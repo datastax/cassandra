@@ -31,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -649,6 +650,7 @@ public class CompactionsTest
     @Test
     public void testCompactionListener()
     {
+        final long totalByteScanned = 100;
         ColumnFamilyStore cfs = MockSchema.newCFS();
         cfs.addSSTable(MockSchema.sstable(1, true, cfs));
         ActiveOperations.CompactionProgressListener listener = Mockito.mock(ActiveOperations
@@ -658,9 +660,10 @@ public class CompactionsTest
                                                                                    OperationType.ANTICOMPACTION,
                                                                                    0,
                                                                                    0,
+                                                                                   totalByteScanned,
                                                                                    UUID.randomUUID(),
                                                                                    cfs.getLiveSSTables());
-        
+
         AbstractTableOperation operation = new AbstractTableOperation()
         {
             public OperationProgress getProgress()
@@ -675,6 +678,7 @@ public class CompactionsTest
         };
         CompactionManager.instance.active.registerListener(listener);
 
+        Assert.assertEquals(totalByteScanned, operation.getProgress().totalByteScanned());
         try (NonThrowingCloseable cls = CompactionManager.instance.active.onOperationStart(operation))
         {}
         verify(listener).onStarted(progress);
