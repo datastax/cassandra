@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -74,6 +75,7 @@ import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -88,6 +90,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 public class CompactionsTest
@@ -641,5 +644,40 @@ public class CompactionsTest
             t = Throwables.getRootCause(t);
             assertTrue(t.getMessage(), t instanceof CompactionInterruptedException);
         }
+    }
+
+    @Test
+    public void testCompactionListener()
+    {
+        ColumnFamilyStore cfs = MockSchema.newCFS();
+        cfs.addSSTable(MockSchema.sstable(1, true, cfs));
+        ActiveOperations.CompactionProgressListener listener = Mockito.mock(ActiveOperations
+                                                                            .CompactionProgressListener.class);
+        AbstractTableOperation.OperationProgress progress = new AbstractTableOperation
+                                                                .OperationProgress(cfs.metadata(),
+                                                                                   OperationType.ANTICOMPACTION,
+                                                                                   0,
+                                                                                   0,
+                                                                                   UUID.randomUUID(),
+                                                                                   cfs.getLiveSSTables());
+        
+        AbstractTableOperation operation = new AbstractTableOperation()
+        {
+            public OperationProgress getProgress()
+            {
+                return progress;
+            }
+
+            public boolean isGlobal()
+            {
+                return false;
+            }
+        };
+        CompactionManager.instance.active.registerListener(listener);
+
+        try (NonThrowingCloseable cls = CompactionManager.instance.active.onOperationStart(operation))
+        {}
+        verify(listener).onStarted(progress);
+        verify(listener).onCompleted(progress);
     }
 }
