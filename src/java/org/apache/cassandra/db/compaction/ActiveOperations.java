@@ -49,12 +49,12 @@ public class ActiveOperations implements TableOperationObserver
         /**
          * Called when compaction started
          */
-        default void onStarted(AbstractTableOperation.OperationProgress progress) {};
+        default void onStarted(AbstractTableOperation.OperationProgress progress) {}
 
         /**
          * Called when compaction completed
          */
-        default void onCompleted(AbstractTableOperation.OperationProgress progressOnCompleted) {};
+        default void onCompleted(AbstractTableOperation.OperationProgress progressOnCompleted) {}
     }
 
     public void registerListener(CompactionProgressListener listener)
