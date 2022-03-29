@@ -36,7 +36,7 @@ public interface CompactionObserver
         public void onInProgress(CompactionProgress progress) { }
 
         @Override
-        public void onCompleted(TimeUUID id) { }
+        public void onCompleted(TimeUUID id, boolean isSuccess) { }
     };
 
     /**
@@ -50,6 +50,7 @@ public interface CompactionObserver
      * Indicates that a compaction with the given id has completed.
      * <p/>
      * @param id  the id of the compaction
+     * @param isSuccess true if compaction finished without any exceptions
      */
-    void onCompleted(TimeUUID id);
+    void onCompleted(TimeUUID id, boolean isSuccess);
 }
