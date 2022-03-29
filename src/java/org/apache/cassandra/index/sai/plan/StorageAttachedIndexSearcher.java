@@ -560,24 +560,27 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                         return null;
                     }
 
-                    @Override
-                    public boolean hasNext()
+                    private Row loadNext()
                     {
                         if (next == null)
                             next = computeNext();
-                        return next != null;
+                        return next;
+                    }
+
+                    @Override
+                    public boolean hasNext()
+                    {
+                        return loadNext() != null;
                     }
 
                     @Override
                     public Row next()
                     {
-                        if (next == null)
-                            next = computeNext();
-                        if (next == null)
-                            throw new NoSuchElementException();
-
-                        Row result = next;
+                        Row result = loadNext();
                         next = null;
+
+                        if (result == null)
+                            throw new NoSuchElementException();
                         return result;
                     }
                 };
