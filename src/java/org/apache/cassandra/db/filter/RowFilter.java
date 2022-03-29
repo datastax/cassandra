@@ -36,7 +36,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.CustomIndexExpression;
+import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.Clustering;
@@ -310,7 +310,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             for (Restrictions restrictionSet : restrictions.filterRestrictions().getRestrictions())
                 restrictionSet.addToRowFilter(this, indexManager, options);
 
-            for (CustomIndexExpression expression : restrictions.filterRestrictions().getExternalExpressions())
+            for (ExternalRestriction expression : restrictions.filterRestrictions().getExternalExpressions())
                 expression.addToRowFilter(this, table, options);
 
             for (StatementRestrictions child : restrictions.children())
@@ -340,6 +340,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         {
             expression.validate();
             current.expressions.add(expression);
+        }
+
+        public void addUserExpression(UserExpression e)
+        {
+            current.expressions.add(e);
         }
     }
 
