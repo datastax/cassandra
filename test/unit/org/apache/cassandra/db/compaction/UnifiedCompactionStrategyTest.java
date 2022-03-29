@@ -1161,6 +1161,38 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         }
     }
 
+    @Test
+    public void testGetNextCompactionAggregates()
+    {
+        Controller controller = Mockito.mock(Controller.class);
+        long minimalSizeBytes = 2 << 20;
+        when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
+        when(controller.getScalingParameter(anyInt())).thenReturn(0);
+        when(controller.getFanout(anyInt())).thenCallRealMethod();
+        when(controller.getThreshold(anyInt())).thenCallRealMethod();
+        when(controller.getMaxLevelSize(anyInt(), anyLong())).thenCallRealMethod();
+        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
+        when(controller.getNumShards()).thenReturn(1);
+        when(controller.areL0ShardsEnabled()).thenReturn(true);
+        when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
+        when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
+        when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
+        when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
+        when(controller.maxSSTablesToCompact()).thenReturn(1000);
+        when(controller.maybeSort(anyList())).thenAnswer(answ -> answ.getArgument(0));
+        when(controller.maybeRandomize(any(IntArrayList.class))).thenAnswer(answ -> answ.getArgument(0));
+        when(controller.random()).thenCallRealMethod();
+
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
+
+        CompactionAggregate.UnifiedAggregate aggregate = Mockito.mock(CompactionAggregate.UnifiedAggregate.class);
+        CompactionPick compaction = Mockito.mock(CompactionPick.class);
+        when(compaction.isEmpty()).thenReturn(true);
+        when(aggregate.getSelected()).thenReturn(compaction);
+        Collection<CompactionAggregate> compactionAggregates = strategy.getNextCompactionAggregates(ImmutableList.of(aggregate), 1000);
+        assertNotNull(compactionAggregates);
+    }
+
     private List<SSTableReader> createSStables(IPartitioner partitioner)
     {
         return createSStables(partitioner, mapFromPair(Pair.create(4 * ONE_MB, 4)), 10000, UUID.randomUUID());

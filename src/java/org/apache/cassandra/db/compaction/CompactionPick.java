@@ -28,6 +28,9 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
 
+import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.SSTable;
+
 /**
  * A set of sstables that were picked for compaction along with some other relevant properties.
  * <p/>
@@ -36,18 +39,18 @@ import com.google.common.collect.ImmutableSet;
  * Also, it contains other useful parameters such as a score that was assigned to this candidate (the read hotness or level
  * score depending on the strategy) and the level, if applicable.
  **/
-class CompactionPick
+public class CompactionPick
 {
     final static CompactionPick EMPTY = create(-1, Collections.emptyList(), 0);
 
     /** The key to the parent compaction aggregate, e.g. a level number or tier avg size, -1 if no parent */
-    final long parent;
+    public final long parent;
 
     /** The sstables to be compacted */
-    final ImmutableSet<CompactionSSTable> sstables;
+    public final ImmutableSet<CompactionSSTable> sstables;
 
     /** Only expired sstables */
-    final ImmutableSet<CompactionSSTable> expired;
+    public final ImmutableSet<CompactionSSTable> expired;
 
     /** The sum of all the sstable hotness scores */
     final double hotness;
@@ -60,7 +63,7 @@ class CompactionPick
 
     /** The unique compaction id, this is only available when a compaction is submitted */
     @Nullable
-    volatile UUID id;
+    public volatile UUID id;
 
     /** The compaction progress, this is only available when compaction actually starts and will be null as long as
      * the candidate is still pending execution, also some tasks cannot report a progress at all, e.g. {@link SingleSSTableLCSTask}.
@@ -88,7 +91,7 @@ class CompactionPick
     /**
      * Create a pending compaction candidate calculating hotness and avg size.
      */
-    static CompactionPick create(long parent, Collection<? extends CompactionSSTable> sstables, Collection<? extends CompactionSSTable> expired)
+    public static CompactionPick create(long parent, Collection<? extends CompactionSSTable> sstables, Collection<? extends CompactionSSTable> expired)
     {
         Collection<CompactionSSTable> nonExpiring = sstables.stream().filter(sstable -> !expired.contains(sstable)).collect(Collectors.toList());
         return create(parent,

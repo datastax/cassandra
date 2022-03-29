@@ -660,9 +660,14 @@ public abstract class CompactionAggregate
             return new UnifiedAggregate(sstables, selected, compactions, shard, bucket);
         }
 
-        int bucketIndex()
+        public int bucketIndex()
         {
             return bucket.index;
+        }
+
+        public long bucketMin()
+        {
+            return bucket.min;
         }
 
         @Override
@@ -699,7 +704,7 @@ public abstract class CompactionAggregate
         }
     }
 
-    static UnifiedAggregate createUnified(Collection<CompactionSSTable> sstables,
+    public static UnifiedAggregate createUnified(Collection<CompactionSSTable> sstables,
                                           CompactionPick selected,
                                           Iterable<CompactionPick> pending,
                                           UnifiedCompactionStrategy.Shard shard,
@@ -762,6 +767,12 @@ public abstract class CompactionAggregate
         {
             return Long.compare(index, key.index);
         }
+
+        @Override
+        public String toString()
+        {
+            return Long.toString(index);
+        }
     }
 
     /**
@@ -791,6 +802,12 @@ public abstract class CompactionAggregate
 
             // either not sharded or same shard
             return Long.compare(index, key.index);
+        }
+
+        @Override
+        public String toString()
+        {
+            return index + "-" + shard;
         }
     }
 

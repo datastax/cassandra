@@ -69,6 +69,7 @@ public class View
     public final List<Memtable> flushingMemtables;
     final Set<SSTableReader> compacting;
     final Set<SSTableReader> sstables;
+    final Map<String, SSTableReader> sstablesByFilename;
     // we use a Map here so that we can easily perform identity checks as well as equality checks.
     // When marking compacting, we now  indicate if we expect the sstables to be present (by default we do),
     // and we then check that not only are they all present in the live set, but that the exact instance present is
@@ -91,6 +92,10 @@ public class View
 
         this.sstablesMap = sstables;
         this.sstables = sstablesMap.keySet();
+        this.sstablesByFilename = new HashMap<>(this.sstables.size());
+        for (SSTableReader sstable : this.sstables)
+            this.sstablesByFilename.put(sstable.getFilename(), sstable);
+
         this.compactingMap = compacting;
         this.compacting = compactingMap.keySet();
         this.intervalTree = intervalTree;
@@ -113,6 +118,11 @@ public class View
     public Set<SSTableReader> liveSSTables()
     {
         return sstables;
+    }
+
+    public SSTableReader getLiveSSTable(String filename)
+    {
+        return sstablesByFilename.get(filename);
     }
 
     public Iterable<SSTableReader> sstables(SSTableSet sstableSet, Predicate<SSTableReader> filter)
