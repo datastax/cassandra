@@ -510,7 +510,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
                 return new RowIterator()
                 {
-                    boolean hasNext;
                     Row next;
 
                     @Override
@@ -549,25 +548,37 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                         delegate.close();
                     }
 
+                    private Row computeNext()
+                    {
+                        while (delegate.hasNext())
+                        {
+                            Row row = delegate.next();
+                            queryContext.rowsFiltered++;
+                            if (tree.isSatisfiedBy(delegate.partitionKey(), row, staticRow))
+                                return row;
+                        }
+                        return null;
+                    }
+
                     @Override
                     public boolean hasNext()
                     {
-                        while (hasNext = delegate.hasNext())
-                        {
-                            next = delegate.next();
-                            queryContext.rowsFiltered++;
-                            if (tree.isSatisfiedBy(delegate.partitionKey(), next, staticRow))
-                                return true;
-                        }
-                        return false;
+                        if (next == null)
+                            next = computeNext();
+                        return next != null;
                     }
 
                     @Override
                     public Row next()
                     {
-                        if (!hasNext)
+                        if (next == null)
+                            next = computeNext();
+                        if (next == null)
                             throw new NoSuchElementException();
-                        return next;
+
+                        Row result = next;
+                        next = null;
+                        return result;
                     }
                 };
             }
