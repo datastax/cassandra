@@ -128,6 +128,10 @@ public abstract class AbstractTableOperation implements TableOperation
          */
         private final Unit unit;
         /**
+         * The total bytes that have been scanned. For single file operation, it's the same as "completed"
+         */
+        private final long totalBytesScanned;
+        /**
          * A unique ID for this operation
          */
         private final TimeUUID operationId;
@@ -139,21 +143,32 @@ public abstract class AbstractTableOperation implements TableOperation
 
         public OperationProgress(TableMetadata metadata, OperationType operationType, long bytesComplete, long totalBytes, TimeUUID operationId, Collection<SSTableReader> sstables, String targetDirectory)
         {
-            this(metadata, operationType, bytesComplete, totalBytes, Unit.BYTES, operationId, sstables, targetDirectory);
+            this(metadata, operationType, bytesComplete, totalBytes, Unit.BYTES, bytesComplete, operationId, sstables, targetDirectory);
         }
 
         public OperationProgress(TableMetadata metadata, OperationType operationType, long bytesComplete, long totalBytes, TimeUUID operationId, Collection<? extends SSTableReader> sstables)
         {
-            this(metadata, operationType, bytesComplete, totalBytes, Unit.BYTES, operationId, sstables, null);
+            this(metadata, operationType, bytesComplete, totalBytes, Unit.BYTES, bytesComplete, operationId, sstables, null);
+        }
+
+        public OperationProgress(TableMetadata metadata, OperationType operationType, long bytesComplete, long totalBytes, long totalBytesScanned, TimeUUID operationId, Collection<? extends SSTableReader> sstables)
+        {
+            this(metadata, operationType, bytesComplete, totalBytes, Unit.BYTES, totalBytesScanned, operationId, sstables, null);
         }
 
         public OperationProgress(TableMetadata metadata, OperationType operationType, long completed, long total, Unit unit, TimeUUID operationId, Collection<? extends SSTableReader> sstables, String targetDirectory)
+        {
+            this(metadata, operationType, completed, total, unit, completed, operationId, sstables, targetDirectory);
+        }
+        
+        public OperationProgress(TableMetadata metadata, OperationType operationType, long completed, long total, Unit unit, long totalBytesScanned, TimeUUID operationId, Collection<? extends SSTableReader> sstables, String targetDirectory)
         {
             this.operationType = operationType;
             this.completed = completed;
             this.total = total;
             this.metadata = metadata;
             this.unit = unit;
+            this.totalBytesScanned = totalBytesScanned;
             this.operationId = operationId;
             this.sstables = ImmutableSet.copyOf(sstables);
             this.targetDirectory = targetDirectory;
@@ -164,7 +179,7 @@ public abstract class AbstractTableOperation implements TableOperation
          */
         public OperationProgress forProgress(long complete, long total)
         {
-            return new OperationProgress(metadata, operationType, complete, total, unit, operationId, sstables, targetDirectory);
+            return new OperationProgress(metadata, operationType, complete, total, unit, complete, operationId, sstables, targetDirectory);
         }
 
         /**
@@ -237,6 +252,14 @@ public abstract class AbstractTableOperation implements TableOperation
         public Set<SSTableReader> sstables()
         {
             return sstables;
+        }
+
+        /**
+         * @return the total number of units that has been scanned by the operation
+         */
+        public long totalByteScanned()
+        {
+            return totalBytesScanned;
         }
 
         /**
