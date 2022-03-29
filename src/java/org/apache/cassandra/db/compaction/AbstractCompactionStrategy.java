@@ -112,7 +112,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     }
 
     @Override
-    public void onCompleted(TimeUUID id)
+    public void onCompleted(TimeUUID id, boolean isSuccess)
     {
         backgroundCompactions.onCompleted(this, id);
     }
