@@ -1353,7 +1353,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                     //Thread.sleep(5);
 
                     // then remove the old sstables
-                    strategy.onCompleted(id);
+                    strategy.onCompleted(id, true);
                     counters.numCompactions.incrementAndGet();
                     counters.numCompactionsPending.decrementAndGet();
                     counters.numCompactedSSTables.addAndGet(candidates.size());
