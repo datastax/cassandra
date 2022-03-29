@@ -61,6 +61,13 @@ import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.WhereClause;
+import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
+import org.apache.cassandra.cql3.restrictions.Restrictions;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.RawSelector;
@@ -110,11 +117,6 @@ import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.metrics.ClientRequestSizeMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
@@ -321,6 +323,48 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     {
         if (parameters.allowFiltering && !SchemaConstants.isSystemKeyspace(table.keyspace))
             Guardrails.allowFilteringEnabled.ensureEnabled(state);
+    }
+
+    /**
+     * Adds the specified restrictions to the index restrictions.
+     *
+     * @param indexRestrictions the index restrictions to add
+     * @return a new {@code SelectStatement} instance with the added index restrictions
+     */
+    public SelectStatement addIndexRestrictions(Restrictions indexRestrictions)
+    {
+        return new SelectStatement(rawCQLStatement,
+                                   table,
+                                   bindVariables,
+                                   parameters,
+                                   selection,
+                                   restrictions.addIndexRestrictions(indexRestrictions),
+                                   isReversed,
+                                   aggregationSpecFactory,
+                                   orderingComparator,
+                                   limit,
+                                   perPartitionLimit);
+    }
+
+    /**
+     * Adds the specified external restrictions to the index restrictions.
+     *
+     * @param indexRestrictions the index restrictions to add
+     * @return a new {@code SelectStatement} instance with the added index restrictions
+     */
+    public SelectStatement addIndexRestrictions(Iterable<ExternalRestriction> indexRestrictions)
+    {
+        return new SelectStatement(rawCQLStatement,
+                                   table,
+                                   bindVariables,
+                                   parameters,
+                                   selection,
+                                   restrictions.addExternalRestrictions(indexRestrictions),
+                                   isReversed,
+                                   aggregationSpecFactory,
+                                   orderingComparator,
+                                   limit,
+                                   perPartitionLimit);
     }
 
     private void validateQueryOptions(QueryState queryState, QueryOptions options)
