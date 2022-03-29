@@ -2906,13 +2906,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         synchronized (this)
         {
             logger.debug("Cancelling in-progress compactions for {}", metadata.name);
-            Iterable<ColumnFamilyStore> toInterruptFor = interruptIndexes
-                                                         ? concatWithIndexes()
-                                                         : Collections.singleton(this);
-
-            toInterruptFor = interruptViews
-                             ? Iterables.concat(toInterruptFor, viewManager.allViewsCfs())
-                             : toInterruptFor;
+            Iterable<ColumnFamilyStore> toInterruptFor = concatWith(interruptIndexes, interruptViews);
 
             Iterable<TableMetadata> toInterruptForMetadata = Iterables.transform(toInterruptFor, ColumnFamilyStore::metadata);
 
@@ -3340,9 +3334,23 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public Iterable<ColumnFamilyStore> concatWithIndexes()
     {
+        return concatWith(true, false);
+    }
+
+    public Iterable<ColumnFamilyStore> concatWith(boolean includeIndexes, boolean includeViews)
+    {
         // we return the main CFS first, which we rely on for simplicity in switchMemtable(), for getting the
         // latest commit log segment position
-        return Iterables.concat(Collections.singleton(this), indexManager.getAllIndexColumnFamilyStores());
+        Set<ColumnFamilyStore> mainCFS = Collections.singleton(this);
+        if (includeIndexes && includeViews)
+            return Iterables.concat(mainCFS,
+                                    indexManager.getAllIndexColumnFamilyStores(),
+                                    viewManager.allViewsCfs());
+        if (includeIndexes)
+            return Iterables.concat(mainCFS, indexManager.getAllIndexColumnFamilyStores());
+        if (includeViews)
+            return Iterables.concat(mainCFS, viewManager.allViewsCfs());
+        return mainCFS;
     }
 
     @Override
