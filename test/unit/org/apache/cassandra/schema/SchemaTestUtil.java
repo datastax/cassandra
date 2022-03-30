@@ -21,6 +21,7 @@ package org.apache.cassandra.schema;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
+import java.util.UUID;
 
 import org.junit.Assert;
 import org.slf4j.Logger;
@@ -143,4 +144,8 @@ public class SchemaTestUtil
         f.rethrowIfFailed();
     }
 
+    public static UUID calculateSchemaDigest()
+    {
+        return SchemaKeyspace.calculateSchemaDigest();
+    }
 }
