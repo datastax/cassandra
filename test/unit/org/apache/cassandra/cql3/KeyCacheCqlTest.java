@@ -39,7 +39,7 @@ import org.apache.cassandra.metrics.CacheMetrics;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaKeyspace;
+import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
@@ -315,7 +315,7 @@ public class KeyCacheCqlTest extends CQLTester
         }
 
         dropTable("DROP TABLE %s");
-        assert Schema.instance.isSameVersion(SchemaKeyspace.calculateSchemaDigest());
+        assert Schema.instance.isSameVersion(SchemaTestUtil.calculateSchemaDigest());
 
         //Test loading for a dropped 2i/table
         CacheService.instance.keyCache.clear();
