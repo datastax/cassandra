@@ -503,6 +503,16 @@ public class KeyspaceTest extends CQLTester
     }
 
     @Test
+    public void testSetUnsetInitialized()
+    {
+        // dumb test to make sonar happy
+        Keyspace.unsetInitialized();
+        Assertions.assertThat(Keyspace.isInitialized()).isFalse();
+        Keyspace.setInitialized();
+        Assertions.assertThat(Keyspace.isInitialized()).isTrue();
+    }
+
+    @Test
     public void shouldThrowOnMissingKeyspace()
     {
         String ksName = "MissingKeyspace";
