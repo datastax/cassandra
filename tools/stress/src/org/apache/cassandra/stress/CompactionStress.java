@@ -91,7 +91,6 @@ public abstract class CompactionStress implements Runnable
     static
     {
         DatabaseDescriptor.daemonInitialization();
-        Keyspace.setInitialized();
         CommitLog.instance.start();
     }
 

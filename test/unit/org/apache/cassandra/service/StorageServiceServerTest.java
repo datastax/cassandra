@@ -31,7 +31,9 @@ import java.util.UUID;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
+
 import org.junit.Assert;
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -84,6 +86,16 @@ public class StorageServiceServerTest
         mkdirs();
         cleanup();
         StorageService.instance.initServer(0);
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
+        // a proper test would be to call decommission here, but decommission() mixes both shutdown and datatransfer
+        // calls.  This test is only interested in the shutdown-related items which a properly handled by just
+        // stopping the client.
+        //StorageService.instance.decommission();
+        StorageService.instance.stopClient();
     }
 
     @Test
