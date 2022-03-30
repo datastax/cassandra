@@ -38,7 +38,10 @@ import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 import org.apache.cassandra.utils.FBUtilities;
 import org.awaitility.Awaitility;
 
@@ -46,6 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.mockito.Mockito.mock;
 
 public class SchemaTest
 {
@@ -90,7 +94,8 @@ public class SchemaTest
     }
 
     @Test
-    public void testSchemaVersionUpdates() {
+    public void testSchemaVersionUpdates()
+    {
         KeyspaceMetadata ksm = KeyspaceMetadata.create("testSchemaVersionUpdates", KeyspaceParams.simple(1));
         SchemaTransformation.SchemaTransformationResult r = Schema.instance.transform(current -> current.withAddedOrUpdated(ksm));
 
@@ -105,6 +110,26 @@ public class SchemaTest
             assertEquals(SchemaKeyspace.calculateSchemaDigest(), Schema.instance.getVersion());
         }
         Schema.instance.transform(current -> current.without(ksm.name));
+    }
+    
+    @Test
+    public void testSchemaManagerMocking()
+    {
+        Keyspace.unsetInitialized();
+
+        SchemaUpdateHandler updateHandler = mock(SchemaUpdateHandler.class);
+        Schema schemaManager = new Schema(false, Keyspaces.of(SchemaKeyspace.metadata(), SystemKeyspace.metadata()), updateHandler);
+        assertThat(schemaManager.getKeyspaceMetadata("ks")).isNull();
+
+        KeyspaceMetadata newKs = KeyspaceMetadata.create("ks", KeyspaceParams.simple(1));
+        DistributedSchema before = new DistributedSchema(schemaManager.distributedKeyspaces(), schemaManager.getVersion());
+        DistributedSchema after = new DistributedSchema(schemaManager.distributedKeyspaces().withAddedOrUpdated(newKs), UUID.randomUUID());
+        KeyspacesDiff diff = Keyspaces.diff(before.getKeyspaces(), after.getKeyspaces());
+        SchemaTransformationResult transformation = new SchemaTransformationResult(before, after, diff);
+        schemaManager.mergeAndUpdateVersion(transformation, true);
+
+        assertThat(schemaManager.getKeyspaceMetadata("ks")).isEqualTo(newKs);
+        assertThat(schemaManager.getKeyspaceInstance("ks")).isNull(); // means that we didn't open the keyspace, which is expected since Keyspace is uninitialized
     }
 
     @Test
@@ -178,9 +203,9 @@ public class SchemaTest
 
             // a multi-step schema transformation
             SchemaTransformation transformation = schema -> {
-                schema = schema.withAddedOrReplaced(KeyspaceMetadata.create("test1" + suffix, KeyspaceParams.simple(1)));
-                schema = schema.withAddedOrReplaced(KeyspaceMetadata.create("test2" + suffix, KeyspaceParams.simple(1)));
-                schema = schema.withAddedOrReplaced(KeyspaceMetadata.create("test3" + suffix, KeyspaceParams.simple(1)));
+                schema = schema.withAddedOrUpdated(KeyspaceMetadata.create("test1" + suffix, KeyspaceParams.simple(1)));
+                schema = schema.withAddedOrUpdated(KeyspaceMetadata.create("test2" + suffix, KeyspaceParams.simple(1)));
+                schema = schema.withAddedOrUpdated(KeyspaceMetadata.create("test3" + suffix, KeyspaceParams.simple(1)));
                 return schema;
             };
 
