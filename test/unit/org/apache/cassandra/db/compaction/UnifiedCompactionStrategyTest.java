@@ -1186,11 +1186,10 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
         CompactionAggregate.UnifiedAggregate aggregate = Mockito.mock(CompactionAggregate.UnifiedAggregate.class);
-        CompactionPick compaction = Mockito.mock(CompactionPick.class);
-        when(compaction.isEmpty()).thenReturn(true);
-        when(aggregate.getSelected()).thenReturn(compaction);
+        when(aggregate.getSelected()).thenReturn(CompactionPick.EMPTY);
         Collection<CompactionAggregate> compactionAggregates = strategy.getNextCompactionAggregates(ImmutableList.of(aggregate), 1000);
         assertNotNull(compactionAggregates);
+        assertEquals(0, compactionAggregates.size());
     }
 
     private List<SSTableReader> createSStables(IPartitioner partitioner)
