@@ -51,7 +51,6 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
 
     private final KeyspaceAttributes attrs;
     private final boolean ifNotExists;
-    private final HashSet<String> clientWarnings = new HashSet<>();
 
     public CreateKeyspaceStatement(String keyspaceName, KeyspaceAttributes attrs, boolean ifNotExists)
     {
@@ -125,6 +124,7 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
 
     Set<String> clientWarnings(KeyspacesDiff diff)
     {
+        HashSet<String> clientWarnings = new HashSet<>();
         if (attrs.hasProperty("graph_engine"))
         {
             clientWarnings.add("The unsupported graph property 'graph_engine' was ignored.");
