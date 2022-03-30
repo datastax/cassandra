@@ -172,7 +172,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         Collection<AbstractCompactionTask> tasks = new ArrayList<>(aggregates.size());
         for (CompactionAggregate aggregate : aggregates)
         {
-            LifecycleTransaction transaction = realm.tryModify(aggregate.getSelected().sstables, OperationType.COMPACTION);
+            LifecycleTransaction transaction = realm.tryModify(aggregate.getSelected().ssstables(), OperationType.COMPACTION);
             if (transaction != null)
             {
                 backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
@@ -441,7 +441,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             ++perLevel[level];
             ++runningCompactions;
             levelCount = Math.max(levelCount, level + 1);
-            spaceAvailable -= compaction.totSizeInBytes;
+            spaceAvailable -= compaction.totSizeInBytes();
         }
 
         return new CompactionLimits(runningCompactions,
@@ -482,7 +482,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 // ... and also the levels that a layout-preserving selection would create.
                 limits.levelCount = Math.max(limits.levelCount, levelOf(aggregate.selected) + 1);
             }
-            limits.levelCount = Math.max(limits.levelCount, (int) aggregate.getSelected().parent);
+            limits.levelCount = Math.max(limits.levelCount, (int) aggregate.getSelected().parent());
         }
 
         final List<CompactionAggregate> selection = getSelection(pending, limits.maxCompactions, limits.levelCount, limits.perLevel, limits.spaceAvailable);
@@ -562,7 +562,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
         List<CompactionAggregate.UnifiedAggregate> pending = new ArrayList<>(aggregates);
         for (CompactionAggregate.UnifiedAggregate aggregate : pending)
-            limits.levelCount = Math.max(limits.levelCount, (int) aggregate.getSelected().parent);
+            limits.levelCount = Math.max(limits.levelCount, (int) aggregate.getSelected().parent());
 
         final List<CompactionAggregate> selection = getSelection(pending, limits.maxCompactions, limits.levelCount, limits.perLevel, limits.spaceAvailable);
         logger.debug("Starting {} compactions.", selection.size());
@@ -571,13 +571,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     
     private void warnIfSizeAbove(CompactionAggregate.UnifiedAggregate aggregate, long spaceOverheadLimit)
     {
-        if (aggregate.selected.totSizeInBytes > spaceOverheadLimit)
+        if (aggregate.selected.totSizeInBytes() > spaceOverheadLimit)
             logger.warn("Compaction needs to perform an operation that is bigger than the current space overhead " +
                         "limit - size {} (compacting {} sstables in shard {}/bucket {}); limit {} = {}% of dataset size {}. " +
                         "To honor the limit, this operation will not be performed, which may result in degraded performance.\n" +
                         "Please verify the compaction parameters, specifically {} and {}.",
-                        FBUtilities.prettyPrintMemory(aggregate.selected.totSizeInBytes),
-                        aggregate.selected.sstables.size(),
+                        FBUtilities.prettyPrintMemory(aggregate.selected.totSizeInBytes()),
+                        aggregate.selected.ssstables().size(),
                         aggregate.getShard().name(),
                         aggregate.bucketIndex(),
                         FBUtilities.prettyPrintMemory(spaceOverheadLimit),
@@ -628,7 +628,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 expired.add(aggregateIndex);
                 continue;
             }
-            if (pick.totSizeInBytes > spaceAvailable)
+            if (pick.totSizeInBytes() > spaceAvailable)
                 continue;
             if (perLevel[levelOf(pick)] > perLevelCount)
                 continue;  // this level is already using up all its share + one, we can ignore candidate altogether
@@ -671,7 +671,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 if (selection.get(aggregateIndex))
                     continue; // this is a repeat
                 CompactionAggregate.UnifiedAggregate aggregate = pending.get(aggregateIndex);
-                if (aggregate.selected.totSizeInBytes > spaceAvailable)
+                if (aggregate.selected.totSizeInBytes() > spaceAvailable)
                     continue; // compaction is too large for current cycle
                 int level = levelOf(aggregate.selected);
 
@@ -686,7 +686,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
                 --remaining;
                 ++perLevel[level];
-                spaceAvailable -= aggregate.selected.totSizeInBytes;
+                spaceAvailable -= aggregate.selected.totSizeInBytes();
                 selection.set(aggregateIndex);
             }
 
@@ -703,8 +703,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     private int shardsSpanned(CompactionPick pick)
     {
-        PartitionPosition min = pick.sstables.stream().map(CompactionSSTable::getFirst).min(Ordering.natural()).get();
-        PartitionPosition max = pick.sstables.stream().map(CompactionSSTable::getLast).max(Ordering.natural()).get();
+        PartitionPosition min = pick.ssstables().stream().map(CompactionSSTable::getFirst).min(Ordering.natural()).get();
+        PartitionPosition max = pick.ssstables().stream().map(CompactionSSTable::getLast).max(Ordering.natural()).get();
         return arenaSelector.shardFor(max) - arenaSelector.shardFor(min) + 1;
     }
 
@@ -843,7 +843,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     private static int levelOf(CompactionPick pick)
     {
-        return (int) pick.parent;
+        return (int) pick.parent();
     }
 
     public TableMetadata getMetadata()

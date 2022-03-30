@@ -564,7 +564,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         assertEquals(0, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
 
         for (CompactionPick pick : strategy.backgroundCompactions.getCompactionsInProgress())
-            strategy.backgroundCompactions.onInProgress(mockProgress(strategy, pick.id));
+            strategy.backgroundCompactions.onInProgress(mockProgress(strategy, pick.id()));
 
         // now that we have a rate, make sure we produce tasks to fill up the limit
         assertEquals(Math.min(maxThroughput, maxCount) - 1, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
@@ -573,8 +573,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         assertEquals(0, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
 
         for (CompactionPick pick : strategy.backgroundCompactions.getCompactionsInProgress())
-            if (pick.progress == null)
-                strategy.backgroundCompactions.onInProgress(mockProgress(strategy, pick.id));
+            if (pick.progress() == null)
+                strategy.backgroundCompactions.onInProgress(mockProgress(strategy, pick.id()));
 
         // and also when they do
         assertEquals(0, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
@@ -584,7 +584,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
              --remaining)
         {
             // mark a task as completed
-            strategy.backgroundCompactions.onCompleted(strategy, Iterables.get(strategy.backgroundCompactions.getCompactionsInProgress(), 0).id);
+            strategy.backgroundCompactions.onCompleted(strategy, Iterables.get(strategy.backgroundCompactions.getCompactionsInProgress(), 0).id());
 
             // and check that we get a new one
             assertEquals(1, strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds()).size());
@@ -1326,10 +1326,10 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             {
                 // expired SSTables don't contribute to total size
                 assertTrue(pick.hasExpiredOnly());
-                assertEquals(sstables.size() / 3, pick.expired.size());
-                assertEquals(0L, pick.totSizeInBytes);
-                assertEquals(0L, pick.avgSizeInBytes);
-                assertEquals(0, pick.parent);
+                assertEquals(sstables.size() / 3, pick.expired().size());
+                assertEquals(0L, pick.totSizeInBytes());
+                assertEquals(0L, pick.avgSizeInBytes());
+                assertEquals(0, pick.parent());
             }
         }
         finally
@@ -1382,17 +1382,17 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             for (CompactionPick pick : picks)
             {
                 assertFalse(pick.hasExpiredOnly());
-                assertEquals(pick.sstables.size() / 2, pick.expired.size());
-                Set<CompactionSSTable> nonExpired = pick.sstables.stream()
-                                                                 .filter(sstable -> !pick.expired.contains(sstable))
+                assertEquals(pick.ssstables().size() / 2, pick.expired().size());
+                Set<CompactionSSTable> nonExpired = pick.ssstables().stream()
+                                                                 .filter(sstable -> !pick.expired().contains(sstable))
                                                                  .collect(Collectors.toSet());
-                assertEquals(pick.sstables.size() / 2, nonExpired.size());
+                assertEquals(pick.ssstables().size() / 2, nonExpired.size());
                 long expectedTotSize = nonExpired.stream()
                                                  .mapToLong(CompactionSSTable::onDiskLength)
                                                  .sum();
-                assertEquals(expectedTotSize, pick.totSizeInBytes);
-                assertEquals(expectedTotSize / nonExpired.size(), pick.avgSizeInBytes);
-                assertEquals(0, pick.parent);
+                assertEquals(expectedTotSize, pick.totSizeInBytes());
+                assertEquals(expectedTotSize / nonExpired.size(), pick.avgSizeInBytes());
+                assertEquals(0, pick.parent());
             }
         }
         finally

@@ -28,9 +28,6 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
 
-import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.SSTable;
-
 /**
  * A set of sstables that were picked for compaction along with some other relevant properties.
  * <p/>
@@ -44,34 +41,34 @@ public class CompactionPick
     final static CompactionPick EMPTY = create(-1, Collections.emptyList(), 0);
 
     /** The key to the parent compaction aggregate, e.g. a level number or tier avg size, -1 if no parent */
-    public final long parent;
+    private final long parent;
 
     /** The sstables to be compacted */
-    public final ImmutableSet<CompactionSSTable> sstables;
+    private final ImmutableSet<CompactionSSTable> sstables;
 
     /** Only expired sstables */
-    public final ImmutableSet<CompactionSSTable> expired;
+    private final ImmutableSet<CompactionSSTable> expired;
 
     /** The sum of all the sstable hotness scores */
-    final double hotness;
+    private final double hotness;
 
     /** The average size in bytes for the sstables in this compaction */
-    final long avgSizeInBytes;
+    private final long avgSizeInBytes;
 
     /** The total size on disk for the sstables in this compaction */
-    final long totSizeInBytes;
+    private final long totSizeInBytes;
 
     /** The unique compaction id, this is only available when a compaction is submitted */
     @Nullable
-    public volatile UUID id;
+    private volatile UUID id;
 
     /** The compaction progress, this is only available when compaction actually starts and will be null as long as
      * the candidate is still pending execution, also some tasks cannot report a progress at all, e.g. {@link SingleSSTableLCSTask}.
      * */
-    @Nullable volatile CompactionProgress progress;
+    private @Nullable volatile CompactionProgress progress;
 
     /** Set to true when the compaction has completed */
-    volatile boolean completed;
+    private volatile boolean completed;
 
     private CompactionPick(long parent,
                            Collection<? extends CompactionSSTable> compacting,
@@ -139,6 +136,42 @@ public class CompactionPick
     public long avgSizeInBytes()
     {
         return avgSizeInBytes;
+    }
+
+    public long totSizeInBytes()
+    {
+        return totSizeInBytes;
+    }
+
+    public long parent()
+    {
+        return parent;
+    }
+
+    public ImmutableSet<CompactionSSTable> ssstables()
+    {
+        return sstables;
+    }
+
+    public ImmutableSet<CompactionSSTable> expired()
+    {
+        return expired;
+    }
+
+    @Nullable
+    public UUID id()
+    {
+        return id;
+    }
+    
+    public CompactionProgress progress()
+    {
+        return progress;
+    }
+    
+    public boolean completed()
+    {
+        return completed;
     }
 
     void setSubmitted(UUID id)

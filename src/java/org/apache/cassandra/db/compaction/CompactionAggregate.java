@@ -100,8 +100,8 @@ public abstract class CompactionAggregate
         long ret = 0;
         for (CompactionPick comp : compactions)
         {
-            if (comp.id == null)
-                ret += comp.totSizeInBytes;
+            if (comp.id() == null)
+                ret += comp.totSizeInBytes();
         }
         return ret;
     }
@@ -114,7 +114,7 @@ public abstract class CompactionAggregate
         List<CompactionPick> ret = new ArrayList<>(compactions.size());
         for (CompactionPick comp : compactions)
         {
-            if (comp.id == null)
+            if (comp.id() == null)
                 ret.add(comp);
         }
 
@@ -129,7 +129,7 @@ public abstract class CompactionAggregate
         List<CompactionPick> ret = new ArrayList<>(compactions.size());
         for (CompactionPick comp : compactions)
         {
-            if (comp.id != null && !comp.completed)
+            if (comp.id() != null && !comp.completed())
                 ret.add(comp);
         }
 
@@ -185,28 +185,28 @@ public abstract class CompactionAggregate
 
         for (CompactionPick compaction : compactions)
         {
-            if (compaction.completed)
+            if (compaction.completed())
                 continue;
 
             numCompactions++;
-            numCandidateSSTables += compaction.sstables.size();
-            numExpiredSSTables += compaction.expired.size();
-            tot += compaction.sstables.stream().mapToLong(CompactionSSTable::uncompressedLength).reduce(0L, Long::sum);
-            expiredTot += compaction.expired.stream().mapToLong(CompactionSSTable::uncompressedLength).reduce(0L, Long::sum);
+            numCandidateSSTables += compaction.ssstables().size();
+            numExpiredSSTables += compaction.expired().size();
+            tot += compaction.ssstables().stream().mapToLong(CompactionSSTable::uncompressedLength).reduce(0L, Long::sum);
+            expiredTot += compaction.expired().stream().mapToLong(CompactionSSTable::uncompressedLength).reduce(0L, Long::sum);
             if (trackHotness)
-                hotness += compaction.hotness;
+                hotness += compaction.hotness();
 
-            if (compaction.id != null)
+            if (compaction.id() != null)
             {
                 numCompactionsInProgress++;
-                numCompactingSSTables += compaction.sstables.size();
+                numCompactingSSTables += compaction.ssstables().size();
             }
 
-            if (compaction.progress != null)
+            if (compaction.progress() != null)
             {
-                read += compaction.progress.uncompressedBytesRead();
-                written += compaction.progress.uncompressedBytesWritten();
-                durationNanos += compaction.progress.durationInNanos();
+                read += compaction.progress().uncompressedBytesRead();
+                written += compaction.progress().uncompressedBytesWritten();
+                durationNanos += compaction.progress().durationInNanos();
             }
         }
 
@@ -277,7 +277,7 @@ public abstract class CompactionAggregate
      */
     public CompactionAggregate withAdditionalCompactions(Collection<CompactionPick> comps)
     {
-        List<CompactionSSTable> added = comps.stream().flatMap(comp -> comp.sstables.stream()).collect(Collectors.toList());
+        List<CompactionSSTable> added = comps.stream().flatMap(comp -> comp.ssstables().stream()).collect(Collectors.toList());
         return clone(Iterables.concat(sstables, added), selected, Iterables.concat(compactions, comps));
     }
 
@@ -286,7 +286,7 @@ public abstract class CompactionAggregate
      */
     public CompactionAggregate withOnlyTheseCompactions(Collection<CompactionPick> comps)
     {
-        List<CompactionSSTable> retained = comps.stream().flatMap(comp -> comp.sstables.stream()).collect(Collectors.toList());
+        List<CompactionSSTable> retained = comps.stream().flatMap(comp -> comp.ssstables().stream()).collect(Collectors.toList());
         return clone(retained, CompactionPick.EMPTY, comps);
     }
 
@@ -371,8 +371,8 @@ public abstract class CompactionAggregate
             long readLevel = 0L;
 
             for (CompactionPick compaction : compactions)
-                if (!compaction.completed && compaction.progress != null)
-                    readLevel += compaction.progress.uncompressedBytesRead(level);
+                if (!compaction.completed() && compaction.progress() != null)
+                    readLevel += compaction.progress().uncompressedBytesRead(level);
 
             return new LeveledCompactionStatistics(stats, level, score, pendingCompactions, readLevel);
         }
