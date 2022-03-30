@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3;
 
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -62,11 +63,23 @@ public final class WhereClause
      *
      * @param from the old identifier
      * @param to   the new identifier
-     * @return a new WhereClause with with "from" replaced by "to" in all relations
+     * @return a new WhereClause with "from" replaced by "to" in all relations
      */
     public WhereClause renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
     {
         return new WhereClause(rootElement.rename(from, to));
+    }
+
+    /**
+     * Allows mutation of the relations held within the where clause element
+     * hierarchy
+     *
+     * @param relationMutator the relation mutator
+     * @return a new WhereClause with the relations mutated
+     */
+    public WhereClause mutateRelations(Function<Relation, Relation> relationMutator)
+    {
+        return new WhereClause(rootElement.mutate(relationMutator));
     }
 
     /**
@@ -400,6 +413,11 @@ public final class WhereClause
                     ? (AndElement) flattened
                     : new AndElement(Lists.newArrayList(flattened));
         }
+
+        protected ExpressionElement mutate(Function<Relation, Relation> relationMutator)
+        {
+            return this;
+        }
     }
 
     public static abstract class VariableElement extends ExpressionElement
@@ -436,6 +454,12 @@ public final class WhereClause
         public String toString()
         {
             return relation.toString();
+        }
+
+        @Override
+        protected ExpressionElement mutate(Function<Relation, Relation> relationMutator)
+        {
+            return new RelationElement(relationMutator.apply(relation));
         }
     }
 
@@ -475,6 +499,16 @@ public final class WhereClause
          * Returns a new container of the same type with new children copied from the given collection
          */
         protected abstract ContainerElement withChildren(Collection<ExpressionElement> children);
+
+        @Override
+        protected ExpressionElement mutate(Function<Relation, Relation> relationMutator)
+        {
+            List<ExpressionElement> newChildren = children.stream()
+                                                          .map(c -> c.mutate(relationMutator))
+                                                          .collect(Collectors.toList());
+
+            return this.withChildren(newChildren);
+        }
 
         protected abstract Operator operator();
 
