@@ -237,12 +237,6 @@ public class BaseCompactionStrategyTest
         when(ret.getGeneration()).thenReturn(new SequenceBasedSSTableUniqueIdentifier(level));
         when(ret.toString()).thenReturn(String.format("Bytes on disk: %s, level %d, hotness %f, timestamp %d, first %s, last %s, disk index: %d, repaired: %b, pend. repair: %b",
                                                       FBUtilities.prettyPrintMemory(bytesOnDisk), level, hotness, timestamp, first, last, diskIndex, repaired, pendingRepair));
-        Path filenamePath = Mockito.mock(Path.class);
-        when(filenamePath.toString()).thenReturn("mocked_path-" + ret.hashCode());
-        Path path = Mockito.mock(Path.class);
-        when(path.getFileName()).thenReturn(filenamePath);
-        when(ret.getFilename()).thenReturn("mocked_path-" + ret.hashCode());
-
         int deletionTime;
         if (ttl > 0)
             deletionTime = (int) TimeUnit.MILLISECONDS.toSeconds(timestamp) + ttl;
