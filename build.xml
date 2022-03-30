@@ -456,7 +456,7 @@
 
     <target name="realclean" depends="clean" description="Remove the entire build directory and all downloaded artifacts">
         <delete>
-          <fileset dir="${build.lib}" excludes="cassandra-driver-internal-only-*"/>
+          <fileset dir="${build.lib}" excludes="cassandra-driver-internal-only-*,puresasl-internal-only-*"/>
         </delete>
         <delete includeemptydirs="false" dir="${build.dir}" failonerror="false"/>
         <delete dir="${doc.dir}/build" />
@@ -1321,9 +1321,10 @@
           <exclude name="ide/nbproject/private/**" />
         </tarfileset>
 
-        <!-- python driver -->
+        <!-- python driver, puresasl for SASL / GSSAPI -->
         <tarfileset dir="${basedir}" prefix="${final.name}-src">
           <include name="lib/cassandra-driver-internal-only-**" />
+          <include name="lib/puresasl-internal-only-**" />
         </tarfileset>
 
         <!-- Shell includes in bin/ and tools/bin/ -->
