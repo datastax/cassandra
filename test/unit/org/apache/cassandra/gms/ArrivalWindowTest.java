@@ -21,14 +21,15 @@ package org.apache.cassandra.gms;
  */
 
 
-import static org.junit.Assert.*;
-
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.FBUtilities;
+
+import static org.junit.Assert.assertEquals;
 
 public class ArrivalWindowTest
 {
@@ -36,6 +37,7 @@ public class ArrivalWindowTest
     public static void beforeClass()
     {
         DatabaseDescriptor.setDefaultFailureDetector();
+        DatabaseDescriptor.setConfig(new Config());
     }
 
     @Test
