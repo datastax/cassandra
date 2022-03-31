@@ -26,24 +26,29 @@ import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 
 public class GuidGenerator
 {
-    private static final Random myRand;
-    private static final SecureRandom mySecureRand;
-    private static final String s_id;
-
-    static
+    private static class Instance
     {
-        if (!JAVA_SECURITY_EGD.isPresent())
+        final static Instance instance = new Instance();
+
+        final Random myRand;
+        final SecureRandom mySecureRand;
+        final String s_id;
+
+        private Instance()
         {
-            JAVA_SECURITY_EGD.setString("file:/dev/urandom");
-        }
-        mySecureRand = new SecureRandom();
-        long secureInitializer = mySecureRand.nextLong();
-        myRand = new Random(secureInitializer);
-        try {
-            s_id = FBUtilities.getLocalAddressAndPort().toString();
-        }
-        catch (RuntimeException e) {
-            throw new AssertionError(e);
+            if (!JAVA_SECURITY_EGD.isPresent())
+                JAVA_SECURITY_EGD.setString("file:/dev/urandom");
+            mySecureRand = new SecureRandom();
+            long secureInitializer = mySecureRand.nextLong();
+            myRand = new Random(secureInitializer);
+            try
+            {
+                s_id = FBUtilities.getLocalAddressAndPort().toString();
+            }
+            catch (RuntimeException e)
+            {
+                throw new AssertionError(e);
+            }
         }
     }
 
@@ -59,7 +64,7 @@ public class GuidGenerator
             sb.append(Integer.toHexString(b));
         }
 
-        return convertToStandardFormat( sb.toString() );
+        return convertToStandardFormat(sb.toString());
     }
 
     public static String guidToString(byte[] bytes)
@@ -72,7 +77,7 @@ public class GuidGenerator
             sb.append(Integer.toHexString(b));
         }
 
-        return convertToStandardFormat( sb.toString() );
+        return convertToStandardFormat(sb.toString());
     }
 
     public static ByteBuffer guidAsBytes(Random random, String hostId, long time)
@@ -91,14 +96,13 @@ public class GuidGenerator
 
     public static ByteBuffer guidAsBytes()
     {
-        return guidAsBytes(myRand, s_id, currentTimeMillis());
+        return guidAsBytes(Instance.instance.myRand, Instance.instance.s_id, currentTimeMillis());
     }
 
     /*
-        * Convert to the standard format for GUID
-        * Example: C2FEEEAC-CFCD-11D1-8B05-00600806D9B6
-    */
-
+     * Convert to the standard format for GUID
+     * Example: C2FEEEAC-CFCD-11D1-8B05-00600806D9B6
+     */
     private static String convertToStandardFormat(String valueAfterMD5)
     {
         String raw = valueAfterMD5.toUpperCase();
