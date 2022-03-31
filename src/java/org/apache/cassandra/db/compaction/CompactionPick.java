@@ -65,7 +65,8 @@ public class CompactionPick
     /** The compaction progress, this is only available when compaction actually starts and will be null as long as
      * the candidate is still pending execution, also some tasks cannot report a progress at all, e.g. {@link SingleSSTableLCSTask}.
      * */
-    private @Nullable volatile CompactionProgress progress;
+    @Nullable 
+    private volatile CompactionProgress progress;
 
     /** Set to true when the compaction has completed */
     private volatile boolean completed;
