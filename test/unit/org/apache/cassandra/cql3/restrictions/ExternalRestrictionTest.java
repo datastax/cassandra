@@ -137,7 +137,7 @@ public class ExternalRestrictionTest extends CQLTester
         }
 
         @Override
-        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
+        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
         {
             return ByteBufferUtil.compareUnsigned(value, row.getCell(column).buffer()) == 0;
         }
