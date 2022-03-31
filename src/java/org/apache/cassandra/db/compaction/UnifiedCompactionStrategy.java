@@ -777,7 +777,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return tables.values();
     }
 
-    // used by CNDB to deser aggregates
+    // used by CNDB to deserialize aggregates
     public Shard getCompactionShard(Collection<? extends CompactionSSTable> sstables)
     {
         maybeUpdateSelector();
@@ -787,7 +787,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return shard;
     }
 
-    // used by CNDB to deser aggregates
+    // used by CNDB to deserialize aggregates
     public Bucket getBucket(int index, long min)
     {
         return new Bucket(controller, index, min);
