@@ -379,7 +379,7 @@ public class Nodes
     public class Local
     {
         private final NonBlockingHashMap<InetAddressAndPort, LocalInfo> internalMap = new NonBlockingHashMap<>();
-        private final InetAddressAndPort localInfoKey = FBUtilities.getBroadcastAddressAndPort();
+        private final InetAddressAndPort localInfoKey = InetAddressAndPort.getLoopbackAddress();
 
         /**
          * @see #update(UnaryOperator, boolean, boolean)

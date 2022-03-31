@@ -106,8 +106,6 @@ public abstract class Tracing extends ExecutorLocals.Impl
 
     protected static final Logger logger = LoggerFactory.getLogger(Tracing.class);
 
-    private final InetAddressAndPort localAddress = FBUtilities.getLocalAddressAndPort();
-
     protected final ConcurrentMap<TimeUUID, TraceState> sessions = new ConcurrentHashMap<>();
 
     public static final Tracing instance;
@@ -198,7 +196,7 @@ public abstract class Tracing extends ExecutorLocals.Impl
     {
         assert get() == null;
 
-        TraceState ts = newTraceState(state, localAddress, sessionId, traceType);
+        TraceState ts = newTraceState(state, FBUtilities.getLocalAddressAndPort(), sessionId, traceType);
         set(ts);
         sessions.put(sessionId, ts);
 
