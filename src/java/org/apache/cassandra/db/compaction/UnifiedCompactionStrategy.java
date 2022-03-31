@@ -684,9 +684,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 if (selection.get(aggregateIndex))
                     continue; // this is a repeat
                 CompactionAggregate.UnifiedAggregate aggregate = pending.get(aggregateIndex);
-                if (aggregate.selected.totSizeInBytes() > spaceAvailable)
+                if (aggregate.getSelected().totSizeInBytes() > spaceAvailable)
                     continue; // compaction is too large for current cycle
-                int level = levelOf(aggregate.selected);
+                int level = levelOf(aggregate.getSelected());
 
                 if (perLevel[level] > perLevelCount)
                     continue;   // share + one already used
@@ -699,7 +699,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
                 --remaining;
                 ++perLevel[level];
-                spaceAvailable -= aggregate.selected.totSizeInBytes();
+                spaceAvailable -= aggregate.getSelected().totSizeInBytes();
                 selection.set(aggregateIndex);
             }
 

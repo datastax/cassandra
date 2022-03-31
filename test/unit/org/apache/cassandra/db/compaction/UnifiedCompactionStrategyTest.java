@@ -34,6 +34,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import org.junit.Assert;
@@ -1185,11 +1186,18 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
+        CompactionPick compaction = Mockito.mock(CompactionPick.class);
+        when(compaction.isEmpty()).thenReturn(false);
+        when(compaction.hasExpiredOnly()).thenReturn(false);
+        List<SSTableReader> nonExpiredSSTables = createSStables(realm.getPartitioner());
+        when(compaction.ssstables()).thenReturn(ImmutableSet.copyOf(nonExpiredSSTables));
+
         CompactionAggregate.UnifiedAggregate aggregate = Mockito.mock(CompactionAggregate.UnifiedAggregate.class);
-        when(aggregate.getSelected()).thenReturn(CompactionPick.EMPTY);
+        when(aggregate.getSelected()).thenReturn(compaction);
+
         Collection<CompactionAggregate> compactionAggregates = strategy.getNextCompactionAggregates(ImmutableList.of(aggregate), 1000);
         assertNotNull(compactionAggregates);
-        assertEquals(0, compactionAggregates.size());
+        assertEquals(1, compactionAggregates.size());
     }
 
     private List<SSTableReader> createSStables(IPartitioner partitioner)
