@@ -46,8 +46,6 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-import static org.apache.cassandra.utils.Clock.Global.nanoTime;
-
 /**
  * Column index writer that flushes indexed data directly from the corresponding Memtable index, without buffering index
  * data in memory.
@@ -98,7 +96,7 @@ public class MemtableIndexWriter implements PerIndexWriter
     @Override
     public void complete(Stopwatch stopwatch) throws IOException
     {
-        long start = nanoTime();
+        long start = stopwatch.elapsed(TimeUnit.MILLISECONDS);
 
         try
         {
@@ -124,17 +122,15 @@ public class MemtableIndexWriter implements PerIndexWriter
 
                 indexContext.getIndexMetrics().memtableIndexFlushCount.inc();
 
-                long durationMillis = Math.max(1, TimeUnit.NANOSECONDS.toMillis(nanoTime() - start));
+                long elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
 
-                if (logger.isTraceEnabled())
-                {
-                    logger.trace(indexContext.logMessage("Flushed {} Memtable index cells for {} in {} ms."),
-                                 cellCount,
-                                 indexDescriptor.descriptor,
-                                 durationMillis);
-                }
+                logger.debug(indexContext.logMessage("Completed flushing {} memtable index cells to SSTable {}. Duration: {} ms. Total elapsed: {} ms"),
+                             cellCount,
+                             indexDescriptor.descriptor,
+                             elapsed - start,
+                             elapsed);
 
-                indexContext.getIndexMetrics().memtableFlushCellsPerSecond.update((long) (cellCount * 1000.0 / durationMillis));
+                indexContext.getIndexMetrics().memtableFlushCellsPerSecond.update((long) (cellCount * 1000.0 / Math.max(1, elapsed - start)));
             }
         }
         catch (Throwable t)
