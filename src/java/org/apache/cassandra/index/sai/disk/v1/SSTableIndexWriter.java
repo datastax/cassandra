@@ -126,6 +126,9 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (maybeAbort())
             return;
 
+        long start = stopwatch.elapsed(TimeUnit.MILLISECONDS);
+        long elapsed;
+
         boolean emptySegment = currentBuilder == null || currentBuilder.isEmpty();
         logger.debug(indexContext.logMessage("Completing index flush with {}buffered data..."), emptySegment ? "no " : "");
 
@@ -135,6 +138,12 @@ public class SSTableIndexWriter implements PerIndexWriter
             if (!emptySegment)
             {
                 flushSegment();
+                elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
+                logger.debug(indexContext.logMessage("Completed flush of final segment for SSTable {}. Duration: {} ms. Total elapsed: {} ms"),
+                             indexDescriptor.descriptor,
+                             elapsed - start,
+                             elapsed);
+                start = elapsed;
             }
 
             // Even an empty segment may carry some fixed memory, so remove it:
@@ -149,6 +158,11 @@ public class SSTableIndexWriter implements PerIndexWriter
             if (this.indexContext.isSegmentCompactionEnabled())
             {
                 compactSegments();
+                elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
+                logger.debug(indexContext.logMessage("Completed index compaction for SSTable {}. Duration: {} ms. Total elapsed: {} ms"),
+                             indexDescriptor.descriptor,
+                             elapsed - start,
+                             elapsed);
             }
 
             writeSegmentsMetadata();
