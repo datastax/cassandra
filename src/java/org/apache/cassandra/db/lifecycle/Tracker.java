@@ -448,11 +448,6 @@ public class Tracker
         return view.get().liveSSTables();
     }
 
-    public SSTableReader getLiveSSTable(String filename)
-    {
-        return view.get().getLiveSSTable(filename);
-    }
-
     public void maybeIncrementallyBackup(final Iterable<SSTableReader> sstables)
     {
         if (!DatabaseDescriptor.isIncrementalBackupsEnabled())
