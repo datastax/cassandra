@@ -40,7 +40,6 @@ import org.slf4j.LoggerFactory;
 
 import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
@@ -458,6 +457,25 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return limits;
     }
 
+    private Collection<CompactionAggregate> updateLevelCountWithParentAndGetSelection(final CompactionLimits limits,
+                                                                                      List<CompactionAggregate.UnifiedAggregate> pending)
+    {
+        for (CompactionAggregate.UnifiedAggregate aggregate : pending)
+        {
+            CompactionPick selected = aggregate.getSelected();
+            if (selected != null)
+                limits.levelCount = Math.max(limits.levelCount, (int) selected.parent());
+        }
+
+        final List<CompactionAggregate> selection = getSelection(pending,
+                                                                 limits.maxCompactions,
+                                                                 limits.levelCount,
+                                                                 limits.perLevel,
+                                                                 limits.spaceAvailable);
+        logger.debug("Starting {} compactions (out of {})", selection.size(), pending.stream().filter(agg -> !agg.getSelected().isEmpty()).count());
+        return selection;
+    }
+
     /**
      * Selects compactions to run next.
      * 
@@ -485,17 +503,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             {
                 // ... and also the levels that a layout-preserving selection would create.
                 limits.levelCount = Math.max(limits.levelCount, levelOf(selected) + 1);
-                limits.levelCount = Math.max(limits.levelCount, (int) selected.parent());
             }
         }
 
-        final List<CompactionAggregate> selection = getSelection(pending, 
-                                                                 limits.maxCompactions, 
-                                                                 limits.levelCount, 
-                                                                 limits.perLevel, 
-                                                                 limits.spaceAvailable);
-        logger.debug("Starting {} compactions (out of {})", selection.size(), pending.stream().filter(agg -> !agg.selected.isEmpty()).count());
-        return selection;
+        return updateLevelCountWithParentAndGetSelection(limits, pending);
     }
     
     /**
@@ -512,24 +523,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                        int maxConcurrentCompactions)
     {
         final CompactionLimits limits = getCurrentLimits(maxConcurrentCompactions);
-
         maybeUpdateSelector();
-
-        List<CompactionAggregate.UnifiedAggregate> pending = new ArrayList<>(aggregates);
-        for (CompactionAggregate.UnifiedAggregate aggregate : pending)
-        {
-            CompactionPick selected = aggregate.getSelected();
-            if (selected != null)
-                limits.levelCount = Math.max(limits.levelCount, (int) selected.parent());
-        }
-
-        final List<CompactionAggregate> selection = getSelection(pending, 
-                                                                 limits.maxCompactions, 
-                                                                 limits.levelCount, 
-                                                                 limits.perLevel, 
-                                                                 limits.spaceAvailable);
-        logger.debug("Starting {} compactions (out of {})", selection.size(), pending.stream().filter(agg -> !agg.getSelected().isEmpty()).count());
-        return selection;
+        return updateLevelCountWithParentAndGetSelection(limits, new ArrayList<>(aggregates));
     }
 
     /**
