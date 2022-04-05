@@ -50,7 +50,7 @@ public class CommitLogApiTest
     }
 
     @Test
-    public void forPath()
+    public void testForPath()
     {
         AbstractCommitLogSegmentManager original = CommitLog.instance.getSegmentManager();
         File location = Mockito.mock(File.class);
