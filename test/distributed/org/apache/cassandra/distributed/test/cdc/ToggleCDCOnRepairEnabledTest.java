@@ -39,7 +39,7 @@ public class ToggleCDCOnRepairEnabledTest extends TestBaseImpl
     {
         testCDCOnRepairEnabled(true, cluster -> {
             cluster.get(2).runOnInstance(() -> {
-                boolean containCDCInLog = CommitLog.instance.segmentManager
+                boolean containCDCInLog = CommitLog.instance.getSegmentManager()
                                               .getActiveSegments()
                                               .stream()
                                               .anyMatch(s -> s.getCDCState() == CommitLogSegment.CDCState.CONTAINS);
@@ -54,7 +54,7 @@ public class ToggleCDCOnRepairEnabledTest extends TestBaseImpl
     {
         testCDCOnRepairEnabled(false, cluster -> {
             cluster.get(2).runOnInstance(() -> {
-                boolean containCDCInLog = CommitLog.instance.segmentManager
+                boolean containCDCInLog = CommitLog.instance.getSegmentManager()
                                               .getActiveSegments()
                                               .stream()
                                               .allMatch(s -> s.getCDCState() != CommitLogSegment.CDCState.CONTAINS);
