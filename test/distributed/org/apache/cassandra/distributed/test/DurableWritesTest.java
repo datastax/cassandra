@@ -47,7 +47,7 @@ public class DurableWritesTest extends TestBaseImpl
 
             cluster.get(1).runOnInstance(() -> {
                 TableId wanted = TableId.fromString(Keyspace.open(KEYSPACE).getColumnFamilyStore("tbl").metadata.id.toString());
-                boolean containsTbl = CommitLog.instance.segmentManager
+                boolean containsTbl = CommitLog.instance.getSegmentManager()
                     .getActiveSegments()
                     .stream()
                     .anyMatch(s -> s.getDirtyTableIds().contains(wanted));
