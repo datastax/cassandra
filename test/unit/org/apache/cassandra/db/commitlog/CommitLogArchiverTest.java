@@ -113,7 +113,7 @@ public class CommitLogArchiverTest extends CQLTester
         }
 
         CommitLog.instance.forceRecycleAllSegments();
-        CommitLog.instance.segmentManager.awaitManagementTasksCompletion();
+        CommitLog.instance.getSegmentManager().awaitManagementTasksCompletion();
         // If the number of files that under backup dir is bigger than 1, that means the
         // archiver for commitlog is effective.
         assertTrue(dir.isDirectory() && dir.tryList().length > 0);
@@ -134,7 +134,7 @@ public class CommitLogArchiverTest extends CQLTester
         assertRows(execute("SELECT * FROM %s"), row(4, 0, 0), row(4, 1, 1), row(3, 0, 0), row(3, 1, 1));
 
         CommitLog.instance.forceRecycleAllSegments();
-        CommitLog.instance.segmentManager.awaitManagementTasksCompletion();
+        CommitLog.instance.getSegmentManager().awaitManagementTasksCompletion();
         execute("TRUNCATE TABLE %s");
         assertRowCount(execute("SELECT * FROM %s"), 0);
 
@@ -162,7 +162,7 @@ public class CommitLogArchiverTest extends CQLTester
         assertRows(execute("SELECT * FROM %s"), row(1, 0, 0), row(1, 1, 1), row(2, 0, 0), row(2, 1, 1));
 
         CommitLog.instance.forceRecycleAllSegments();
-        CommitLog.instance.segmentManager.awaitManagementTasksCompletion();
+        CommitLog.instance.getSegmentManager().awaitManagementTasksCompletion();
         execute("TRUNCATE TABLE %s");
         assertRowCount(execute("SELECT * FROM %s"), 0);
         // replay log
