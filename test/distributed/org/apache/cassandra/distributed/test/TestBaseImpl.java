@@ -36,6 +36,7 @@ import org.junit.BeforeClass;
 import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.distributed.Cluster;
+import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
@@ -106,7 +107,7 @@ public class TestBaseImpl extends DistributedTestBase
 
     protected void bootstrapAndJoinNode(Cluster cluster)
     {
-        IInstanceConfig config = cluster.newInstanceConfig();
+        IInstanceConfig config = cluster.newInstanceConfig().with(Feature.NETWORK, Feature.GOSSIP);
         config.set("auto_bootstrap", true);
         IInvokableInstance newInstance = cluster.bootstrap(config);
         withProperty(BOOTSTRAP_SCHEMA_DELAY_MS.getKey(), Integer.toString(90 * 1000),
