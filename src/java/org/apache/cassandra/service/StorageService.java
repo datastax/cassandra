@@ -2394,6 +2394,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 return;
             }
 
+            if (state == ApplicationState.INDEX_STATUS)
+            {
+                updateIndexStatus(endpoint, value);
+                return;
+            }
+
             if (getTokenMetadata().isMember(endpoint))
             {
                 switch (state)
@@ -2407,9 +2413,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         break;
                     case NET_VERSION:
                         updateNetVersion(endpoint, value);
-                        break;
-                    case INDEX_STATUS:
-                        updateIndexStatus(endpoint, value);
                         break;
                 }
             }
@@ -3261,7 +3264,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         return changedRanges.build();
     }
-
 
     public void onJoin(InetAddressAndPort endpoint, EndpointState epState)
     {

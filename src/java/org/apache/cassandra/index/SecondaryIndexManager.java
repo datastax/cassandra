@@ -1856,6 +1856,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         try
         {
+            if (versionedValue == null)
+                return;
             if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
                 return;
 
@@ -1868,13 +1870,45 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 Index.Status status = Index.Status.valueOf(e.getValue());
                 indexStatus.put(keyspaceIndex, status);
             }
-
-            peerIndexStatus.put(endpoint, indexStatus);
+            
+            Map<String, Index.Status> oldStatus = peerIndexStatus.put(endpoint, indexStatus);
+            Map<String, Index.Status> delta = indexStatusDelta(oldStatus, indexStatus);
+            if (!delta.isEmpty())
+                logger.debug("Received updated index status for peer {}: {}", endpoint, formatIndexStatus(delta));
         }
         catch (Throwable e)
         {
             logger.warn("Unable to parse index status: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Returns a new map containing only the entries from newStatus that differ from corresponding entries in oldStatus.
+     */
+    private static @Nonnull  Map<String, Index.Status> indexStatusDelta(
+            @Nullable  Map<String, Index.Status> oldStatus,
+            @Nonnull Map<String, Index.Status> newStatus)
+    {
+        Map<String, Index.Status> delta = new HashMap<>();
+        for (Map.Entry<String, Index.Status> e : newStatus.entrySet())
+        {
+            if (oldStatus == null || e.getValue() != oldStatus.get(e.getKey()))
+                delta.put(e.getKey(), e.getValue());
+        }
+        return delta;
+    }
+
+    private static String formatIndexStatus(Map<String, Index.Status> indexStatus)
+    {
+        StringBuilder statusStr = new StringBuilder();
+        for (Map.Entry<String, Index.Status> e : indexStatus.entrySet())
+        {
+            statusStr.append("\n    ");
+            statusStr.append(e.getKey());
+            statusStr.append(": ");
+            statusStr.append(e.getValue());
+        }
+        return statusStr.toString();
     }
 
     @VisibleForTesting

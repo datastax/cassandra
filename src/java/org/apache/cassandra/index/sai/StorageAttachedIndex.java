@@ -445,6 +445,7 @@ public class StorageAttachedIndex implements Index
             if (baseCfs.indexManager.isIndexQueryable(this))
             {
                 logger.debug(indexContext.logMessage("Skipping validation in pre-join task, as the initialization task has already made the index queryable..."));
+                baseCfs.indexManager.makeIndexQueryable(this, Status.BUILD_SUCCEEDED);
                 return null;
             }
 
