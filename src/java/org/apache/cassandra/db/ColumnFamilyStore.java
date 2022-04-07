@@ -2706,7 +2706,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         Callable<LifecycleTransaction> callable = () -> {
             assert data.getCompacting().isEmpty() : data.getCompacting();
             Iterable<SSTableReader> sstables = Iterables.filter(getLiveSSTables(), sstable -> !sstable.isMarkedSuspect());
-            LifecycleTransaction modifier = data.tryModify(sstables, operationType);
+            LifecycleTransaction modifier = tryModify(sstables, operationType);
             assert modifier != null: "something marked things compacting while compactions are disabled";
             return modifier;
         };
@@ -3480,9 +3480,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return sstable -> sstable.getPendingRepair() != null && sessionID.equals(sstable.getPendingRepair());
     }
 
-    public LifecycleTransaction tryModify(Iterable<? extends CompactionSSTable> ssTableReaders, OperationType operationType)
+    @Override
+    public LifecycleTransaction tryModify(Iterable<? extends CompactionSSTable> ssTableReaders,
+                                          OperationType operationType,
+                                          UUID id)
     {
-        return data.tryModify(Iterables.transform(ssTableReaders, SSTableReader.class::cast), operationType);
+        return data.tryModify(Iterables.transform(ssTableReaders, SSTableReader.class::cast), operationType, id);
     }
 
     public CompactionRealm.OverlapTracker getOverlapTracker(Iterable<SSTableReader> sources)
