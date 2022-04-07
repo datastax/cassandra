@@ -23,8 +23,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -34,15 +36,20 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.utils.Throwables;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 
+import static org.apache.cassandra.Util.subListOf;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atMostOnce;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -51,7 +58,8 @@ public class NodesTest
 {
     private final ExecutorService executor = mock(ExecutorService.class);
     private final INodesPersistence persistence = mock(INodesPersistence.class);
-    private final Future<?> promise = mock(Future.class);
+    private final CopyOnWriteArrayList<Future<?>> promises = new CopyOnWriteArrayList<>();
+
 
     private final UUID newHostId = UUID.randomUUID();
     private final UUID id1 = UUID.randomUUID();
@@ -76,11 +84,16 @@ public class NodesTest
     @Before
     public void beforeTest()
     {
-        reset(persistence, executor, promise);
+        promises.clear();
+        reset(persistence, executor);
         nodes = new Nodes(persistence, executor);
         infoRef = new AtomicReference<>();
         taskCaptor = ArgumentCaptor.forClass(Runnable.class);
-        when(executor.submit(taskCaptor.capture())).thenAnswer(inv -> promise);
+        when(executor.submit(taskCaptor.capture())).thenAnswer(inv -> {
+            Future<?> promise = mock(Future.class);
+            promises.add(promise);
+            return promise;
+        });
     }
 
     @After
@@ -88,7 +101,8 @@ public class NodesTest
     {
         verify(persistence, atMostOnce()).loadLocal();
         verify(persistence, atMostOnce()).loadPeers();
-        verifyNoMoreInteractions(executor, persistence, promise);
+        verifyNoMoreInteractions(executor, persistence);
+        promises.forEach(Mockito::verifyNoMoreInteractions);
     }
 
     @Test
@@ -138,7 +152,8 @@ public class NodesTest
     public void updateLocalNoChanges() throws Exception
     {
         nodes.getLocal().update(current -> current.setHostId(newHostId), false, false);
-        clearInvocations(persistence, executor, promise);
+        clearInvocations(persistence, executor);
+        clearInvocations(promises.toArray());
 
         ILocalInfo r = updateLocalInfo(newHostId, false, false);
 
@@ -152,7 +167,7 @@ public class NodesTest
 
         verify(executor).submit(any(Runnable.class));
 
-        taskCaptor.getValue().run();
+        subListOf(taskCaptor.getAllValues(), -1).forEach(Runnable::run);
         verify(persistence).saveLocal(argThat(info -> info.getHostId().equals(newHostId)));
 
         checkLiveObject(r, () -> nodes.getLocal().get(), newHostId);
@@ -163,10 +178,10 @@ public class NodesTest
     {
         ILocalInfo r = updateLocalInfo(newHostId, true, false);
 
-        verify(executor).submit(any(Runnable.class));
-        verify(promise).get();
+        verify(executor, times(2)).submit(any(Runnable.class));
+        subListOf(promises, -2).forEach(promise -> Throwables.maybeFail(() -> verify(promise).get(anyLong(), any(TimeUnit.class))));
 
-        taskCaptor.getValue().run();
+        subListOf(taskCaptor.getAllValues(), -2).forEach(Runnable::run);
         verify(persistence).saveLocal(argThat(info -> info.getHostId().equals(newHostId)));
         verify(persistence).syncLocal();
 
@@ -177,13 +192,13 @@ public class NodesTest
     public void updateLocalWithForce() throws Exception
     {
         nodes.getLocal().update(current -> current.setHostId(newHostId), false, false);
-        clearInvocations(persistence, executor, promise);
+        clearInvocations(persistence, executor);
 
         ILocalInfo r = updateLocalInfo(newHostId, false, true);
 
         verify(executor).submit(any(Runnable.class));
 
-        taskCaptor.getValue().run();
+        subListOf(taskCaptor.getAllValues(), -1).forEach(Runnable::run);
         verify(persistence).saveLocal(argThat(info -> info.getHostId().equals(newHostId)));
 
         checkLiveObject(r, () -> nodes.getLocal().get(), newHostId);
@@ -193,7 +208,7 @@ public class NodesTest
     public void updatePeersNoChanges() throws Exception
     {
         nodes.getPeers().update(addr1, current -> current.setHostId(newHostId), false, false);
-        clearInvocations(persistence, executor, promise);
+        clearInvocations(persistence, executor);
 
         IPeerInfo r = updatePeerInfo(newHostId, false, false);
 
@@ -207,7 +222,7 @@ public class NodesTest
 
         verify(executor).submit(any(Runnable.class));
 
-        taskCaptor.getValue().run();
+        subListOf(taskCaptor.getAllValues(), -1).forEach(Runnable::run);
         verify(persistence).savePeer(argThat(info -> info.getHostId().equals(newHostId)));
 
         checkLiveObject(r, () -> nodes.getPeers().get(addr1), newHostId);
@@ -218,10 +233,10 @@ public class NodesTest
     {
         IPeerInfo r = updatePeerInfo(newHostId, true, false);
 
-        verify(executor).submit(any(Runnable.class));
-        verify(promise).get();
+        verify(executor, times(2)).submit(any(Runnable.class));
+        subListOf(promises, -2).forEach(promise -> Throwables.maybeFail(() -> verify(promise).get(anyLong(), any(TimeUnit.class))));
 
-        taskCaptor.getValue().run();
+        subListOf(taskCaptor.getAllValues(), -2).forEach(Runnable::run);
         verify(persistence).savePeer(argThat(info -> info.getHostId().equals(newHostId)));
         verify(persistence).syncPeers();
 
@@ -232,13 +247,14 @@ public class NodesTest
     public void updatePeersWithForce() throws Exception
     {
         nodes.getPeers().update(addr1, current -> current.setHostId(newHostId), false, false);
-        clearInvocations(persistence, executor, promise);
+        clearInvocations(persistence, executor);
+        clearInvocations(promises.toArray());
 
         IPeerInfo r = updatePeerInfo(newHostId, false, true);
 
         verify(executor).submit(any(Runnable.class));
 
-        taskCaptor.getValue().run();
+        subListOf(taskCaptor.getAllValues(), -1).forEach(Runnable::run);
         verify(persistence).savePeer(argThat(info -> info.getHostId().equals(newHostId)));
 
         checkLiveObject(r, () -> nodes.getPeers().get(addr1), newHostId);
@@ -269,7 +285,7 @@ public class NodesTest
         assertThat(r).isEqualTo(p2.duplicate().setRemoved(true));
         verify(executor).submit(any(Runnable.class));
 
-        taskCaptor.getValue().run();
+        subListOf(taskCaptor.getAllValues(), -1).forEach(Runnable::run);
         verify(persistence).deletePeer(addr2);
 
         Set<IPeerInfo> peers = nodes.getPeers().get().collect(Collectors.toSet());
@@ -283,13 +299,15 @@ public class NodesTest
         IPeerInfo p2 = nodes.getPeers().update(addr2, current -> current.setHostId(id2));
 
         clearInvocations(executor);
+        promises.clear();
 
         IPeerInfo r = nodes.getPeers().remove(addr2, true, true);
         assertThat(r).isEqualTo(p2.duplicate().setRemoved(true));
-        verify(executor).submit(any(Runnable.class));
-        verify(promise).get();
+        verify(executor, times(2)).submit(any(Runnable.class));
 
-        taskCaptor.getValue().run();
+        subListOf(promises, -2).forEach(promise -> Throwables.maybeFail(() -> verify(promise).get(anyLong(), any(TimeUnit.class))));
+
+        subListOf(taskCaptor.getAllValues(), -2).forEach(Runnable::run);
         verify(persistence).deletePeer(addr2);
         verify(persistence).syncPeers();
 
@@ -329,7 +347,7 @@ public class NodesTest
 
         verify(executor).submit(any(Runnable.class));
 
-        taskCaptor.getValue().run();
+        subListOf(taskCaptor.getAllValues(), -1).forEach(Runnable::run);
         verify(persistence).deletePeer(addr2);
 
         Set<IPeerInfo> peers = nodes.getPeers().get().collect(Collectors.toSet());

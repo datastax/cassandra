@@ -54,6 +54,7 @@ import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1152,5 +1153,27 @@ public class Util
         {
             return true;
         }
+    }
+
+    /**
+     * Returns a prefix or suffix sublist of the given list.
+     *
+     * @param list source list
+     * @param size the number of elements to take from the source list:
+     *             if positive, the method returns a prefix of the list;
+     *             if negative, the method returns a suffix of the list;
+     *             if zero, the method returns an empty list;
+     *             Note that the order remains unchanged in any case
+     * @return the sublist of the given list
+     */
+    public static <T> List<T> subListOf(List<T> list, int size)
+    {
+        if (size > 0)
+            return list.subList(0, size);
+
+        if (size < 0)
+            return list.subList(list.size() + size, list.size());
+
+        return Lists.newArrayList();
     }
 }

@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.nodes;
 
+import java.time.Duration;
 import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
@@ -37,6 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -52,6 +54,8 @@ import org.apache.cassandra.utils.concurrent.LoadingMap;
 public class Nodes
 {
     private static final Logger logger = LoggerFactory.getLogger(Nodes.class);
+
+    private final static Duration PERSISTENCE_TIMEOUT = Duration.ofMillis(CassandraRelevantProperties.NODES_PERSISTENCE_TIMEOUT_MS.getLong());
 
     @VisibleForTesting
     private final ExecutorService updateExecutor;
@@ -244,7 +248,7 @@ public class Nodes
 
     public class Peers
     {
-        private final LoadingMap<InetAddressAndPort, PeerInfo> internalMap = new LoadingMap<>();
+        private final LoadingMap<InetAddressAndPort, PeerInfo> internalMap = new LoadingMap<>(8, PERSISTENCE_TIMEOUT.multipliedBy(2));
 
         public IPeerInfo update(InetAddressAndPort peer, UnaryOperator<PeerInfo> update)
         {
@@ -269,38 +273,54 @@ public class Nodes
          */
         public IPeerInfo update(InetAddressAndPort peer, UnaryOperator<PeerInfo> update, boolean blocking, boolean force)
         {
-            return internalMap.compute(peer, (key, existingPeerInfo) -> {
-                PeerInfo updated = existingPeerInfo == null
-                                   ? update.apply(new PeerInfo().setPeerAddressAndPort(peer))
-                                   : update.apply(existingPeerInfo.duplicate()); // since we operate on mutable objects, we don't want to let the update function to operate on the live object
+            try
+            {
+                return internalMap.compute(peer, (key, existingPeerInfo) -> {
+                    PeerInfo updated = existingPeerInfo == null
+                                       ? update.apply(new PeerInfo().setPeerAddressAndPort(peer))
+                                       : update.apply(existingPeerInfo.duplicate()); // since we operate on mutable objects, we don't want to let the update function to operate on the live object
 
-                if (updated.getPeerAddressAndPort() == null)
-                    updated.setPeerAddressAndPort(peer);
-                else
-                    Preconditions.checkArgument(Objects.equals(updated.getPeerAddressAndPort(), peer));
+                    if (updated.getPeerAddressAndPort() == null)
+                        updated.setPeerAddressAndPort(peer);
+                    else
+                        Preconditions.checkArgument(Objects.equals(updated.getPeerAddressAndPort(), peer));
 
-                updated.setRemoved(false);
-                save(existingPeerInfo, updated, blocking, force);
-                return updated;
-            });
+                    updated.setRemoved(false);
+                    save(existingPeerInfo, updated, blocking, force);
+                    return updated;
+                });
+            }
+            finally
+            {
+                if (blocking)
+                    FBUtilities.waitOnFuture(updateExecutor.submit(nodesPersistence::syncPeers), PERSISTENCE_TIMEOUT);
+            }
         }
 
         /**
-         * @param peer peer to remove
+         * @param peer     peer to remove
          * @param blocking block until the removal is persisted and synced
-         * @param hard remove also the transient state instead of just setting {@link PeerInfo#isRemoved()} state
+         * @param hard     remove also the transient state instead of just setting {@link PeerInfo#isRemoved()} state
          * @return the remove
          */
         public IPeerInfo remove(InetAddressAndPort peer, boolean blocking, boolean hard)
         {
             AtomicReference<PeerInfo> removed = new AtomicReference<>();
-            internalMap.computeIfPresent(peer, (key, existingPeerInfo) -> {
-                delete(peer, blocking);
-                existingPeerInfo.setRemoved(true);
-                removed.set(existingPeerInfo);
-                return hard ? null : existingPeerInfo;
-            });
-            return removed.get();
+            try
+            {
+                internalMap.computeIfPresent(peer, (key, existingPeerInfo) -> {
+                    delete(peer, blocking);
+                    existingPeerInfo.setRemoved(true);
+                    removed.set(existingPeerInfo);
+                    return hard ? null : existingPeerInfo;
+                });
+                return removed.get();
+            }
+            finally
+            {
+                if (blocking)
+                    FBUtilities.waitOnFuture(updateExecutor.submit(nodesPersistence::syncPeers), PERSISTENCE_TIMEOUT);
+            }
         }
 
         /**
@@ -343,11 +363,9 @@ public class Nodes
             Future<?> f = updateExecutor.submit(wrapPersistenceTask("saving peer information: " + newInfo, () -> {
                 nodesPersistence.savePeer(newInfo);
                 logger.trace("Saved peer: {}", newInfo);
-                if (blocking)
-                    nodesPersistence.syncPeers();
             }));
             if (blocking)
-                FBUtilities.waitOnFuture(f);
+                FBUtilities.waitOnFuture(f, PERSISTENCE_TIMEOUT);
         }
 
         private Peers load()
@@ -366,18 +384,16 @@ public class Nodes
             Future<?> f = updateExecutor.submit(wrapPersistenceTask("deleting peer information: " + peer, () -> {
                 nodesPersistence.deletePeer(peer);
                 logger.trace("Deleted peer {}", peer);
-                if (blocking)
-                    nodesPersistence.syncPeers();
             }));
 
             if (blocking)
-                FBUtilities.waitOnFuture(f);
+                FBUtilities.waitOnFuture(f, PERSISTENCE_TIMEOUT);
         }
     }
 
     public class Local
     {
-        private final LoadingMap<InetAddressAndPort, LocalInfo> internalMap = new LoadingMap<>(1);
+        private final LoadingMap<InetAddressAndPort, LocalInfo> internalMap = new LoadingMap<>(1, PERSISTENCE_TIMEOUT.multipliedBy(2));
         private final InetAddressAndPort localInfoKey = InetAddressAndPort.getLoopbackAddress();
 
         /**
@@ -408,13 +424,21 @@ public class Nodes
          */
         public ILocalInfo update(UnaryOperator<LocalInfo> update, boolean blocking, boolean force)
         {
-            return internalMap.compute(localInfoKey, (key, existingLocalInfo) -> {
-                LocalInfo updated = existingLocalInfo == null
-                                    ? update.apply(new LocalInfo())
-                                    : update.apply(existingLocalInfo.duplicate()); // since we operate on mutable objects, we don't want to let the update function to operate on the live object
-                save(existingLocalInfo, updated, blocking, force);
-                return updated;
-            });
+            try
+            {
+                return internalMap.compute(localInfoKey, (key, existingLocalInfo) -> {
+                    LocalInfo updated = existingLocalInfo == null
+                                        ? update.apply(new LocalInfo())
+                                        : update.apply(existingLocalInfo.duplicate()); // since we operate on mutable objects, we don't want to let the update function to operate on the live object
+                    save(existingLocalInfo, updated, blocking, force);
+                    return updated;
+                });
+            }
+            finally
+            {
+                if (blocking)
+                    FBUtilities.waitOnFuture(updateExecutor.submit(nodesPersistence::syncLocal), PERSISTENCE_TIMEOUT);
+            }
         }
 
         /**
@@ -437,12 +461,10 @@ public class Nodes
             Future<?> f = updateExecutor.submit(wrapPersistenceTask("saving local node information: " + newInfo, () -> {
                 nodesPersistence.saveLocal(newInfo);
                 logger.trace("Saving local: {}, blocking = {}, force = {}", newInfo, blocking, force);
-                if (blocking)
-                    nodesPersistence.syncLocal();
             }));
 
             if (blocking)
-                FBUtilities.waitOnFuture(f);
+                FBUtilities.waitOnFuture(f, PERSISTENCE_TIMEOUT);
         }
 
         private Local load()

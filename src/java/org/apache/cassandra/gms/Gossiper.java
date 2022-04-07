@@ -62,6 +62,7 @@ import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.JMXEnabledSingleThreadExecutor;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.dht.Token;
@@ -111,6 +112,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     {
         public static final String DISABLE_THREAD_VALIDATION = "cassandra.gossip.disable_thread_validation";
     }
+
+    private final long LOCK_TIMEOUT_MS = CassandraRelevantProperties.GOSSIPER_LOCK_TIMEOUT.getLong();
 
     private static final DebuggableScheduledThreadPoolExecutor executor = new DebuggableScheduledThreadPoolExecutor("GossipTasks");
 
@@ -295,12 +298,14 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     {
         public void run()
         {
+            boolean locked = false;
             try
             {
                 //wait on messaging service to start listening
                 MessagingService.instance().waitUntilListening();
 
-                taskLock.lock();
+                taskLock();
+                locked = true;
 
                 /* Update the local heartbeat counter. */
                 endpointStateMap.get(FBUtilities.getBroadcastAddressAndPort()).getHeartBeatState().updateHeartBeat();
@@ -350,7 +355,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             }
             finally
             {
-                taskLock.unlock();
+                if (locked)
+                    taskLock.unlock();
             }
         }
     }
@@ -2010,7 +2016,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     public void addLocalApplicationStates(List<Pair<ApplicationState, VersionedValue>> states)
     {
-        taskLock.lock();
+        taskLock();
         try
         {
             for (Pair<ApplicationState, VersionedValue> pair : states)
@@ -2022,7 +2028,6 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         {
             taskLock.unlock();
         }
-
     }
 
     public void stop()
@@ -2432,4 +2437,20 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         return removedState;
     }
 
+    private void taskLock()
+    {
+        boolean result;
+        try
+        {
+            result = taskLock.tryLock(LOCK_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        }
+        catch (InterruptedException e)
+        {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Thread was interrupted while trying to acquire a lock for Gossiper task", e);
+        }
+
+        if (!result)
+            throw new AssertionError("Failed to acquire a Gossiper task lock in " + LOCK_TIMEOUT_MS + "ms");
+    }
 }

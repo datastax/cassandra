@@ -269,6 +269,18 @@ public enum CassandraRelevantProperties
     SYSTEM_DISTRIBUTED_NTS_RF_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_per_dc"),
     SYSTEM_DISTRIBUTED_NTS_DC_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_dc_names"),
 
+    /**
+     * Maximum time to wait for node information persistence operations, like save, delete or sync, before throwing exception.
+     * This is mainly for unfound deadlock mitigation. Do not modify this setting in production use!
+     */
+    NODES_PERSISTENCE_TIMEOUT_MS("cassandra.test.nodes.persistence_timeout_ms", "60000"),
+
+    /**
+     * Maximum time to wait to acquire a lock for Gossiper task before failing.
+     * This is mainly for unfound deadlock mitigation. Not to be modified in production use!
+     */
+    GOSSIPER_LOCK_TIMEOUT("cassandra.test.nodes.lock_timeout_ms", "60000"),
+
     ;
 
 
