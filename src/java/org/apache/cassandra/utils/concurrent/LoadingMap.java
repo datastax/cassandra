@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.utils.concurrent;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -32,7 +33,10 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
+
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * An extension of {@link NonBlockingHashMap} where all values are wrapped by {@link CompletableFuture}.
@@ -47,6 +51,8 @@ import org.cliffc.high_scale_lib.NonBlockingHashMap;
  */
 public class LoadingMap<K, V>
 {
+    private static final int DEFAULT_INITIAL_CAPACITY = 8;
+
     // The map of futures lets us synchronize on per key basis rather than synchronizing the whole map.
     // It works in the way that when there is an ongoing computation (update) on a key, the other thread
     // trying to access that key recevies an incomplete future and needs to wait until the computation is done.
@@ -54,14 +60,39 @@ public class LoadingMap<K, V>
     // It also ensures exactly-once semantics for the update operation.
     private final Map<K, CompletableFuture<V>> internalMap;
 
+    private final Duration timeout;
+
+    /**
+     * Creates an empty map with default capacity and no timeout.
+     */
     public LoadingMap()
     {
-        this.internalMap = new NonBlockingHashMap<>();
+        this(DEFAULT_INITIAL_CAPACITY);
     }
 
+    /**
+     * Creates an empty loading map with no timeout.
+     *
+     * @param initialSize initial map capacity
+     */
     public LoadingMap(int initialSize)
     {
+        this(initialSize, Duration.ZERO);
+    }
+
+    /**
+     * Creates an empty loading map.
+     *
+     * @param initialSize initial map capacity
+     * @param timeout     maximum time to wait for the concurrent update to finish before failing;
+     *                    zero timeout means no timeout at all
+     */
+    public LoadingMap(int initialSize, Duration timeout)
+    {
+        Preconditions.checkNotNull(timeout, "Timeout cannot be null");
+        Preconditions.checkArgument(!timeout.isNegative(), "Timeout must be not negative but was: %s", timeout);
         this.internalMap = new NonBlockingHashMap<>(initialSize);
+        this.timeout = timeout;
     }
 
     /**
@@ -93,7 +124,7 @@ public class LoadingMap<K, V>
         CompletableFuture<V> newEntry = new CompletableFuture<>();
         CompletableFuture<V> previousEntry = replaceEntry(key, newEntry, false, true);
         if (previousEntry != null)
-            return previousEntry.join();
+            return get(previousEntry);
 
         return updateOrRemoveEntry(key, (k, v) -> mappingFunction.apply(k), previousEntry, newEntry);
     }
@@ -141,7 +172,7 @@ public class LoadingMap<K, V>
             }
             else
             {
-                previousValue = previousEntry.join();
+                previousValue = get(previousEntry);
 
                 if (previousValue != null)
                 {
@@ -170,7 +201,7 @@ public class LoadingMap<K, V>
      */
     private V updateOrRemoveEntry(K key, BiFunction<? super K, ? super V, ? extends V> remappingFunction, CompletableFuture<V> previousEntry, CompletableFuture<V> newEntry)
     {
-        V previousValue = previousEntry != null ? previousEntry.join() : null;
+        V previousValue = previousEntry != null ? get(previousEntry) : null;
 
         try
         {
@@ -234,7 +265,7 @@ public class LoadingMap<K, V>
                 // value not found
                 return null;
 
-            V value = entry.join();
+            V value = get(entry);
             if (value != null)
                 return value;
 
@@ -336,5 +367,13 @@ public class LoadingMap<K, V>
         {
             return (T) value;
         }
+    }
+
+    private V get(CompletableFuture<V> f)
+    {
+        if (timeout.isZero())
+            return f.join();
+        else
+            return FBUtilities.waitOnFuture(f, timeout);
     }
 }

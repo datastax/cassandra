@@ -48,6 +48,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -530,15 +531,16 @@ public class FBUtilities
         catch (ExecutionException ee)
         {
             logger.info("Exception occurred in async code", ee);
-            throw Throwables.cleaned(ee);
+            throw new CompletionException(ee.getCause());
         }
         catch (InterruptedException ie)
         {
+            Thread.currentThread().interrupt();
             throw new AssertionError(ie);
         }
         catch (TimeoutException e)
         {
-            throw new RuntimeException("Timeout - task did not finish in " + timeout);
+            throw new CompletionException("Timeout - task did not finish in " + timeout, e);
         }
     }
 
