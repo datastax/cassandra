@@ -267,7 +267,7 @@ public abstract class Message
             return response;
         }
 
-        void setTracingRequested()
+        public void setTracingRequested()
         {
             tracingRequested = true;
         }
@@ -297,7 +297,7 @@ public abstract class Message
             return this;
         }
 
-        TimeUUID getTracingId()
+        public TimeUUID getTracingId()
         {
             return tracingId;
         }
