@@ -2773,9 +2773,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     case NET_VERSION:
                         updateNetVersion(endpoint, value);
                         break;
-                    case INDEX_STATUS:
-                        updateIndexStatus(endpoint, value);
-                        break;
                 }
             }
             else
@@ -3633,7 +3630,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         return changedRanges.build();
     }
-
 
     public void onJoin(InetAddressAndPort endpoint, EndpointState epState)
     {
