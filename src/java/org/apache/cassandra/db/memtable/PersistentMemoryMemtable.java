@@ -143,17 +143,17 @@ public class PersistentMemoryMemtable extends AbstractMemtable
     }
 
     //ConcurrentLongART holds all memtable Partitions which is thread-safe
-    public PersistentMemoryMemtable(TableMetadataRef metadaRef, Owner owner)
+    public PersistentMemoryMemtable(TableMetadataRef metadataRef, Owner owner)
     {
-        super(metadaRef);
+        super(metadataRef);
         this.owner = owner;
         //Since Index TableMetadata will contain base table Id ,
         //converting Index name to Index table ID is required, to persist into tablesLinkedList and tablesMap.
-        this.id = metadaRef.get().isIndex() ? TableId.fromUUID(UUID.nameUUIDFromBytes(metadaRef.get().indexName().get().getBytes())) : metadaRef.get().id;
-        if (metadaRef.get().isIndex())
-            processIndexTable(metadaRef);
+        this.id = metadataRef.get().isIndex() ? TableId.fromUUID(UUID.nameUUIDFromBytes(metadataRef.get().indexName().get().getBytes())) : metadataRef.get().id;
+        if (metadataRef.get().isIndex())
+            processIndexTable(metadataRef);
         else
-            processRegularTable(metadaRef);
+            processRegularTable(metadataRef);
     }
 
     // This function assumes it is being called from within an outer transaction
@@ -198,6 +198,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
         return pair[1];
     }
 
+    @SuppressWarnings({ "resource" })
     public MemtableUnfilteredPartitionIterator makePartitionIterator(ColumnFilter columnFilter, DataRange dataRange)
     {
         AbstractBounds<PartitionPosition> keyRange = dataRange.keyRange();
@@ -243,6 +244,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
         return new PmemUnfilteredPartitionIterator(heap, metadata(), entryIterator, minLocalDeletionTime, columnFilter, dataRange);
     }
 
+    @SuppressWarnings({ "resource" })
     public Partition getPartition(DecoratedKey key)
     {
         PmemPartition pMemPartition = null;
@@ -607,10 +609,10 @@ public class PersistentMemoryMemtable extends AbstractMemtable
         }
 
         public Memtable create(AtomicReference<CommitLogPosition> commitLogLowerBound,
-                               TableMetadataRef metadaRef,
+                               TableMetadataRef metadataRef,
                                Owner owner)
         {
-            return new PersistentMemoryMemtable(metadaRef, owner);
+            return new PersistentMemoryMemtable(metadataRef, owner);
         }
 
         public boolean writesShouldSkipCommitLog()
@@ -655,22 +657,22 @@ public class PersistentMemoryMemtable extends AbstractMemtable
         return tablesMap.get(metadata.id);
     }
 
-    private void processIndexTable(TableMetadataRef metadaRef)
+    private void processIndexTable(TableMetadataRef metadataRef)
     {
         ConcurrentLongART memtableCart = tablesMap.get(id);
         if (memtableCart == null)
-            addToTablesMap(metadaRef, id);
+            addToTablesMap(metadataRef, id);
     }
 
-    private void addToTablesMap(TableMetadataRef metadaRef, TableId id)
+    private void addToTablesMap(TableMetadataRef metadataRef, TableId id)
     {
         version = 1;
         ConcurrentLongART memtableCart = new ConcurrentLongART(heap, CORES);
         tablesMap.put(id, memtableCart);
 
         SerializationHeader sHeader = new SerializationHeader(false,
-                                                              metadaRef.get(),
-                                                              metadaRef.get().regularAndStaticColumns(),
+                                                              metadataRef.get(),
+                                                              metadataRef.get().regularAndStaticColumns(),
                                                               EncodingStats.NO_STATS);
         Map<Integer, SerializationHeader> tableMetadataMap = new ConcurrentHashMap<>();
         tableMetadataMap.putIfAbsent(version, sHeader);
@@ -680,31 +682,31 @@ public class PersistentMemoryMemtable extends AbstractMemtable
         tablesMetadataMap.putIfAbsent(id, pmemTableInfo);
     }
 
-    private void processRegularTable(TableMetadataRef metadaRef)
+    private void processRegularTable(TableMetadataRef metadataRef)
     {
-        ConcurrentLongART memtableCart = tablesMap.get(metadaRef.id);
+        ConcurrentLongART memtableCart = tablesMap.get(metadataRef.id);
         if (memtableCart == null)
-            addToTablesMap(metadaRef, metadaRef.id);
+            addToTablesMap(metadataRef, metadataRef.id);
         else
         {
-            PmemTableInfo previousTableinfo = tablesMetadataMap.get(metadaRef.id);
-            if (tablesMetadataMap.get(metadaRef.id).getSerializationHeaderMap().size() == 0)
-                reloadTablesMetadataMap(metadaRef.get(), previousTableinfo, heap);
+            PmemTableInfo previousTableinfo = tablesMetadataMap.get(metadataRef.id);
+            if (tablesMetadataMap.get(metadataRef.id).getSerializationHeaderMap().size() == 0)
+                reloadTablesMetadataMap(metadataRef.get(), previousTableinfo, heap);
 
-            int currentVersion = tablesMetadataMap.get(metadaRef.id).getSerializationHeaderMap().size();
+            int currentVersion = tablesMetadataMap.get(metadataRef.id).getSerializationHeaderMap().size();
             int previousColumCount = previousTableinfo.getSerializationHeaderMap().get(currentVersion).columns().size();
-            if (metadaRef.get().regularAndStaticColumns().size() != previousColumCount)
+            if (metadataRef.get().regularAndStaticColumns().size() != previousColumCount)
             {
                 int nextVersion = currentVersion + 1;
                 SerializationHeader alteredHeader = new SerializationHeader(false,
-                                                                            metadaRef.get(),
-                                                                            metadaRef.get().regularAndStaticColumns(),
+                                                                            metadataRef.get(),
+                                                                            metadataRef.get().regularAndStaticColumns(),
                                                                             EncodingStats.NO_STATS);
-                tablesMetadataMap.get(metadaRef.id).getSerializationHeaderMap().putIfAbsent(nextVersion, alteredHeader);
+                tablesMetadataMap.get(metadataRef.id).getSerializationHeaderMap().putIfAbsent(nextVersion, alteredHeader);
 
                 TransactionalMemoryBlock tableMetadatablock = heap.memoryBlockFromHandle(previousTableinfo.metadataBlockHandle());
                 tableMetadatablock.free();
-                previousTableinfo.serializeSerializationHeader(tablesMetadataMap.get(metadaRef.id).getSerializationHeaderMap(), heap);
+                previousTableinfo.serializeSerializationHeader(tablesMetadataMap.get(metadataRef.id).getSerializationHeaderMap(), heap);
             }
         }
     }

@@ -813,8 +813,8 @@
         <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static"/>
         <dependency groupId="javax.inject" artifactId="javax.inject"/>
         <dependency groupId="com.google.j2objc" artifactId="j2objc-annotations"/>
-	<dependency groupId="org.hdrhistogram" artifactId="HdrHistogram"/>
-	<dependency groupId="com.intel.pmem" artifactId="llpl" version="1.2.1-release" />
+        <dependency groupId="org.hdrhistogram" artifactId="HdrHistogram"/>
+        <dependency groupId="com.intel.pmem" artifactId="llpl" version="1.2.1-release" />
 
         <!-- sasi deps -->
         <dependency groupId="de.jflex" artifactId="jflex" />
@@ -1346,7 +1346,7 @@
         <jvmarg value="-Djava.io.tmpdir=${tmp.dir}"/>
         <jvmarg value="-Dcassandra.debugrefcount=true"/>
         <jvmarg value="-Xss512m"/>
-        <jvmarg value="-Dpmem_path=/mnt/pmem1/persistent_pool" />
+        <jvmarg value="-Dpmem_path=/mnt/mem/persistent_pool" />
         <jvmarg value="-Dpool_size=132385536" />
         <!-- When we do classloader manipulation SoftReferences can cause memory leaks
              that can OOM our test runs. The next two settings informs our GC
@@ -1399,7 +1399,7 @@
       <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/system_data"/>
       <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/saved_caches"/>
       <delete quiet="true" failonerror="false" dir="${build.test.dir}/cassandra/hints"/>
-      <delete quiet="true" failonerror="false" file="/mnt/pmem1/persistent_pool"/>
+      <delete quiet="true" failonerror="false" file="/mnt/mem/persistent_pool"/>
     </sequential>
   </macrodef>
 
@@ -1766,7 +1766,7 @@
     </sequential>
   </macrodef>
 
-  <target name="test" depends="build-test" description="Test Runner">
+  <target name="test" depends="eclipse-warnings,build-test" description="Test Runner">
     <path id="all-test-classes-path">
       <fileset dir="${test.unit.src}" includes="**/${test.name}.java" excludes="**/distributed/test/UpgradeTest*.java" />
     </path>
