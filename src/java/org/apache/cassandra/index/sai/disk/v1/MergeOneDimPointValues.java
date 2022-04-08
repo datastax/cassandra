@@ -55,6 +55,10 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
             {
                 queue.add(iterator);
             }
+            else
+            {
+                iterator.close();
+            }
         }
     }
 
@@ -68,6 +72,10 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
             if (iterator.hasNext())
             {
                 queue.add(iterator);
+            }
+            else
+            {
+                iterator.close();
             }
         }
     }
@@ -91,32 +99,43 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
     @SuppressWarnings("resource")
     public void intersect(IntersectVisitor visitor) throws IOException
     {
-        while (queue.size() != 0)
+        try
         {
-            final BKDReader.IteratorState reader = queue.top();
-            if (reader.hasNext())
+            while (queue.size() != 0)
             {
-                final long rowID = reader.next();
-
-                minRowID = Math.min(minRowID, rowID);
-                maxRowID = Math.max(maxRowID, rowID);
-                numRows++;
-
-                visitor.visit(rowID, reader.scratch);
-
+                final BKDReader.IteratorState reader = queue.top();
                 if (reader.hasNext())
                 {
-                    queue.updateTop();
+                    final long rowID = reader.next();
+
+                    minRowID = Math.min(minRowID, rowID);
+                    maxRowID = Math.max(maxRowID, rowID);
+                    numRows++;
+
+                    visitor.visit(rowID, reader.scratch);
+
+                    if (reader.hasNext())
+                    {
+                        queue.updateTop();
+                    }
+                    else
+                    {
+                        queue.pop();
+                    }
                 }
                 else
                 {
-                    queue.pop();
+                    // iterator is exhausted
+                    BKDReader.IteratorState iterator = queue.pop();
+                    iterator.close();
                 }
             }
-            else
+        }
+        finally
+        {
+            while (queue.size() != 0)
             {
-                // iterator is exhausted
-                queue.pop();
+                queue.pop().close();
             }
         }
     }
