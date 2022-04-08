@@ -113,6 +113,12 @@ public class Tracker
         return tryModify(singleton(sstable), operationType, LifecycleTransaction.newId());
     }
 
+    public LifecycleTransaction tryModify(Iterable<? extends SSTableReader> sstables,
+                                          OperationType operationType)
+    {
+        return tryModify(sstables, operationType, LifecycleTransaction.newId());
+    }
+
     /**
      * @return a Transaction over the provided sstables if we are able to mark the given @param sstables as compacted, before anyone else
      */
