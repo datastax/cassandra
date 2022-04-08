@@ -113,7 +113,12 @@ public class TestBaseImpl extends DistributedTestBase
 
     protected void bootstrapAndJoinNode(Cluster cluster)
     {
-        IInstanceConfig config = cluster.newInstanceConfig().with(Feature.NETWORK, Feature.GOSSIP);
+        cluster.stream().forEach(node -> {
+            assert node.config().has(Feature.NETWORK) : "Network feature must be enabled on the cluster";
+            assert node.config().has(Feature.GOSSIP) : "Gossip feature must be enabled on the cluster";
+        });
+
+        IInstanceConfig config = cluster.newInstanceConfig();
         config.set("auto_bootstrap", true);
         IInvokableInstance newInstance = cluster.bootstrap(config);
         withProperty(BOOTSTRAP_SCHEMA_DELAY_MS.getKey(), Integer.toString(90 * 1000),
@@ -128,7 +133,7 @@ public class TestBaseImpl extends DistributedTestBase
         await()
             .atMost(90, TimeUnit.SECONDS)
             .untilAsserted(() -> {
-                assert cluster.stream().allMatch(node -> !node.isShutdown() && node.callOnInstance(() -> {
+                assert cluster.stream().allMatch(node -> node.isShutdown() || node.callOnInstance(() -> {
                     EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(address);
                     return state != null && state.isNormalState();
                 })) : "New node should be seen in NORMAL state by the other nodes in the cluster";
