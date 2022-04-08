@@ -120,14 +120,13 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
                     }
                     else
                     {
-                        queue.pop();
+                        queue.pop().close();
                     }
                 }
                 else
                 {
                     // iterator is exhausted
-                    BKDReader.IteratorState iterator = queue.pop();
-                    iterator.close();
+                    queue.pop().close();
                 }
             }
         }
