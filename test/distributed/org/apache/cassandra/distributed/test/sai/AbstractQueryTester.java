@@ -66,7 +66,8 @@ public class AbstractQueryTester extends TestBaseImpl
     public static void setupCluster() throws Exception
     {
         cluster = Cluster.build(3)
-                         .withConfig(config -> config.set("hinted_handoff_enabled", false).with(GOSSIP, NETWORK))
+                         .withConfig(config -> config.with(NETWORK, GOSSIP)
+                                                     .set("hinted_handoff_enabled", false))
                          .withInstanceInitializer((cl, nodeNumber) -> {
                              Byteman.createFromText(INJECTION_SCRIPT).install(cl);
                          })
