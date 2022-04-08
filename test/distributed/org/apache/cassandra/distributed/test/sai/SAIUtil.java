@@ -45,6 +45,7 @@ public class SAIUtil
      */
     public static void waitForIndexQueryable(Cluster cluster, String keyspace)
     {
+        assertGossipEnabled(cluster);
         final List<String> indexes = getIndexes(cluster, keyspace);
         await().atMost(60, TimeUnit.SECONDS)
                .untilAsserted(() -> assertIndexesQueryable(cluster, keyspace, indexes));
@@ -55,8 +56,17 @@ public class SAIUtil
      */
     public static void waitForIndexQueryable(Cluster cluster, String keyspace, String index)
     {
+        assertGossipEnabled(cluster);
         await().atMost(60, TimeUnit.SECONDS)
                .untilAsserted(() -> assertIndexQueryable(cluster, keyspace, index));
+    }
+
+    private static void assertGossipEnabled(Cluster cluster)
+    {
+        cluster.stream().forEach(node -> {
+            assert node.config().has(Feature.NETWORK) : "Network not enabled on this cluster";
+            assert node.config().has(Feature.GOSSIP) : "Gossip not enabled on this cluster";
+        });
     }
 
     /**
@@ -75,9 +85,6 @@ public class SAIUtil
     private static void assertIndexesQueryable(Cluster cluster, String keyspace, final Iterable<String> indexes)
     {
         IInvokableInstance localNode = cluster.get(1);
-        assert localNode.config().has(Feature.NETWORK) : "Network not enabled on this cluster";
-        assert localNode.config().has(Feature.GOSSIP) : "Gossip not enabled on this cluster";
-
         final List<InetAddressAndPort> nodes =
             cluster.stream()
                    .map(node -> nodeAddress(node.broadcastAddress()))
