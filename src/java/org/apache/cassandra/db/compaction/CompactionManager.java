@@ -29,11 +29,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
@@ -252,6 +248,11 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         return backgroundCompactionRunner.getOngoingCompactionsCount();
     }
 
+    public CompletableFuture<?>[] startCompactionTasks(ColumnFamilyStore cfs, Collection<AbstractCompactionTask> tasks)
+    {
+        return backgroundCompactionRunner.startCompactionTasks(cfs, tasks);
+    }
+    
     public int getOngoingBackgroundUpgradesCount()
     {
         return backgroundCompactionRunner.getOngoingUpgradesCount();
