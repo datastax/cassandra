@@ -86,7 +86,8 @@ public class IndexConsistencyTest extends TestBaseImpl
     public static void setupCluster() throws Exception
     {
         cluster = Cluster.build(NUM_REPLICAS)
-                         .withConfig(config -> config.set("hinted_handoff_enabled", false).with(GOSSIP, NETWORK))
+                         .withConfig(config -> config.with(NETWORK, GOSSIP)
+                                                     .set("hinted_handoff_enabled", false))
                          .withInstanceInitializer((cl, nodeNumber) -> {
                              Byteman.createFromText(String.format(INJECTION_SCRIPT, nodeNumber, nodeNumber)).install(cl);
                          })

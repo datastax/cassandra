@@ -286,7 +286,7 @@ public class BootstrapTest extends TestBaseImpl
                                         .withInstanceInitializer(BootstrapTest.BB::install)
                                         .start())
         {
-            bootstrapAndJoinNode(cluster);
+            bootstrapAndJoinNodeNoWait(cluster);
 
             IInvokableInstance joiningInstance = cluster.get(3);
 
