@@ -1872,9 +1872,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             }
             
             Map<String, Index.Status> oldStatus = peerIndexStatus.put(endpoint, indexStatus);
-            Map<String, Index.Status> delta = indexStatusDelta(oldStatus, indexStatus);
-            if (!delta.isEmpty())
-                logger.debug("Received updated index status for peer {}: {}", endpoint, formatIndexStatus(delta));
+            Map<String, Index.Status> updated = updatedIndexStatuses(oldStatus, indexStatus);
+            Set<String> removed = removedIndexStatuses(oldStatus, indexStatus);
+            if (!updated.isEmpty() || !removed.isEmpty())
+                logger.debug("Received index status for peer {}:\n    Updated: {}\n    Removed: {}",
+                             endpoint, updated, removed);
         }
         catch (Throwable e)
         {
@@ -1883,10 +1885,24 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     }
 
     /**
+     * Returns the names of indexes that are present in oldStatus but absent in newStatus.
+     */
+    private static @Nonnull Set<String> removedIndexStatuses(
+            @Nullable Map<String, Index.Status> oldStatus,
+            @Nonnull Map<String, Index.Status> newStatus)
+    {
+        if (oldStatus == null)
+            return Collections.emptySet();
+        Set<String> result = new HashSet<>(oldStatus.keySet());
+        result.removeAll(newStatus.keySet());
+        return result;
+    }
+
+    /**
      * Returns a new map containing only the entries from newStatus that differ from corresponding entries in oldStatus.
      */
-    private static @Nonnull  Map<String, Index.Status> indexStatusDelta(
-            @Nullable  Map<String, Index.Status> oldStatus,
+    private static @Nonnull Map<String, Index.Status> updatedIndexStatuses(
+            @Nullable Map<String, Index.Status> oldStatus,
             @Nonnull Map<String, Index.Status> newStatus)
     {
         Map<String, Index.Status> delta = new HashMap<>();
@@ -1896,19 +1912,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 delta.put(e.getKey(), e.getValue());
         }
         return delta;
-    }
-
-    private static String formatIndexStatus(Map<String, Index.Status> indexStatus)
-    {
-        StringBuilder statusStr = new StringBuilder();
-        for (Map.Entry<String, Index.Status> e : indexStatus.entrySet())
-        {
-            statusStr.append("\n    ");
-            statusStr.append(e.getKey());
-            statusStr.append(": ");
-            statusStr.append(e.getValue());
-        }
-        return statusStr.toString();
     }
 
     @VisibleForTesting

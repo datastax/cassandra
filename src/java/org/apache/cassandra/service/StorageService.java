@@ -2387,16 +2387,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         else
         {
+            if (state == ApplicationState.INDEX_STATUS)
+            {
+                updateIndexStatus(endpoint, value);
+                return;
+            }
+
             EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
             if (epState == null || Gossiper.instance.isDeadState(epState))
             {
                 logger.debug("Ignoring state change for dead or unknown endpoint: {}", endpoint);
-                return;
-            }
-
-            if (state == ApplicationState.INDEX_STATUS)
-            {
-                updateIndexStatus(endpoint, value);
                 return;
             }
 
