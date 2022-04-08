@@ -21,6 +21,7 @@ package org.apache.cassandra.distributed.test;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Date;
@@ -29,6 +30,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableSet;
 
@@ -38,14 +40,19 @@ import org.junit.BeforeClass;
 import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.distributed.Cluster;
+import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.shared.DistributedTestBase;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.locator.InetAddressAndPort;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.BOOTSTRAP_SCHEMA_DELAY_MS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.JOIN_RING;
 import static org.apache.cassandra.distributed.action.GossipHelper.withProperty;
+import static org.awaitility.Awaitility.await;
 
 public class TestBaseImpl extends DistributedTestBase
 {
@@ -119,12 +126,42 @@ public class TestBaseImpl extends DistributedTestBase
 
     protected void bootstrapAndJoinNode(Cluster cluster)
     {
+        IInvokableInstance newInstance = bootstrapAndJoinNodeNoWait(cluster);
+
+        // Wait until all the other live nodes on the cluster see this node as NORMAL.
+        // The old nodes will update their tokens only after the new node announces its NORMAL state through gossip.
+        // This is to avoid disagreements about ring ownership between nodes and sudden ownership changes
+        // while running the tests.
+        InetAddressAndPort address = nodeAddress(newInstance.broadcastAddress());
+        await()
+            .atMost(90, TimeUnit.SECONDS)
+            .untilAsserted(() -> {
+                assert cluster.stream().allMatch(node -> node.isShutdown() || node.callOnInstance(() -> {
+                    EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(address);
+                    return state != null && state.isNormalState();
+                })) : "New node should be seen in NORMAL state by the other nodes in the cluster";
+        });
+    }
+
+    protected IInvokableInstance bootstrapAndJoinNodeNoWait(Cluster cluster)
+    {
+        cluster.stream().forEach(node -> {
+            assert node.config().has(Feature.NETWORK) : "Network feature must be enabled on the cluster";
+            assert node.config().has(Feature.GOSSIP) : "Gossip feature must be enabled on the cluster";
+        });
+
         IInstanceConfig config = cluster.newInstanceConfig();
         config.set("auto_bootstrap", true);
         IInvokableInstance newInstance = cluster.bootstrap(config);
         withProperty(BOOTSTRAP_SCHEMA_DELAY_MS, Integer.toString(90 * 1000),
                      () -> withProperty(JOIN_RING, false, () -> newInstance.startup(cluster)));
         newInstance.nodetoolResult("join").asserts().success();
+        return newInstance;
+    }
+
+    private static InetAddressAndPort nodeAddress(InetSocketAddress address)
+    {
+        return InetAddressAndPort.getByAddressOverrideDefaults(address.getAddress(), address.getPort());
     }
 
     @SuppressWarnings("unchecked")
