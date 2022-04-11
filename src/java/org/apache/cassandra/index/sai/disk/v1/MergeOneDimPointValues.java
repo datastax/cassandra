@@ -45,12 +45,12 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
     public long maxRowID = Long.MIN_VALUE;
     public long numRows = 0;
 
-    public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, AbstractType termComparator) throws IOException
+    public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, AbstractType termComparator)
     {
         this(iterators, TypeUtil.fixedSizeOf(termComparator));
     }
 
-    public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, int bytesPerDim) throws IOException
+    public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, int bytesPerDim)
     {
         queue = new MergeQueue(iterators.size());
         this.scratch = new byte[bytesPerDim];
