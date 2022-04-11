@@ -17,10 +17,12 @@
  */
 package org.apache.cassandra.index.sai.disk.v1;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import org.junit.After;
 import org.junit.Before;
@@ -40,7 +42,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableUniqueIdentifier;
 import org.apache.cassandra.io.util.File;
@@ -82,7 +83,7 @@ public class KDTreeSegmentMergerTest extends SAITester
     @Test
     public void compactionMergerTest() throws Throwable
     {
-        performMerger(getRandom().nextIntBetween(1000, 15000), getRandom().nextIntBetween(2, 10), true);
+        performMerger(() -> getRandom().nextIntBetween(1000, 15000), getRandom().nextIntBetween(2, 10), true);
 
         expected.keySet().forEach(term -> assertThat(expected.get(term), is(actual.get(term))));
     }
@@ -90,7 +91,7 @@ public class KDTreeSegmentMergerTest extends SAITester
     @Test
     public void postBuildMergerTest() throws Throwable
     {
-        performMerger(getRandom().nextIntBetween(1000, 15000), getRandom().nextIntBetween(2, 10), false);
+        performMerger(() -> getRandom().nextIntBetween(1000, 15000), getRandom().nextIntBetween(2, 10), false);
 
         expected.keySet().forEach(term -> assertThat(expected.get(term), is(actual.get(term))));
     }
@@ -98,7 +99,7 @@ public class KDTreeSegmentMergerTest extends SAITester
     @Test
     public void compactionQueryTest() throws Throwable
     {
-        performCompaction(getRandom().nextIntBetween(1000, 15000), getRandom().nextIntBetween(2, 10), true);
+        performCompaction(() -> getRandom().nextIntBetween(1000, 15000), getRandom().nextIntBetween(2, 10), true);
 
         expected.keySet().forEach(term -> assertThat(expected.get(term), is(actual.get(term))));
     }
@@ -106,25 +107,28 @@ public class KDTreeSegmentMergerTest extends SAITester
     @Test
     public void postBuildQueryTest() throws Throwable
     {
-        performCompaction(getRandom().nextIntBetween(1000, 15000), getRandom().nextIntBetween(2, 10), false);
+        performCompaction(() -> getRandom().nextIntBetween(1000, 15000), getRandom().nextIntBetween(2, 10), false);
 
         expected.keySet().forEach(term -> assertThat(expected.get(term), is(actual.get(term))));
     }
 
-    private void performMerger(int segmentSize, int segments, boolean compaction) throws Throwable
+    private void performMerger(Supplier<Integer> segmentSizeSupplier, int segmentCount, boolean compaction) throws Throwable
     {
+        final List<BKDReader> segmentReaders = new ArrayList<>();
         final List<BKDReader.IteratorState> segmentIterators = new ArrayList<>();
 
         byte[] scratch = new byte[Integer.BYTES];
 
         int maxSegmentRowId = 0;
         int generation = 1;
+        int docID = 0;
 
-        for (int segment = 0; segment < segments; segment++)
+        for (int segment = 0; segment < segmentCount; segment++)
         {
             BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
+            int segmentSize = segmentSizeSupplier.get();
 
-            for (int docID = segmentSize * segment; docID < (segmentSize * segment) + segmentSize; docID++)
+            for (int docInSegment = 0; docInSegment < segmentSize; docInSegment++)
             {
                 int value = getRandom().nextIntBetween(0, 100);
                 NumericUtils.intToSortableBytes(value, scratch, 0);
@@ -138,9 +142,12 @@ public class KDTreeSegmentMergerTest extends SAITester
                     postings = new ArrayList<>();
                     expected.put(value, postings);
                 }
-                postings.add(new Long(docID));
+                postings.add((long) docID);
+                docID++;
             }
-            segmentIterators.add(createReader(buffer, maxSegmentRowId, generation).iteratorState());
+            BKDReader segmentReader = createReader(buffer, maxSegmentRowId, generation);
+            segmentReaders.add(segmentReader);
+            segmentIterators.add(segmentReader.iteratorState());
             if (compaction)
                 generation++;
         }
@@ -159,10 +166,13 @@ public class KDTreeSegmentMergerTest extends SAITester
             }
             postings.add(rowId);
         });
+        segmentReaders.forEach(BKDReader::close);
     }
 
-    private void performCompaction(int segmentSize, int segments, boolean compaction) throws Throwable
+    private void performCompaction(Supplier<Integer> segmentSizeSupplier, int segmentCount, boolean compaction) throws Throwable
     {
+
+        final List<BKDReader> segmentReaders = new ArrayList<>();
         final List<BKDReader.IteratorState> segmentIterators = new ArrayList<>();
 
         byte[] scratch = new byte[Integer.BYTES];
@@ -170,12 +180,14 @@ public class KDTreeSegmentMergerTest extends SAITester
         int maxSegmentRowId = 0;
         int generation = 1;
         int totalRows = 0;
+        int docID = 0;
 
-        for (int segment = 0; segment < segments; segment++)
+        for (int segment = 0; segment < segmentCount; segment++)
         {
             BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
+            int segmentSize = segmentSizeSupplier.get();
 
-            for (int docID = segmentSize * segment; docID < (segmentSize * segment) + segmentSize; docID++)
+            for (int docInSegment = 0; docInSegment < segmentSize; docInSegment++)
             {
                 int value = getRandom().nextIntBetween(0, 100);
                 NumericUtils.intToSortableBytes(value, scratch, 0);
@@ -189,13 +201,17 @@ public class KDTreeSegmentMergerTest extends SAITester
                     postings = new ArrayList<>();
                     expected.put(value, postings);
                 }
-                postings.add(new Long(docID));
+                postings.add((long) docID);
                 totalRows++;
+                docID++;
             }
-            segmentIterators.add(createReader(buffer, maxSegmentRowId, generation).iteratorState());
+            BKDReader segmentReader = createReader(buffer, maxSegmentRowId, generation);
+            segmentReaders.add(segmentReader);
+            segmentIterators.add(segmentReader.iteratorState());
             if (compaction)
                 generation++;
         }
+
 
         MergeOneDimPointValues merger = new MergeOneDimPointValues(segmentIterators, Integer.BYTES);
 
@@ -243,7 +259,9 @@ public class KDTreeSegmentMergerTest extends SAITester
                     postings.add(rowId);
                 }
             }
+            reader.close();
         }
+        segmentReaders.forEach(BKDReader::close);
     }
 
     private BKDReader createReader(BKDTreeRamBuffer buffer, int maxSegmentRowId, int generation) throws Throwable

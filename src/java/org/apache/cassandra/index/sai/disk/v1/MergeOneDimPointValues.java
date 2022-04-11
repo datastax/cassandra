@@ -47,22 +47,9 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
 
     public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, AbstractType termComparator) throws IOException
     {
-        queue = new MergeQueue(iterators.size());
-        this.scratch = new byte[TypeUtil.fixedSizeOf(termComparator)];
-        for (BKDReader.IteratorState iterator : iterators)
-        {
-            if (iterator.hasNext())
-            {
-                queue.add(iterator);
-            }
-            else
-            {
-                iterator.close();
-            }
-        }
+        this(iterators, TypeUtil.fixedSizeOf(termComparator));
     }
 
-    @VisibleForTesting
     public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, int bytesPerDim) throws IOException
     {
         queue = new MergeQueue(iterators.size());
@@ -104,28 +91,20 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
             while (queue.size() != 0)
             {
                 final BKDReader.IteratorState reader = queue.top();
+                final long rowID = reader.next();
+
+                minRowID = Math.min(minRowID, rowID);
+                maxRowID = Math.max(maxRowID, rowID);
+                numRows++;
+
+                visitor.visit(rowID, reader.scratch);
+
                 if (reader.hasNext())
                 {
-                    final long rowID = reader.next();
-
-                    minRowID = Math.min(minRowID, rowID);
-                    maxRowID = Math.max(maxRowID, rowID);
-                    numRows++;
-
-                    visitor.visit(rowID, reader.scratch);
-
-                    if (reader.hasNext())
-                    {
-                        queue.updateTop();
-                    }
-                    else
-                    {
-                        queue.pop().close();
-                    }
+                    queue.updateTop();
                 }
                 else
                 {
-                    // iterator is exhausted
                     queue.pop().close();
                 }
             }
