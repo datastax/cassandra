@@ -291,7 +291,7 @@ public abstract class Message
                 throw new IllegalArgumentException();
         }
 
-        Message setTracingId(TimeUUID tracingId)
+        public Message setTracingId(TimeUUID tracingId)
         {
             this.tracingId = tracingId;
             return this;
