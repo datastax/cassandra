@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import com.google.common.base.Preconditions;
 
+import net.openhft.chronicle.core.util.ThrowingConsumer;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.IPartitioner;
@@ -54,6 +55,9 @@ import org.apache.cassandra.utils.NullableSerializer;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
+
+import static org.apache.cassandra.gms.ApplicationState.SCHEMA;
+import static org.apache.cassandra.gms.ApplicationState.TOKENS;
 
 /**
  * This abstraction represents both the HeartBeatState and the ApplicationState in an EndpointState
@@ -124,10 +128,27 @@ public class EndpointState
         if (updater == null)
             return;
 
-        updater.accept(info -> {
-            entries.forEach(e -> updateNodeInfo(info, e.getKey(), e.getValue()));
-            return info;
-        });
+        List<ThrowingConsumer<NodeInfo<?>, UnknownHostException>> allUpdates = entries.stream()
+                                                                                      .map(e -> updateNodeInfo(e.getKey(), e.getValue()))
+                                                                                      .filter(Objects::nonNull)
+                                                                                      .collect(Collectors.toList());
+
+        if (!allUpdates.isEmpty())
+        {
+            updater.accept(info -> {
+                allUpdates.forEach(update -> {
+                    try
+                    {
+                        update.accept(info);
+                    }
+                    catch (UnknownHostException e)
+                    {
+                        throw Throwables.cleaned(e);
+                    }
+                });
+                return info;
+            });
+        }
     }
 
     void setHeartBeatState(HeartBeatState newHbState)
@@ -173,7 +194,13 @@ public class EndpointState
 
             if (applicationState.compareAndSet(orig, copy))
             {
-                update(copy.entrySet());
+                EnumMap<ApplicationState, VersionedValue> diff = new EnumMap<>(copy);
+                for (Map.Entry<ApplicationState, VersionedValue> entry : copy.entrySet())
+                {
+                    if (Objects.equals(entry.getValue(), orig.get(entry.getKey())))
+                        diff.remove(entry.getKey());
+                }
+                update(diff.entrySet());
                 return;
             }
         }
@@ -308,7 +335,7 @@ public class EndpointState
     @Nullable
     public UUID getSchemaVersion()
     {
-        VersionedValue applicationState = getApplicationState(ApplicationState.SCHEMA);
+        VersionedValue applicationState = getApplicationState(SCHEMA);
         return applicationState != null
                ? UUID.fromString(applicationState.value)
                : null;
@@ -317,7 +344,7 @@ public class EndpointState
     @Nullable
     public Collection<Token> getTokens(IPartitioner partitioner)
     {
-        VersionedValue value = getApplicationState(ApplicationState.TOKENS);
+        VersionedValue value = getApplicationState(TOKENS);
         return value != null ? getTokens(partitioner, value) : null;
     }
 
@@ -334,54 +361,39 @@ public class EndpointState
         }
     }
 
-    public static NodeInfo<?> updateNodeInfo(NodeInfo<?> info, ApplicationState state, VersionedValue value)
+    private static ThrowingConsumer<NodeInfo<?>, UnknownHostException> updateNodeInfo(ApplicationState state, VersionedValue value)
     {
-        try
+        switch (state)
         {
-            switch (state)
-            {
-                case TOKENS:
-                    info.setTokens(getTokens(DatabaseDescriptor.getPartitioner(), value));
-                    break;
-                case HOST_ID:
-                    info.setHostId(UUID.fromString(value.value));
-                    break;
-                case RELEASE_VERSION:
-                    info.setReleaseVersion(new CassandraVersion(value.value));
-                    break;
-                case DC:
-                    info.setDataCenter(value.value);
-                    break;
-                case RACK:
-                    info.setRack(value.value);
-                    break;
-                case SCHEMA:
-                    info.setSchemaVersion(UUID.fromString(value.value));
-                    break;
-                case INTERNAL_IP:
+            case TOKENS:
+                return info -> info.setTokens(getTokens(DatabaseDescriptor.getPartitioner(), value));
+            case HOST_ID:
+                return info -> info.setHostId(UUID.fromString(value.value));
+            case RELEASE_VERSION:
+                return info -> info.setReleaseVersion(new CassandraVersion(value.value));
+            case DC:
+                return info -> info.setDataCenter(value.value);
+            case RACK:
+                return info -> info.setRack(value.value);
+            case SCHEMA:
+                return info -> info.setSchemaVersion(UUID.fromString(value.value));
+            case INTERNAL_IP:
+                return info -> {
                     if (info instanceof LocalInfo)
                         ((LocalInfo) info).setListenAddressOnly(InetAddress.getByName(value.value), FBUtilities.getLocalAddressAndPort().getPort());
-                    break;
-                case INTERNAL_ADDRESS_AND_PORT:
+                };
+            case INTERNAL_ADDRESS_AND_PORT:
+                return info -> {
                     if (info instanceof LocalInfo)
                         ((LocalInfo) info).setListenAddressAndPort(InetAddressAndPort.getByName(value.value));
-                    break;
-                case RPC_ADDRESS:
-                    info.setNativeTransportAddressOnly(InetAddress.getByName(value.value), DatabaseDescriptor.getNativeTransportPort());
-                    break;
-                case NATIVE_ADDRESS_AND_PORT:
-                    info.setNativeTransportAddressAndPort(InetAddressAndPort.getByName(value.value));
-                    break;
-                default:
-                    // no-op
-            }
+                };
+            case RPC_ADDRESS:
+                return info -> info.setNativeTransportAddressOnly(InetAddress.getByName(value.value), DatabaseDescriptor.getNativeTransportPort());
+            case NATIVE_ADDRESS_AND_PORT:
+                return info -> info.setNativeTransportAddressAndPort(InetAddressAndPort.getByName(value.value));
+            default:
+                return null;
         }
-        catch (UnknownHostException ex)
-        {
-            throw Throwables.unchecked(ex);
-        }
-
-        return info;
     }
 
     public String toString()
