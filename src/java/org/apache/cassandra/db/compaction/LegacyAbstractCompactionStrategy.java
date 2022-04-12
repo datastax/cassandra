@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -84,7 +85,12 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
                     return ImmutableList.of();
                 }
 
-                LifecycleTransaction transaction = realm.tryModify(compaction.getSelected().ssstables(), OperationType.COMPACTION);
+                CompactionPick selected = compaction.getSelected();
+                Preconditions.checkNotNull(selected);
+
+                LifecycleTransaction transaction = realm.tryModify(selected.sstables(),
+                                                                   OperationType.COMPACTION,
+                                                                   selected.id());
                 if (transaction != null)
                 {
                     backgroundCompactions.setSubmitted(this, transaction.opId(), compaction);
@@ -96,7 +102,7 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
                 // received any replace notifications. Remove any non-live sstables we track and try again.
                 removeDeadSSTables();
 
-                previous = compaction.getSelected();
+                previous = selected;
             }
         }
 
