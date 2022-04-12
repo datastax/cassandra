@@ -20,8 +20,6 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.IOException;
 import java.util.List;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.MutableOneDimPointValues;
@@ -38,36 +36,33 @@ import org.apache.lucene.util.bkd.BKDWriter;
  */
 public class MergeOneDimPointValues extends MutableOneDimPointValues
 {
-    private final byte[] scratch;
     private final MergeQueue queue;
+
+    public final int bytesPerDim;
 
     public long minRowID = Long.MAX_VALUE;
     public long maxRowID = Long.MIN_VALUE;
     public long numRows = 0;
 
-    public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, AbstractType termComparator) throws IOException
+
+    public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, AbstractType termComparator)
+    {
+        this(iterators, TypeUtil.fixedSizeOf(termComparator));
+    }
+
+    public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, int bytesPerDim)
     {
         queue = new MergeQueue(iterators.size());
-        this.scratch = new byte[TypeUtil.fixedSizeOf(termComparator)];
+        this.bytesPerDim = bytesPerDim;
         for (BKDReader.IteratorState iterator : iterators)
         {
             if (iterator.hasNext())
             {
                 queue.add(iterator);
             }
-        }
-    }
-
-    @VisibleForTesting
-    public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, int bytesPerDim) throws IOException
-    {
-        queue = new MergeQueue(iterators.size());
-        this.scratch = new byte[bytesPerDim];
-        for (BKDReader.IteratorState iterator : iterators)
-        {
-            if (iterator.hasNext())
+            else
             {
-                queue.add(iterator);
+                iterator.close();
             }
         }
     }
@@ -91,11 +86,11 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
     @SuppressWarnings("resource")
     public void intersect(IntersectVisitor visitor) throws IOException
     {
-        while (queue.size() != 0)
+        try
         {
-            final BKDReader.IteratorState reader = queue.top();
-            if (reader.hasNext())
+            while (queue.size() != 0)
             {
+                final BKDReader.IteratorState reader = queue.top();
                 final long rowID = reader.next();
 
                 minRowID = Math.min(minRowID, rowID);
@@ -110,13 +105,15 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
                 }
                 else
                 {
-                    queue.pop();
+                    queue.pop().close();
                 }
             }
-            else
+        }
+        finally
+        {
+            while (queue.size() != 0)
             {
-                // iterator is exhausted
-                queue.pop();
+                queue.pop().close();
             }
         }
     }
@@ -124,7 +121,7 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
     @Override
     public int getBytesPerDimension()
     {
-        return scratch.length;
+        return bytesPerDim;
     }
 
     private static class MergeQueue extends PriorityQueue<BKDReader.IteratorState>
