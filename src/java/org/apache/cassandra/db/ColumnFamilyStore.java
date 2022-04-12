@@ -3933,9 +3933,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     }
 
     @Override
-    public LifecycleTransaction tryModify(Iterable<? extends CompactionSSTable> ssTableReaders, OperationType operationType)
+    public LifecycleTransaction tryModify(Iterable<? extends CompactionSSTable> ssTableReaders,
+                                          OperationType operationType,
+                                          TimeUUID id)
     {
-        return data.tryModify(Iterables.transform(ssTableReaders, SSTableReader.class::cast), operationType);
+        return data.tryModify(Iterables.transform(ssTableReaders, SSTableReader.class::cast), operationType, id);
     }
 
     @Override
