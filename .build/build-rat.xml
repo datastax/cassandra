@@ -55,6 +55,7 @@
                  <exclude name="test/conf/sstableloader_with_encryption.yaml"/>
                  <exclude name="test/conf/unit-test-conf/test-native-port.yaml"/>
                  <exclude name="test/resources/data/config/YamlConfigurationLoaderTest/*.yaml"/>
+                 <exclude name="test/resources/mockito-extensions/org.mockito.plugins.MockMaker"/>
                  <exclude name="tools/cqlstress-*.yaml"/>
                  <!-- test data -->
                  <exclude name="pylib/cqlshlib/test/test_authproviderhandling_config/*"/>
