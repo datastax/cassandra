@@ -34,11 +34,10 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Runnables;
-
-import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -157,6 +156,14 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     private List<Runnable> abortHooks = new ArrayList<>();
 
     /**
+     * Creates a new unique id that is suitable for a transaction.
+     */
+    public static TimeUUID newId()
+    {
+        return TimeUUID.Generator.nextTimeUUID();
+    }
+
+    /**
      * construct a Transaction for use in an offline operation
      */
     public static LifecycleTransaction offline(OperationType operationType, SSTableReader reader)
@@ -173,7 +180,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         Tracker dummy = Tracker.newDummyTracker(metadata);
         dummy.addInitialSSTables(readers);
         dummy.apply(updateCompacting(emptySet(), readers));
-        return new LifecycleTransaction(dummy, operationType, readers);
+        return new LifecycleTransaction(dummy, operationType, readers, newId());
     }
 
     /**
@@ -182,14 +189,17 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     public static LifecycleTransaction offline(OperationType operationType, TableMetadataRef metadata)
     {
         Tracker dummy = Tracker.newDummyTracker(metadata);
-        return new LifecycleTransaction(dummy, operationType, Collections.emptyList());
+        return new LifecycleTransaction(dummy, operationType, Collections.emptyList(), newId());
     }
 
     @VisibleForTesting
-    public LifecycleTransaction(Tracker tracker, OperationType operationType, Iterable<? extends SSTableReader> readers)
+    public LifecycleTransaction(Tracker tracker,
+                                OperationType operationType,
+                                Iterable<? extends SSTableReader> readers,
+                                TimeUUID uuid)
     {
         this.tracker = tracker;
-        this.log = ILogTransactionsFactory.instance.createLogTransaction(operationType, tracker.metadata);
+        this.log = ILogTransactionsFactory.instance.createLogTransaction(operationType, uuid, tracker.metadata);
         for (SSTableReader reader : readers)
         {
             originals.add(reader);
@@ -565,7 +575,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
             originals.remove(reader);
             marked.remove(reader);
         }
-        return new LifecycleTransaction(tracker, log.opType(), readers);
+        return new LifecycleTransaction(tracker, log.opType(), readers, newId());
     }
 
     /**

@@ -26,14 +26,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import com.codahale.metrics.Counter;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-
+import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.codahale.metrics.Counter;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
@@ -51,8 +51,6 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
-
-import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
 /**
  * IMPORTANT: When this object is involved in a transactional graph, and is not encapsulated in a LifecycleTransaction,
@@ -117,9 +115,12 @@ final class LogTransaction extends AbstractLogTransaction
     // will be recognized as GCable.
     protected static final Queue<Runnable> failedDeletions = new ConcurrentLinkedQueue<>();
 
-    LogTransaction(OperationType opType)
+    LogTransaction(OperationType opType, TimeUUID uuid)
     {
-        this.txnFile = new LogFile(opType, nextTimeUUID());
+        Preconditions.checkNotNull(opType);
+        Preconditions.checkNotNull(uuid);
+
+        this.txnFile = new LogFile(opType, uuid);
         this.lock = new Object();
         this.selfRef = new Ref<>(this, new TransactionTidier(txnFile, lock));
 
