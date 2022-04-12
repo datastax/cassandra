@@ -26,11 +26,10 @@ import java.util.Set;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
-
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.junit.Assert;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -164,7 +163,9 @@ public class HelpersTest
     public void testMarkObsolete()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        AbstractLogTransaction txnLogs = ILogTransactionsFactory.instance.createLogTransaction(OperationType.UNKNOWN, cfs.metadata);
+        AbstractLogTransaction txnLogs = ILogTransactionsFactory.instance.createLogTransaction(OperationType.UNKNOWN,
+                                                                                               LifecycleTransaction.newId(),
+                                                                                               cfs.metadata);
         Iterable<SSTableReader> readers = Lists.newArrayList(MockSchema.sstable(1, cfs), MockSchema.sstable(2, cfs));
         Iterable<SSTableReader> readersToKeep = Lists.newArrayList(MockSchema.sstable(3, cfs), MockSchema.sstable(4, cfs));
 
@@ -191,7 +192,9 @@ public class HelpersTest
     public void testObsoletionPerformance()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        AbstractLogTransaction txnLogs = ILogTransactionsFactory.instance.createLogTransaction(OperationType.UNKNOWN, cfs.metadata);
+        AbstractLogTransaction txnLogs = ILogTransactionsFactory.instance.createLogTransaction(OperationType.UNKNOWN,
+                                                                                               LifecycleTransaction.newId(),
+                                                                                               cfs.metadata);
         List<SSTableReader> readers = new ArrayList<>();
 
         for (int i = 0; i < 10000; i++)
