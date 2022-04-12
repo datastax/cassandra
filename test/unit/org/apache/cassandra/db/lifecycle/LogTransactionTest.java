@@ -19,9 +19,9 @@ package org.apache.cassandra.db.lifecycle;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
-import java.nio.file.FileSystem;
 import java.nio.file.Path;
 import java.nio.file.spi.FileSystemProvider;
 import java.util.Arrays;
@@ -48,8 +48,8 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
@@ -78,16 +78,17 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.MockSchema;
-import org.apache.cassandra.utils.FilterFactory;
-import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FilterFactory;
+import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.AbstractTransactionalTest;
 import org.apache.cassandra.utils.concurrent.Transactional;
 import org.mockito.Mockito;
 
-import static org.junit.Assert.assertArrayEquals;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -273,7 +274,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
                                                                                   (log) -> log.obsoleted(sstable2),
                                                                                   (log) -> log.txnFile().addAll(LogRecord.Type.ADD, Collections.singleton(sstable2))))
         {
-            try (LogTransaction log = new LogTransaction(OperationType.COMPACTION))
+            try (LogTransaction log = new LogTransaction(OperationType.COMPACTION, LifecycleTransaction.newId()))
             {
                 log.trackNew(sstable1); // creates a log file in datadir1
                 log.untrackNew(sstable1); // removes sstable1 from `records`, but still on disk & in `onDiskRecords`
@@ -648,7 +649,9 @@ public class LogTransactionTest extends AbstractTransactionalTest
 
     private static LogTransaction createLogTransaction(OperationType type, TableMetadataRef metadata)
     {
-        LogTransaction txn = (LogTransaction) ILogTransactionsFactory.instance.createLogTransaction(type, metadata);
+        LogTransaction txn = (LogTransaction) ILogTransactionsFactory.instance.createLogTransaction(type,
+                                                                                                    LifecycleTransaction.newId(),
+                                                                                                    metadata);
         assertEquals(type, txn.opType());
         return txn;
     }
@@ -1329,7 +1332,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
         SSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
 
-        try(LogTransaction log = new LogTransaction(OperationType.COMPACTION))
+        try(LogTransaction log = new LogTransaction(OperationType.COMPACTION, TimeUUID.Generator.nextTimeUUID()))
         {
             assertNotNull(log);
             log.trackNew(sstable);
@@ -1350,7 +1353,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
         File dataFolder = new Directories(cfs.metadata()).getDirectoryForNewSSTables();
         SSTableReader sstable = sstable(dataFolder, cfs, 0, 128);
 
-        try(LogTransaction log = new LogTransaction(OperationType.COMPACTION))
+        try(LogTransaction log = new LogTransaction(OperationType.COMPACTION, TimeUUID.Generator.nextTimeUUID()))
         {
             assertNotNull(log);
             log.trackNew(sstable);
@@ -1372,7 +1375,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
         assertTrue("STATS file not created successfully in test setup", Files.exists(sFile.toPath()));
 
         // Confirm we can remove leftovers even if the STATS file doesn't match
-        try(LogTransaction log = new LogTransaction(OperationType.COMPACTION))
+        try(LogTransaction log = new LogTransaction(OperationType.COMPACTION, TimeUUID.Generator.nextTimeUUID()))
         {
             assertNotNull(log);
 
@@ -1417,7 +1420,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
         assertTrue("Failed to set mtime for STATS file to currentTimeMillis()", sFile.trySetLastModified(System.currentTimeMillis()));
 
         // Confirm we can remove leftovers even if the STATS file doesn't match
-        try(LogTransaction log = new LogTransaction(OperationType.COMPACTION))
+        try(LogTransaction log = new LogTransaction(OperationType.COMPACTION, TimeUUID.Generator.nextTimeUUID()))
         {
             assertNotNull(log);
             // Need to flag the transaction as having a REMOVE entry so it'll trigger the path to calculate stats on list
@@ -1454,7 +1457,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
             File sFile = sstable.descriptor.fileFor(SSTableFormat.Components.STATS);
             assertTrue("STATS file not created successfully in test setup", Files.exists(sFile.toPath()));
 
-            try(LogTransaction log = new LogTransaction(OperationType.COMPACTION))
+            try(LogTransaction log = new LogTransaction(OperationType.COMPACTION, TimeUUID.Generator.nextTimeUUID()))
             {
                 assertNotNull(log);
 
@@ -1718,7 +1721,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
     @Test(expected = TransactionAlreadyCompletedException.class)
     public void useAfterCompletedTest()
     {
-        try (LogTransaction txnFile = new LogTransaction(OperationType.STREAM))
+        try (LogTransaction txnFile = new LogTransaction(OperationType.STREAM, TimeUUID.Generator.nextTimeUUID()))
         {
             txnFile.abort(); // this should complete the txn
             txnFile.trackNew(dummySSTable()); // expect an IllegalStateException here
