@@ -19,14 +19,15 @@ package org.apache.cassandra.db.lifecycle;
 
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.TimeUUID;
 
 final class LogTransactionsFactory implements ILogTransactionsFactory
 {
     @Override
-    public AbstractLogTransaction createLogTransaction(OperationType operationType, TableMetadataRef metadata)
+    public AbstractLogTransaction createLogTransaction(OperationType operationType, TimeUUID uuid, TableMetadataRef metadata)
     {
         logger.debug("Creating a transaction for {} on {}", operationType, metadata);
-        return new LogTransaction(operationType);
+        return new LogTransaction(operationType, uuid);
     }
 
     @Override
