@@ -23,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.LOG_TRANSACTIONS_FACTORY;
 
@@ -44,7 +45,9 @@ public interface ILogTransactionsFactory
     /**
      * Create {@link AbstractLogTransaction} that tracks sstable files involved in a transaction across sstables:
      */
-    AbstractLogTransaction createLogTransaction(OperationType operationType, TableMetadataRef metadata);
+    AbstractLogTransaction createLogTransaction(OperationType operationType,
+                                                TimeUUID uuid,
+                                                TableMetadataRef metadata);
 
     /**
      * Create {@link ILogAwareFileLister} that lists files which are not removed by log transactions in a folder.
