@@ -553,15 +553,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
      * that the compaction statistics will be accurate.
      * <p/>
      * This is called by {@link UnifiedCompactionStrategy#getNextCompactionAggregates(int)}
-     * and by CNDB, after calling {@link UnifiedCompactionStrategy#getPendingCompactionAggregates(int)} in the leader,
-     * or before submitting tasks in the follower.
-     * <p/>
-     * The reason is twofold:
-     * <ul>
-     *     <li>the follower never calls {@link UnifiedCompactionStrategy#getPendingCompactionAggregates(int)} and,</li>
-     *     <li>there are aggregates published to etcd or being compacted by other processes, and these must be added to
-     *      the pending tasks else they get wiped in the background compactions and the statistics are not accurate.</li>
-     * </ul>
+     * and externally after calling {@link UnifiedCompactionStrategy#getPendingCompactionAggregates(int)} 
+     * or before submitting tasks.
      *
      * Also, note that skipping the call to {@link BackgroundCompactions#setPending(CompactionStrategy, Collection)}
      * would result in memory leaks: the aggregates added in {@link BackgroundCompactions#setSubmitted(CompactionStrategy, UUID, CompactionAggregate)}
