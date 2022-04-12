@@ -17,8 +17,8 @@
  */
 package org.apache.cassandra.index.sai.disk.v1;
 
-import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,7 +41,9 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
+import org.apache.cassandra.index.sai.disk.v1.kdtree.MutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
+
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableUniqueIdentifier;
 import org.apache.cassandra.io.util.File;
@@ -49,10 +51,12 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.lucene.index.PointValues;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
+import org.mockito.Mockito;
 
 import static org.apache.cassandra.index.sai.disk.QueryEventListeners.NO_OP_BKD_LISTENER;
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertThrows;
 
 public class KDTreeSegmentMergerTest extends SAITester
 {
@@ -110,6 +114,30 @@ public class KDTreeSegmentMergerTest extends SAITester
         performCompaction(() -> getRandom().nextIntBetween(1000, 15000), getRandom().nextIntBetween(2, 10), false);
 
         expected.keySet().forEach(term -> assertThat(expected.get(term), is(actual.get(term))));
+    }
+
+
+    @Test
+    public void closeEmptyIterators() throws Throwable
+    {
+        BKDReader.IteratorState iterator = Mockito.mock(BKDReader.IteratorState.class);
+        Mockito.when(iterator.hasNext()).thenReturn(false);
+        MergeOneDimPointValues merger = new MergeOneDimPointValues(Collections.singletonList(iterator), Integer.BYTES);
+        MutableOneDimPointValues.IntersectVisitor visitor = Mockito.mock(MutableOneDimPointValues.IntersectVisitor.class);
+        merger.intersect(visitor);
+        Mockito.verify(iterator, Mockito.times(1)).close();
+    }
+
+    @Test
+    public void closeIteratorsOnFailure() throws Throwable
+    {
+        BKDReader.IteratorState iterator = Mockito.mock(BKDReader.IteratorState.class);
+        Mockito.when(iterator.hasNext()).thenReturn(true);
+        Mockito.when(iterator.next()).thenThrow(new RuntimeException("injected failure"));
+        MergeOneDimPointValues merger = new MergeOneDimPointValues(Collections.singletonList(iterator), Integer.BYTES);
+        MutableOneDimPointValues.IntersectVisitor visitor = Mockito.mock(MutableOneDimPointValues.IntersectVisitor.class);
+        assertThrows(RuntimeException.class, () -> merger.intersect(visitor));
+        Mockito.verify(iterator, Mockito.times(1)).close();
     }
 
     private void performMerger(Supplier<Integer> segmentSizeSupplier, int segmentCount, boolean compaction) throws Throwable

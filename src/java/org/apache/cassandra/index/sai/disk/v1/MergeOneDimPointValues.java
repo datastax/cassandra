@@ -38,12 +38,14 @@ import org.apache.lucene.util.bkd.BKDWriter;
  */
 public class MergeOneDimPointValues extends MutableOneDimPointValues
 {
-    private final byte[] scratch;
     private final MergeQueue queue;
+
+    public final int bytesPerDim;
 
     public long minRowID = Long.MAX_VALUE;
     public long maxRowID = Long.MIN_VALUE;
     public long numRows = 0;
+
 
     public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, AbstractType termComparator)
     {
@@ -53,7 +55,7 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
     public MergeOneDimPointValues(List<BKDReader.IteratorState> iterators, int bytesPerDim)
     {
         queue = new MergeQueue(iterators.size());
-        this.scratch = new byte[bytesPerDim];
+        this.bytesPerDim = bytesPerDim;
         for (BKDReader.IteratorState iterator : iterators)
         {
             if (iterator.hasNext())
@@ -121,7 +123,7 @@ public class MergeOneDimPointValues extends MutableOneDimPointValues
     @Override
     public int getBytesPerDimension()
     {
-        return scratch.length;
+        return bytesPerDim;
     }
 
     private static class MergeQueue extends PriorityQueue<BKDReader.IteratorState>
