@@ -49,8 +49,6 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableUniqueIdentifier;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.service.StorageServiceMBean;
 import org.apache.lucene.index.PointValues;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
