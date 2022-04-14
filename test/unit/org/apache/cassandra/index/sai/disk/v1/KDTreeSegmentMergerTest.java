@@ -122,6 +122,7 @@ public class KDTreeSegmentMergerTest extends SAITester
     // Ignored because it requires mock-maker-inline mockito extension to be able to mock final methods.
     // Unfortunately dtest API InstanceClassloader cannot load that extension properly and enabling it causes failures
     // in some other distributed tests.
+    // See: https://github.com/mockito/mockito/issues/2203
     @Ignore
     @Test
     public void closeEmptyIterators() throws Throwable
