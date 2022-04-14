@@ -113,28 +113,45 @@ public class CassandraXMLJUnitResultFormatter implements JUnitResultFormatter, X
     private final ConcurrentMap<String, Element> testElements = new ConcurrentHashMap<>();
 
     /**
-     * tests that failed.
+     * Tests that failed - see {@link #testElements} for keys interpretation
      */
     private final ConcurrentMap<String, Element> failedTests = new ConcurrentHashMap<>();
 
     /**
-     * Tests that were skipped.
+     * Tests that were skipped - see {@link #testElements} for keys interpretation
      */
     private final ConcurrentMap<String, Test> skippedTests = new ConcurrentHashMap<>();
 
     /**
-     * Tests that were ignored. See the note above about the key being a bit of a hack.
+     * Tests that were ignored - see {@link #testElements} for keys interpretation
      */
     private final ConcurrentMap<String, Test> ignoredTests = new ConcurrentHashMap<>();
 
     /**
-     * Timing helper.
+     * Times when the tests were started - see {@link #testElements} for keys interpretation
      */
     private final ConcurrentMap<String, Long> testStarts = new ConcurrentHashMap<>();
+
+    /**
+     * Times when the tests were finished - see {@link #testElements} for keys interpretation
+     */
     private final ConcurrentMap<String, Long> testEnds = new ConcurrentHashMap<>();
 
+    /**
+     * Forbbidden log entries (collected as throwables), recorded before, between and after test cases (for example
+     * during execution of @BeforeClass or @AfterClass blocks). Keys are the times in ms of the event
+     */
     private final ConcurrentSkipListMap<Long, Throwable> suiteEvents = new ConcurrentSkipListMap<>();
+
+    /**
+     * Forbidden log entries (collected as throwawbles) recorded during tests execution - see {@link #suiteEvents} for keys interpretation
+     */
     private final ConcurrentSkipListMap<Long, Throwable> testEvents = new ConcurrentSkipListMap<>();
+
+    /**
+     * The current events map - the listener registered in {@link ForbiddenLogEntriesFilter} writes the events to the
+     * map referenced by this variable
+     */
     private volatile ConcurrentSkipListMap<Long, Throwable> events = suiteEvents;
 
     /**
@@ -192,7 +209,7 @@ public class CassandraXMLJUnitResultFormatter implements JUnitResultFormatter, X
     public void startTestSuite(final JUnitTest suite)
     {
         forbiddenLogEntriesFilter = ForbiddenLogEntriesFilter.getInstanceIfUsed();
-        if (forbiddenLogEntriesFilter != null)
+        if (FAIL_ON_FORBIDDEN_LOG_ENTRIES && forbiddenLogEntriesFilter != null)
             forbiddenLogEntriesFilter.setListener(this::onForbiddenLogEvent);
 
         long startTime = System.currentTimeMillis();
@@ -301,7 +318,7 @@ public class CassandraXMLJUnitResultFormatter implements JUnitResultFormatter, X
     @Override
     public void endTestSuite(final JUnitTest suite) throws BuildException
     {
-        if (forbiddenLogEntriesFilter != null)
+        if (FAIL_ON_FORBIDDEN_LOG_ENTRIES && forbiddenLogEntriesFilter != null)
             forbiddenLogEntriesFilter.setListener(null);
 
         maybeAddClassCaseElement();
@@ -511,9 +528,6 @@ public class CassandraXMLJUnitResultFormatter implements JUnitResultFormatter, X
 
     private void onForbiddenLogEvent(ILoggingEvent event)
     {
-        if (!FAIL_ON_FORBIDDEN_LOG_ENTRIES)
-            return;
-
         String timestamp = DateUtils.format(new Date(event.getTimeStamp()), "HH:mm:ss.SSS");
         String msg = String.format("%s %s %s", timestamp, event.getLoggerName(), event.getFormattedMessage());
         Throwable t = new AssertionFailedError(msg);

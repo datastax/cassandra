@@ -137,7 +137,7 @@ public class LogbackLoggingSupport implements LoggingSupport
         return logLevelMaps;
     }
 
-    public Set<Appender<?>> getAllLogbackAppenders()
+    private Set<Appender<?>> getAllLogbackAppenders()
     {
         ILoggerFactory factory = LoggerFactory.getILoggerFactory();
         LoggerContext ctx = (LoggerContext) factory;

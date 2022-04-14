@@ -164,8 +164,6 @@ public class LogbackStatusListener implements StatusListener, LoggerContextListe
         }
     }
 
-    ;
-
     private static class WrappedPrintStream extends PrintStream
     {
         private long asyncAppenderThreadId = Long.MIN_VALUE;
