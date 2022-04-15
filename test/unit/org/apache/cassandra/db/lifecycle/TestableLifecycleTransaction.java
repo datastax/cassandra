@@ -24,6 +24,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import static java.util.Collections.emptySet;
 import static org.apache.cassandra.db.lifecycle.View.permitCompacting;
 import static org.apache.cassandra.db.lifecycle.View.updateCompacting;
+import org.apache.cassandra.utils.TimeUUID;
 
 /**
  * A {@link LifecycleTransaction} subclass that exposes the package-private constructor
@@ -38,7 +39,7 @@ public class TestableLifecycleTransaction extends LifecycleTransaction
 {
     public TestableLifecycleTransaction(Tracker tracker, OperationType operationType, Iterable<SSTableReader> readers)
     {
-        super(markCompactingAndReturn(tracker, readers), operationType, readers);
+        super(markCompactingAndReturn(tracker, readers), operationType, readers, TimeUUID.Generator.nextTimeUUID());
     }
 
     private static Tracker markCompactingAndReturn(Tracker tracker, Iterable<SSTableReader> readers)
