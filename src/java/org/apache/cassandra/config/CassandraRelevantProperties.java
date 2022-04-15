@@ -259,6 +259,7 @@ public enum CassandraRelevantProperties
     EXPIRATION_OVERFLOW_WARNING_INTERVAL_MINUTES("cassandra.expiration_overflow_warning_interval_minutes", "5"),
     FAILURE_LOGGING_INTERVAL_SECONDS("cassandra.request_failure_log_interval_seconds", "60"),
     FAIL_ON_MISSING_CRYPTO_PROVIDER("cassandra.fail_on_missing_crypto_provider", "false"),
+
     FD_INITIAL_VALUE_MS("cassandra.fd_initial_value_ms"),
     FD_MAX_INTERVAL_MS("cassandra.fd_max_interval_ms"),
     FILE_CACHE_ENABLED("cassandra.file_cache_enabled"),
@@ -564,6 +565,7 @@ public enum CassandraRelevantProperties
     TEST_DRIVER_READ_TIMEOUT_MS("cassandra.test.driver.read_timeout_ms", "12000"),
     TEST_ENCRYPTION("cassandra.test.encryption", "false"),
     TEST_FAIL_MV_LOCKS_COUNT("cassandra.test.fail_mv_locks_count", "0"),
+    TEST_FAIL_ON_FORBIDDEN_LOG_ENTRIES("cassandra.test.fail_on_forbidden_log_entries", "false"),
     TEST_FAIL_WRITES_KS("cassandra.test.fail_writes_ks", ""),
     /** Flush changes of {@link org.apache.cassandra.schema.SchemaKeyspace} after each schema modification. In production,
      * we always do that. However, tests which do not restart nodes may disable this functionality in order to run

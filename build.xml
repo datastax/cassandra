@@ -139,6 +139,8 @@
     <!-- fast shutdown of messaging service -->
     <property name="cassandra.test.messagingService.nonGracefulShutdown" value="true"/>
 
+    <property name="cassandra.test.fail_on_forbidden_log_entries" value="false"/>
+
     <!-- https://www.eclemma.org/jacoco/ -->
     <property name="jacoco.version" value="0.8.8"/>
     <property name="jacoco.export.dir" value="${build.dir}/jacoco/" />
@@ -1185,6 +1187,7 @@
         <jvmarg value="-DQT_SHRINKS=0"/>
         <jvmarg value="-Dcassandra.disable_tcactive_openssl=true" />
         <jvmarg value="-Dcassandra.use_nix_recursive_delete=true"/>
+        <jvmarg value="-Dcassandra.test.fail_on_forbidden_log_entries=${cassandra.test.fail_on_forbidden_log_entries}"/>
         <jvmarg line="${_std-test-jvmargs} " />
         <jvmarg line="${test.jvm.args}" />
         <optjvmargs/>
