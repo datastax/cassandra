@@ -125,6 +125,7 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
@@ -411,7 +412,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public RangesAtEndpoint getReplicas(AbstractReplicationStrategy replicationStrategy, InetAddressAndPort endpoint)
     {
-        return replicationStrategy.getAddressReplicas(tokenMetadata.cloneOnlyTokenMap(), endpoint);
+        return replicationStrategy.getAddressReplicas(getTokenMetadata().cloneOnlyTokenMap(), endpoint);
     }
 
     public List<Range<Token>> getLocalRanges(String ks)
@@ -7669,9 +7670,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Set<SSTableReader> result = table.runWithCompactionsDisabled(() -> {
                 Set<SSTableReader> sstables = table.getLiveSSTables().stream().filter(predicate).collect(Collectors.toSet());
                 if (!preview)
-                    table.getCompactionStrategyManager().mutateRepaired(sstables, repairedAt, null, false);
+                {
+                    try
+                    {
+                        table.mutateRepaired(sstables, repairedAt, null, false);
+                    }
+                    catch (IOException e)
+                    {
+                        throw new RuntimeException(e);
+                    }
+                }
                 return sstables;
-            }, predicate, OperationType.ANTICOMPACTION, true, false, true);
+            }, predicate, OperationType.ANTICOMPACTION, true, false, true, TableOperation.StopTrigger.NONE);
             sstablesTouched.addAll(result.stream().map(sst -> sst.descriptor.baseFile().name()).collect(Collectors.toList()));
         }
         return sstablesTouched;
