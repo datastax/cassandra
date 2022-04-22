@@ -617,15 +617,25 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
                 closing.add(pool.close(false));
 
             long deadline = nanoTime() + units.toNanos(timeout);
-            maybeFail(() -> FutureCombiner.nettySuccessListener(closing).get(timeout, units),
-                      () -> {
-                          if (shutdownExecutors)
-                              shutdownExecutors(deadline);
-                      },
-                      () -> ExecutorUtils.awaitTermination(timeout, units, inboundExecutors),
-                      () -> callbacks.awaitTerminationUntil(deadline),
-                      inboundSink::clear,
-                      outboundSink::clear);
+            try
+            {
+                maybeFail(() -> FutureCombiner.nettySuccessListener(closing).get(timeout, units),
+                          () -> {
+                              if (shutdownExecutors)
+                                  shutdownExecutors(deadline);
+                          },
+                          () -> ExecutorUtils.awaitTermination(timeout, units, inboundExecutors),
+                          () -> callbacks.awaitTerminationUntil(deadline),
+                          inboundSink::clear,
+                          outboundSink::clear);
+            }
+            catch (Throwable t)
+            {
+                if (NON_GRACEFUL_SHUTDOWN.getBoolean())
+                    logger.info("Timeout when waiting for messaging service shutdown", t);
+                else
+                    throw t;
+            }
         }
     }
 
