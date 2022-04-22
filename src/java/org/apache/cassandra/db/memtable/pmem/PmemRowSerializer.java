@@ -431,13 +431,9 @@ public class PmemRowSerializer extends UnfilteredSerializer {
      * guaranteed to never return empty rows.
      */
     public Unfiltered deserialize(DataInputPlus in, SerializationHeader header, DeserializationHelper helper, Row.Builder builder)
-            throws IOException {
-
-        Unfiltered unfiltered = deserializeOne(in, header, helper, builder);
-        if (unfiltered == null || unfiltered.isEmpty())
-            return null;
-
-        return unfiltered;
+            throws IOException
+    {
+        return deserializeOne(in, header, helper, builder);
     }
 
     /**

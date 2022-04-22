@@ -19,15 +19,17 @@
 package org.apache.cassandra.db.memtable.pmem;
 
 import java.io.IOException;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-
+import com.intel.pmem.llpl.Transaction;
 import com.intel.pmem.llpl.TransactionalHeap;
 import com.intel.pmem.llpl.TransactionalMemoryBlock;
+import com.intel.pmem.llpl.util.ConcurrentLongART;
+import com.intel.pmem.llpl.util.LongLinkedList;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
@@ -37,157 +39,269 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 
-//Contains TableID & Cart pointer
+
+//Contains TableID , Cart pointer, LongLinkedList handle
 // TableID - 36bytes
 // Cart pointer - 8 bytes
+//LongLinkedList  - 8 bytes
 
-public class PmemTableInfo {
-    public static final PmemTableInfo.Serializer serializer = new PmemTableInfo.Serializer();
-    private static final int TABLE_ID_OFFSET = 0;
+public class PmemTableInfo
+{
     private static final int TABLE_ID_SIZE = 36;
+    private static final int TABLE_ID_OFFSET = 0;
+    private static final int CART_HANDLE_OFFSET = TABLE_ID_SIZE;
+    private static final int SH_LIST_OFFSET = 44;
+    private static final int BLOCK_SIZE = SH_LIST_OFFSET + Long.SIZE;
     private TransactionalMemoryBlock block;
+    private ConcurrentLongART memtableCart;
+    private TableMetadata metadata;
+    //Persist serialization header block handle
+    private LongLinkedList sHeaderLongLinkedList;
+    //For faster access saving serializationHeader in in-memory on every table metadata change
+    private List<SerializationHeader> serializationHeaderList = new ArrayList<>();
 
-    //Save version and respective SerializationHeader
-    private Map<Integer, SerializationHeader> serializationHeaderMap = new ConcurrentHashMap<>();
-    private static final int METADATA_OFFSET = 44;
-    private TransactionalMemoryBlock tableMetadatablock;
-
-    public PmemTableInfo(TransactionalHeap heap, long cartAddress, TableId id, Map<Integer, SerializationHeader> sHeaderMap) {
-        block = heap.allocateMemoryBlock(TABLE_ID_SIZE + Long.SIZE + Long.SIZE);
+    public PmemTableInfo(TransactionalHeap heap, ConcurrentLongART memtableCart, TableMetadata metadata)
+    {
+        this.memtableCart = memtableCart;
+        this.metadata = metadata;
+        //Since Index TableMetadata will contain base table Id ,
+        //converting Index name to Index table ID, which is required to differentiate Base and Index table.
+        TableId id = metadata.isIndex() ? TableId.fromUUID(UUID.nameUUIDFromBytes(metadata.indexName().get().getBytes())) : metadata.id;
+        block = heap.allocateMemoryBlock(BLOCK_SIZE);
         byte[] tableUUIDBytes = id.toString().getBytes();
         block.copyFromArray(tableUUIDBytes, 0, TABLE_ID_OFFSET, tableUUIDBytes.length);
-        block.setLong(TABLE_ID_SIZE, cartAddress);
-
-        this.serializationHeaderMap = sHeaderMap;
-        serializeSerializationHeader(sHeaderMap, heap);
+        block.setLong(CART_HANDLE_OFFSET, memtableCart.handle());
+        this.sHeaderLongLinkedList = new LongLinkedList(heap);
+        persistSerializationHeader();
+        block.setLong(SH_LIST_OFFSET, sHeaderLongLinkedList.handle());
     }
 
-    public PmemTableInfo(TransactionalMemoryBlock block, TransactionalHeap heap) {
+    public PmemTableInfo(TransactionalMemoryBlock block)
+    {
         this.block = block;
-        this.tableMetadatablock = heap.memoryBlockFromHandle(getMetadataBlockAddress());
+        this.memtableCart = ConcurrentLongART.fromHandle(block.heap(), getCartHandle());
     }
 
-    public static PmemTableInfo fromHandle(TransactionalHeap heap, long tableHandle) {
-        return new PmemTableInfo(heap.memoryBlockFromHandle(tableHandle), heap);
+    /**
+     * Recreates  PmemTableInfo from the given table handle
+     *
+     * @param heap        TransactionalHeap
+     * @param tableHandle PmemTableInfo handle
+     * @return PmemTableInfo
+     */
+    public static PmemTableInfo fromHandle(TransactionalHeap heap, long tableHandle)
+    {
+        return new PmemTableInfo(heap.memoryBlockFromHandle(tableHandle));
     }
 
-    public long handle() {
+    /**
+     * @return block handle
+     */
+    public long handle()
+    {
         return block.handle();
     }
 
-    public long metadataBlockHandle() {
-        return tableMetadatablock.handle();
-    }
-
-    public TableId getTableID() {
+    /**
+     * Reads TableID from Persistent memory block
+     *
+     * @return TableId
+     */
+    public TableId getTableID()
+    {
         int len = TABLE_ID_SIZE;
-
         byte[] b = new byte[len];
         block.copyToArray(TABLE_ID_OFFSET, b, 0, len);
         String str = new String(b);
         return TableId.fromUUID(UUID.fromString(str));
     }
 
-    public long getCartAddress() {
+    private long getCartHandle()
+    {
         return block.getLong(TABLE_ID_SIZE);
     }
 
-    public void updateCartAddress(long handle) {
-        block.setLong(TABLE_ID_SIZE, handle);
+    /**
+     * @return ConcurrentLongART
+     */
+    public ConcurrentLongART getMemtableCart()
+    {
+        return memtableCart;
     }
 
-    public long getMetadataBlockAddress() {
-        return block.getLong(METADATA_OFFSET);
+    /**
+     * @return The metadata for the table
+     */
+    public TableMetadata getMetadata()
+    {
+        return metadata;
     }
 
-    public Map<Integer, SerializationHeader> getSerializationHeaderMap() {
-        return serializationHeaderMap;
+    /**
+     * Updates this PmemTableInfo with given  ConcurrentLongART
+     *
+     * @param memtableCart ConcurrentLongART
+     */
+    public void updateMemtableCart(ConcurrentLongART memtableCart)
+    {
+        this.memtableCart = memtableCart;
+        block.setLong(TABLE_ID_SIZE, memtableCart.handle());
     }
 
-    public Map<Integer, SerializationHeader> deserializeHeader(TableMetadata metadata, TransactionalHeap heap) {
-
-        DataInputPlus in = new MemoryBlockDataInputPlus(tableMetadatablock, heap);
-
-        try {
-            serializationHeaderMap = PmemTableInfo.serializer.deserialize(in, metadata);
-        } catch (IOException e) {
-            e.printStackTrace();
+    /**
+     * Frees the Persistent Memory associated with this PmemTableInfo
+     */
+    public void cleanUp()
+    {
+        Iterator<Long> itr = sHeaderLongLinkedList.iterator();
+        while (itr.hasNext())
+        {
+            long sHeaderHandle = itr.next();
+            TransactionalMemoryBlock sHeaderBlock = block.heap().memoryBlockFromHandle(sHeaderHandle);
+            sHeaderBlock.free();
         }
-        return serializationHeaderMap;
+        sHeaderLongLinkedList.clear();
+        sHeaderLongLinkedList.free();
+        block.free();
     }
 
-    public void serializeSerializationHeader(Map<Integer, SerializationHeader> tableMetaDataMap, TransactionalHeap heap) {
-        long blockSize = serializer.serializedSize(tableMetaDataMap);
-        tableMetadatablock = heap.allocateMemoryBlock(blockSize);
-        block.setLong(METADATA_OFFSET, tableMetadatablock.handle());
-        DataOutputPlus out = new MemoryBlockDataOutputPlus(tableMetadatablock, 0);
-        try {
-            PmemTableInfo.serializer.serialize(tableMetaDataMap, out);
-        } catch (IOException e) {
-            e.printStackTrace();
+    private long getListHandle()
+    {
+        return block.getLong(SH_LIST_OFFSET);
+    }
+
+    /**
+     * Stores the Updated metadata and new serialization header if  applicable
+     *
+     * @param metadata the column family meta data
+     */
+    public void update(TableMetadata metadata)
+    {
+        this.metadata = metadata;
+        if (metadata.regularAndStaticColumns().size() != getPreviousColumnCount())
+        {
+            persistSerializationHeader();
         }
     }
 
-    public static class Serializer {
-        public void serialize(Map<Integer, SerializationHeader> tableMetaDataMap, DataOutputPlus out) throws IOException {
-            out.writeUnsignedVInt(tableMetaDataMap.size());
-            for (Map.Entry<Integer, SerializationHeader> entry : tableMetaDataMap.entrySet()) {
-                out.writeUnsignedVInt(entry.getKey());
-                SerializationHeader.serializer.serialize(BigFormat.latestVersion, entry.getValue().toComponent(), out);
+    /**
+     * @return Table metadata version
+     */
+    public int getMetadataVersion()
+    {
+        return serializationHeaderList.size() - 1;
+    }
+
+    /**
+     * Returns the serialization header associated with given version
+     *
+     * @param version Metadata version
+     * @return SerializationHeader
+     */
+    public SerializationHeader getSerializationHeader(int version)
+    {
+        return serializationHeaderList.get(version);
+    }
+
+    private int getPreviousColumnCount()
+    {
+        int version = getMetadataVersion();
+        int columCount = getSerializationHeader(version).columns().size();
+        return columCount;
+    }
+
+    /**
+     * @return true if this PmemTableInfo is fully initialized
+     */
+    public boolean isLoaded()
+    {
+        return serializationHeaderList.size() > 0;
+    }
+
+    //Persist SerializationHeader on every table alter
+    private void persistSerializationHeader()
+    {
+        SerializationHeader sHeader = new SerializationHeader(false,
+                                                              metadata,
+                                                              metadata.regularAndStaticColumns(),
+                                                              EncodingStats.NO_STATS);
+        TransactionalHeap heap = block.heap();
+        Transaction.create(heap, () -> {
+            long blockSize = SerializationHeader.serializer.serializedSize(BigFormat.latestVersion, sHeader.toComponent());
+            TransactionalMemoryBlock serializationHeaderBlock = heap.allocateMemoryBlock(blockSize);
+            DataOutputPlus out = new MemoryBlockDataOutputPlus(serializationHeaderBlock, 0);
+            try
+            {
+                SerializationHeader.serializer.serialize(BigFormat.latestVersion, sHeader.toComponent(), out);
             }
-        }
+            catch (IOException e)
+            {
+                e.printStackTrace();
+            }
+            long index = sHeaderLongLinkedList.size();
+            sHeaderLongLinkedList.add(index, serializationHeaderBlock.handle());
+        });
+        serializationHeaderList.add(sHeader);
+    }
 
-        public Map<Integer, SerializationHeader> deserialize(DataInputPlus in, TableMetadata metadata) throws IOException {
-            int count = (int) in.readUnsignedVInt();
-            Map<Integer, SerializationHeader> headerMap = new ConcurrentHashMap<>();
-            for (int k = 0; k < count; k++) {
-                Integer savedVesrion = (int) in.readUnsignedVInt();
+    /**
+     * Reinitializes pmemtableInfo after restart
+     *
+     * @param metadata Column family table metadata
+     */
+    public void reload(TableMetadata metadata)
+    {
+        this.metadata = metadata;
+        TransactionalHeap heap = block.heap();
+        sHeaderLongLinkedList = LongLinkedList.fromHandle(heap, getListHandle());
+        Iterator<Long> sHeaderLinkedList = sHeaderLongLinkedList.iterator();
+
+        while (sHeaderLinkedList.hasNext())
+        {
+            long sHeaderHandle = sHeaderLinkedList.next();
+            TransactionalMemoryBlock sHeaderBlock = heap.memoryBlockFromHandle(sHeaderHandle);
+            DataInputPlus in = new MemoryBlockDataInputPlus(sHeaderBlock, heap);
+            try
+            {
                 SerializationHeader.Component component = SerializationHeader.serializer.deserialize(BigFormat.latestVersion, in);
-
-                SerializationHeader header = toSerializationHeader(component, metadata);
-                headerMap.putIfAbsent(savedVesrion, header);
+                SerializationHeader sHeader = toSerializationHeader(component, metadata);
+                serializationHeaderList.add(sHeader);
             }
-            return headerMap;
+            catch (IOException e)
+            {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    // Construct SerializationHeader  from  SerializationHeader.Component
+    private static SerializationHeader toSerializationHeader(SerializationHeader.Component component, TableMetadata metadata)
+    {
+
+        TableMetadata.Builder metadataBuilder = TableMetadata.builder(metadata.keyspace, metadata.name, metadata.id);
+        component.getStaticColumns().entrySet().stream()
+                 .forEach(entry -> {
+                     ColumnIdentifier ident = ColumnIdentifier.getInterned(UTF8Type.instance.getString(entry.getKey()), true);
+                     metadataBuilder.addStaticColumn(ident, entry.getValue());
+                 });
+        component.getRegularColumns().entrySet().stream()
+                 .forEach(entry -> {
+                     ColumnIdentifier ident = ColumnIdentifier.getInterned(UTF8Type.instance.getString(entry.getKey()), true);
+                     metadataBuilder.addRegularColumn(ident, entry.getValue());
+                 });
+        for (ColumnMetadata columnMetadata : metadata.partitionKeyColumns())
+            metadataBuilder.addPartitionKeyColumn(columnMetadata.name, columnMetadata.cellValueType());
+        for (ColumnMetadata columnMetadata : metadata.clusteringColumns())
+        {
+            metadataBuilder.addClusteringColumn(columnMetadata.name, columnMetadata.cellValueType());
         }
 
-        public long serializedSize(Map<Integer, SerializationHeader> tableMetaDataMap) {
-            long size = 0;
-            size += TypeSizes.sizeofUnsignedVInt(tableMetaDataMap.size());
-
-            for (Map.Entry<Integer, SerializationHeader> entry : tableMetaDataMap.entrySet()) {
-                size += TypeSizes.sizeofUnsignedVInt(entry.getKey());
-                size += SerializationHeader.serializer.serializedSize(BigFormat.latestVersion, entry.getValue().toComponent());
-            }
-            return size;
-        }
-
-        // Construct SerializationHeader  from  SerializationHeader.Component
-        private static SerializationHeader toSerializationHeader(SerializationHeader.Component component, TableMetadata metadata) {
-
-            TableMetadata.Builder metadataBuilder = TableMetadata.builder(metadata.keyspace, metadata.name, metadata.id);
-            component.getStaticColumns().entrySet().stream()
-                    .forEach(entry -> {
-                        ColumnIdentifier ident = ColumnIdentifier.getInterned(UTF8Type.instance.getString(entry.getKey()), true);
-                        metadataBuilder.addStaticColumn(ident, entry.getValue());
-                    });
-            component.getRegularColumns().entrySet().stream()
-                    .forEach(entry -> {
-                        ColumnIdentifier ident = ColumnIdentifier.getInterned(UTF8Type.instance.getString(entry.getKey()), true);
-                        metadataBuilder.addRegularColumn(ident, entry.getValue());
-                    });
-            for (ColumnMetadata columnMetadata : metadata.partitionKeyColumns())
-                metadataBuilder.addPartitionKeyColumn(columnMetadata.name, columnMetadata.cellValueType());
-            for (ColumnMetadata columnMetadata : metadata.clusteringColumns()) {
-                metadataBuilder.addClusteringColumn(columnMetadata.name, columnMetadata.cellValueType());
-            }
-
-            TableMetadata tableMetadata = metadataBuilder.build();
-            SerializationHeader serializationHeader = new SerializationHeader(false,
-                    tableMetadata,
-                    tableMetadata.regularAndStaticColumns(),
-                    EncodingStats.NO_STATS);
-            return serializationHeader;
-        }
+        TableMetadata tableMetadata = metadataBuilder.build();
+        SerializationHeader serializationHeader = new SerializationHeader(false,
+                                                                          tableMetadata,
+                                                                          tableMetadata.regularAndStaticColumns(),
+                                                                          EncodingStats.NO_STATS);
+        return serializationHeader;
     }
 }
 

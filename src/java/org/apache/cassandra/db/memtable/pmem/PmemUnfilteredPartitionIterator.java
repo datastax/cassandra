@@ -44,20 +44,21 @@ public class PmemUnfilteredPartitionIterator extends AbstractUnfilteredPartition
     private final DataRange dataRange;
     private TransactionalHeap heap;
     private LongART.Entry nextEntry;
+    private PmemTableInfo pmemTableInfo;
 
     public PmemUnfilteredPartitionIterator(TransactionalHeap heap,
-                                           TableMetadata tableMetadata,
                                            AutoCloseableIterator<LongART.Entry> iter,
                                            int minLocalDeletionTime,
                                            ColumnFilter columnFilter,
-                                           DataRange dataRange) {
+                                           DataRange dataRange, PmemTableInfo pmemTableInfo) {
         this.heap = heap;
-        this.tableMetadata = tableMetadata;
+        this.tableMetadata = pmemTableInfo.getMetadata();
         this.iter = iter;
         this.minLocalDeletionTime = minLocalDeletionTime;
         this.columnFilter = columnFilter;
         this.dataRange = dataRange;
         this.nextEntry = null;
+        this.pmemTableInfo = pmemTableInfo;
     }
 
     @Override
@@ -78,7 +79,7 @@ public class PmemUnfilteredPartitionIterator extends AbstractUnfilteredPartition
         try {
             dkey = BufferDecoratedKey.fromByteComparable(ByteComparable.fixedLength(nextEntry.getKey()),
                     BYTE_COMPARABLE_VERSION, tableMetadata.partitioner);
-            pMemPartition = new PmemPartition(heap, dkey, tableMetadata, null, UpdateTransaction.NO_OP);
+            pMemPartition = new PmemPartition(heap, dkey, null, UpdateTransaction.NO_OP, pmemTableInfo);
             pMemPartition.load(heap, nextEntry.getValue(), EncodingStats.NO_STATS);
         } catch (Exception e) {
             closeCartIterator();

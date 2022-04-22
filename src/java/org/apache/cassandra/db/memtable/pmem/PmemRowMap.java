@@ -20,12 +20,8 @@ package org.apache.cassandra.db.memtable.pmem;
 
 import java.io.IOError;
 import java.io.IOException;
-import java.util.Map;
-import java.util.UUID;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import com.intel.pmem.llpl.util.LongART;
 import com.intel.pmem.llpl.TransactionalHeap;
 import com.intel.pmem.llpl.TransactionalMemoryBlock;
@@ -33,7 +29,6 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.memtable.PersistentMemoryMemtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.DeserializationHelper;
@@ -45,7 +40,6 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -63,34 +57,36 @@ public class PmemRowMap {
     private static final Logger logger = LoggerFactory.getLogger(PmemRowMap.class);
     private final LongART rangeTombstoneMarkerTree;
     private final UpdateTransaction indexer;
+    private final PmemTableInfo pmemTableInfo;
 
-    private PmemRowMap(TransactionalHeap heap, LongART rangeTombstoneMarkerTree, LongART arTree, TableMetadata tableMetadata, DeletionTime partitionLevelDeletion, UpdateTransaction indexer) {
+    private PmemRowMap(TransactionalHeap heap, LongART rangeTombstoneMarkerTree, LongART arTree, DeletionTime partitionLevelDeletion, UpdateTransaction indexer, PmemTableInfo pmemTableInfo) {
         this.heap = heap;
         this.rowMapTree = arTree;
-        this.tableMetadata = tableMetadata;
+        this.tableMetadata = pmemTableInfo.getMetadata();
         this.partitionLevelDeletion = partitionLevelDeletion;
         this.rangeTombstoneMarkerTree = rangeTombstoneMarkerTree;
         this.indexer = indexer;
+        this.pmemTableInfo = pmemTableInfo;
     }
 
-    public static PmemRowMap create(TransactionalHeap heap, TableMetadata tableMetadata, DeletionTime partitionLevelDeletion, UpdateTransaction indexer) {
+    public static PmemRowMap create(TransactionalHeap heap, DeletionTime partitionLevelDeletion, UpdateTransaction indexer,  PmemTableInfo pmemTableInfo) {
         LongART arTree = new LongART(heap);
-        return (new PmemRowMap(heap, null, arTree, tableMetadata, partitionLevelDeletion, indexer));
+        return (new PmemRowMap(heap, null, arTree, partitionLevelDeletion, indexer, pmemTableInfo));
     }
 
-    public static PmemRowMap createForTombstone(TransactionalHeap heap, TableMetadata tableMetadata, DeletionTime partitionLevelDeletion, UpdateTransaction indexer) {
+    public static PmemRowMap createForTombstone(TransactionalHeap heap, DeletionTime partitionLevelDeletion, UpdateTransaction indexer, PmemTableInfo pmemTableInfo) {
         LongART arTree = new LongART(heap);
-        return (new PmemRowMap(heap, arTree, null, tableMetadata, partitionLevelDeletion, indexer));
+        return (new PmemRowMap(heap, arTree, null, partitionLevelDeletion, indexer,pmemTableInfo));
     }
 
-    public static PmemRowMap loadFromAddress(TransactionalHeap heap, long address, TableMetadata tableMetadata, DeletionTime partitionLevelDeletion, UpdateTransaction indexer) {
+    public static PmemRowMap loadFromAddress(TransactionalHeap heap, long address, DeletionTime partitionLevelDeletion, UpdateTransaction indexer,PmemTableInfo pmemTableInfo) {
         LongART arTree = LongART.fromHandle(heap, address);
-        return (new PmemRowMap(heap, null, arTree, tableMetadata, partitionLevelDeletion, indexer));
+        return (new PmemRowMap(heap, null, arTree, partitionLevelDeletion, indexer,pmemTableInfo));
     }
 
-    public static PmemRowMap loadFromRtmHandle(TransactionalHeap heap, long handle, TableMetadata tableMetadata, DeletionTime partitionLevelDeletion, UpdateTransaction indexer) {
+    public static PmemRowMap loadFromRtmHandle(TransactionalHeap heap, long handle, DeletionTime partitionLevelDeletion, UpdateTransaction indexer, PmemTableInfo pmemTableInfo) {
         LongART arTree = LongART.fromHandle(heap, handle);
-        return (new PmemRowMap(heap, arTree, null, tableMetadata, partitionLevelDeletion, indexer));
+        return (new PmemRowMap(heap, arTree, null, partitionLevelDeletion, indexer, pmemTableInfo));
     }
 
     public Row getRow(Clustering clustering, TableMetadata metadata) {
@@ -105,17 +101,7 @@ public class PmemRowMap {
         DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(block, heap);
         try {
             int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
-            SerializationHeader serializationHeader;
-            TableId id = metadata.isIndex() ? TableId.fromUUID(UUID.nameUUIDFromBytes(metadata.indexName().get().getBytes())) : metadata.id;
-            Map<Integer, SerializationHeader> sHeaderMap = PersistentMemoryMemtable.getTablesMetadataMap().get(id).getSerializationHeaderMap();
-            if (sHeaderMap.size() > 1) {
-                serializationHeader = sHeaderMap.get(savedVersion);
-            } else {
-                serializationHeader = new SerializationHeader(false,
-                        metadata,
-                        metadata.regularAndStaticColumns(),
-                        EncodingStats.NO_STATS);
-            }
+            SerializationHeader serializationHeader = pmemTableInfo.getSerializationHeader(savedVersion);
             DeserializationHelper helper = new DeserializationHelper(metadata, -1, DeserializationHelper.Flag.LOCAL);
             row = (Row) PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
         } catch (IOException e) {
@@ -144,17 +130,7 @@ public class PmemRowMap {
         Row currentRow;
         try {
             int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
-            SerializationHeader serializationHeader;
-            TableId id = tableMetadata.isIndex() ? TableId.fromUUID(UUID.nameUUIDFromBytes(tableMetadata.indexName().get().getBytes())) : tableMetadata.id;
-            Map<Integer, SerializationHeader> sHeaderMap = PersistentMemoryMemtable.getTablesMetadataMap().get(id).getSerializationHeaderMap();
-            if (sHeaderMap.size() > 1) {
-                serializationHeader = sHeaderMap.get(savedVersion);
-            } else {
-                serializationHeader = new SerializationHeader(false,
-                        tableMetadata,
-                        tableMetadata.regularAndStaticColumns(),
-                        EncodingStats.NO_STATS);
-            }
+            SerializationHeader serializationHeader = pmemTableInfo.getSerializationHeader(savedVersion);
             DeserializationHelper helper = new DeserializationHelper(tableMetadata, -1, DeserializationHelper.Flag.LOCAL);
             currentRow = (Row) PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
         } catch (IOException e) {
@@ -184,8 +160,7 @@ public class PmemRowMap {
                 EncodingStats.NO_STATS);
         SerializationHelper helper = new SerializationHelper(serializationHeader);
 
-        //Since index table cannot be altered, the version will be always 1.
-        int version = tableMetadata.isIndex() ? 1 : PersistentMemoryMemtable.getTablesMetadataMap().get(tableMetadata.id).getSerializationHeaderMap().size();
+        int version = pmemTableInfo.getMetadataVersion();
         long size = PmemRowSerializer.serializer.serializedSize(row, helper.header, 0, version);
 
         try {
@@ -222,8 +197,7 @@ public class PmemRowMap {
                 EncodingStats.NO_STATS);
         SerializationHelper helper = new SerializationHelper(serializationHeader);
 
-        //Since index table cannot be altered, the version will be always 1.
-        int version = tableMetadata.isIndex() ? 1 : PersistentMemoryMemtable.getTablesMetadataMap().get(tableMetadata.id).getSerializationHeaderMap().size();
+        int version = pmemTableInfo.getMetadataVersion();
         long size = PmemRowSerializer.serializer.serializedSize(unfiltered, helper.header, 0, version);
 
         try {

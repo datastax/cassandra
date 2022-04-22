@@ -22,12 +22,8 @@ import java.io.IOError;
 import java.io.IOException;
 import java.util.Comparator;
 import java.util.Iterator;
-import java.util.Map;
-import java.util.UUID;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import com.intel.pmem.llpl.TransactionalHeap;
 import com.intel.pmem.llpl.TransactionalMemoryBlock;
 import com.intel.pmem.llpl.util.AutoCloseableIterator;
@@ -43,7 +39,6 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.ByteArrayAccessor;
-import org.apache.cassandra.db.memtable.PersistentMemoryMemtable;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.EncodingStats;
@@ -54,7 +49,6 @@ import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -84,11 +78,12 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
     private EncodingStats stats;
     private boolean isSliceDone = false;
     private Slice slice;
+    private  PmemTableInfo pmemTableInfo;
 
-    public PmemRowAndRtmIterator(TableMetadata metadata, DecoratedKey partitionKey, DeletionInfo deletionInfo, ColumnFilter selection, Row staticRow, boolean isReversed, LongART pmemRowMapTree, Slice slice, AutoCloseableIterator cartIterator, LongART pmemRtmMapTree, TransactionalHeap heap, EncodingStats stats)
+    public PmemRowAndRtmIterator(DecoratedKey partitionKey, DeletionInfo deletionInfo, ColumnFilter selection, Row staticRow, boolean isReversed, LongART pmemRowMapTree, Slice slice, AutoCloseableIterator cartIterator, LongART pmemRtmMapTree, TransactionalHeap heap, EncodingStats stats, PmemTableInfo pmemTableInfo)
     {
+        this.metadata = pmemTableInfo.getMetadata();
         this.comparator = isReversed ? metadata.comparator.reversed() : metadata.comparator;
-        this.metadata = metadata;
         this.selection = selection;
         this.heap = heap;
         this.stats = stats;
@@ -100,12 +95,13 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
         this.slice = slice;
         this.rtmIterator = buildRtmTreeIterator(pmemRtmMapTree, slice);
         this.pmemRowTreeIterator = buildRowTreeIterator(pmemRowMapTree, slice);
+        this.pmemTableInfo = pmemTableInfo;
     }
 
-    public static UnfilteredRowIterator create(TableMetadata metadata, DecoratedKey key, DeletionInfo deletionTime, ColumnFilter columns, Row staticRow, boolean reversed
-    , LongART pmemRtmMapTree, AutoCloseableIterator cartIterator, LongART pmemRowMapTree, TransactionalHeap heap, Slice slice, EncodingStats stats)
+    public static UnfilteredRowIterator create(DecoratedKey key, DeletionInfo deletionTime, ColumnFilter columns, Row staticRow, boolean reversed
+    , LongART pmemRtmMapTree, AutoCloseableIterator cartIterator, LongART pmemRowMapTree, TransactionalHeap heap, Slice slice, EncodingStats stats, PmemTableInfo pmemTableInfo)
     {
-        PmemRowAndRtmIterator pmemRowAndRtmIterator = new PmemRowAndRtmIterator(metadata, key, deletionTime, columns, staticRow, reversed, pmemRowMapTree, slice, cartIterator, pmemRtmMapTree, heap, stats);
+        PmemRowAndRtmIterator pmemRowAndRtmIterator = new PmemRowAndRtmIterator(key, deletionTime, columns, staticRow, reversed, pmemRowMapTree, slice, cartIterator, pmemRtmMapTree, heap, stats, pmemTableInfo);
         pmemRowAndRtmIterator.staticRow = staticRow;
         return pmemRowAndRtmIterator;
     }
@@ -165,24 +161,6 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
         return next;
     }
 
-    private SerializationHeader savedHeader(int savedVersion)
-    {
-        SerializationHeader serializationHeader;
-        TableId id = metadata.isIndex() ? TableId.fromUUID(UUID.nameUUIDFromBytes(metadata.indexName().get().getBytes())) : metadata.id;
-        Map<Integer, SerializationHeader> sHeaderMap = PersistentMemoryMemtable.getTablesMetadataMap().get(id).getSerializationHeaderMap();
-        if (sHeaderMap.size() > 1)
-            serializationHeader = sHeaderMap.get(savedVersion);
-        else
-        {
-            serializationHeader = new SerializationHeader(false,
-                                                          metadata,
-                                                          metadata.regularAndStaticColumns(),
-                                                          EncodingStats.NO_STATS);
-        }
-
-        return serializationHeader;
-    }
-
     private Unfiltered computeNextRowInternal(Iterator<LongART.Entry> rowIterator)
     {
         Row.Builder builder = BTreeRow.sortedBuilder();
@@ -195,7 +173,7 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
         try
         {
             int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
-            SerializationHeader serializationHeader = savedHeader(savedVersion);
+            SerializationHeader serializationHeader = pmemTableInfo.getSerializationHeader(savedVersion);
             DeserializationHelper helper = new DeserializationHelper(metadata, -1, DeserializationHelper.Flag.LOCAL);
             Unfiltered unfiltered = PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
             return unfiltered;
@@ -216,8 +194,8 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
         try
         {
             int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
-            SerializationHeader serializationHeader = savedHeader(savedVersion);
-            DeserializationHelper helper = new DeserializationHelper(metadata(), -1, DeserializationHelper.Flag.LOCAL);
+            SerializationHeader serializationHeader = pmemTableInfo.getSerializationHeader(savedVersion);
+            DeserializationHelper helper = new DeserializationHelper(metadata, -1, DeserializationHelper.Flag.LOCAL);
             Unfiltered unfiltered = PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
             return (RangeTombstoneMarker) unfiltered;
         }
@@ -230,8 +208,13 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
 
     private void updateNextRow()
     {
-        if (nextRow == null && pmemRowTreeIterator.hasNext())
+        while (nextRow == null && pmemRowTreeIterator.hasNext())
+        {
             nextRow = (Row) computeNextRowInternal(pmemRowTreeIterator);
+            //Cassandra recommends to Skip empty rows
+            if (nextRow.isEmpty())
+                nextRow = null;
+        }
     }
 
     private void updateNextMarker()
@@ -413,7 +396,7 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
         return rowTreeIterator;
     }
 
-    public Iterator<LongART.Entry> buildRtmTreeIterator(LongART pmemRtmMapTree, Slice slice)
+    private Iterator<LongART.Entry> buildRtmTreeIterator(LongART pmemRtmMapTree, Slice slice)
     {
         Iterator<LongART.Entry> rtmTreeIterator;
         boolean includeStart = slice.start().isInclusive();

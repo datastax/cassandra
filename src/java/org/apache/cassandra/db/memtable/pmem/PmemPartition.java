@@ -24,9 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.Map;
 import java.util.NavigableSet;
-import java.util.UUID;
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -51,7 +49,6 @@ import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.ByteArrayAccessor;
-import org.apache.cassandra.db.memtable.PersistentMemoryMemtable;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.BTreeRow;
@@ -69,7 +66,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -129,21 +125,24 @@ public class PmemPartition implements Partition {
     PmemRowMap pmemRowMap;
     PmemRowMap pmemRtmMap;
     private final UpdateTransaction indexer;
+    private final PmemTableInfo pmemTableInfo;
 
-    public PmemPartition(TransactionalHeap heap, DecoratedKey dkey, TableMetadata tableMetadata, AutoCloseableIterator<LongART.Entry> cartIterator, UpdateTransaction indexer) {
+    public PmemPartition(TransactionalHeap heap, DecoratedKey dkey, AutoCloseableIterator<LongART.Entry> cartIterator, UpdateTransaction indexer, PmemTableInfo pmemTableInfo) {
         this.heap = heap;
         this.token = dkey.getToken();
         this.key = dkey;
-        this.tableMetadata = tableMetadata;
+        this.tableMetadata = pmemTableInfo.getMetadata();
         this.ref = EMPTY;
         this.cartIterator = cartIterator;
         this.indexer = indexer;
+        this.pmemTableInfo = pmemTableInfo;
     }
 
-    public PmemPartition(TransactionalHeap heap, TableMetadata tableMetadata, UpdateTransaction indexer) {
+    public PmemPartition(TransactionalHeap heap, UpdateTransaction indexer, PmemTableInfo pmemTableInfo) {
         this.heap = heap;
-        this.tableMetadata = tableMetadata;
+        this.tableMetadata = pmemTableInfo.getMetadata();
         this.indexer = indexer;
+        this.pmemTableInfo =pmemTableInfo;
     }
 
     //This load function is called during puts
@@ -156,11 +155,11 @@ public class PmemPartition implements Partition {
         }
         long rowMapAddress = block.getLong(ROW_MAP_OFFSET);
         if (rowMapAddress != 0) {
-            pmemRowMap = PmemRowMap.loadFromAddress(heap, rowMapAddress, tableMetadata, DeletionTime.LIVE, indexer);
+            pmemRowMap = PmemRowMap.loadFromAddress(heap, rowMapAddress, DeletionTime.LIVE, indexer,pmemTableInfo);
         }
         final long rtmTreeHandle = block.getLong(RTM_INFO_OFFSET);
         if (rtmTreeHandle != 0) {
-            pmemRtmMap = PmemRowMap.loadFromRtmHandle(heap, rtmTreeHandle, tableMetadata, DeletionTime.LIVE, UpdateTransaction.NO_OP);
+            pmemRtmMap = PmemRowMap.loadFromRtmHandle(heap, rtmTreeHandle, DeletionTime.LIVE, UpdateTransaction.NO_OP,pmemTableInfo);
         }
         if (block.getLong(DELETION_INFO_OFFSET) > 0) {
             TransactionalMemoryBlock deletedPartitionBlock = heap.memoryBlockFromHandle(block.getLong(DELETION_INFO_OFFSET));
@@ -193,11 +192,11 @@ public class PmemPartition implements Partition {
         // Range Tombstone Marker
         final long rtmTreeHandle;
 
-        pmemRowMap = PmemRowMap.create(heap, update.metadata(), update.partitionLevelDeletion(), indexer);
+        pmemRowMap = PmemRowMap.create(heap, update.partitionLevelDeletion(), indexer, pmemTableInfo);
         rowMapAddress = pmemRowMap.getHandle(); //gets address of arTree
 
         //TODO  Lazy load of RTM ArtTree
-        pmemRtmMap = PmemRowMap.createForTombstone(heap, update.metadata(), update.partitionLevelDeletion(), UpdateTransaction.NO_OP);
+        pmemRtmMap = PmemRowMap.createForTombstone(heap, update.partitionLevelDeletion(), UpdateTransaction.NO_OP, pmemTableInfo);
         rtmTreeHandle = pmemRtmMap.getRtmTreeHandle();//gets handle of RTM arTree
 
         for (Row r : update) {
@@ -306,9 +305,7 @@ public class PmemPartition implements Partition {
                     EncodingStats.NO_STATS);
             SerializationHelper helper = new SerializationHelper(serializationHeader);
 
-            //Since index table cannot be altered, the version will be always 1.
-            int version = tableMetadata.isIndex() ? 1 : PersistentMemoryMemtable.getTablesMetadataMap().get(tableMetadata.id).getSerializationHeaderMap().size();
-
+            int version = pmemTableInfo.getMetadataVersion();
             PmemRowSerializer.serializer.serializeStaticRow(newStaticRow, helper, dob, version);
             int size = dob.getLength();
 
@@ -347,17 +344,7 @@ public class PmemPartition implements Partition {
 
         try {
             int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
-            SerializationHeader serializationHeader;
-            TableId id = tableMetadata.isIndex() ? TableId.fromUUID(UUID.nameUUIDFromBytes(tableMetadata.indexName().get().getBytes())) : tableMetadata.id;
-            Map<Integer, SerializationHeader> sHeaderMap = PersistentMemoryMemtable.getTablesMetadataMap().get(id).getSerializationHeaderMap();
-            if (sHeaderMap.size() > 1) {
-                serializationHeader = sHeaderMap.get(savedVersion);
-            } else {
-                serializationHeader = new SerializationHeader(false,
-                        tableMetadata,
-                        tableMetadata.regularAndStaticColumns(),
-                        EncodingStats.NO_STATS);
-            }
+            SerializationHeader serializationHeader = pmemTableInfo.getSerializationHeader(savedVersion);
             DeserializationHelper helper = new DeserializationHelper(tableMetadata, -1, DeserializationHelper.Flag.LOCAL);
             return PmemRowSerializer.serializer.deserializeStaticRow(memoryBlockDataInputPlus, serializationHeader, helper);
         } catch (IOException e) {
@@ -508,7 +495,7 @@ public class PmemPartition implements Partition {
             return UnfilteredRowIterators.noRowsIterator(metadata(), partitionKey(), staticRow, partitionDeletion, reversed);
         }
         if (slices.size() == 1) {
-            return PmemRowAndRtmIterator.create(tableMetadata, key, current.deletionInfo, columns, staticRow, reversed, pmemRtmMap.getRangeTombstoneMarkerTree(), cartIterator, pmemRowMap.getRowMapTree(), heap, slices.get(0), ref.stats);
+            return PmemRowAndRtmIterator.create(key, current.deletionInfo, columns, staticRow, reversed, pmemRtmMap.getRangeTombstoneMarkerTree(), cartIterator, pmemRowMap.getRowMapTree(), heap, slices.get(0), ref.stats,pmemTableInfo);
         }
         return new SlicesIterator(current, columns, slices, reversed);
     }
@@ -528,7 +515,7 @@ public class PmemPartition implements Partition {
             DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(rangeMemoryBlock, heap);
             try {
                 int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
-                SerializationHeader serializationHeader = savedHeader(savedVersion);
+                SerializationHeader serializationHeader = pmemTableInfo.getSerializationHeader(savedVersion);
                 DeserializationHelper helper = new DeserializationHelper(metadata(), -1, DeserializationHelper.Flag.LOCAL);
 
                 Unfiltered unfiltered = PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
@@ -543,22 +530,6 @@ public class PmemPartition implements Partition {
         }
 
         return deletionBuilder.build();
-    }
-
-    private SerializationHeader savedHeader(int savedVersion) {
-        SerializationHeader serializationHeader;
-        TableId id = tableMetadata.isIndex() ? TableId.fromUUID(UUID.nameUUIDFromBytes(tableMetadata.indexName().get().getBytes())) : tableMetadata.id;
-        Map<Integer, SerializationHeader> sHeaderMap = PersistentMemoryMemtable.getTablesMetadataMap().get(id).getSerializationHeaderMap();
-        if (sHeaderMap.size() > 1) {
-            serializationHeader = sHeaderMap.get(savedVersion);
-        } else {
-            serializationHeader = new SerializationHeader(false,
-                    tableMetadata,
-                    tableMetadata.regularAndStaticColumns(),
-                    EncodingStats.NO_STATS);
-        }
-
-        return serializationHeader;
     }
 
 
@@ -614,7 +585,7 @@ public class PmemPartition implements Partition {
                         return endOfData();
 
                     int sliceIdx = isReversed ? slices.size() - idx - 1 : idx;
-                    currentSlice = PmemRowAndRtmIterator.create(tableMetadata, key, current.deletionInfo, columnFilter, staticRow, isReversed, pmemRtmMap.getRangeTombstoneMarkerTree(), cartIterator, pmemRowMap.getRowMapTree(), heap, slices.get(sliceIdx), ref.stats);
+                    currentSlice = PmemRowAndRtmIterator.create(key, current.deletionInfo, columnFilter, staticRow, isReversed, pmemRtmMap.getRangeTombstoneMarkerTree(), cartIterator, pmemRowMap.getRowMapTree(), heap, slices.get(sliceIdx), ref.stats, pmemTableInfo);
                     idx++;
                 }
                 if (currentSlice.hasNext())
@@ -702,7 +673,7 @@ public class PmemPartition implements Partition {
         }
 
         private Iterator<Unfiltered> nextIterator(Clustering<?> clustering) {
-            return PmemRowAndRtmIterator.create(tableMetadata, key, ref.deletionInfo, selection, staticRow, reversed, pmemRtmMap.getRangeTombstoneMarkerTree(), cartIterator, pmemRowTree, heap, Slice.make(clustering), ref.stats);
+            return PmemRowAndRtmIterator.create(key, ref.deletionInfo, selection, staticRow, reversed, pmemRtmMap.getRangeTombstoneMarkerTree(), cartIterator, pmemRowTree, heap, Slice.make(clustering), ref.stats, pmemTableInfo);
         }
 
         @Override
@@ -862,18 +833,7 @@ public class PmemPartition implements Partition {
             DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(mb, heap);
             try {
                 int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
-
-                SerializationHeader serializationHeader;
-                TableId id = tableMetadata.isIndex() ? TableId.fromUUID(UUID.nameUUIDFromBytes(tableMetadata.indexName().get().getBytes())) : tableMetadata.id;
-                Map<Integer, SerializationHeader> sHeaderMap = PersistentMemoryMemtable.getTablesMetadataMap().get(id).getSerializationHeaderMap();
-                if (sHeaderMap.size() > 1) {
-                    serializationHeader = sHeaderMap.get(savedVersion);
-                } else {
-                    serializationHeader = new SerializationHeader(false,
-                            metadata,
-                            metadata.regularAndStaticColumns(),
-                            EncodingStats.NO_STATS);
-                }
+                SerializationHeader serializationHeader = pmemTableInfo.getSerializationHeader(savedVersion);
                 DeserializationHelper helper = new DeserializationHelper(metadata, -1, DeserializationHelper.Flag.LOCAL);
                 Unfiltered unfiltered = PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
 
