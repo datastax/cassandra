@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -48,6 +49,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+// TODO this test is broken since UCS as some of the BM rules became irrelevant and target not existing locations
 @RunWith(BMUnitRunner.class)
 public class CompactionsBytemanTest extends CQLTester
 {
@@ -59,6 +61,18 @@ public class CompactionsBytemanTest extends CQLTester
             for (ColumnFamilyStore cfs : Keyspace.open(ksname).getColumnFamilyStores())
                 cfs.disableAutoCompaction();
         }
+    }
+
+    @After
+    public void tearDown()
+    {
+        while (STARTED != null && STARTED.getQueueLength() > 0)
+            STARTED.release();
+        STARTED = null;
+
+        while (PROCEED != null && PROCEED.getQueueLength() > 0)
+            PROCEED.release();
+        PROCEED = null;
     }
 
     /*
@@ -140,7 +154,7 @@ public class CompactionsBytemanTest extends CQLTester
     {
         createTable("CREATE TABLE %s (k INT, c INT, v INT, PRIMARY KEY (k, c))");
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        cfs.enableAutoCompaction();
+        cfs.enableAutoCompaction(true);
 
         execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", 0, 1, 1);
         Util.spinAssertEquals(true, () -> CompactionManager.instance.getOngoingBackgroundCompactionsCount() == 0, 5);
