@@ -87,6 +87,7 @@ import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.ColumnDefinitions;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.NettyOptions;
+import com.datastax.driver.core.PoolingOptions;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
@@ -684,7 +685,8 @@ public abstract class CQLTester
                                          .withClusterName("Test Cluster")
                                          .withPort(nativePort)
                                          .withSocketOptions(socketOptions)
-                                         .withNettyOptions(IMMEDIATE_CONNECTION_SHUTDOWN_NETTY_OPTIONS);
+                                         .withNettyOptions(IMMEDIATE_CONNECTION_SHUTDOWN_NETTY_OPTIONS)
+                                         .withPoolingOptions(new PoolingOptions().setPoolTimeoutMillis(10000));
 
         if (user != null)
             builder.withCredentials(user.username, user.password);
