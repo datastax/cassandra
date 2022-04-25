@@ -331,7 +331,7 @@ public class CompactionTask extends AbstractCompactionTask
                 if (null != opObserver)
                     this.obsCloseable = opObserver.onOperationStart(op);
 
-                compObservers.forEach(obs -> obs.onInProgress(this));
+                getCompObservers().forEach(obs -> obs.onInProgress(this));
             }
             catch (Throwable t)
             {
