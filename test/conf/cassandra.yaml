@@ -65,6 +65,12 @@ local_read_size_warn_threshold: 4096KiB
 local_read_size_fail_threshold: 8192KiB
 row_index_read_size_warn_threshold: 4096KiB
 row_index_read_size_fail_threshold: 8192KiB
+read_request_timeout_in_ms: 20000
+range_request_timeout_in_ms: 20000
+write_request_timeout_in_ms: 20000
+counter_write_request_timeout_in_ms: 20000
+cas_contention_timeout_in_ms: 20000
+request_timeout_in_ms: 20000
 
 memtable:
     configurations:
