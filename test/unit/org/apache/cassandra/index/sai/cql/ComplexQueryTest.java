@@ -35,6 +35,7 @@ public class ComplexQueryTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int, a int, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 1, 1);
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 2, 2);
@@ -50,6 +51,7 @@ public class ComplexQueryTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int, a int, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 1, 1);
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 2, 2);
@@ -70,6 +72,7 @@ public class ComplexQueryTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(d) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, a, b, c, d) VALUES (?, ?, ?, ?, ?)", 1, 1, 1, 1, 1);
         execute("INSERT INTO %s (pk, a, b, c, d) VALUES (?, ?, ?, ?, ?)", 2, 2, 1, 1, 1);
@@ -109,6 +112,7 @@ public class ComplexQueryTest extends SAITester
         createTable("CREATE TABLE %s (pk int, ck int, a int, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(ck) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, ck, a) VALUES (?, ?, ?)", 1, 1, 1);
         execute("INSERT INTO %s (pk, ck, a) VALUES (?, ?, ?)", 2, 2, 2);
@@ -129,6 +133,7 @@ public class ComplexQueryTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(d) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(e) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, ck0, ck1, a, b, c, d, e) VALUES (?, ?, ?, ?, ?, ? ,?, ?)", 1, 1, 1, 1, 1, 1, 1, 1);
         execute("INSERT INTO %s (pk, ck0, ck1, a, b, c, d, e) VALUES (?, ?, ?, ?, ?, ? ,?, ?)", 2, 2, 2, 2, 2, 2, 2, 2);
@@ -186,6 +191,7 @@ public class ComplexQueryTest extends SAITester
         createTable("CREATE TABLE %s (pk int, ck int, a int, b int, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, ck, a, b) VALUES (?, ?, ?, ?)", 1, 1, 1, 5);
         execute("INSERT INTO %s (pk, ck, a, b) VALUES (?, ?, ?, ?)", 1, 2, 2, 6);
@@ -206,6 +212,7 @@ public class ComplexQueryTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int, a int, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 1, 1);
         execute("INSERT INTO %s (pk, a) VALUES (?, ?)", 2, 2);
