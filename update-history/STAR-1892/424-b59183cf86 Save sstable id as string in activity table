@@ -1,0 +1,190 @@
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -1,10 +1,3 @@
+-<<<<<<<
+-4.1
+- * Add information whether sstables are dropped to SchemaChangeListener (CASSANDRA-17582)
+- * Save sstable id as string in activity table (CASSANDRA-17585)
+- * Add support for UUID based sstable generation identifiers (CASSANDRA-17048)
+- * Fix a race condition where a keyspace can be oopened while it is being removed (CASSANDRA-17658)
+-=======
+ 5.0-alpha2
+  * Remove deprecated properties in CompressionParams (CASSANDRA-18742)
+  * Add support for repair coordinator to retry messages that timeout (CASSANDRA-18816)
+@@ -28,7 +21,6 @@
+ Merged from 3.0:
+  * Upgrade snappy-java to 1.1.10.4 (CASSANDRA-18878)
+  * Add cqlshrc.sample and credentials.sample into Debian package (CASSANDRA-18818)
+->>>>>>>
+ 
+ 
+ 5.0-alpha1
+--- a/src/java/org/apache/cassandra/db/SystemKeyspace.java
++++ b/src/java/org/apache/cassandra/db/SystemKeyspace.java
+@@ -1488,12 +1488,7 @@
+      */
+     public static RestorableMeter getSSTableReadMeter(String keyspace, String table, SSTableId id)
+     {
+-<<<<<<<
+-        String cql = "SELECT * FROM system.%s WHERE keyspace_name=? and table_name=? and id=?";
+-        UntypedResultSet results = executeInternal(format(cql, SSTABLE_ACTIVITY_V2), keyspace, table, id.toString());
+-=======
+         UntypedResultSet results = readSSTableActivity(keyspace, table, id);
+->>>>>>>
+ 
+         if (results.isEmpty())
+             return new RestorableMeter();
+--- a/src/java/org/apache/cassandra/db/compaction/CompactionLogger.java
++++ b/src/java/org/apache/cassandra/db/compaction/CompactionLogger.java
+@@ -176,11 +176,7 @@
+     {
+         ObjectNode node = json.objectNode();
+         node.put("generation", sstable.descriptor.id.toString());
+-<<<<<<<
+-        node.put("version", sstable.descriptor.version.getVersion());
+-=======
+         node.put("version", sstable.descriptor.version.version);
+->>>>>>>
+         node.put("size", sstable.onDiskLength());
+         JsonNode logResult = strategy.strategyLogger().sstable(sstable);
+         if (logResult != null)
+--- a/src/java/org/apache/cassandra/io/sstable/Descriptor.java
++++ b/src/java/org/apache/cassandra/io/sstable/Descriptor.java
+@@ -186,11 +186,7 @@
+     {
+         buff.append(version).append(separator);
+         buff.append(id.toString());
+-<<<<<<<
+-        buff.append(separator).append(formatType.name);
+-=======
+         buff.append(separator).append(version.format.name());
+->>>>>>>
+     }
+ 
+     public String relativeFilenameFor(Component component)
+--- a/src/java/org/apache/cassandra/io/sstable/format/big/BigTableReader.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/big/BigTableReader.java
+@@ -294,13 +294,7 @@
+             assert key instanceof DecoratedKey; // EQ only make sense if the key is a valid row key
+             if (!isPresentInFilter((IFilter.FilterKey) key))
+             {
+-<<<<<<<
+-                listener.onSSTableSkipped(this, SkippingReason.BLOOM_FILTER);
+-                Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.id);
+-                bloomFilterTracker.addTrueNegative();
+-=======
+                 notifySkipped(SkippingReason.BLOOM_FILTER, listener, operator, updateStats);
+->>>>>>>
+                 return null;
+             }
+         }
+@@ -312,50 +306,11 @@
+             AbstractRowIndexEntry cachedPosition = getCachedPosition(decoratedKey, updateStats);
+             if (cachedPosition != null && cachedPosition.getSSTableFormat() == descriptor.getFormat())
+             {
+-<<<<<<<
+-                // we do not need to track "true positive" for Bloom Filter here because it has been already tracked
+-                // inside getCachedPosition method
+-                listener.onSSTableSelected(this, cachedPosition, SelectionReason.KEY_CACHE_HIT);
+-                Tracing.trace("Key cache hit for sstable {}", descriptor.id);
+-                return cachedPosition;
+-            }
+-        }
+-
+-        // check the smallest and greatest keys in the sstable to see if it can't be present
+-        boolean skip = false;
+-        if (key.compareTo(first) < 0)
+-        {
+-            if (op == Operator.EQ)
+-                skip = true;
+-            else
+-                key = first;
+-
+-            op = Operator.EQ;
+-        }
+-        else
+-        {
+-            int l = last.compareTo(key);
+-            // l <= 0  => we may be looking past the end of the file; we then narrow our behaviour to:
+-            //             1) skipping if strictly greater for GE and EQ;
+-            //             2) skipping if equal and searching GT, and we aren't permitting matching past last
+-            skip = l <= 0 && (l < 0 || (!permitMatchPastLast && op == Operator.GT));
+-        }
+-        if (skip)
+-        {
+-            if (op == Operator.EQ && updateCacheAndStats)
+-                bloomFilterTracker.addFalsePositive();
+-            listener.onSSTableSkipped(this, SkippingReason.MIN_MAX_KEYS);
+-            Tracing.trace("Check against min and max keys allows skipping sstable {}", descriptor.id);
+-            return null;
+-        }
+-
+-=======
+                 notifySelected(SelectionReason.KEY_CACHE_HIT, listener, operator, updateStats, cachedPosition);
+                 return (RowIndexEntry) cachedPosition;
+             }
+         }
+ 
+->>>>>>>
+         int binarySearchResult = indexSummary.binarySearch(key);
+         long sampledPosition = indexSummary.getScanPositionFromBinarySearchResult(binarySearchResult);
+         int sampledIndex = IndexSummary.getIndexFromBinarySearchResult(binarySearchResult);
+@@ -396,14 +351,7 @@
+                     exactMatch = (comparison == 0);
+                     if (v < 0)
+                     {
+-<<<<<<<
+-                        if (op == SSTableReader.Operator.EQ && updateCacheAndStats)
+-                            bloomFilterTracker.addFalsePositive();
+-                        listener.onSSTableSkipped(this, SkippingReason.PARTITION_INDEX_LOOKUP);
+-                        Tracing.trace("Partition index lookup allows skipping sstable {}", descriptor.id);
+-=======
+                         notifySkipped(SkippingReason.PARTITION_INDEX_LOOKUP, listener, operator, updateStats);
+->>>>>>>
+                         return null;
+                     }
+                 }
+@@ -431,14 +379,7 @@
+                         // store exact match for the key
+                         cacheKey(decoratedKey, indexEntry);
+                     }
+-<<<<<<<
+-                    if (op == Operator.EQ && updateCacheAndStats)
+-                        bloomFilterTracker.addTruePositive();
+-                    listener.onSSTableSelected(this, indexEntry, SelectionReason.INDEX_ENTRY_FOUND);
+-                    Tracing.trace("Partition index with {} entries found for sstable {}", indexEntry.columnsIndexCount(), descriptor.id);
+-=======
+                     notifySelected(SelectionReason.INDEX_ENTRY_FOUND, listener, operator, updateStats, indexEntry);
+->>>>>>>
+                     return indexEntry;
+                 }
+ 
+@@ -451,14 +392,7 @@
+             throw new CorruptSSTableException(e, path);
+         }
+ 
+-<<<<<<<
+-        if (op == SSTableReader.Operator.EQ && updateCacheAndStats)
+-            bloomFilterTracker.addFalsePositive();
+-        listener.onSSTableSkipped(this, SkippingReason.INDEX_ENTRY_NOT_FOUND);
+-        Tracing.trace("Partition index lookup complete (bloom filter false positive) for sstable {}", descriptor.id);
+-=======
+         notifySkipped(SkippingReason.INDEX_ENTRY_NOT_FOUND, listener, operator, updateStats);
+->>>>>>>
+         return null;
+     }
+ 
+--- a/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/SSTableReaderTest.java
+@@ -1133,11 +1133,7 @@
+         {
+             File f = notLiveDesc.fileFor(c);
+             assertTrue(f.exists());
+-<<<<<<<
+-            assertTrue(f.toString().contains(String.format("-%s-", id)));
+-=======
+             assertTrue(f.toString().contains(format("-%s-", id)));
+->>>>>>>
+             f.deleteOnExit();
+             assertFalse(sstable.descriptor.fileFor(c).exists());
+         }
