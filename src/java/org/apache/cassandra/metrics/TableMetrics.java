@@ -938,6 +938,12 @@ public class TableMetrics
             return cnt;
         });
     }
+    
+    @VisibleForTesting
+    public MovingAverage flushSizeOnDisk()
+    {
+        return flushSizeOnDisk;
+    }
 
     private Memtable.MemoryUsage getMemoryUsageWithIndexes(ColumnFamilyStore cfs)
     {
