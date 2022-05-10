@@ -28,6 +28,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import javax.annotation.concurrent.ThreadSafe;
+
 import com.google.common.collect.ImmutableList;
 
 import org.slf4j.Logger;
@@ -37,6 +39,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.NonThrowingCloseable;
 
+@ThreadSafe
 public class ActiveOperations implements TableOperationObserver
 {
     private static final Logger logger = LoggerFactory.getLogger(ActiveOperations.class);
@@ -77,7 +80,10 @@ public class ActiveOperations implements TableOperationObserver
     public List<TableOperation> getTableOperations()
     {
         ImmutableList.Builder<TableOperation> builder = ImmutableList.builder();
-        builder.addAll(operations);
+        synchronized (operations)
+        {
+            builder.addAll(operations);
+        }
         return builder.build();
     }
 
