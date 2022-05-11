@@ -283,16 +283,15 @@ public abstract class CompactionAggregate
      * @return a pair containing the result on the left (true if the compaction is found, false otherwise), and
      * a matching compaction on the right (any compaction that is equal, including the same instance).
      */
-    public Pair<Boolean, CompactionPick> contains(CompactionPick compaction)
+    public Pair<Boolean, CompactionPick> containsSameInstance(CompactionPick compaction)
     {
         List<CompactionPick> activeCompactions = getActive();
         int existingCompactionIdx = activeCompactions.indexOf(compaction);
         CompactionPick existingCompaction = existingCompactionIdx == -1 ? null : activeCompactions.get(existingCompactionIdx);
-        if (existingCompaction == null || existingCompaction != compaction)
-            return Pair.create(false, existingCompaction);
-
-        return Pair.create(true, existingCompaction);
+        boolean containsSameInstance = existingCompaction != null && existingCompaction == compaction;
+        return Pair.create(containsSameInstance, existingCompaction);
     }
+    
     /**
      * Replace an existing compaction pick with a new one, this is used by CNDB because it creates new
      * compactions from etcd. If the existing compaction is null, simply add the replacement.

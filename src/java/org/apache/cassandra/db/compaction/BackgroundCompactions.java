@@ -198,7 +198,7 @@ public class BackgroundCompactions
                 if (logger.isTraceEnabled())
                     logger.trace("Found aggregate for compaction: {}", existingAggregate);
 
-                Pair<Boolean, CompactionPick> contains = existingAggregate.contains(compaction);
+                Pair<Boolean, CompactionPick> contains = existingAggregate.containsSameInstance(compaction);
                 if (!contains.left)
                 {
                     // add the compaction just submitted to the aggregate that was found if it doesn't already contain it

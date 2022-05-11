@@ -200,7 +200,7 @@ public class BackgroundCompactionsTest
         CompactionPick compaction = Mockito.mock(CompactionPick.class);
         when(aggregate.getSelected()).thenReturn(compaction);
         when(aggregate.getMatching(any(TreeMap.class))).thenReturn(aggregate);
-        when(aggregate.contains(eq(compaction))).thenReturn(Pair.create(true, compaction)); // ensure the aggregate already has the compaction
+        when(aggregate.containsSameInstance(eq(compaction))).thenReturn(Pair.create(true, compaction)); // ensure the aggregate already has the compaction
 
         backgroundCompactions.setSubmitted(strategyContainer, uuid, aggregate);
 
@@ -262,7 +262,7 @@ public class BackgroundCompactionsTest
         when(aggregate.getMatching(any(TreeMap.class))).thenReturn(pending.get(0));
 
         CompactionPick existingCompaction = pending.get(0).getActive().get(0); // ensure the matching aggregate does not have the compaction
-        when(pending.get(0).contains(eq(compaction))).thenReturn(Pair.create(false, existingCompaction));
+        when(pending.get(0).containsSameInstance(eq(compaction))).thenReturn(Pair.create(false, existingCompaction));
         when(pending.get(0).withReplacedCompaction(eq(compaction), eq(existingCompaction))).thenReturn(pending.get(0));
 
         backgroundCompactions.setSubmitted(strategyContainer, uuid, aggregate);
