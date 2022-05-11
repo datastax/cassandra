@@ -116,6 +116,7 @@ import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.MigrationCoordinator;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.ClientState;
@@ -159,6 +160,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.CONSISTENT
 import static org.apache.cassandra.config.CassandraRelevantProperties.RING_DELAY;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_CASSANDRA_SUITENAME;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_CASSANDRA_TESTTAG;
+import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_FLUSH_LOCAL_SCHEMA_CHANGES;
 import static org.apache.cassandra.distributed.api.Feature.BLANK_GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.JMX;
@@ -728,7 +730,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 else
                 {
                     Schema.instance.startSync();
-                    Stream peers = cluster.stream().filter(instance -> ((IInstance) instance).isValid());
+                    Stream<IInstance> peers = cluster.stream().filter(instance -> ((IInstance) instance).isValid());
                     SystemKeyspace.setLocalHostId(config.hostId());
                     if (config.has(BLANK_GOSSIP))
                         peers.forEach(peer -> GossipHelper.statusToBlank((IInvokableInstance) peer).accept(this));
@@ -855,6 +857,9 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
     public Future<Void> shutdown(boolean graceful)
     {
         inInstancelogger.info("Shutting down instance {} / {}", config.num(), config.broadcastAddress().getHostString());
+        if (!TEST_FLUSH_LOCAL_SCHEMA_CHANGES.getBoolean(true))
+            flush(SchemaKeyspace.metadata().name);
+
         Future<?> future = async((ExecutorService executor) -> {
             Throwable error = null;
 
