@@ -30,6 +30,7 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.api.IInstance;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
+import org.apache.cassandra.distributed.api.Row;
 import org.apache.cassandra.distributed.api.SimpleQueryResult;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexStatusManager;
@@ -119,7 +120,7 @@ public class SAIUtil
         String query = String.format("SELECT index_name FROM system_views.%s WHERE keyspace_name = '%s' ALLOW FILTERING",
                                      ColumnIndexesSystemView.NAME, keyspace);
         SimpleQueryResult result = cluster.get(1).executeInternalWithResult(query);
-        return Streams.stream(result)
+        return Streams.stream((Iterable<Row>) result)
                       .map(row -> (String) row.get("index_name"))
                       .collect(Collectors.toList());
     }
