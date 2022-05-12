@@ -75,7 +75,6 @@ import static java.nio.file.StandardOpenOption.READ;
 import static java.nio.file.StandardOpenOption.TRUNCATE_EXISTING;
 import static java.nio.file.StandardOpenOption.WRITE;
 import static java.util.Collections.unmodifiableSet;
-import static org.apache.cassandra.config.CassandraRelevantProperties.USE_NIX_RECURSIVE_DELETE;
 import static org.apache.cassandra.utils.Throwables.merge;
 
 /**
@@ -100,6 +99,7 @@ public final class PathUtils
     private static final NoSpamLogger nospam1m = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     private static Consumer<Path> onDeletion = path -> {};
+    private static final boolean USE_NIX_RECURSIVE_DELETE = CassandraRelevantProperties.USE_NIX_RECURSIVE_DELETE.getBoolean();
 
     public static FileChannel newReadChannel(Path path) throws NoSuchFileException
     {
@@ -393,7 +393,7 @@ public final class PathUtils
      */
     public static void deleteRecursive(Path path)
     {
-        if (USE_NIX_RECURSIVE_DELETE.getBoolean() && path.getFileSystem() == FileSystems.getDefault())
+        if (USE_NIX_RECURSIVE_DELETE && path.getFileSystem() == FileSystems.getDefault())
         {
             deleteRecursiveUsingNixCommand(path, false);
             return;
@@ -413,7 +413,7 @@ public final class PathUtils
      */
     public static void deleteQuietly(Path path)
     {
-        if (USE_NIX_RECURSIVE_DELETE.getBoolean() && path.getFileSystem() == FileSystems.getDefault())
+        if (USE_NIX_RECURSIVE_DELETE && path.getFileSystem() == FileSystems.getDefault())
         {
             deleteRecursiveUsingNixCommand(path, true);
             return;
@@ -433,7 +433,7 @@ public final class PathUtils
      */
     public static void deleteRecursive(Path path, RateLimiter rateLimiter)
     {
-        if (USE_NIX_RECURSIVE_DELETE.getBoolean() && path.getFileSystem() == java.nio.file.FileSystems.getDefault())
+        if (USE_NIX_RECURSIVE_DELETE && path.getFileSystem() == java.nio.file.FileSystems.getDefault())
         {
             deleteRecursiveUsingNixCommand(path, false);
             return;
