@@ -1452,7 +1452,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 for (SSTableMultiWriter writer : flushResults)
                 {
                     accumulate = writer.commit(accumulate);
-                    metric.flushSizeOnDisk.update(writer.getOnDiskBytesWritten());
+                    metric.flushSizeOnDisk().update(writer.getOnDiskBytesWritten());
                 }
 
                 maybeFail(txn.commit(accumulate));
