@@ -134,7 +134,7 @@ public class TableMetrics
     /** The average flushed size for sstables, which is derived from {@link this#bytesFlushed}. */
     public final MovingAverage flushSize;
     /** The average on-disk flushed size for sstables. */
-    public final MovingAverage flushSizeOnDisk;
+    private final MovingAverage flushSizeOnDisk;
     /** The average number of sstables created on flush. */
     public final MovingAverage flushSegmentCount;
     /** The average duration per 1Kb of data flushed, in nanoseconds. */
@@ -924,6 +924,12 @@ public class TableMetrics
         rowIndexSize = createTableHistogram("RowIndexSize", cfs.keyspace.metric.rowIndexSize, false);
 
         formatSpecificGauges = createFormatSpecificGauges(cfs);
+    }
+    
+    @VisibleForTesting
+    public MovingAverage flushSizeOnDisk()
+    {
+        return flushSizeOnDisk;
     }
 
     private Memtable.MemoryUsage getMemoryUsageWithIndexes(ColumnFamilyStore cfs)
