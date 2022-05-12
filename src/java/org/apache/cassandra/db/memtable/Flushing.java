@@ -248,7 +248,7 @@ public class Flushing
                                         toFlush.memtable().getFinalCommitLogUpperBound());
                             // Update the metrics
                             metrics.incBytesFlushed(toFlush.memtable().getLiveDataSize(), bytesFlushed, before - Clock.Global.nanoTime());
-                            metrics.flushSizeOnDisk.update(onDiskBytesWritten);
+                            metrics.flushSizeOnDisk().update(onDiskBytesWritten);
                             metrics.flushSegmentCount.update(segmentCount);
                         }
 
