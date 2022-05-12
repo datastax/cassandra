@@ -81,7 +81,7 @@ public class ShardedMultiWriterTest extends CQLTester
         cfs.disableAutoCompaction();
 
         int rowCount = insertData(totSizeBytes);
-        cfs.metric.flushSizeOnDisk.update(totSizeBytes); // flush size is only updated after the flush completes; set here so that flush uses correct size
+        cfs.metric.flushSizeOnDisk().update(totSizeBytes); // flush size is only updated after the flush completes; set here so that flush uses correct size
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         assertEquals(numOutputSSTables, cfs.getLiveSSTables().size());
