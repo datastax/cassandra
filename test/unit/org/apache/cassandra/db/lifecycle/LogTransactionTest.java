@@ -1312,7 +1312,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
 
     private static SSTableReader sstable(File dataFolder, ColumnFamilyStore cfs, int generation, int size) throws IOException
     {
-        Descriptor descriptor = new Descriptor(dataFolder, cfs.keyspace.getName(), cfs.getTableName(), new SequenceBasedSSTableId(generation), SSTableFormat.Type.BIG);
+        Descriptor descriptor = new Descriptor(dataFolder, cfs.getKeyspaceName(), cfs.getTableName(), new SequenceBasedSSTableId(generation), SSTableFormat.Type.BIG);
         Set<Component> components = ImmutableSet.of(Component.DATA, Component.PRIMARY_INDEX, Component.FILTER, Component.TOC);
         for (Component component : components)
         {

@@ -239,12 +239,10 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * The underlying column family containing the source data for these indexes
      */
     public final ColumnFamilyStore baseCfs;
-    private final Keyspace keyspace;
 
     public SecondaryIndexManager(ColumnFamilyStore baseCfs)
     {
         this.baseCfs = baseCfs;
-        this.keyspace = baseCfs.keyspace;
         baseCfs.getTracker().subscribe(this);
     }
 
@@ -503,7 +501,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public static boolean isIndexColumnFamilyStore(ColumnFamilyStore cfs)
     {
-        return isIndexColumnFamily(cfs.name);
+        return isIndexColumnFamily(cfs.getTableName());
     }
 
     /**
@@ -526,7 +524,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public static ColumnFamilyStore getParentCfs(ColumnFamilyStore cfs)
     {
-        String parentCfs = getParentCfsName(cfs.name);
+        String parentCfs = getParentCfsName(cfs.getTableName());
         return cfs.keyspace.getColumnFamilyStore(parentCfs);
     }
 
@@ -550,7 +548,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public static String getIndexName(ColumnFamilyStore cfs)
     {
-        return getIndexName(cfs.name);
+        return getIndexName(cfs.getTableName());
     }
 
     /**
@@ -729,7 +727,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     @VisibleForTesting
     public synchronized void markIndexesBuilding(Set<Index> indexes, boolean isFullRebuild, boolean isNewCF)
     {
-        String keyspaceName = baseCfs.keyspace.getName();
+        String keyspaceName = baseCfs.getKeyspaceName();
 
         // First step is to validate against concurrent rebuilds; it would be more optimized to do everything on a single
         // step, but we're not really expecting a very high number of indexes, and this isn't on any hot path, so
@@ -781,7 +779,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             {
                 inProgressBuilds.remove(indexName);
                 if (!needsFullRebuild.contains(indexName) && DatabaseDescriptor.isDaemonInitialized())
-                    SystemKeyspace.setIndexBuilt(baseCfs.keyspace.getName(), indexName);
+                    SystemKeyspace.setIndexBuilt(baseCfs.getKeyspaceName(), indexName);
             }
         }
     }
@@ -805,7 +803,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             counter.decrementAndGet();
 
             if (DatabaseDescriptor.isDaemonInitialized())
-                SystemKeyspace.setIndexRemoved(baseCfs.keyspace.getName(), indexName);
+                SystemKeyspace.setIndexRemoved(baseCfs.getKeyspaceName(), indexName);
 
             needsFullRebuild.add(indexName);
 
@@ -834,13 +832,13 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     private synchronized void markIndexRemoved(String indexName)
     {
-        SystemKeyspace.setIndexRemoved(baseCfs.keyspace.getName(), indexName);
+        SystemKeyspace.setIndexRemoved(baseCfs.getKeyspaceName(), indexName);
         queryableIndexes.remove(indexName);
         writableIndexes.remove(indexName);
         needsFullRebuild.remove(indexName);
         inProgressBuilds.remove(indexName);
         // remove existing indexing status
-        propagateLocalIndexStatus(keyspace.getName(), indexName, Index.Status.DROPPED);
+        propagateLocalIndexStatus(baseCfs.getKeyspaceName(), indexName, Index.Status.DROPPED);
     }
 
     public Index getIndexByName(String indexName)
@@ -981,7 +979,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         indexes.values().stream()
                .map(i -> i.getIndexMetadata().name)
                .forEach(allIndexNames::add);
-        return SystemKeyspace.getBuiltIndexes(baseCfs.keyspace.getName(), allIndexNames);
+        return SystemKeyspace.getBuiltIndexes(baseCfs.getKeyspaceName(), allIndexNames);
     }
 
     /**
@@ -1022,7 +1020,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             while (!pager.isExhausted())
             {
                 try (ReadExecutionController controller = cmd.executionController();
-                     WriteContext ctx = keyspace.getWriteHandler().createContextForIndexing();
+                     WriteContext ctx = baseCfs.keyspace.getWriteHandler().createContextForIndexing();
                      UnfilteredPartitionIterator page = pager.fetchPageUnfiltered(baseCfs.metadata(), pageSize, controller))
                 {
                     if (!page.hasNext())
@@ -1389,7 +1387,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                                           int nowInSec)
     {
         // the check for whether there are any registered indexes is already done in CompactionIterator
-        return new IndexGCTransaction(key, regularAndStaticColumns, keyspace, versions, nowInSec, listIndexGroups(), writableIndexSelector());
+        return new IndexGCTransaction(key, regularAndStaticColumns, baseCfs.keyspace, versions, nowInSec, listIndexGroups(), writableIndexSelector());
     }
 
     /**
@@ -1402,7 +1400,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         if (!hasIndexes())
             return CleanupTransaction.NO_OP;
 
-        return new CleanupGCTransaction(key, regularAndStaticColumns, keyspace, nowInSec, listIndexGroups(), writableIndexSelector());
+        return new CleanupGCTransaction(key, regularAndStaticColumns, baseCfs.keyspace, nowInSec, listIndexGroups(), writableIndexSelector());
     }
 
     /**
@@ -1823,7 +1821,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         String name = index.getIndexMetadata().name;
         if (indexes.get(name) == index)
         {
-            propagateLocalIndexStatus(keyspace.getName(), name, status);
+            propagateLocalIndexStatus(baseCfs.getKeyspaceName(), name, status);
             if (!index.isQueryable(status))
                 queryableIndexes.remove(name);
         }
@@ -1834,7 +1832,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         String name = index.getIndexMetadata().name;
         if (indexes.get(name) == index)
         {
-            propagateLocalIndexStatus(keyspace.getName(), name, status);
+            propagateLocalIndexStatus(baseCfs.getKeyspaceName(), name, status);
             if (index.isQueryable(status))
             {
                 if (queryableIndexes.add(name))

@@ -181,7 +181,7 @@ public class Tracker
         for (SSTableReader sstable : newSSTables)
         {
             if (logger.isTraceEnabled())
-                logger.trace("adding {} to list of files tracked for {}.{}", sstable.descriptor, cfstore.keyspace.getName(), cfstore.name);
+                logger.trace("adding {} to list of files tracked for {}.{}", sstable.descriptor, cfstore.getKeyspaceName(), cfstore.getTableName());
             try
             {
                 add += sstable.bytesOnDisk();
@@ -195,7 +195,7 @@ public class Tracker
         for (SSTableReader sstable : oldSSTables)
         {
             if (logger.isTraceEnabled())
-                logger.trace("removing {} from list of files tracked for {}.{}", sstable.descriptor, cfstore.keyspace.getName(), cfstore.name);
+                logger.trace("removing {} from list of files tracked for {}.{}", sstable.descriptor, cfstore.getKeyspaceName(), cfstore.getTableName());
             try
             {
                 subtract += sstable.bytesOnDisk();

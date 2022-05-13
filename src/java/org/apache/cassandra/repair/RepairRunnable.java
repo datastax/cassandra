@@ -271,7 +271,7 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
         ActiveRepairService.instance.recordRepairStatus(cmd, ParentRepairStatus.IN_PROGRESS, ImmutableList.of());
 
         List<ColumnFamilyStore> columnFamilies = getColumnFamilies();
-        String[] cfnames = columnFamilies.stream().map(cfs -> cfs.name).toArray(String[]::new);
+        String[] cfnames = columnFamilies.stream().map(ColumnFamilyStore::getTableName).toArray(String[]::new);
 
         this.traceState = maybeCreateTraceState(columnFamilies);
 
@@ -304,7 +304,7 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
 
         StringBuilder cfsb = new StringBuilder();
         for (ColumnFamilyStore cfs : columnFamilyStores)
-            cfsb.append(", ").append(cfs.keyspace.getName()).append(".").append(cfs.name);
+            cfsb.append(", ").append(cfs.getKeyspaceName()).append(".").append(cfs.getTableName());
 
         UUID sessionId = Tracing.instance.newSession(ClientState.forInternalCalls(), Tracing.TraceType.REPAIR);
         TraceState traceState = Tracing.instance.begin("repair", ImmutableMap.of("keyspace", keyspace, "columnFamilies",

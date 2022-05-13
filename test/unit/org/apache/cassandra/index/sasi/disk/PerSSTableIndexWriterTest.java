@@ -88,7 +88,7 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
         ColumnFamilyStore cfs = Keyspace.open(KS_NAME).getColumnFamilyStore(CF_NAME);
         ColumnMetadata column = cfs.metadata().getColumn(UTF8Type.instance.decompose("age"));
 
-        SASIIndex sasi = (SASIIndex) cfs.indexManager.getIndexByName(cfs.name + "_age");
+        SASIIndex sasi = (SASIIndex) cfs.indexManager.getIndexByName(cfs.getTableName() + "_age");
 
         File directory = cfs.getDirectories().getDirectoryForNewSSTables();
         Descriptor descriptor = cfs.newSSTableDescriptor(directory);
@@ -180,7 +180,7 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
         ColumnFamilyStore cfs = Keyspace.open(KS_NAME).getColumnFamilyStore(CF_NAME);
         ColumnMetadata column = cfs.metadata().getColumn(UTF8Type.instance.decompose(columnName));
 
-        SASIIndex sasi = (SASIIndex) cfs.indexManager.getIndexByName(cfs.name + "_" + columnName);
+        SASIIndex sasi = (SASIIndex) cfs.indexManager.getIndexByName(cfs.getTableName() + "_" + columnName);
 
         File directory = cfs.getDirectories().getDirectoryForNewSSTables();
         Descriptor descriptor = cfs.newSSTableDescriptor(directory);

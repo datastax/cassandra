@@ -273,7 +273,7 @@ public class CompactionStrategyManagerTest
         final int numDir = 4;
         ColumnFamilyStore cfs = createJBODMockCFS(numDir);
         CompactionStrategyFactory strategyFactory = new CompactionStrategyFactory(cfs);
-        Keyspace.open(cfs.keyspace.getName()).getColumnFamilyStore(cfs.name).disableAutoCompaction();
+        Keyspace.open(cfs.getKeyspaceName()).getColumnFamilyStore(cfs.getTableName()).disableAutoCompaction();
         assertTrue(cfs.getLiveSSTables().isEmpty());
         List<SSTableReader> transientRepairs = new ArrayList<>();
         List<SSTableReader> pendingRepair = new ArrayList<>();
@@ -283,10 +283,10 @@ public class CompactionStrategyManagerTest
         for (int i = 0; i < numDir; i++)
         {
             int key = 100 * i;
-            transientRepairs.add(createSSTableWithKey(cfs.keyspace.getName(), cfs.name, key++));
-            pendingRepair.add(createSSTableWithKey(cfs.keyspace.getName(), cfs.name, key++));
-            unrepaired.add(createSSTableWithKey(cfs.keyspace.getName(), cfs.name, key++));
-            repaired.add(createSSTableWithKey(cfs.keyspace.getName(), cfs.name, key++));
+            transientRepairs.add(createSSTableWithKey(cfs.getKeyspaceName(), cfs.getTableName(), key++));
+            pendingRepair.add(createSSTableWithKey(cfs.getKeyspaceName(), cfs.getTableName(), key++));
+            unrepaired.add(createSSTableWithKey(cfs.getKeyspaceName(), cfs.getTableName(), key++));
+            repaired.add(createSSTableWithKey(cfs.getKeyspaceName(), cfs.getTableName(), key++));
         }
 
         cfs.mutateRepaired(transientRepairs, 0, UUID.randomUUID(), true);

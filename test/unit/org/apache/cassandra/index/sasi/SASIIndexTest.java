@@ -919,14 +919,14 @@ public class SASIIndexTest
         Assert.assertTrue(rows.toString(), rows.isEmpty());
 
         // now let's trigger index rebuild and check if we got the data back
-        store.indexManager.rebuildIndexesBlocking(Sets.newHashSet(store.name + "_data_output_id"));
+        store.indexManager.rebuildIndexesBlocking(Sets.newHashSet(store.getTableName() + "_data_output_id"));
 
         rows = getIndexed(store, 10, buildExpression(dataOutputId, Operator.LIKE_CONTAINS, UTF8Type.instance.decompose("a")));
         assertRows(rows, "key1", "key2");
 
         // also let's try to build an index for column which has no data to make sure that doesn't fail
-        store.indexManager.rebuildIndexesBlocking(Sets.newHashSet(store.name + "_first_name"));
-        store.indexManager.rebuildIndexesBlocking(Sets.newHashSet(store.name + "_data_output_id"));
+        store.indexManager.rebuildIndexesBlocking(Sets.newHashSet(store.getTableName() + "_first_name"));
+        store.indexManager.rebuildIndexesBlocking(Sets.newHashSet(store.getTableName() + "_data_output_id"));
 
         rows = getIndexed(store, 10, buildExpression(dataOutputId, Operator.LIKE_CONTAINS, UTF8Type.instance.decompose("a")));
         assertRows(rows, "key1", "key2");
@@ -2422,7 +2422,7 @@ public class SASIIndexTest
             put("key1", Pair.create("Pavel", 14));
         }}, false);
 
-        ColumnIndex index = ((SASIIndex) store.indexManager.getIndexByName(store.name + "_first_name")).getIndex();
+        ColumnIndex index = ((SASIIndex) store.indexManager.getIndexByName(store.getTableName() + "_first_name")).getIndex();
         IndexMemtable beforeFlushMemtable = index.getCurrentMemtable();
 
         PartitionRangeReadCommand command =

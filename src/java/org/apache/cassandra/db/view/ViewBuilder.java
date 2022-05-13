@@ -95,7 +95,7 @@ class ViewBuilder
             SystemDistributedKeyspace.startViewBuild(ksName, view.name, localHostId);
 
             logger.debug("Starting build of view({}.{}). Flushing base table {}.{}",
-                         ksName, view.name, ksName, baseCfs.name);
+                         ksName, view.name, ksName, baseCfs.getTableName());
             baseCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.VIEW_BUILD_STARTED);
 
             loadStatusAndBuild();

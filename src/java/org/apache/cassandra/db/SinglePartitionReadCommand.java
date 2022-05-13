@@ -424,7 +424,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     private UnfilteredRowIterator getThroughCache(ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         assert !cfs.isIndex(); // CASSANDRA-5732
-        assert cfs.isRowCacheEnabled() : String.format("Row cache is not enabled on table [%s]", cfs.name);
+        assert cfs.isRowCacheEnabled() : String.format("Row cache is not enabled on table [%s]", cfs.getTableName());
 
         RowCacheKey key = new RowCacheKey(metadata(), partitionKey());
 
@@ -571,7 +571,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     public UnfilteredRowIterator queryMemtableAndDisk(ColumnFamilyStore cfs, ReadExecutionController executionController)
     {
         assert executionController != null && executionController.validForReadOn(cfs);
-        Tracing.trace("Executing single-partition query on {}", cfs.name);
+        Tracing.trace("Executing single-partition query on {}", cfs.getTableName());
 
         return queryMemtableAndDiskInternal(cfs, executionController, System.nanoTime());
     }

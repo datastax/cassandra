@@ -63,8 +63,8 @@ public class Flushing
         LifecycleTransaction ongoingFlushTransaction = memtable.setFlushTransaction(txn);
         Preconditions.checkState(ongoingFlushTransaction == null,
                                  "Attempted to flush Memtable more than once on %s.%s",
-                                 cfs.keyspace.getName(),
-                                 cfs.name);
+                                 cfs.getKeyspaceName(),
+                                 cfs.getTableName());
 
         DiskBoundaries diskBoundaries = cfs.getDiskBoundaries();
         List<PartitionPosition> boundaries = diskBoundaries.getPositions();

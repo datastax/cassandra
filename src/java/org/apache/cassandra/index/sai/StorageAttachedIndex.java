@@ -541,7 +541,7 @@ public class StorageAttachedIndex implements Index
         Set<SSTableReader> sstables = baseCfs.getLiveSSTables();
 
         // Initialize the SSTable indexes w/ valid existing components...
-        assert group != null : "Missing index group on " + baseCfs.name;
+        assert group != null : "Missing index group on " + baseCfs.getTableName();
         group.onSSTableChanged(Collections.emptyList(), sstables, Collections.singleton(this), validate);
 
         // ...then identify and rebuild the SSTable indexes that are missing.
@@ -675,7 +675,7 @@ public class StorageAttachedIndex implements Index
     @Override
     public String toString()
     {
-        return String.format("%s.%s.%s", baseCfs.keyspace.getName(), baseCfs.name, config == null ? "?" : config.name);
+        return String.format("%s.%s.%s", baseCfs.getKeyspaceName(), baseCfs.getTableName(), config == null ? "?" : config.name);
     }
 
     /**

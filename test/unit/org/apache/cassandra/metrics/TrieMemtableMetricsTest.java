@@ -195,7 +195,7 @@ public class TrieMemtableMetricsTest extends SchemaLoader
 
     private TrieMemtableMetricsView getMemtableMetrics(ColumnFamilyStore cfs)
     {
-        return TrieMemtableMetricsView.getOrCreate(cfs.keyspace.getName(), cfs.name);
+        return TrieMemtableMetricsView.getOrCreate(cfs.getKeyspaceName(), cfs.getTableName());
     }
 
     private void writeAndFlush(int rows) throws IOException, ExecutionException, InterruptedException
