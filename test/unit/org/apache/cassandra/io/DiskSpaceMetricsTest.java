@@ -104,7 +104,7 @@ public class DiskSpaceMetricsTest extends CQLTester
     {
         createTable(KEYSPACE_PER_TEST, "CREATE TABLE %s (pk bigint, PRIMARY KEY (pk))");
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore(KEYSPACE_PER_TEST);
-        assertTrue(Double.isNaN(cfs.metric.flushSizeOnDisk.get()));
+        assertTrue(Double.isNaN(cfs.metric.flushSizeOnDisk().get()));
 
         // disable compaction so nothing changes between calculations
         cfs.disableAutoCompaction();
@@ -118,7 +118,7 @@ public class DiskSpaceMetricsTest extends CQLTester
         MovingAverage expectedMetrics = ExpMovingAverage.decayBy1000();
         for (SSTableReader rdr : liveSSTables)
             expectedMetrics.update(rdr.onDiskLength());
-        assertThat(cfs.metric.flushSizeOnDisk.get()).isEqualTo(expectedMetrics.get());
+        assertThat(cfs.metric.flushSizeOnDisk().get()).isEqualTo(expectedMetrics.get());
     }
 
     private void insert(ColumnFamilyStore cfs, long value) throws Throwable
