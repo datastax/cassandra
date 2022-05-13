@@ -101,7 +101,7 @@ public class DiskSpaceMetricsTest extends CQLTester
     {
         createTable(KEYSPACE_PER_TEST, "CREATE TABLE %s (pk bigint, PRIMARY KEY (pk))");
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore(KEYSPACE_PER_TEST);
-        assertTrue(Double.isNaN(cfs.metric.flushSizeOnDisk.get()));
+        assertTrue(Double.isNaN(cfs.metric.flushSizeOnDisk().get()));
 
         // disable compaction so nothing changes between calculations
         cfs.disableAutoCompaction();
@@ -117,7 +117,7 @@ public class DiskSpaceMetricsTest extends CQLTester
             totalSize += rdr.onDiskLength();
         }
         final int avgSize = totalSize / liveSSTables.size();
-        assertEquals(avgSize, cfs.metric.flushSizeOnDisk.get(), 0.05 * avgSize);
+        assertEquals(avgSize, cfs.metric.flushSizeOnDisk().get(), 0.05 * avgSize);
     }
 
     private void insert(ColumnFamilyStore cfs, long value) throws Throwable
