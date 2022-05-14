@@ -22,8 +22,7 @@ import java.io.IOError;
 import java.io.IOException;
 import java.util.Comparator;
 import java.util.Iterator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
 import com.intel.pmem.llpl.TransactionalHeap;
 import com.intel.pmem.llpl.TransactionalMemoryBlock;
 import com.intel.pmem.llpl.util.AutoCloseableIterator;
@@ -73,7 +72,6 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
     private DeletionTime deletionTime;
     private AutoCloseableIterator cartIterator;
     private Row staticRow = Rows.EMPTY_STATIC_ROW;
-    private static final Logger logger = LoggerFactory.getLogger(PmemRowAndRtmIterator.class);
     private boolean isFirstMarker = true;
     private EncodingStats stats;
     private boolean isSliceDone = false;
@@ -167,7 +165,7 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
         LongART.Entry nextEntry = rowIterator.next();
         TransactionalMemoryBlock cellMemoryBlock = heap.memoryBlockFromHandle(nextEntry.getValue());
         ByteComparable clusteringByteComparable = ByteComparable.fixedLength(nextEntry.getKey());
-        Clustering clustering = metadata.comparator.clusteringFromByteComparable(ByteArrayAccessor.instance, clusteringByteComparable);
+        Clustering<?> clustering = metadata.comparator.clusteringFromByteComparable(ByteArrayAccessor.instance, clusteringByteComparable);
         builder.newRow(clustering);
         DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(cellMemoryBlock, heap);
         try
@@ -178,7 +176,7 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
             Unfiltered unfiltered = PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
             return unfiltered;
         }
-        catch (IOException e)
+        catch (IndexOutOfBoundsException | IOException e)
         {
             closeCartIterator();
             throw new IOError(e);
@@ -199,7 +197,7 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
             Unfiltered unfiltered = PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
             return (RangeTombstoneMarker) unfiltered;
         }
-        catch (IOException e)
+        catch (IndexOutOfBoundsException | IOException e)
         {
             closeCartIterator();
             throw new IOError(e);
@@ -499,7 +497,7 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
         }
         catch (Exception e)
         {
-            e.printStackTrace();
+            throw new RuntimeException(e.getMessage());
         }
     }
 }

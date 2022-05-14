@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.memtable.pmem;
 
+import java.io.IOError;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -219,6 +220,7 @@ public class PmemTableInfo
     }
 
     //Persist SerializationHeader on every table alter
+    @SuppressWarnings({ "resource" })
     private void persistSerializationHeader()
     {
         SerializationHeader sHeader = new SerializationHeader(false,
@@ -234,9 +236,9 @@ public class PmemTableInfo
             {
                 SerializationHeader.serializer.serialize(BigFormat.latestVersion, sHeader.toComponent(), out);
             }
-            catch (IOException e)
+            catch (IndexOutOfBoundsException | IOException e)
             {
-                e.printStackTrace();
+                throw new IOError(e);
             }
             long index = sHeaderLongLinkedList.size();
             sHeaderLongLinkedList.add(index, serializationHeaderBlock.handle());
@@ -267,9 +269,9 @@ public class PmemTableInfo
                 SerializationHeader sHeader = toSerializationHeader(component, metadata);
                 serializationHeaderList.add(sHeader);
             }
-            catch (IOException e)
+            catch (IndexOutOfBoundsException | IOException e)
             {
-                e.printStackTrace();
+                throw new IOError(e);
             }
         }
     }

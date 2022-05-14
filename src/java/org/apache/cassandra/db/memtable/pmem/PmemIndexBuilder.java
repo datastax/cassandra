@@ -55,7 +55,7 @@ public class PmemIndexBuilder extends SecondaryIndexBuilder
     private LongART.Entry nextEntry;
     private final ConcurrentLongART memtableCart;
     private final UUID compactionId;
-    private volatile long keysBuilt = 0;
+    private long keysBuilt = 0;
 
 
     public PmemIndexBuilder(ColumnFamilyStore cfs, Set<Index> indexers)
@@ -85,9 +85,13 @@ public class PmemIndexBuilder extends SecondaryIndexBuilder
                 cfs.indexManager.indexPartition(key, indexers, pageSize);
             }
         }
+        catch (CompactionInterruptedException e)
+        {
+            throw e;
+        }
         catch (Exception e)
         {
-            e.printStackTrace();
+            throw new RuntimeException(e) ;
         }
     }
 

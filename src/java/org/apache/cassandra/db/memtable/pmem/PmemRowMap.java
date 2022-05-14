@@ -20,8 +20,6 @@ package org.apache.cassandra.db.memtable.pmem;
 
 import java.io.IOError;
 import java.io.IOException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import com.intel.pmem.llpl.util.LongART;
 import com.intel.pmem.llpl.TransactionalHeap;
 import com.intel.pmem.llpl.TransactionalMemoryBlock;
@@ -54,7 +52,6 @@ public class PmemRowMap {
     private final LongART rowMapTree;
     private TableMetadata tableMetadata;
     private DeletionTime partitionLevelDeletion;
-    private static final Logger logger = LoggerFactory.getLogger(PmemRowMap.class);
     private final LongART rangeTombstoneMarkerTree;
     private final UpdateTransaction indexer;
     private final PmemTableInfo pmemTableInfo;
@@ -104,8 +101,9 @@ public class PmemRowMap {
             SerializationHeader serializationHeader = pmemTableInfo.getSerializationHeader(savedVersion);
             DeserializationHelper helper = new DeserializationHelper(metadata, -1, DeserializationHelper.Flag.LOCAL);
             row = (Row) PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        } catch (IndexOutOfBoundsException | IOException e)
+        {
+            throw new IOError(e);
         }
         return row;
     }
@@ -133,7 +131,8 @@ public class PmemRowMap {
             SerializationHeader serializationHeader = pmemTableInfo.getSerializationHeader(savedVersion);
             DeserializationHelper helper = new DeserializationHelper(tableMetadata, -1, DeserializationHelper.Flag.LOCAL);
             currentRow = (Row) PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
-        } catch (IOException e) {
+        } catch (IndexOutOfBoundsException | IOException e)
+        {
             throw new IOError(e);
         }
         if (currentRow != null) {
@@ -144,6 +143,7 @@ public class PmemRowMap {
             return currentRow;
     }
 
+    @SuppressWarnings({ "resource" })
     Long merge(Object newRow, Long mb) {
         Row row = (Row) newRow;
         TransactionalMemoryBlock oldBlock = null;
@@ -177,16 +177,15 @@ public class PmemRowMap {
 
             DataOutputPlus memoryBlockDataOutputPlus = new MemoryBlockDataOutputPlus(cellMemoryRegion, 0);
             PmemRowSerializer.serializer.serialize(row, helper, memoryBlockDataOutputPlus, 0, version);
-        } catch (IOException e) {
-            throw new RuntimeException(e.getMessage()
-                    + " Failed to reload partition ", e);
+        } catch (IndexOutOfBoundsException | IOException e)
+        {
+            throw new IOError(e);
         }
         long rowAddress = cellMemoryRegion.handle();
         return rowAddress;
     }
 
-    ;
-
+    @SuppressWarnings({ "resource" })
     Long saveRTM(Object newRTM, Long mb) {
         Unfiltered unfiltered = (Unfiltered) newRTM;
         TransactionalMemoryBlock oldBlock = null;
@@ -215,9 +214,9 @@ public class PmemRowMap {
 
             DataOutputPlus memoryBlockDataOutputPlus = new MemoryBlockDataOutputPlus(rtmMemoryRegion, 0);
             PmemRowSerializer.serializer.serialize(unfiltered, helper, memoryBlockDataOutputPlus, 0, version);
-        } catch (IOException e) {
-            throw new RuntimeException(e.getMessage()
-                    + " Failed to save RTM ", e);
+        } catch (IndexOutOfBoundsException | IOException e)
+        {
+            throw new IOError(e);
         }
 
         return rtmMemoryRegion.handle();

@@ -21,7 +21,6 @@ package org.apache.cassandra.db.memtable;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -46,7 +45,6 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.memtable.pmem.PmemRowMap;
@@ -247,7 +245,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
                 entryIterator = memtableCart.getEntryIterator(partitionKeyBytesLeft, includeStart, partitionKeyBytesRight, includeStop);
             }
         }
-        return new PmemUnfilteredPartitionIterator(heap, entryIterator, minLocalDeletionTime, columnFilter, dataRange, pmemTableInfo);
+        return new PmemUnfilteredPartitionIterator(heap, entryIterator, columnFilter, dataRange, pmemTableInfo);
     }
 
     @SuppressWarnings({ "resource" })
@@ -354,8 +352,9 @@ public class PersistentMemoryMemtable extends AbstractMemtable
                 return false;   // do not do anything
 
             case INDEX_BUILD_COMPLETED:
+                return false;
             case INDEX_REMOVED:
-                // Both of these are needed as safepoints for index management. Nothing to do.
+                dropTable();
                 return false;
 
             case VIEW_BUILD_STARTED:
@@ -388,7 +387,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
                 return false;
             case TRUNCATE: // The data is being deleted, but the table remains.
                 // Returning true asks the ColumnFamilyStore to replace this memtable object without flushing.
-                deleteTable(false);
+                truncateTable();
                 return false;
 
             case MEMTABLE_LIMIT: // The memtable size limit is reached, and this table was selected for flushing.
@@ -428,11 +427,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
         // A setDiscarded call will follow.
     }
 
-    /**
-     * Deletes rows from PmemRowMap and cleans up memory.
-     *
-     * @param artHandle is a handle to load saved PmemPartition.
-     */
+    //Deletes rows from PmemRowMap and cleans up memory.
     private void freeRowMemoryBlock(Long artHandle)
     {
         PmemPartition pmemPartition = new PmemPartition(heap, UpdateTransaction.NO_OP, pmemTableInfo);
@@ -441,74 +436,62 @@ public class PersistentMemoryMemtable extends AbstractMemtable
         rm.delete();
     }
 
-    /**
-     * Truncates/drops the table from Pmem and releases memory.
-     *
-     * @param dropTable when true then drop a table, else truncate a table
-     */
-    private void deleteTable(boolean dropTable)
+    //Frees the Persistent Memory which is associated with CFS
+    private void dropTable()
     {
         ConcurrentLongART memtableCart = tablesMetadataMap.get(id).getMemtableCart();
-        memtableCart.clear((Long artHandle) -> {
-            freeRowMemoryBlock(artHandle);
-        });
+        memtableCart.clear(this::freeRowMemoryBlock);
         memtableCart.free();
-        if (!dropTable)
-        {   //truncate base table
-            memtableCart = new ConcurrentLongART(heap, CORES);
-            pmemTableInfo.updateMemtableCart(memtableCart);
-            //truncate index tables
-            if (!metadata.get().indexes.isEmpty())
-            {
-                Indexes tableIndexes = metadata().indexes;
-                for (IndexMetadata indexTable : tableIndexes)
-                    truncateIndex(indexTable);
-            }
-        }
-        else
+        Iterator<Long> tablesIterator = tablesLinkedList.iterator();
+        int i = 0;
+        while (tablesIterator.hasNext())
         {
-            Iterator<Long> tablesIterator = tablesLinkedList.iterator();
-            int i = 0;
-            while (tablesIterator.hasNext())
+            if (pmemTableInfo.handle() == tablesIterator.next().longValue())
             {
-                PmemTableInfo tableInfo = PmemTableInfo.fromHandle(heap, tablesIterator.next());
-                if (tableInfo.getTableID().equals(id))
-                {
-                    tablesLinkedList.remove(i);
-                    pmemTableInfo.cleanUp();
-                    tablesMetadataMap.remove(id);
-                    break;
-                }
-                i++;
+                tablesLinkedList.remove(i);
+                pmemTableInfo.cleanUp();
+                tablesMetadataMap.remove(id);
+                break;
+            }
+            i++;
+        }
+    }
+
+    //Truncates base and index tables
+    private void truncateTable()
+    {
+        clearMemtableData(id);
+        if (!metadata.get().indexes.isEmpty())
+        {
+            Indexes tableIndexes = metadata().indexes;
+            for (IndexMetadata indexTable : tableIndexes)
+            {
+                TableId indexId = TableId.fromUUID(indexTable.id);
+                clearMemtableData(indexId);
             }
         }
     }
 
-    /**
-     * Truncates index table.
-     */
-    private void truncateIndex(IndexMetadata indexMetadata)
+    //Clears ConcurrentLongART content
+    private void clearMemtableData(TableId id)
     {
-        TableId indexId = TableId.fromUUID(indexMetadata.id);
-        PmemTableInfo pmemIndexTableInfo = tablesMetadataMap.get(indexId);
-        ConcurrentLongART memtableCartForIndex = pmemIndexTableInfo != null ? pmemIndexTableInfo.getMemtableCart() : null;
-        if (memtableCartForIndex != null)
+        PmemTableInfo pmemIndexTableInfo = tablesMetadataMap.get(id);
+        if (pmemIndexTableInfo != null)
         {
-            memtableCartForIndex.clear((Long artHandle) -> {
-                freeRowMemoryBlock(artHandle);
-            });
+            ConcurrentLongART memtableCartForIndex = pmemIndexTableInfo.getMemtableCart();
+            memtableCartForIndex.clear(this::freeRowMemoryBlock);
             memtableCartForIndex.free();
             memtableCartForIndex = new ConcurrentLongART(heap, CORES);
             pmemIndexTableInfo.updateMemtableCart(memtableCartForIndex);
         }
         else
-            logger.info("Cannot truncate non existing Index Table");
+            logger.info("Cannot truncate {} index table ",id);
     }
 
     public void discard()
     {
         //Deletes all memtable data from pmem.
-        deleteTable(true);
+        dropTable();
     }
 
     @Override

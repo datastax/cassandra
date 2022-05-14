@@ -18,7 +18,9 @@
 
 package org.apache.cassandra.db.memtable.pmem;
 
+import java.io.DataInputStream;
 import java.io.IOException;
+import java.io.UTFDataFormatException;
 import java.nio.charset.StandardCharsets;
 
 import com.intel.pmem.llpl.TransactionalHeap;
@@ -161,10 +163,6 @@ public class MemoryBlockDataInputPlus implements DataInputPlus
     @Override
     public String readUTF() throws IOException
     {
-        int utflen = readShort();
-        byte[] bytes = new byte[utflen];
-        block.copyToArray(position, bytes, 0, utflen);
-        position += utflen;
-        return new String(bytes, StandardCharsets.UTF_8);
+        return DataInputStream.readUTF(this);
     }
 }

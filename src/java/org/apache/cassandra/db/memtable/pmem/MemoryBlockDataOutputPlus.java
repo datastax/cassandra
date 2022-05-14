@@ -19,14 +19,20 @@
 package org.apache.cassandra.db.memtable.pmem;
 
 import java.io.IOException;
+import java.io.UTFDataFormatException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 import com.intel.pmem.llpl.TransactionalMemoryBlock;
+import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.Memory;
+import org.apache.cassandra.io.util.UnbufferedDataOutputStreamPlus;
 
-public class MemoryBlockDataOutputPlus implements DataOutputPlus
+/*Extending DataOutputStreamPlus to reuse a few methods defined in it */
+public class MemoryBlockDataOutputPlus extends DataOutputStreamPlus implements DataOutputPlus
 {
     private final TransactionalMemoryBlock block;
     private final long size;
@@ -165,19 +171,91 @@ public class MemoryBlockDataOutputPlus implements DataOutputPlus
             writeChar(s.charAt(index));
     }
 
+    /*Overriding writeUTF method to accomodate the little endianness of LLPL*/
     @Override
     public void writeUTF(String s) throws IOException
     {
-        try
+        int strlen = s.length();
+        if (strlen == 0)
         {
-            int strlen = s.length();
-            writeShort(strlen);
-            block.copyFromArray(s.getBytes(StandardCharsets.UTF_8), 0, position, strlen);
-            position += strlen;
+            return;
         }
-        catch (Exception e)
+        int utfCount = 0;
+        int maxSize = 2;
+        for (int i = 0; i < strlen; i++)
         {
-            e.printStackTrace();
+            int ch = s.charAt(i);
+            if ((ch > 0) & (ch <= 127))
+                utfCount += 1;
+            else if (ch <= 2047)
+                utfCount += 2;
+            else
+                utfCount += maxSize = 3;
+        }
+
+        if (utfCount > 65535)
+            throw new UTFDataFormatException(); //$NON-NLS-1$
+
+        byte[] utfBytes = retrieveTemporaryBuffer(utfCount + 2);
+
+        int bufferLength = utfBytes.length;
+        if (utfCount == strlen)
+        {
+            utfBytes[0] = (byte) utfCount;
+            utfBytes[1] = (byte) (utfCount >> 8);
+            int firstIndex = 2;
+
+            for (int offset = 0; offset < strlen; offset += bufferLength)
+            {
+                int runLength = Math.min(bufferLength - firstIndex, strlen - offset) + firstIndex;
+                offset -= firstIndex;
+                for (int i = firstIndex; i < runLength; i++)
+                    utfBytes[i] = (byte) s.charAt(offset + i);
+                this.write(utfBytes, 0, runLength);
+                firstIndex = 0;
+            }
+        }
+        else
+        {
+            int utfIndex = 2;
+            int offset = 0;
+            utfBytes[0] = (byte) utfCount;
+            utfBytes[1] = (byte) (utfCount >> 8);
+
+            while (strlen > 0)
+            {
+                int charRunLength = (utfBytes.length - utfIndex) / maxSize;
+                if (charRunLength < 128 && charRunLength < strlen)
+                {
+                    this.write(utfBytes, 0, utfIndex);
+                    utfIndex = 0;
+                }
+                if (charRunLength > strlen)
+                    charRunLength = strlen;
+
+                for (int i = 0; i < charRunLength; i++)
+                {
+                    char ch = s.charAt(offset + i);
+                    if ((ch > 0) && (ch <= 127))
+                    {
+                        utfBytes[utfIndex++] = (byte) ch;
+                    }
+                    else if (ch <= 2047)
+                    {
+                        utfBytes[utfIndex++] = (byte) (0xc0 | (0x1f & (ch >> 6)));
+                        utfBytes[utfIndex++] = (byte) (0x80 | (0x3f & ch));
+                    }
+                    else
+                    {
+                        utfBytes[utfIndex++] = (byte) (0xe0 | (0x0f & (ch >> 12)));
+                        utfBytes[utfIndex++] = (byte) (0x80 | (0x3f & (ch >> 6)));
+                        utfBytes[utfIndex++] = (byte) (0x80 | (0x3f & ch));
+                    }
+                }
+                offset += charRunLength;
+                strlen -= charRunLength;
+            }
+            this.write(utfBytes, 0, utfIndex);
         }
     }
 }

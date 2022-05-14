@@ -39,7 +39,6 @@ import static org.apache.cassandra.db.memtable.PersistentMemoryMemtable.BYTE_COM
 public class PmemUnfilteredPartitionIterator extends AbstractUnfilteredPartitionIterator implements Memtable.MemtableUnfilteredPartitionIterator {
     private final TableMetadata tableMetadata;
     private AutoCloseableIterator<LongART.Entry> iter;
-    private final int minLocalDeletionTime;
     private final ColumnFilter columnFilter;
     private final DataRange dataRange;
     private TransactionalHeap heap;
@@ -48,13 +47,11 @@ public class PmemUnfilteredPartitionIterator extends AbstractUnfilteredPartition
 
     public PmemUnfilteredPartitionIterator(TransactionalHeap heap,
                                            AutoCloseableIterator<LongART.Entry> iter,
-                                           int minLocalDeletionTime,
                                            ColumnFilter columnFilter,
                                            DataRange dataRange, PmemTableInfo pmemTableInfo) {
         this.heap = heap;
         this.tableMetadata = pmemTableInfo.getMetadata();
         this.iter = iter;
-        this.minLocalDeletionTime = minLocalDeletionTime;
         this.columnFilter = columnFilter;
         this.dataRange = dataRange;
         this.nextEntry = null;
@@ -91,8 +88,7 @@ public class PmemUnfilteredPartitionIterator extends AbstractUnfilteredPartition
 
     @Override
     public int getMinLocalDeletionTime() {
-        int minLocalDeletionTime = Integer.MAX_VALUE;
-        return minLocalDeletionTime;
+         return Integer.MAX_VALUE;
     }
 
     @Override
@@ -106,8 +102,10 @@ public class PmemUnfilteredPartitionIterator extends AbstractUnfilteredPartition
     private void closeCartIterator() {
         try {
             iter.close();
-        } catch (Exception e) {
-            e.printStackTrace();
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e.getMessage());
         }
     }
 }
