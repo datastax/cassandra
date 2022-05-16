@@ -117,7 +117,7 @@ public class StatusLogger
         for (ColumnFamilyStore cfs : ColumnFamilyStore.all())
         {
             logger.info(String.format("%-25s%20s",
-                                      cfs.keyspace.getName() + "." + cfs.name,
+                                      cfs.getKeyspaceName() + "." + cfs.getTableName(),
                                       cfs.metric.memtableColumnsCount.getValue() + "," + cfs.metric.memtableLiveDataSize.getValue()));
         }
     }

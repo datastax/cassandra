@@ -171,7 +171,7 @@ public class StreamingTransferTest
     private List<String> createAndTransfer(ColumnFamilyStore cfs, Mutator mutator, boolean transferSSTables) throws Exception
     {
         // write a temporary SSTable, and unregister it
-        logger.debug("Mutating {}", cfs.name);
+        logger.debug("Mutating {}", cfs.getTableName());
         long timestamp = 1234;
         for (int i = 1; i <= 3; i++)
             mutator.mutate("key" + i, "col" + i, timestamp);
@@ -180,7 +180,7 @@ public class StreamingTransferTest
         assertEquals(1, cfs.getLiveSSTables().size());
 
         // transfer the first and last key
-        logger.debug("Transferring {}", cfs.name);
+        logger.debug("Transferring {}", cfs.getTableName());
         int[] offs;
         if (transferSSTables)
         {
@@ -221,7 +221,7 @@ public class StreamingTransferTest
         for (int off : offs)
             keys.add("key" + off);
 
-        logger.debug("... everything looks good for {}", cfs.name);
+        logger.debug("... everything looks good for {}", cfs.getTableName());
         return keys;
     }
 
@@ -240,13 +240,13 @@ public class StreamingTransferTest
         List<Range<Token>> ranges = new ArrayList<>();
         // wrapped range
         ranges.add(new Range<Token>(p.getToken(ByteBufferUtil.bytes("key1")), p.getToken(ByteBufferUtil.bytes("key0"))));
-        StreamPlan streamPlan = new StreamPlan(StreamOperation.OTHER).transferRanges(LOCAL, cfs.keyspace.getName(), RangesAtEndpoint.toDummyList(ranges), cfs.getTableName());
+        StreamPlan streamPlan = new StreamPlan(StreamOperation.OTHER).transferRanges(LOCAL, cfs.getKeyspaceName(), RangesAtEndpoint.toDummyList(ranges), cfs.getTableName());
         streamPlan.execute().get();
 
         //cannot add ranges after stream session is finished
         try
         {
-            streamPlan.transferRanges(LOCAL, cfs.keyspace.getName(), RangesAtEndpoint.toDummyList(ranges), cfs.getTableName());
+            streamPlan.transferRanges(LOCAL, cfs.getKeyspaceName(), RangesAtEndpoint.toDummyList(ranges), cfs.getTableName());
             fail("Should have thrown exception");
         }
         catch (RuntimeException e)
@@ -419,7 +419,7 @@ public class StreamingTransferTest
                 cleanedEntries.put(key, cfCleaned);
                 cfs.addSSTable(SSTableUtils.prepare()
                     .ks(keyspace.getName())
-                    .cf(cfs.name)
+                    .cf(cfs.getTableName())
                     .generation(0)
                     .write(entries));
             }
@@ -429,7 +429,7 @@ public class StreamingTransferTest
         cleanedEntries.keySet().retainAll(keys);
         SSTableReader cleaned = SSTableUtils.prepare()
             .ks(keyspace.getName())
-            .cf(cfs.name)
+            .cf(cfs.getTableName())
             .generation(0)
             .write(cleanedEntries);
         SSTableReader streamed = cfs.getLiveSSTables().iterator().next();
@@ -544,7 +544,7 @@ public class StreamingTransferTest
         {
             public void mutate(String key, String colName, long timestamp) throws Exception
             {
-                ColumnFamily cf = ArrayBackedSortedColumns.factory.create(keyspace.getName(), cfs.name);
+                ColumnFamily cf = ArrayBackedSortedColumns.factory.create(keyspace.getName(), cfs.getTableName());
                 cf.addColumn(column(colName, "value", timestamp));
                 cf.addColumn(new BufferCell(cellname("birthdate"), ByteBufferUtil.bytes(new Date(timestamp).toString()), timestamp));
                 Mutation rm = new Mutation(KEYSPACE1, ByteBufferUtil.bytes(key), cf);

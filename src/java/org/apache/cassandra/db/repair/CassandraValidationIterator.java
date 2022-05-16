@@ -217,7 +217,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
                         prs.previewKind.logPrefix(sessionID),
                         parentId,
                         sstables.size(),
-                        cfs.keyspace.getName(),
+                        cfs.getKeyspaceName(),
                         cfs.getTableName());
         }
 

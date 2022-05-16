@@ -307,7 +307,7 @@ public class CompactionManager implements CompactionManagerMBean
     @SuppressWarnings("resource")
     private AllSSTableOpStatus parallelAllSSTableOperation(final ColumnFamilyStore cfs, final OneSSTableOperation operation, int jobs, OperationType operationType) throws ExecutionException, InterruptedException
     {
-        logger.info("Starting {} for {}.{}", operationType, cfs.keyspace.getName(), cfs.getTableName());
+        logger.info("Starting {} for {}.{}", operationType, cfs.getKeyspaceName(), cfs.getTableName());
         List<LifecycleTransaction> transactions = new ArrayList<>();
         List<Future<?>> futures = new ArrayList<>();
         try (LifecycleTransaction compacting = cfs.markAllCompacting(operationType))
@@ -318,7 +318,7 @@ public class CompactionManager implements CompactionManagerMBean
             Iterable<SSTableReader> sstables = Lists.newArrayList(operation.filterSSTables(compacting));
             if (Iterables.isEmpty(sstables))
             {
-                logger.info("No sstables to {} for {}.{}", operationType.name(), cfs.keyspace.getName(), cfs.name);
+                logger.info("No sstables to {} for {}.{}", operationType.name(), cfs.getKeyspaceName(), cfs.getTableName());
                 return AllSSTableOpStatus.SUCCESSFUL;
             }
 
@@ -349,7 +349,7 @@ public class CompactionManager implements CompactionManagerMBean
             }
             FBUtilities.waitOnFutures(futures);
             assert compacting.originals().isEmpty();
-            logger.info("Finished {} for {}.{} successfully", operationType, cfs.keyspace.getName(), cfs.getTableName());
+            logger.info("Finished {} for {}.{} successfully", operationType, cfs.getKeyspaceName(), cfs.getTableName());
             return AllSSTableOpStatus.SUCCESSFUL;
         }
         finally
@@ -365,7 +365,7 @@ public class CompactionManager implements CompactionManagerMBean
             }
             Throwable fail = Throwables.close(null, transactions);
             if (fail != null)
-                logger.error("Failed to cleanup lifecycle transactions ({} for {}.{})", operationType, cfs.keyspace.getName(), cfs.getTableName(), fail);
+                logger.error("Failed to cleanup lifecycle transactions ({} for {}.{})", operationType, cfs.getKeyspaceName(), cfs.getTableName(), fail);
         }
     }
 
@@ -471,14 +471,13 @@ public class CompactionManager implements CompactionManagerMBean
     public AllSSTableOpStatus performCleanup(final ColumnFamilyStore cfStore, int jobs) throws InterruptedException, ExecutionException
     {
         assert !cfStore.isIndex();
-        Keyspace keyspace = cfStore.keyspace;
         if (!StorageService.instance.isJoined())
         {
             logger.info("Cleanup cannot run before a node has joined the ring");
             return AllSSTableOpStatus.ABORTED;
         }
         // if local ranges is empty, it means no data should remain
-        final RangesAtEndpoint replicas = StorageService.instance.getLocalReplicas(keyspace.getName());
+        final RangesAtEndpoint replicas = StorageService.instance.getLocalReplicas(cfStore.getKeyspaceName());
         final Set<Range<Token>> allRanges = replicas.ranges();
         final Set<Range<Token>> transientRanges = replicas.onlyTransient().ranges();
         final Set<Range<Token>> fullRanges = replicas.onlyFull().ranges();
@@ -516,7 +515,7 @@ public class CompactionManager implements CompactionManagerMBean
                     }
                 }
                 logger.info("Skipping cleanup for {}/{} sstables for {}.{} since they are fully contained in owned ranges (full ranges: {}, transient ranges: {})",
-                            skippedSStables, totalSSTables, cfStore.keyspace.getName(), cfStore.getTableName(), fullRanges, transientRanges);
+                            skippedSStables, totalSSTables, cfStore.getKeyspaceName(), cfStore.getTableName(), fullRanges, transientRanges);
                 sortedSSTables.sort(SSTableReader.sizeComparator);
                 return sortedSSTables;
             }
@@ -568,7 +567,7 @@ public class CompactionManager implements CompactionManagerMBean
             return AllSSTableOpStatus.ABORTED;
         }
 
-        if (StorageService.instance.getLocalReplicas(cfs.keyspace.getName()).isEmpty())
+        if (StorageService.instance.getLocalReplicas(cfs.getKeyspaceName()).isEmpty())
         {
             logger.info("Relocate cannot run before a node has joined the ring");
             return AllSSTableOpStatus.ABORTED;
@@ -719,7 +718,8 @@ public class CompactionManager implements CompactionManagerMBean
             Preconditions.checkArgument(!replicas.isEmpty(), "No ranges to anti-compact");
 
             if (logger.isInfoEnabled())
-                logger.info("{} Starting anticompaction for {}.{} on {}/{} sstables", PreviewKind.NONE.logPrefix(sessionID), cfs.keyspace.getName(), cfs.getTableName(), validatedForRepair.size(), cfs.getLiveSSTables().size());
+                logger.info("{} Starting anticompaction for {}.{} on {}/{} sstables", PreviewKind.NONE.logPrefix(sessionID),
+                            cfs.getKeyspaceName(), cfs.getTableName(), validatedForRepair.size(), cfs.getLiveSSTables().size());
             if (logger.isTraceEnabled())
                 logger.trace("{} Starting anticompaction for ranges {}", PreviewKind.NONE.logPrefix(sessionID), replicas);
 
@@ -958,8 +958,7 @@ public class CompactionManager implements CompactionManagerMBean
         for (Map.Entry<ColumnFamilyStore,Descriptor> entry : descriptors.entrySet())
         {
             ColumnFamilyStore cfs = entry.getKey();
-            Keyspace keyspace = cfs.keyspace;
-            final RangesAtEndpoint replicas = StorageService.instance.getLocalReplicas(keyspace.getName());
+            final RangesAtEndpoint replicas = StorageService.instance.getLocalReplicas(cfs.getKeyspaceName());
             final Set<Range<Token>> allRanges = replicas.ranges();
             final Set<Range<Token>> transientRanges = replicas.onlyTransient().ranges();
             boolean hasIndexes = cfs.indexManager.hasIndexes();
@@ -1482,7 +1481,7 @@ public class CompactionManager implements CompactionManagerMBean
             return 0;
         }
 
-        logger.info("Anticompacting {} in {}.{} for {}", txn.originals(), cfs.keyspace.getName(), cfs.getTableName(), pendingRepair);
+        logger.info("Anticompacting {} in {}.{} for {}", txn.originals(), cfs.getKeyspaceName(), cfs.getTableName(), pendingRepair);
         Set<SSTableReader> sstableAsSet = txn.originals();
 
         File destination = cfs.getDirectories().getWriteableLocationAsFile(cfs.getExpectedCompactedFileSize(sstableAsSet, OperationType.ANTICOMPACTION));
@@ -1592,7 +1591,7 @@ public class CompactionManager implements CompactionManagerMBean
             txn.commit();
             logger.info("Anticompacted {} in {}.{} to full = {}, transient = {}, unrepaired = {} for {}",
                         sstableAsSet,
-                        cfs.keyspace.getName(),
+                        cfs.getKeyspaceName(),
                         cfs.getTableName(),
                         fullSSTables,
                         transSSTables,

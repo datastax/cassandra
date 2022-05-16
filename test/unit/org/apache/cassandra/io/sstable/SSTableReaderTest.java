@@ -859,7 +859,7 @@ public class SSTableReaderTest
 
     private void assertIndexQueryWorks(ColumnFamilyStore indexedCFS)
     {
-        assert CF_INDEXED.equals(indexedCFS.name);
+        assert CF_INDEXED.equals(indexedCFS.getTableName());
 
         // make sure all sstables including 2ary indexes load from disk
         for (ColumnFamilyStore cfs : indexedCFS.concatWithIndexes())

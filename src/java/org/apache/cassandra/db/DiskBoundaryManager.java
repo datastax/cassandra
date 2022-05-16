@@ -42,7 +42,7 @@ public class DiskBoundaryManager
             {
                 if (diskBoundaries == null || diskBoundaries.isOutOfDate())
                 {
-                    logger.debug("Refreshing disk boundary cache for {}.{}", cfs.keyspace.getName(), cfs.getTableName());
+                    logger.debug("Refreshing disk boundary cache for {}.{}", cfs.getKeyspaceName(), cfs.getTableName());
                     SortedLocalRanges localRanges = cfs.getLocalRanges();
 
                     DiskBoundaries oldBoundaries = diskBoundaries;
@@ -50,7 +50,7 @@ public class DiskBoundaryManager
                                      ? new DiskBoundaries(cfs, cfs.getDirectories().getWriteableLocations(), localRanges, DisallowedDirectories.getDirectoriesVersion())
                                      : getDiskBoundaryValue(cfs, localRanges);
 
-                    logger.debug("Updating boundaries from {} to {} for {}.{}", oldBoundaries, diskBoundaries, cfs.keyspace.getName(), cfs.getTableName());
+                    logger.debug("Updating boundaries from {} to {} for {}.{}", oldBoundaries, diskBoundaries, cfs.getKeyspaceName(), cfs.getTableName());
                 }
             }
         }

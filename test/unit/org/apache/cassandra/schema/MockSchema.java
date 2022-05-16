@@ -139,7 +139,7 @@ public class MockSchema
     public static SSTableReader sstable(int generation, int size, boolean keepRef, long firstToken, long lastToken, int level, ColumnFamilyStore cfs)
     {
         Descriptor descriptor = new Descriptor(cfs.getDirectories().getDirectoryForNewSSTables(),
-                                               cfs.keyspace.getName(),
+                                               cfs.getKeyspaceName(),
                                                cfs.getTableName(),
                                                sstableId(generation), SSTableFormat.Type.BIG);
         Set<Component> components = ImmutableSet.of(Component.DATA, Component.PRIMARY_INDEX, Component.FILTER, Component.TOC);

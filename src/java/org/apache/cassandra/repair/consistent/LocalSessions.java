@@ -306,7 +306,7 @@ public class LocalSessions
             }
         }
 
-        return new PendingStats(cfs.keyspace.getName(), cfs.name, pending.build(), finalized.build(), failed.build());
+        return new PendingStats(cfs.getKeyspaceName(), cfs.getTableName(), pending.build(), finalized.build(), failed.build());
     }
 
     /**

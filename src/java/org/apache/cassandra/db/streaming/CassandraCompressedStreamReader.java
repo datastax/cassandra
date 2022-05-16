@@ -71,7 +71,7 @@ public class CassandraCompressedStreamReader extends CassandraStreamReader
         }
 
         logger.debug("[Stream #{}] Start receiving file #{} from {}, repairedAt = {}, size = {}, ks = '{}', pendingRepair = '{}', table = '{}'.",
-                     session.planId(), fileSeqNum, session.peer, repairedAt, totalSize, cfs.keyspace.getName(), pendingRepair,
+                     session.planId(), fileSeqNum, session.peer, repairedAt, totalSize, cfs.getKeyspaceName(), pendingRepair,
                      cfs.getTableName());
 
         StreamDeserializer deserializer = null;
@@ -109,7 +109,7 @@ public class CassandraCompressedStreamReader extends CassandraStreamReader
         {
             Object partitionKey = deserializer != null ? deserializer.partitionKey() : "";
             logger.warn("[Stream {}] Error while reading partition {} from stream on ks='{}' and table='{}'.",
-                        session.planId(), partitionKey, cfs.keyspace.getName(), cfs.getTableName());
+                        session.planId(), partitionKey, cfs.getKeyspaceName(), cfs.getTableName());
             if (writer != null)
             {
                 writer.abort(e);

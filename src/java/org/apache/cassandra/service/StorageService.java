@@ -1223,7 +1223,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private void executePreJoinTasks(boolean bootstrap)
     {
         StreamSupport.stream(ColumnFamilyStore.all().spliterator(), false)
-                .filter(cfs -> Schema.instance.getUserKeyspaces().names().contains(cfs.keyspace.getName()))
+                .filter(cfs -> Schema.instance.getUserKeyspaces().names().contains(cfs.getKeyspaceName()))
                 .forEach(cfs -> cfs.indexManager.executePreJoinTasksBlocking(bootstrap));
     }
 
@@ -4018,7 +4018,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         for (ColumnFamilyStore cfStore : getValidColumnFamilies(true, false, keyspaceName, tableNames))
         {
-            logger.debug("Forcing flush on keyspace {}, CF {}", keyspaceName, cfStore.name);
+            logger.debug("Forcing flush on keyspace {}, CF {}", keyspaceName, cfStore.getTableName());
             cfStore.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
         }
     }

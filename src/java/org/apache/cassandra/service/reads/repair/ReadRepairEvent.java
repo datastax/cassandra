@@ -43,7 +43,7 @@ final class ReadRepairEvent extends DiagnosticEvent
 {
 
     private final ReadRepairEventType type;
-    private final Keyspace keyspace;
+    private final String keyspaceName;
     private final String tableName;
     private final String cqlCommand;
     private final ConsistencyLevel consistency;
@@ -64,7 +64,7 @@ final class ReadRepairEvent extends DiagnosticEvent
     ReadRepairEvent(ReadRepairEventType type, AbstractReadRepair readRepair, Collection<InetAddressAndPort> destinations,
                     Collection<InetAddressAndPort> allEndpoints, DigestResolver digestResolver)
     {
-        this.keyspace = readRepair.cfs.keyspace;
+        this.keyspaceName = readRepair.cfs.getKeyspaceName();
         this.tableName = readRepair.cfs.getTableName();
         this.cqlCommand = readRepair.command.toCQLString();
         this.consistency = readRepair.replicaPlan().consistencyLevel();
@@ -84,7 +84,7 @@ final class ReadRepairEvent extends DiagnosticEvent
     {
         HashMap<String, Serializable> ret = new HashMap<>();
 
-        ret.put("keyspace", keyspace.getName());
+        ret.put("keyspace", keyspaceName);
         ret.put("table", tableName);
         ret.put("command", cqlCommand);
         ret.put("consistency", consistency.name());

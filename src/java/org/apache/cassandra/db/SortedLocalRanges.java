@@ -118,7 +118,7 @@ public class SortedLocalRanges
             && !StorageService.isReplacingSameAddress()) // When replacing same address, the node marks itself as UN locally
         {
             PendingRangeCalculatorService.instance.blockUntilFinished();
-            localRanges = tmd.getPendingRanges(cfs.keyspace.getName(), FBUtilities.getBroadcastAddressAndPort());
+            localRanges = tmd.getPendingRanges(cfs.getKeyspaceName(), FBUtilities.getBroadcastAddressAndPort());
         }
         else
         {

@@ -111,7 +111,7 @@ public class IndexesSystemView extends AbstractVirtualTable
                         View view = context.getView();
 
                         dataset.row(ks, indexName)
-                               .column(TABLE_NAME, cfs.name)
+                               .column(TABLE_NAME, cfs.getTableName())
                                .column(COLUMN_NAME, context.getColumnName())
                                .column(IS_QUERYABLE, manager.isIndexQueryable(index))
                                .column(IS_BUILDING, manager.isIndexBuilding(indexName))

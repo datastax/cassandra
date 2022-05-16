@@ -531,7 +531,7 @@ public class CancelCompactionsTest extends CQLTester
     {
         return CompactionManager.instance.active.getTableOperations()
                                                 .stream()
-                                                .filter(operation -> operation.getProgress().table().orElse("unknown").equalsIgnoreCase(cfs.name))
+                                                .filter(operation -> operation.getProgress().table().orElse("unknown").equalsIgnoreCase(cfs.getTableName()))
                                                 .collect(Collectors.toList());
     }
 }

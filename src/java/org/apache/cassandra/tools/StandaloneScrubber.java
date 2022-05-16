@@ -96,7 +96,7 @@ public class StandaloneScrubber
             ColumnFamilyStore cfs = null;
             for (ColumnFamilyStore c : keyspace.getValidColumnFamilies(true, false, options.cfName))
             {
-                if (c.name.equals(options.cfName))
+                if (c.getTableName().equals(options.cfName))
                 {
                     cfs = c;
                     break;

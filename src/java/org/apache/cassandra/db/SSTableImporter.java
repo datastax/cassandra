@@ -71,7 +71,7 @@ public class SSTableImporter
     synchronized List<String> importNewSSTables(Options options)
     {
         logger.info("Loading new SSTables for {}/{}: {}",
-                    cfs.keyspace.getName(), cfs.getTableName(), options);
+                    cfs.getKeyspaceName(), cfs.getTableName(), options);
 
         List<Pair<Directories.SSTableLister, String>> listers = getSSTableListers(options.srcPaths);
 
@@ -172,11 +172,11 @@ public class SSTableImporter
 
         if (newSSTables.isEmpty())
         {
-            logger.info("No new SSTables were found for {}/{}", cfs.keyspace.getName(), cfs.getTableName());
+            logger.info("No new SSTables were found for {}/{}", cfs.getKeyspaceName(), cfs.getTableName());
             return failedDirectories;
         }
 
-        logger.info("Loading new SSTables and building secondary indexes for {}/{}: {}", cfs.keyspace.getName(), cfs.getTableName(), newSSTables);
+        logger.info("Loading new SSTables and building secondary indexes for {}/{}: {}", cfs.getKeyspaceName(), cfs.getTableName(), newSSTables);
 
         try (Refs<SSTableReader> refs = Refs.ref(newSSTables))
         {
@@ -196,7 +196,7 @@ public class SSTableImporter
 
         }
 
-        logger.info("Done loading load new SSTables for {}/{}", cfs.keyspace.getName(), cfs.getTableName());
+        logger.info("Done loading load new SSTables for {}/{}", cfs.getKeyspaceName(), cfs.getTableName());
         return failedDirectories;
     }
 

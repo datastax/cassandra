@@ -408,9 +408,9 @@ public class TTLTest extends CQLTester
             {
                 ToolResult tool;
                 if (reinsertOverflowedTTL)
-                    tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-r", KEYSPACE, cfs.name);
+                    tool = ToolRunner.invokeClass(StandaloneScrubber.class, "-r", KEYSPACE, cfs.getTableName());
                 else
-                    tool = ToolRunner.invokeClass(StandaloneScrubber.class, KEYSPACE, cfs.name);
+                    tool = ToolRunner.invokeClass(StandaloneScrubber.class, KEYSPACE, cfs.getTableName());
 
                 tool.assertOnCleanExit();
                 Assertions.assertThat(tool.getStdout()).contains("Pre-scrub sstables snapshotted into");

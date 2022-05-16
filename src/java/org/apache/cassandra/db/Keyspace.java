@@ -236,7 +236,7 @@ public class Keyspace
         boolean tookSnapShot = false;
         for (ColumnFamilyStore cfStore : columnFamilyStores.values())
         {
-            if (columnFamilyName == null || cfStore.name.equals(columnFamilyName))
+            if (columnFamilyName == null || cfStore.getTableName().equals(columnFamilyName))
             {
                 tookSnapShot = true;
                 cfStore.snapshot(snapshotName, skipFlush, rateLimiter);
@@ -431,7 +431,7 @@ public class Keyspace
         }
         else
         {
-            throw new IllegalStateException("CFS is already initialized: " + cfs.name);
+            throw new IllegalStateException("CFS is already initialized: " + cfs.getTableName());
         }
     }
 
@@ -461,7 +461,7 @@ public class Keyspace
         {
             // re-initializing an existing CF.  This will happen if you cleared the schema
             // on this node and it's getting repopulated from the rest of the cluster.
-            assert cfs.name.equals(metadata.name);
+            assert cfs.getTableName().equals(metadata.name);
             cfs.reload();
         }
     }
@@ -553,7 +553,7 @@ public class Keyspace
                                 locks[j].unlock();
 
                             if (logger.isTraceEnabled())
-                                logger.trace("Could not acquire lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).name);
+                                logger.trace("Could not acquire lock for {} and table {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()), columnFamilyStores.get(tableId).getTableName());
                             Tracing.trace("Could not acquire MV lock");
                             if (future != null)
                             {
