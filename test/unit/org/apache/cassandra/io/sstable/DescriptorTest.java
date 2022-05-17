@@ -19,6 +19,7 @@ package org.apache.cassandra.io.sstable;
 
 import java.util.UUID;
 
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -107,6 +108,7 @@ public class DescriptorTest
         assertEquals(original.cfname, desc.cfname);
         assertEquals(original.version, desc.version);
         assertEquals(original.id, desc.id);
+        assertEquals(original.fileFor(Components.DATA).toPath(), desc.pathFor(Components.DATA));
         assertEquals(Components.DATA, pair.right);
 
         assertEquals(Components.DATA, Descriptor.validFilenameWithComponent(file.name()));
@@ -332,5 +334,16 @@ public class DescriptorTest
             Assert.assertEquals(String.format("Expected keyspace not found for %s", filePath), expectedKeyspace, descriptor.ksname);
             Assert.assertEquals(String.format("Expected table not found for %s", filePath), expectedTable, descriptor.cfname);
         }
+    }
+
+    @Test
+    public void testLegacyDSEAPI()
+    {
+        File dir = new File(".");
+        Descriptor desc = new Descriptor(dir, "ks", "cf", new SequenceBasedSSTableId(1), BigFormat.getInstance());
+
+        assertEquals(dir.toCanonical().toPath(), desc.getDirectory());
+        assertEquals(desc.fileFor(Components.DATA).toPath(), desc.pathFor(Components.DATA));
+        assertEquals(desc.baseFileUri(), desc.baseFileURI());
     }
 }
