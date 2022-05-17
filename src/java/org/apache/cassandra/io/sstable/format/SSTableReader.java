@@ -87,6 +87,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.CheckedFunction;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
@@ -1639,7 +1640,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
                 // don't ideally want to dropPageCache for the file until all instances have been released
                 for (Component c : desc.discoverComponents())
-                    INativeLibrary.instance.trySkipCache(desc.fileFor(c), 0, 0);
+                    StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(c));
             }
             finally
             {
