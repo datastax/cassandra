@@ -43,13 +43,14 @@ import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
+import org.apache.cassandra.service.IEndpointLifecycleSubscriber;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.schema.MigrationCoordinator.MAX_OUTSTANDING_VERSION_REQUESTS;
 
-public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpointStateChangeSubscriber
+public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpointStateChangeSubscriber, IEndpointLifecycleSubscriber
 {
     private static final Logger logger = LoggerFactory.getLogger(DefaultSchemaUpdateHandler.class);
 
@@ -85,6 +86,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
         this.updateCallback = updateCallback;
         this.migrationCoordinator = migrationCoordinator == null ? createMigrationCoordinator(messagingService) : migrationCoordinator;
         Gossiper.instance.register(this);
+        StorageService.instance.register(this);
         SchemaPushVerbHandler.instance.register(msg -> applyMutations(msg.payload));
         SchemaPullVerbHandler.instance.register(msg -> messagingService.send(msg.responseWith(getSchemaMutations()), msg.from()));
     }
@@ -128,52 +130,34 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
     }
 
     @Override
-    public void onRemove(InetAddressAndPort endpoint)
+    public void onChange(InetAddressAndPort endpoint, ApplicationState state, VersionedValue value)
+    {
+        refreshEndpointSchemaVersion(endpoint);
+    }
+
+    @Override
+    public void onJoinCluster(InetAddressAndPort endpoint)
+    {
+        refreshEndpointSchemaVersion(endpoint);
+    }
+
+    @Override
+    public void onLeaveCluster(InetAddressAndPort endpoint)
     {
         migrationCoordinator.removeAndIgnoreEndpoint(endpoint);
     }
 
-    @Override
-    public void onChange(InetAddressAndPort endpoint, ApplicationState state, VersionedValue value)
+    private void refreshEndpointSchemaVersion(InetAddressAndPort endpoint)
     {
-        if (state == ApplicationState.SCHEMA)
-        {
-            EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-            if (epState != null && !Gossiper.instance.isDeadState(epState) && StorageService.instance.getTokenMetadata().isMember(endpoint))
-            {
-                migrationCoordinator.reportEndpointVersion(endpoint, UUID.fromString(value.value));
-            }
-        }
-    }
+        EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        if (Gossiper.instance.isDeadState(epState))
+            return;
+        if (!StorageService.instance.getTokenMetadata().isMember(endpoint))
+            return;
 
-    @Override
-    public void onJoin(InetAddressAndPort endpoint, EndpointState epState)
-    {
-        // no-op
-    }
-
-    @Override
-    public void beforeChange(InetAddressAndPort endpoint, EndpointState currentState, ApplicationState newStateKey, VersionedValue newValue)
-    {
-        // no-op
-    }
-
-    @Override
-    public void onAlive(InetAddressAndPort endpoint, EndpointState state)
-    {
-        // no-op
-    }
-
-    @Override
-    public void onDead(InetAddressAndPort endpoint, EndpointState state)
-    {
-        // no-op
-    }
-
-    @Override
-    public void onRestart(InetAddressAndPort endpoint, EndpointState state)
-    {
-        // no-op
+        VersionedValue value = epState.getApplicationState(ApplicationState.SCHEMA);
+        if (value != null)
+            migrationCoordinator.reportEndpointVersion(endpoint, UUID.fromString(value.value));
     }
 
     private synchronized SchemaTransformationResult applyMutations(Collection<Mutation> schemaMutations)

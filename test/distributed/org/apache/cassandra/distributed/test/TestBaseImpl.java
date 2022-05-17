@@ -43,9 +43,8 @@ import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.shared.DistributedTestBase;
-import org.apache.cassandra.gms.EndpointState;
-import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.service.StorageService;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.BOOTSTRAP_SCHEMA_DELAY_MS;
 import static org.apache.cassandra.distributed.action.GossipHelper.withProperty;
@@ -134,8 +133,7 @@ public class TestBaseImpl extends DistributedTestBase
             .atMost(90, TimeUnit.SECONDS)
             .untilAsserted(() -> {
                 assert cluster.stream().allMatch(node -> node.isShutdown() || node.callOnInstance(() -> {
-                    EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(address);
-                    return state != null && state.isNormalState();
+                    return StorageService.instance.getTokenMetadata().isMember(address);
                 })) : "New node should be seen in NORMAL state by the other nodes in the cluster";
         });
     }

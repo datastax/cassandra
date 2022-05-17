@@ -2347,6 +2347,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * Note: Any time a node state changes from STATUS_NORMAL, it will not be visible to new nodes. So it follows that
      * you should never bootstrap a new node during a removenode, decommission or move.
      */
+    @Override
     public void onChange(InetAddressAndPort endpoint, ApplicationState state, VersionedValue value)
     {
         if (state == ApplicationState.STATUS || state == ApplicationState.STATUS_WITH_PORT)
@@ -2387,11 +2388,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         else
         {
-            if (state == ApplicationState.INDEX_STATUS)
-            {
-                updateIndexStatus(endpoint, value);
-                return;
-            }
 
             EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
             if (epState == null || Gossiper.instance.isDeadState(epState))
@@ -2413,6 +2409,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                         break;
                     case NET_VERSION:
                         updateNetVersion(endpoint, value);
+                        break;
+                    case INDEX_STATUS:
+                        updateIndexStatus(endpoint, value);
                         break;
                 }
             }
@@ -2798,11 +2797,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         // capture because updateNormalTokens clears moving and member status
         boolean isMember = getTokenMetadata().isMember(endpoint);
-        boolean isMoving = getTokenMetadata().isMoving(endpoint);
+        boolean isMoving = getTokenMetadata().isMoving(endpoint) || operationMode == Mode.MOVING;
+
+        if (!isMember && !isMoving)
+        {
+            // while the endpoint was not a member, we were ignoring some onChange events,
+            // so let's redo them now
+            refreshEndpointState(endpoint);
+        }
 
         updateTokenMetadata(endpoint, tokens, endpointsToRemove);
 
-        if (isMoving || operationMode == Mode.MOVING)
+        if (isMoving)
         {
             getTokenMetadata().removeFromMoving(endpoint);
             notifyMoved(endpoint);
@@ -2811,8 +2817,21 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             notifyJoined(endpoint);
         }
-
         PendingRangeCalculatorService.instance.update();
+    }
+
+    /**
+     * Retrieves the endpoint state from gossiper and applies proper updates
+     * that we may have ignored when the endpoint was not a member.
+     */
+    private void refreshEndpointState(InetAddressAndPort endpoint)
+    {
+        EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+        VersionedValue value;
+        if ((value = epState.getApplicationState(ApplicationState.NET_VERSION)) != null)
+            updateNetVersion(endpoint, value);
+        if ((value = epState.getApplicationState(ApplicationState.INDEX_STATUS)) != null)
+            updateIndexStatus(endpoint, value);
     }
 
     /**
@@ -3265,6 +3284,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return changedRanges.build();
     }
 
+    @Override
     public void onJoin(InetAddressAndPort endpoint, EndpointState epState)
     {
         // Explicitly process STATUS or STATUS_WITH_PORT before the other
@@ -3280,13 +3300,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             statusValue = epState.getApplicationState(statusState);
         }
         if (statusValue != null)
-            Gossiper.instance.doOnChangeNotifications(endpoint, statusState, statusValue);
+            onChange(endpoint, statusState, statusValue);
 
         for (Map.Entry<ApplicationState, VersionedValue> entry : epState.states())
         {
             if (entry.getKey() == ApplicationState.STATUS_WITH_PORT || entry.getKey() == ApplicationState.STATUS)
                 continue;
-            Gossiper.instance.doOnChangeNotifications(endpoint, entry.getKey(), entry.getValue());
+            onChange(endpoint, entry.getKey(), entry.getValue());
         }
     }
 
