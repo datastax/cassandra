@@ -30,6 +30,7 @@ import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.utils.ChecksumType;
 
 public abstract class CompressedChunkReader extends AbstractReaderFileProxy implements ChunkReader
@@ -166,6 +167,8 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
             }
             catch (CorruptBlockException e)
             {
+                StorageProvider.instance.invalidateFileSystemCache(channel.getFile());
+
                 // Make sure reader does not see stale data.
                 uncompressed.position(0).limit(0);
                 throw new CorruptSSTableException(e, channel.filePath());

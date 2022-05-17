@@ -285,6 +285,22 @@ public class FileUtilsTest
         Assert.assertFalse(new File(to).exists());
     }
 
+    @Test
+    public void testLegacyDSEAPI() throws IOException
+    {
+        Path tmpDir = Files.createTempDirectory(this.getClass().getSimpleName());
+
+        FileUtils.createDirectory(tmpDir);
+        Path f = tmpDir.resolve("somefile");
+        FileUtils.appendAndSync(f, "lorem", "ipsum");
+        assertEquals(Arrays.asList(f), FileUtils.listPaths(tmpDir, path -> true));
+        assertEquals(Arrays.asList(f), FileUtils.listPaths(tmpDir));
+        FileUtils.deleteContent(tmpDir);
+        assertEquals(Arrays.asList(), FileUtils.listPaths(tmpDir));
+        FileUtils.delete(tmpDir);
+        FileUtils.deleteRecursive(tmpDir);
+    }
+
     private File createFolder(File folder, String additionalName)
     {
         folder = folder.resolve(additionalName);
