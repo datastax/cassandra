@@ -252,8 +252,7 @@ public abstract class CQLTester
 
     private static Consumer<Cluster.Builder> clusterBuilderConfigurator;
 
-    // needed in GuardrailsOnTableTest to check whether dropping schema tasks have been finished
-    protected static final ThreadPoolExecutor schemaCleanup =
+    private static final ThreadPoolExecutor schemaCleanup =
     new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
 
 
@@ -555,6 +554,14 @@ public abstract class CQLTester
             execute(String.format("TRUNCATE %s", table));
         Schema.instance.loadFromDisk();
         beforeTest();
+    }
+
+    /**
+     * Blocks until the previous schema cleanup task finished.
+     */
+    public void waitForSchemaCleanupCompleted(long timeout, TimeUnit unit)
+    {
+        Awaitility.await().atMost(timeout, unit).until(() -> schemaCleanup.getActiveCount() == 0);
     }
 
     public static List<String> buildNodetoolArgs(List<String> args)
