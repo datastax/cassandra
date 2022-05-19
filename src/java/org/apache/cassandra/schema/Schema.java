@@ -446,12 +446,6 @@ public class Schema implements SchemaProvider
     @Override
     public TableMetadata getTableMetadata(TableId id)
     {
-        if (distributedKeyspaces == null || localKeyspaces == null)
-        {
-            logger.info("Likely due to mocked tests, null values for distributedKeyspaces ({}), and localKeyspaces ({})",
-                        distributedKeyspaces, localKeyspaces);
-            return null;
-        }
         return ObjectUtils.getFirstNonNull(() -> distributedKeyspaces.getTableOrViewNullable(id),
                                            () -> localKeyspaces.getTableOrViewNullable(id),
                                            () -> VirtualKeyspaceRegistry.instance.getTableMetadataNullable(id));
