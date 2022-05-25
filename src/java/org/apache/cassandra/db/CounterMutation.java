@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.Lock;
 
 import com.google.common.base.Function;
@@ -33,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Counter;
+import com.codahale.metrics.Histogram;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.rows.*;
@@ -45,6 +47,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.metrics.LatencyMetrics;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.tracing.Tracing;
@@ -66,7 +69,30 @@ public class CounterMutation implements IMutation
 
     public static final CounterMutationSerializer serializer = new CounterMutationSerializer();
 
+    /**
+     * This metric tracks the number of timeouts that occurred because the locks could not be
+     * acquired within DatabaseDescriptor.getCounterWriteRpcTimeout().
+     */
     public static final Counter lockTimeout = Metrics.counter(DefaultNameFactory.createMetricName("Counter", "lock_timeout", null));
+
+    /**
+     * This metric tracks how long it took to acquire all the locks
+     * that must be acquired before applying the counter mutation.
+     */
+    public static final LatencyMetrics lockAcquireTime = new LatencyMetrics("Counter", "lock_acquire_time");
+
+    /**
+     * This metric tracks the number of locks that must be acquired before applying the counter
+     * mutation. A mutation normally has one partition only, unless it comes from a batch,
+     * where the same partition key is used across different tables.
+     * For each partition, we need to acquire one lock for each column on each row.
+     * The locks are striped, see {@link CounterMutation#LOCKS} for details.
+     */
+    public static final Histogram locksPerUpdate = Metrics.histogram(DefaultNameFactory
+                                                                     .createMetricName("Counter",
+                                                                                       "locks_per_update",
+                                                                                       null),
+                                                                     false);
 
     private static final String LOCK_TIMEOUT_MESSAGE = "Failed to acquire locks for counter mutation on keyspace {} for longer than {} millis, giving up";
     private static final String LOCK_TIMEOUT_TRACE = "Failed to acquire locks for counter mutation for longer than {} millis, giving up";
@@ -175,18 +201,20 @@ public class CounterMutation implements IMutation
             try
             {
                 if (!lock.tryLock(timeout, NANOSECONDS))
-                    handleLockTimeout(replicationStrategy);
+                    handleLockTimeout(replicationStrategy, startTime);
                 locks.add(lock);
             }
             catch (InterruptedException e)
             {
-                handleLockTimeout(replicationStrategy);
+                handleLockTimeout(replicationStrategy, startTime);
             }
         }
+        lockAcquireTime.addNano(System.nanoTime() - startTime);
     }
 
-    private void handleLockTimeout(AbstractReplicationStrategy replicationStrategy)
+    private void handleLockTimeout(AbstractReplicationStrategy replicationStrategy, long startTime)
     {
+        lockAcquireTime.addNano(System.nanoTime() - startTime);
         lockTimeout.inc();
         nospamLogger.error(LOCK_TIMEOUT_MESSAGE, getKeyspaceName(), DatabaseDescriptor.getCounterWriteRpcTimeout(MILLISECONDS));
         Tracing.trace(LOCK_TIMEOUT_TRACE, DatabaseDescriptor.getCounterWriteRpcTimeout(MILLISECONDS));
@@ -200,7 +228,14 @@ public class CounterMutation implements IMutation
      */
     private Iterable<Object> getCounterLockKeys()
     {
-        return Iterables.concat(Iterables.transform(getPartitionUpdates(), new Function<PartitionUpdate, Iterable<Object>>()
+        LongAdder counter = new LongAdder()
+        {
+            private long counter = 0;
+            public long sum() { return counter;}
+            public void increment() { counter++; }
+        };
+
+        Iterable<Object> result = Iterables.concat(Iterables.transform(getPartitionUpdates(), new Function<PartitionUpdate, Iterable<Object>>()
         {
             public Iterable<Object> apply(final PartitionUpdate update)
             {
@@ -212,6 +247,7 @@ public class CounterMutation implements IMutation
                         {
                             public Object apply(final ColumnData data)
                             {
+                                counter.increment();
                                 return Objects.hashCode(update.metadata().id, key(), row.clustering(), data.column());
                             }
                         }));
@@ -219,6 +255,8 @@ public class CounterMutation implements IMutation
                 }));
             }
         }));
+        locksPerUpdate.update(counter.sum());
+        return result;
     }
 
     private PartitionUpdate processModifications(PartitionUpdate changes)
