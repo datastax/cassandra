@@ -73,6 +73,7 @@ import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
+import org.assertj.core.util.Streams;
 
 import static java.util.function.Predicate.isEqual;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -463,16 +464,10 @@ public class BatchStatement implements CQLStatement
     private void updatePerBatchMetrics(Collection<? extends IMutation> mutations)
     {
         int updatedPartitions = mutations.size();
-        int updatedColumns = 0;
-        for (IMutation mutation : mutations)
-        {
-            for (PartitionUpdate update : mutation.getPartitionUpdates())
-            {
-                for (Row row : update)
-                    updatedColumns += row.columns().size();
-            }
-        }
-
+        int updatedColumns = mutations.stream()
+                                      .flatMap(mutation -> mutation.getPartitionUpdates().stream())
+                                      .flatMap(update -> Streams.stream(update.iterator()))
+                                      .mapToInt(row -> row.columns().size()).sum();
         metrics.update(type, updatedPartitions, updatedColumns);
     }
 
