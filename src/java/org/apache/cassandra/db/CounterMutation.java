@@ -20,7 +20,6 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.Lock;
 
 import com.google.common.base.Function;
@@ -190,29 +189,45 @@ public class CounterMutation implements IMutation
         applyCounterMutation();
     }
 
+    private int getNrLocks(Iterable<Lock> locks)
+    {
+        Lock prev = null;
+        int counter = 0;
+        for(Lock l: locks)
+        {
+            if (prev != l)
+                counter++;
+            if (prev == null)
+                prev = l;
+        }
+        return counter;
+    }
+
     private void grabCounterLocks(Keyspace keyspace, List<Lock> locks) throws WriteTimeoutException
     {
         long startTime = System.nanoTime();
 
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
-        for (Lock lock : LOCKS.bulkGet(getCounterLockKeys()))
+        Iterable<Lock> iterableLocks = LOCKS.bulkGet(getCounterLockKeys());
+        locksPerUpdate.update(getNrLocks(iterableLocks));
+        for (Lock lock : iterableLocks)
         {
             long timeout = getTimeout(NANOSECONDS) - (System.nanoTime() - startTime);
             try
             {
                 if (!lock.tryLock(timeout, NANOSECONDS))
-                    handleLockTimeout(replicationStrategy, startTime);
+                    handleLockTimeoutAndThrow(replicationStrategy, startTime);
                 locks.add(lock);
             }
             catch (InterruptedException e)
             {
-                handleLockTimeout(replicationStrategy, startTime);
+                handleLockTimeoutAndThrow(replicationStrategy, startTime);
             }
         }
         lockAcquireTime.addNano(System.nanoTime() - startTime);
     }
 
-    private void handleLockTimeout(AbstractReplicationStrategy replicationStrategy, long startTime)
+    private void handleLockTimeoutAndThrow(AbstractReplicationStrategy replicationStrategy, long startTime)
     {
         lockAcquireTime.addNano(System.nanoTime() - startTime);
         lockTimeout.inc();
@@ -228,14 +243,7 @@ public class CounterMutation implements IMutation
      */
     private Iterable<Object> getCounterLockKeys()
     {
-        LongAdder counter = new LongAdder()
-        {
-            private long counter = 0;
-            public long sum() { return counter;}
-            public void increment() { counter++; }
-        };
-
-        Iterable<Object> result = Iterables.concat(Iterables.transform(getPartitionUpdates(), new Function<PartitionUpdate, Iterable<Object>>()
+        return Iterables.concat(Iterables.transform(getPartitionUpdates(), new Function<PartitionUpdate, Iterable<Object>>()
         {
             public Iterable<Object> apply(final PartitionUpdate update)
             {
@@ -247,7 +255,6 @@ public class CounterMutation implements IMutation
                         {
                             public Object apply(final ColumnData data)
                             {
-                                counter.increment();
                                 return Objects.hashCode(update.metadata().id, key(), row.clustering(), data.column());
                             }
                         }));
@@ -255,8 +262,6 @@ public class CounterMutation implements IMutation
                 }));
             }
         }));
-        locksPerUpdate.update(counter.sum());
-        return result;
     }
 
     private PartitionUpdate processModifications(PartitionUpdate changes)

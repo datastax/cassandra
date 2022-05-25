@@ -463,12 +463,12 @@ public class BatchStatement implements CQLStatement
 
     private void updatePerBatchMetrics(Collection<? extends IMutation> mutations)
     {
-        int updatedPartitions = mutations.size();
-        int updatedColumns = mutations.stream()
+        int nrUpdatedPartitions = mutations.size();
+        int nrUpdatedColumns = mutations.stream()
                                       .flatMap(mutation -> mutation.getPartitionUpdates().stream())
                                       .flatMap(update -> Streams.stream(update.iterator()))
                                       .mapToInt(row -> row.columns().size()).sum();
-        metrics.update(type, updatedPartitions, updatedColumns);
+        metrics.update(type, nrUpdatedPartitions, nrUpdatedColumns);
     }
 
     private ResultMessage executeWithConditions(BatchQueryOptions options, QueryState state, long queryStartNanoTime)
