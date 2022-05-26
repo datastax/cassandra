@@ -53,6 +53,7 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.index.TargetParser;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
@@ -107,6 +108,7 @@ public class IndexContext
     private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
     private final AbstractAnalyzer.AnalyzerFactory queryAnalyzerFactory;
     private final PrimaryKey.Factory primaryKeyFactory;
+    private final IPartitioner partitioner;
 
     private final boolean segmentCompactionEnabled;
 
@@ -118,6 +120,7 @@ public class IndexContext
         this.table = tableMeta.name;
         this.partitionKeyType = tableMeta.partitionKeyType;
         this.clusteringComparator = tableMeta.comparator;
+        this.partitioner = tableMeta.partitioner;
         this.target = TargetParser.parse(tableMeta, config);
         this.config = config;
         this.viewManager = new IndexViewManager(this);
@@ -165,6 +168,7 @@ public class IndexContext
         this.config = config;
         this.viewManager = null;
         this.indexMetrics = null;
+        this.partitioner = null;
         this.columnQueryMetrics = columnQueryMetrics;
         this.indexWriterConfig = indexWriterConfig;
         Map<String, String> options = config != null ? config.options : Collections.emptyMap();
@@ -188,6 +192,7 @@ public class IndexContext
         this.viewManager = null;
         this.indexMetrics = null;
         this.columnQueryMetrics = null;
+        this.partitioner = null;
         this.indexWriterConfig = IndexWriterConfig.emptyConfig();
         Map<String, String> options = Collections.emptyMap();
         this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), options);
@@ -196,6 +201,11 @@ public class IndexContext
                                     : this.analyzerFactory;
         this.primaryKeyFactory = Version.LATEST.onDiskFormat().primaryKeyFactory(clusteringComparator);
         this.segmentCompactionEnabled = true;
+    }
+
+    public IPartitioner partitioner()
+    {
+        return partitioner;
     }
 
     public AbstractType<?> keyValidator()

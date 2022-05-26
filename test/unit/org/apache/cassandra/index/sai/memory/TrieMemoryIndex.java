@@ -1,10 +1,4 @@
 /*
- * All changes to the original code are Copyright DataStax, Inc.
- *
- * Please see the included license file for details.
- */
-
-/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -25,6 +19,7 @@
 package org.apache.cassandra.index.sai.memory;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.PriorityQueue;
@@ -61,7 +56,6 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
 
-
     private final MemtableTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
     private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
@@ -76,7 +70,6 @@ public class TrieMemoryIndex extends MemoryIndex
             return MINIMUM_QUEUE_SIZE;
         }
     };
-
 
     public TrieMemoryIndex(IndexContext indexContext)
     {
@@ -161,10 +154,10 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public Iterator<Pair<ByteComparable, PrimaryKeys>> iterator()
+    public Iterator<Pair<ByteComparable, Iterable<ByteComparable>>> iterator()
     {
         Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator = data.entrySet().iterator();
-        return new Iterator<Pair<ByteComparable, PrimaryKeys>>()
+        return new Iterator<Pair<ByteComparable, Iterable<ByteComparable>>>()
         {
             @Override
             public boolean hasNext()
@@ -173,10 +166,10 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             @Override
-            public Pair<ByteComparable, PrimaryKeys> next()
+            public Pair<ByteComparable, Iterable<ByteComparable>> next()
             {
                 Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
-                return Pair.create(decode(entry.getKey()), entry.getValue());
+                return Pair.create(decode(entry.getKey()), entry.getValue().byteComparables());
             }
         };
     }
@@ -191,7 +184,6 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         return isLiteral ? version -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(version)))
                          : term;
-
     }
 
     private ByteSource append(ByteSource src, int lastByte)

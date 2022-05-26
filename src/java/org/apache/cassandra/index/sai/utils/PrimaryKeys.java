@@ -22,6 +22,7 @@ import java.util.SortedSet;
 import java.util.concurrent.ConcurrentSkipListSet;
 
 import org.apache.cassandra.utils.ObjectSizes;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * A sorted set of {@link PrimaryKey}s.
@@ -50,6 +51,29 @@ public class PrimaryKeys implements Iterable<PrimaryKey>
     public SortedSet<PrimaryKey> keys()
     {
         return keys;
+    }
+
+    public Iterable<ByteComparable> byteComparables()
+    {
+        return () -> {
+            return new Iterator<ByteComparable>()
+            {
+                final Iterator<PrimaryKey> iterator = keys.iterator();
+
+                @Override
+                public boolean hasNext()
+                {
+                    return iterator.hasNext();
+                }
+
+                @Override
+                public ByteComparable next()
+                {
+                    final PrimaryKey key = iterator.next();
+                    return (version) -> key.asComparableBytes(version);
+                }
+            };
+        };
     }
 
     public int size()

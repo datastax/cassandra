@@ -78,9 +78,7 @@ public abstract class AbstractTrieMemoryIndexBenchmark
             randomChars[i] = (char)('a' + random.nextInt(26));
         }
 
-        ColumnMetadata string = ColumnMetadata.regularColumn(KEYSPACE, TABLE, STRING_COLUMN, UTF8Type.instance);
-        ColumnMetadata integer = ColumnMetadata.regularColumn(KEYSPACE, TABLE, INTEGER_COLUMN, Int32Type.instance);
-        TableMetadata table = TableMetadata.builder(KEYSPACE, TABLE)
+       TableMetadata table = TableMetadata.builder(KEYSPACE, TABLE)
                 .addPartitionKeyColumn(PARTITION_KEY, UTF8Type.instance)
                 .addRegularColumn(STRING_COLUMN, UTF8Type.instance)
                 .addRegularColumn(INTEGER_COLUMN, Int32Type.instance)
@@ -103,7 +101,6 @@ public abstract class AbstractTrieMemoryIndexBenchmark
         IndexMetadata integerMetadata = IndexMetadata.fromSchemaMetadata(INTEGER_INDEX, IndexMetadata.Kind.CUSTOM, integerOptions);
         integerContext = new IndexContext(table, integerMetadata);
     }
-
 
     protected void initialiseColumnData(int numberOfTerms, int rowsPerPartition)
     {

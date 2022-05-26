@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.memory;
 
 import java.nio.ByteBuffer;
 import java.util.Iterator;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
@@ -27,7 +28,6 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
@@ -36,9 +36,8 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 public abstract class MemoryIndex
 {
     protected final IndexContext indexContext;
-
-    private ByteBuffer minTerm;
-    private ByteBuffer maxTerm;
+    private final AtomicReference<ByteBuffer> minTermRef = new AtomicReference<>();
+    private final AtomicReference<ByteBuffer> maxTermRef = new AtomicReference<>();
 
     protected MemoryIndex(IndexContext indexContext)
     {
@@ -53,22 +52,22 @@ public abstract class MemoryIndex
     {
         assert term != null;
 
-        minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator());
-        maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator());
+        minTermRef.accumulateAndGet(term, (term1, term2) -> TypeUtil.min(term1, term2, indexContext.getValidator()));
+        maxTermRef.accumulateAndGet(term, (term1, term2) -> TypeUtil.max(term1, term2, indexContext.getValidator()));
     }
 
     public ByteBuffer getMinTerm()
     {
-        return minTerm;
+        return minTermRef.get();
     }
 
     public ByteBuffer getMaxTerm()
     {
-        return maxTerm;
+        return maxTermRef.get();
     }
 
     /**
-     * Iterate all Term->PrimaryKeys mappings in sorted order
+     * @return Terms -> ByteComparable encoded primary keys
      */
-    public abstract Iterator<Pair<ByteComparable, PrimaryKeys>> iterator();
+    public abstract Iterator<Pair<ByteComparable, Iterable<ByteComparable>>> iterator();
 }
