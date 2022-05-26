@@ -33,7 +33,8 @@ public class IndexMetrics extends AbstractMetrics
     public final Gauge ssTableCellCount;
     public final Gauge liveMemtableIndexWriteCount;
     public final Gauge diskUsedBytes;
-    public final Gauge memtableIndexBytes;
+    public final Gauge memtableOnHeapIndexBytes;
+    public final Gauge memtableOffHeapIndexBytes;
     public final Gauge indexFileCacheBytes;
     
     public final Counter memtableIndexFlushCount;
@@ -61,7 +62,8 @@ public class IndexMetrics extends AbstractMetrics
         memtableIndexFlushErrors = Metrics.counter(createMetricName("MemtableIndexFlushErrors"));
         segmentFlushErrors = Metrics.counter(createMetricName("CompactionSegmentFlushErrors"));
         liveMemtableIndexWriteCount = Metrics.register(createMetricName("LiveMemtableIndexWriteCount"), context::liveMemtableWriteCount);
-        memtableIndexBytes = Metrics.register(createMetricName("MemtableIndexBytes"), context::estimatedMemIndexMemoryUsed);
+        memtableOnHeapIndexBytes = Metrics.register(createMetricName("MemtableOnHeapIndexBytes"), context::estimatedOnHeapMemIndexMemoryUsed);
+        memtableOffHeapIndexBytes = Metrics.register(createMetricName("MemtableOffHeapIndexBytes"), context::estimatedOffHeapMemIndexMemoryUsed);
         diskUsedBytes = Metrics.register(createMetricName("DiskUsedBytes"), context::diskUsage);
         indexFileCacheBytes = Metrics.register(createMetricName("IndexFileCacheBytes"), context::indexFileCacheSize);
     }

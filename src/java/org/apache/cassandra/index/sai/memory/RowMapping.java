@@ -88,7 +88,7 @@ public class RowMapping
     {
         assert complete : "RowMapping is not built.";
 
-        Iterator<Pair<ByteComparable, PrimaryKeys>> iterator = index.iterator();
+        Iterator<Pair<ByteComparable, Iterator<ByteComparable>>> iterator = index.iterator(minKey.partitionKey(), maxKey.partitionKey());
         return new AbstractIterator<Pair<ByteComparable, LongArrayList>>()
         {
             @Override
@@ -96,16 +96,15 @@ public class RowMapping
             {
                 while (iterator.hasNext())
                 {
-                    Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
+                    Pair<ByteComparable, Iterator<ByteComparable>> pair = iterator.next();
 
                     LongArrayList postings = null;
-                    Iterator<PrimaryKey> primaryKeys = pair.right.iterator();
+                    Iterator<ByteComparable> primaryKeys = pair.right;
 
                     while (primaryKeys.hasNext())
                     {
-                        PrimaryKey primaryKey = primaryKeys.next();
-                        ByteComparable byteComparable = v -> primaryKey.asComparableBytes(v);
-                        Long segmentRowId = rowMapping.get(byteComparable);
+                        ByteComparable primaryKey = primaryKeys.next();
+                        Long segmentRowId = rowMapping.get(primaryKey);
 
                         if (segmentRowId != null)
                         {

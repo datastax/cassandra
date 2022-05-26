@@ -183,7 +183,7 @@ public class StorageAttachedIndex implements Index
     {
         this.baseCfs = baseCfs;
         this.config = config;
-        this.indexContext = new IndexContext(baseCfs.metadata(), config);
+        this.indexContext = new IndexContext(baseCfs.metadata(), config, baseCfs);
     }
 
     /**
@@ -580,18 +580,13 @@ public class StorageAttachedIndex implements Index
         @Override
         public void insertRow(Row row)
         {
-            adjustMemtableSize(indexContext.index(key, row, mt), CassandraWriteContext.fromContext(writeContext).getGroup());
+            indexContext.index(key, row, mt, CassandraWriteContext.fromContext(writeContext).getGroup());
         }
 
         @Override
         public void updateRow(Row oldRow, Row newRow)
         {
             insertRow(newRow);
-        }
-
-        void adjustMemtableSize(long additionalSpace, OpOrder.Group opGroup)
-        {
-            mt.markExtraOnHeapUsed(additionalSpace, opGroup);
         }
     }
 

@@ -41,6 +41,11 @@ public class RangeUnionIterator extends RangeIterator
         this.toRelease = new ArrayList<>(ranges);
     }
 
+    public int numIterators()
+    {
+        return toRelease.size();
+    }
+
     public PrimaryKey computeNext()
     {
         candidates.clear();

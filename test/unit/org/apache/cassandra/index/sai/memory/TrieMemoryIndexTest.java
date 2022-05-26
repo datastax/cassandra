@@ -23,6 +23,8 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.function.IntFunction;
 
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Iterators;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -36,11 +38,13 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
@@ -102,6 +106,29 @@ public class TrieMemoryIndexTest
 //    }
 
     @Test
+    public void testPrimaryKeyIteration()
+    {
+        final TrieMemoryIndex index = newTrieMemoryIndex(Int32Type.instance);
+        for (int i = 0; i < 99; ++i)
+        {
+            index.add(key, Clustering.EMPTY, Int32Type.instance.decompose(i), bytes -> {}, bytes -> {});
+        }
+
+        final Iterator<Pair<ByteComparable, Iterable<ByteComparable>>> iterator = index.iterator();
+        int i = 0;
+        while (iterator.hasNext())
+        {
+            Pair<ByteComparable, Iterable<ByteComparable>> pair = iterator.next();
+
+            for (ByteComparable bc : pair.right)
+            {
+                i++;
+            }
+        }
+        assertEquals(99, i);
+    }
+
+    @Test
     public void shouldAcceptPrefixValues()
     {
         shouldAcceptPrefixValuesForType(UTF8Type.instance, i -> UTF8Type.instance.decompose(String.format("%03d", i)));
@@ -113,15 +140,16 @@ public class TrieMemoryIndexTest
         final TrieMemoryIndex index = newTrieMemoryIndex(type);
         for (int i = 0; i < 99; ++i)
         {
-            index.add(key, Clustering.EMPTY, decompose.apply(i));
+            index.add(key, Clustering.EMPTY, decompose.apply(i), bytes -> {}, bytes -> {});
         }
 
-        final Iterator<Pair<ByteComparable, PrimaryKeys>> iterator = index.iterator();
+        final Iterator<Pair<ByteComparable, Iterable<ByteComparable>>> iterator = index.iterator();
         int i = 0;
         while (iterator.hasNext())
         {
-            Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
-            assertEquals(1, pair.right.size());
+            Pair<ByteComparable, Iterable<ByteComparable>> pair = iterator.next();
+
+            assertEquals(1, Iterables.size(pair.right));
 
             final int rowId = i;
             final ByteComparable expectedByteComparable = TypeUtil.isLiteral(type)
@@ -137,7 +165,6 @@ public class TrieMemoryIndexTest
 
     private TrieMemoryIndex newTrieMemoryIndex(AbstractType<?> columnType)
     {
-        ColumnMetadata column = ColumnMetadata.regularColumn(KEYSPACE, TABLE, REG_COL, columnType);
         TableMetadata metadata = TableMetadata.builder(KEYSPACE, TABLE)
                                               .addPartitionKeyColumn(PART_KEY_COL, UTF8Type.instance)
                                               .addRegularColumn(REG_COL, columnType)
@@ -150,7 +177,7 @@ public class TrieMemoryIndexTest
         options.put("target", REG_COL);
 
         IndexMetadata indexMetadata = IndexMetadata.fromSchemaMetadata("col_index", IndexMetadata.Kind.CUSTOM, options);
-        IndexContext ci = new IndexContext(metadata, indexMetadata);
+        IndexContext ci = new IndexContext(metadata, indexMetadata, MockSchema.newCFS(metadata));
         return new TrieMemoryIndex(ci);
     }
 }

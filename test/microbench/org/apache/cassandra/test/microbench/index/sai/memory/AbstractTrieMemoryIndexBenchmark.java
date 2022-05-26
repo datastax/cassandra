@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.memory.MemoryIndex;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.UUIDGen;
 import org.openjdk.jmh.annotations.Level;
@@ -78,9 +79,7 @@ public abstract class AbstractTrieMemoryIndexBenchmark
             randomChars[i] = (char)('a' + random.nextInt(26));
         }
 
-        ColumnMetadata string = ColumnMetadata.regularColumn(KEYSPACE, TABLE, STRING_COLUMN, UTF8Type.instance);
-        ColumnMetadata integer = ColumnMetadata.regularColumn(KEYSPACE, TABLE, INTEGER_COLUMN, Int32Type.instance);
-        TableMetadata table = TableMetadata.builder(KEYSPACE, TABLE)
+       TableMetadata table = TableMetadata.builder(KEYSPACE, TABLE)
                 .addPartitionKeyColumn(PARTITION_KEY, UTF8Type.instance)
                 .addRegularColumn(STRING_COLUMN, UTF8Type.instance)
                 .addRegularColumn(INTEGER_COLUMN, Int32Type.instance)
@@ -98,12 +97,11 @@ public abstract class AbstractTrieMemoryIndexBenchmark
         integerOptions.put(IndexTarget.TARGET_OPTION_NAME, INTEGER_COLUMN);
 
         IndexMetadata stringMetadata = IndexMetadata.fromSchemaMetadata(STRING_INDEX, IndexMetadata.Kind.CUSTOM, stringOptions);
-        stringContext = new IndexContext(table, stringMetadata);
+        stringContext = new IndexContext(table, stringMetadata, MockSchema.newCFS(table));
 
         IndexMetadata integerMetadata = IndexMetadata.fromSchemaMetadata(INTEGER_INDEX, IndexMetadata.Kind.CUSTOM, integerOptions);
-        integerContext = new IndexContext(table, integerMetadata);
+        integerContext = new IndexContext(table, integerMetadata, MockSchema.newCFS(table));
     }
-
 
     protected void initialiseColumnData(int numberOfTerms, int rowsPerPartition)
     {

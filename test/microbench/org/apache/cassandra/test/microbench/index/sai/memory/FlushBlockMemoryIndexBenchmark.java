@@ -20,10 +20,16 @@ package org.apache.cassandra.test.microbench.index.sai.memory;
 
 
 import java.nio.ByteBuffer;
+import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.index.sai.memory.MemoryIndex;
+import org.apache.cassandra.index.sai.memory.MultiBlockIndex;
 import org.apache.cassandra.index.sai.memory.TrieMemoryIndex;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -38,18 +44,20 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 
 @Fork(1)
-@Warmup(iterations = 5, time = 3)
+@Warmup(iterations = 10, time = 3)
 @Measurement(iterations = 10, time = 3)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @BenchmarkMode(Mode.AverageTime)
 @State(Scope.Thread)
-public class WriteTrieMemoryIndexBenchmark extends AbstractTrieMemoryIndexBenchmark
+public class FlushBlockMemoryIndexBenchmark extends AbstractTrieMemoryIndexBenchmark
 {
-    @Param({ "1000", "10000", "100000", "1000000" })
+    @Param({ "100000", "1000000" })
     protected int numberOfTerms;
 
-    @Param({ "1", "10", "100"})
+    @Param({ "1"})
     protected int rowsPerPartition;
+
+    private MultiBlockIndex integerBlockIndex;
 
     @Setup(Level.Iteration)
     public void initialiseColumnData()
@@ -60,38 +68,17 @@ public class WriteTrieMemoryIndexBenchmark extends AbstractTrieMemoryIndexBenchm
     @Setup(Level.Invocation)
     public void initialiseIndexes()
     {
-        stringIndex = new TrieMemoryIndex(stringContext);
         integerIndex = new TrieMemoryIndex(integerContext);
-    }
 
-    @Benchmark
-    public long writeStringIndex()
-    {
-        long size = 0;
-        int rowCount = 0;
-        int keyCount = 0;
-        for (ByteBuffer term : stringTerms)
-        {
-            stringIndex.add(partitionKeys[keyCount], Clustering.EMPTY, term, allocatedBytes -> {}, allocatesBytes -> {});
-            if (++rowCount == rowsPerPartition)
-            {
-                rowCount = 0;
-                keyCount++;
-            }
-            size++;
-        }
-        return size;
-    }
+        integerBlockIndex = new MultiBlockIndex(integerContext);
 
-    @Benchmark
-    public long writeIntegerIndex()
-    {
         long size = 0;
         int rowCount = 0;
         int keyCount = 0;
         for (ByteBuffer term : integerTerms)
         {
-            integerIndex.add(partitionKeys[keyCount], Clustering.EMPTY, term, allocatedBytes -> {}, allocatesBytes -> {});
+            integerBlockIndex.add(partitionKeys[keyCount], Clustering.EMPTY, term, bytes -> {}, bytes -> {});
+            integerIndex.add(partitionKeys[keyCount], Clustering.EMPTY, term, bytes -> {}, bytes -> {});
             if (++rowCount == rowsPerPartition)
             {
                 rowCount = 0;
@@ -99,6 +86,32 @@ public class WriteTrieMemoryIndexBenchmark extends AbstractTrieMemoryIndexBenchm
             }
             size++;
         }
-        return size;
+    }
+
+    @Benchmark
+    public long flushIntegerBlockIndex()
+    {
+        return iterateAll(integerBlockIndex);
+    }
+
+    @Benchmark
+    public long flushIntegerTrieIndex()
+    {
+        return iterateAll(integerIndex);
+    }
+
+    private long iterateAll(MemoryIndex index)
+    {
+        long count = 0;
+        Iterator<Pair<ByteComparable, Iterable<ByteComparable>>> iterator = index.iterator();
+        while (iterator.hasNext())
+        {
+            Pair<ByteComparable, Iterable<ByteComparable>> pair = iterator.next();
+            for (ByteComparable key : pair.right)
+            {
+                // do nothing
+            }
+        }
+        return count;
     }
 }

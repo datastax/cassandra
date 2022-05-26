@@ -28,8 +28,10 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.index.sai.memory.MultiBlockIndex;
 import org.apache.cassandra.index.sai.memory.TrieMemoryIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -44,26 +46,27 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 
 @Fork(1)
-@Warmup(iterations = 5, time = 3)
+@Warmup(iterations = 10, time = 3)
 @Measurement(iterations = 10, time = 3)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @BenchmarkMode(Mode.AverageTime)
 @State(Scope.Thread)
-public class ReadTrieMemoryIndexBenchmark extends AbstractTrieMemoryIndexBenchmark
+public class ReadBlockIndexMemoryBenchmark extends AbstractTrieMemoryIndexBenchmark
 {
-    private static final int NUMBER_OF_SEARCHES = 1000;
+    private static final int NUMBER_OF_SEARCHES = 5000;
     private static final AbstractBounds<PartitionPosition> ALL_DATA_RANGE = DataRange.allData(Murmur3Partitioner.instance).keyRange();
 
-    @Param({ "1000", "10000", "100000", "1000000" })
+    @Param({ "100000" })
     protected int numberOfTerms;
 
-    @Param({ "1", "10", "100"})
+    @Param({ "1" })
     protected int rowsPerPartition;
 
     private Random random;
-    private Expression[] stringEqualityExpressions;
     private Expression[] integerEqualityExpressions;
     private Expression[] integerRangeExpressions;
+
+    private MultiBlockIndex integerBlockIndex;
 
     @Setup(Level.Iteration)
     public void initialiseIndexes()
@@ -72,12 +75,16 @@ public class ReadTrieMemoryIndexBenchmark extends AbstractTrieMemoryIndexBenchma
         stringIndex = new TrieMemoryIndex(stringContext);
         integerIndex = new TrieMemoryIndex(integerContext);
 
+        integerBlockIndex = new MultiBlockIndex(integerContext);
+
         int rowCount = 0;
         int keyCount = 0;
         for (int i = 0; i < numberOfTerms; i++)
         {
-            stringIndex.add(partitionKeys[keyCount], Clustering.EMPTY, stringTerms[i], allocatedBytes -> {}, allocatesBytes -> {});
-            integerIndex.add(partitionKeys[keyCount], Clustering.EMPTY, integerTerms[i], allocatedBytes -> {}, allocatesBytes -> {});
+            integerIndex.add(partitionKeys[keyCount], Clustering.EMPTY, integerTerms[i], bytes -> {}, bytes -> {});
+
+            integerBlockIndex.add(partitionKeys[keyCount], Clustering.EMPTY, integerTerms[i], bytes -> {}, bytes -> {});
+
             if (++rowCount == rowsPerPartition)
             {
                 rowCount = 0;
@@ -86,13 +93,11 @@ public class ReadTrieMemoryIndexBenchmark extends AbstractTrieMemoryIndexBenchma
         }
         random = new Random(randomSeed);
 
-        stringEqualityExpressions =  new Expression[NUMBER_OF_SEARCHES];
         integerEqualityExpressions  =  new Expression[NUMBER_OF_SEARCHES];
         integerRangeExpressions = new Expression[NUMBER_OF_SEARCHES];
 
         for (int i = 0; i < NUMBER_OF_SEARCHES; i++)
         {
-            stringEqualityExpressions[i] = new Expression(stringContext).add(Operator.EQ, stringTerms[random.nextInt(numberOfTerms)]);
             integerEqualityExpressions[i] = new Expression(integerContext).add(Operator.EQ, integerTerms[random.nextInt(numberOfTerms)]);
 
             int lowerValue = random.nextInt(numberOfTerms - 10);
@@ -100,42 +105,89 @@ public class ReadTrieMemoryIndexBenchmark extends AbstractTrieMemoryIndexBenchma
             integerRangeExpressions[i] = new Expression(integerContext)
             {{
                 operation = Op.RANGE;
+
                 lower = new Bound(Int32Type.instance.decompose(lowerValue), Int32Type.instance, true);
-                upper = new Bound(Int32Type.instance.decompose(lowerValue + 10), Int32Type.instance, true);
+
+                int upperValue = lowerValue + random.nextInt(numberOfTerms - lowerValue);
+
+                upper = new Bound(Int32Type.instance.decompose(upperValue), Int32Type.instance, true);
+
+                // alternative range max to the last term
+                // upper = new Bound(Int32Type.instance.decompose(numberOfTerms - 1), Int32Type.instance, true);
+            }};
+
+            integerEqualityExpressions[i] = new Expression(integerContext)
+            {{
+                operation = Op.RANGE;
+
+                lower = new Bound(Int32Type.instance.decompose(lowerValue), Int32Type.instance, true);
+                upper = new Bound(Int32Type.instance.decompose(lowerValue), Int32Type.instance, true);
             }};
         }
     }
 
     @Benchmark
-    public long stringEqualityBenchmark()
+    public long integerTrieIndexEqualityBenchmark()
     {
-        long size = 0;
+        long matches = 0;
         for (int i = 0; i < NUMBER_OF_SEARCHES; i++)
         {
-            stringIndex.search(stringEqualityExpressions[i], ALL_DATA_RANGE);
+            RangeIterator iterator = integerIndex.search(integerEqualityExpressions[i], ALL_DATA_RANGE);
+            if (iterator.hasNext())
+            {
+                iterator.next();
+                matches++;
+            }
         }
-        return size;
+        return matches;
     }
 
     @Benchmark
-    public long integerEqualityBenchmark()
+    public long integerBlockIndexEqualityBenchmark()
     {
-        long size = 0;
+        long matches = 0;
         for (int i = 0; i < NUMBER_OF_SEARCHES; i++)
         {
-            integerIndex.search(integerEqualityExpressions[i], ALL_DATA_RANGE);
+            RangeIterator iterator = integerBlockIndex.search(integerEqualityExpressions[i], ALL_DATA_RANGE);
+            if (iterator.hasNext())
+            {
+                iterator.next();
+                matches++;
+            }
         }
-        return size;
+        return matches;
     }
 
     @Benchmark
-    public long integerRangeBenchmark()
+    public long integerRangeBlockBenchmark()
     {
-        long size = 0;
+        long matches = 0;
         for (int i = 0; i < NUMBER_OF_SEARCHES; i++)
         {
-            integerIndex.search(integerRangeExpressions[i], ALL_DATA_RANGE);
+            RangeIterator iterator = integerBlockIndex.search(integerRangeExpressions[i], ALL_DATA_RANGE);
+            if (iterator.hasNext())
+            {
+                iterator.next();
+                matches++;
+            }
         }
-        return size;
+        return matches;
+    }
+
+    @Benchmark
+    public long integerRangeTrieBenchmark()
+    {
+        long matches = 0;
+        for (int i = 0; i < NUMBER_OF_SEARCHES; i++)
+        {
+            RangeIterator iterator = integerIndex.search(integerRangeExpressions[i], ALL_DATA_RANGE);
+            // gather 1 match
+            if (iterator.hasNext())
+            {
+                iterator.next();
+                matches++;
+            }
+        }
+        return matches;
     }
 }

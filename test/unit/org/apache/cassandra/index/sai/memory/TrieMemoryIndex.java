@@ -1,10 +1,4 @@
 /*
- * All changes to the original code are Copyright DataStax, Inc.
- *
- * Please see the included license file for details.
- */
-
-/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -25,11 +19,13 @@
 package org.apache.cassandra.index.sai.memory;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.SortedSet;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.LongConsumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,7 +57,6 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
 
-
     private final MemtableTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
     private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
@@ -77,7 +72,6 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     };
 
-
     public TrieMemoryIndex(IndexContext indexContext)
     {
         super(indexContext);
@@ -91,7 +85,7 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public long add(DecoratedKey key, Clustering clustering, ByteBuffer value)
+    public void add(DecoratedKey key, Clustering clustering, ByteBuffer value, LongConsumer onHeapAllocationsTracker, LongConsumer offHeapAllocationsTracker)
     {
         synchronized (writeLock)
         {
@@ -131,7 +125,7 @@ public class TrieMemoryIndex extends MemoryIndex
                     }
                 }
 
-                return (data.sizeOnHeap() - initialSizeOnHeap) + (data.sizeOffHeap() - initialSizeOffHeap) + (primaryKeysReducer.heapAllocations() - reducerHeapSize);
+                onHeapAllocationsTracker.accept((data.sizeOnHeap() - initialSizeOnHeap) + (data.sizeOffHeap() - initialSizeOffHeap) + (primaryKeysReducer.heapAllocations() - reducerHeapSize));
             }
             finally
             {
@@ -161,10 +155,10 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public Iterator<Pair<ByteComparable, PrimaryKeys>> iterator()
+    public Iterator<Pair<ByteComparable, Iterable<ByteComparable>>> iterator()
     {
         Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator = data.entrySet().iterator();
-        return new Iterator<Pair<ByteComparable, PrimaryKeys>>()
+        return new Iterator<Pair<ByteComparable, Iterable<ByteComparable>>>()
         {
             @Override
             public boolean hasNext()
@@ -173,10 +167,10 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             @Override
-            public Pair<ByteComparable, PrimaryKeys> next()
+            public Pair<ByteComparable, Iterable<ByteComparable>> next()
             {
                 Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
-                return Pair.create(decode(entry.getKey()), entry.getValue());
+                return Pair.create(decode(entry.getKey()), entry.getValue().byteComparables());
             }
         };
     }
@@ -191,7 +185,6 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         return isLiteral ? version -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(version)))
                          : term;
-
     }
 
     private ByteSource append(ByteSource src, int lastByte)
