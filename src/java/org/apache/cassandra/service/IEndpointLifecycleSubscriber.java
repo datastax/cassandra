@@ -35,33 +35,33 @@ public interface IEndpointLifecycleSubscriber
      *
      * @param endpoint the newly added endpoint.
      */
-    public void onJoinCluster(InetAddressAndPort endpoint);
+    default void onJoinCluster(InetAddressAndPort endpoint) {}
 
     /**
      * Called when a new node leave the cluster (decommission or removeToken).
      *
      * @param endpoint the endpoint that is leaving.
      */
-    public void onLeaveCluster(InetAddressAndPort endpoint);
+    default void onLeaveCluster(InetAddressAndPort endpoint) {}
 
     /**
      * Called when a node is marked UP.
      *
      * @param endpoint the endpoint marked UP.
      */
-    public void onUp(InetAddressAndPort endpoint);
+    default void onUp(InetAddressAndPort endpoint) {}
 
     /**
      * Called when a node is marked DOWN.
      *
      * @param endpoint the endpoint marked DOWN.
      */
-    public void onDown(InetAddressAndPort endpoint);
+    default void onDown(InetAddressAndPort endpoint) {}
 
     /**
      * Called when a node has moved (to a new token).
      *
      * @param endpoint the endpoint that has moved.
      */
-    public void onMove(InetAddressAndPort endpoint);
+    default void onMove(InetAddressAndPort endpoint) {}
 }
