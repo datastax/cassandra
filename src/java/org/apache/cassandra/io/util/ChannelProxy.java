@@ -42,7 +42,7 @@ public final class ChannelProxy extends SharedCloseableImpl
 {
     private final File file;
 
-    private final FileChannel channel;
+    public final FileChannel channel;
 
     public static FileChannel openChannel(File file)
     {
