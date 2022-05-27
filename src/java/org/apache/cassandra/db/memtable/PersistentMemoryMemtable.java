@@ -78,7 +78,6 @@ public class PersistentMemoryMemtable extends AbstractMemtable
     public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS41;
     protected StatsCollector statsCollector = new StatsCollector();
     private static final Map<TableId, PmemTableInfo> tablesMetadataMap = new ConcurrentHashMap<>();
-    private final TableId id;
     private PmemTableInfo pmemTableInfo;
 
     static
@@ -130,32 +129,24 @@ public class PersistentMemoryMemtable extends AbstractMemtable
         logger.debug("Reloaded tables\n");
     }
 
-    //TODO: This seems to be needed by defaultMemoryFactory, check
-    PersistentMemoryMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
-    {
-        this(metadataRef, owner);
-    }
-
     //ConcurrentLongART holds all memtable Partitions which is thread-safe
     public PersistentMemoryMemtable(TableMetadataRef metadataRef, Owner owner)
     {
-        super(metadataRef);
+        super(updateMetadataRef(metadataRef));
         this.owner = owner;
-        //Since Index TableMetadata will contain base table Id ,
-        //converting Index name to Index table ID is required, to persist into tablesLinkedList and tablesMetadataMap.
-        this.id = metadataRef.get().isIndex() ? TableId.fromUUID(UUID.nameUUIDFromBytes(metadataRef.get().indexName().get().getBytes())) : metadataRef.get().id;
-        if (tablesMetadataMap.get(id) == null)
-            addToTablesMetadataMap(metadataRef);
+
+        if (tablesMetadataMap.get(metadata.get().id) == null)
+            addToTablesMetadataMap(metadata);
         else
         {
-            pmemTableInfo = tablesMetadataMap.get(id);
+            pmemTableInfo = tablesMetadataMap.get(metadata.get().id);
             if (!pmemTableInfo.isLoaded())
             {   //On cassandra restart we reload the metadata and SerializationHeaderList
-                pmemTableInfo.reload(metadataRef.get());
+                pmemTableInfo.reload(metadata.get());
             }
             else
             {   //On Table alter, Update the metadata and  add altered Serialization header in PmemTableInfo
-                pmemTableInfo.update(metadataRef.get());
+                pmemTableInfo.update(metadata.get());
             }
         }
     }
@@ -193,7 +184,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
             ByteSource partitionByteSource = update.partitionKey().asComparableBytes(ByteComparable.Version.OSS41);
             byte[] partitionKeyBytes = ByteSourceInverse.readBytes(partitionByteSource);
             PmemRowUpdater updater = new PmemRowUpdater(update, indexer);
-            ConcurrentLongART memtableCart = tablesMetadataMap.get(id).getMemtableCart();
+            ConcurrentLongART memtableCart = tablesMetadataMap.get(metadata.get().id).getMemtableCart();
             memtableCart.put(partitionKeyBytes, updater, this::merge);
         });
         long[] pair = new long[]{ update.dataSize(), colUpdateTimeDelta };
@@ -211,10 +202,9 @@ public class PersistentMemoryMemtable extends AbstractMemtable
         boolean isBound = keyRange instanceof Bounds;
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
-        int minLocalDeletionTime = Integer.MAX_VALUE;
 
         AutoCloseableIterator<LongART.Entry> entryIterator;
-        ConcurrentLongART memtableCart = tablesMetadataMap.get(id).getMemtableCart();
+        ConcurrentLongART memtableCart = tablesMetadataMap.get(metadata.get().id).getMemtableCart();
         if (startIsMin)
         {
             if (stopIsMin)
@@ -254,7 +244,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
         PmemPartition pMemPartition = null;
         ByteSource partitionByteSource = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
         byte[] partitionKeyBytes = ByteSourceInverse.readBytes(partitionByteSource);
-        ConcurrentLongART memtableCart = tablesMetadataMap.get(id).getMemtableCart();
+        ConcurrentLongART memtableCart = tablesMetadataMap.get(metadata.get().id).getMemtableCart();
 
         if (memtableCart.size() != 0)
         {
@@ -262,7 +252,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
             // The lock is expected to be held  for the duration of all operations on the current  partition and release afterwards.
             // The cartIterator is then embedded in any row iterator created from this partition and will be closed as part of close action on said row iterator.
             //TODO
-            //There is one known scenario where the cartIterator is not closed;
+            //There is one known scenario where the cartIterator is not closed,
             // on a conditional row update, specifically if there is no ClusteringIndexNamesFilter the returned row Iterator is not closed. This needs to be fixed.
             AutoCloseableIterator<LongART.Entry> cartIterator = memtableCart.getEntryIterator(partitionKeyBytes, true, partitionKeyBytes, true);
             long rowHandle;
@@ -287,7 +277,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
     public long partitionCount()
     {
 
-        PmemTableInfo tableInfo = tablesMetadataMap.get(id);
+        PmemTableInfo tableInfo = tablesMetadataMap.get(metadata.get().id);
         ConcurrentLongART memtableCart = tableInfo != null ? pmemTableInfo.getMemtableCart() : null;
         if (memtableCart == null)
             return 0;
@@ -352,12 +342,12 @@ public class PersistentMemoryMemtable extends AbstractMemtable
                 return false;   // do not do anything
 
             case INDEX_BUILD_COMPLETED:
+            case VIEW_BUILD_STARTED:
+            case USER_FORCED:
+            case UNIT_TESTS:
                 return false;
             case INDEX_REMOVED:
                 dropTable();
-                return false;
-
-            case VIEW_BUILD_STARTED:
                 return false;
             case INDEX_BUILD_STARTED:
                 if (!metadata().indexes.isEmpty())
@@ -395,10 +385,6 @@ public class PersistentMemoryMemtable extends AbstractMemtable
             case COMMITLOG_DIRTY: // Commitlog thinks it needs to keep data from this table.
                 // Neither of the above should happen as we specify writesAreDurable and don't use an allocator/cleaner.
                 throw new AssertionError();
-
-            case USER_FORCED:
-            case UNIT_TESTS:
-                return false;
             default:
                 throw new AssertionError();
         }
@@ -422,7 +408,6 @@ public class PersistentMemoryMemtable extends AbstractMemtable
 
     public void switchOut(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
     {
-        //super.switchOut(writeBarrier, commitLogUpperBound);
         // This can prepare the memtable data for deletion; it will still be used while the flush is proceeding.
         // A setDiscarded call will follow.
     }
@@ -432,14 +417,14 @@ public class PersistentMemoryMemtable extends AbstractMemtable
     {
         PmemPartition pmemPartition = new PmemPartition(heap, UpdateTransaction.NO_OP, pmemTableInfo);
         pmemPartition.load(heap, artHandle, statsCollector.get());
-        PmemRowMap rm = PmemRowMap.loadFromAddress(heap, pmemPartition.getRowMapAddress(), pmemPartition.partitionLevelDeletion(), UpdateTransaction.NO_OP, pmemTableInfo);
+        PmemRowMap rm = PmemRowMap.loadFromAddress(heap, pmemPartition.getRowMapAddress(), UpdateTransaction.NO_OP, pmemTableInfo);
         rm.delete();
     }
 
     //Frees the Persistent Memory which is associated with CFS
     private void dropTable()
     {
-        ConcurrentLongART memtableCart = tablesMetadataMap.get(id).getMemtableCart();
+        ConcurrentLongART memtableCart = tablesMetadataMap.get(metadata.get().id).getMemtableCart();
         memtableCart.clear(this::freeRowMemoryBlock);
         memtableCart.free();
         Iterator<Long> tablesIterator = tablesLinkedList.iterator();
@@ -450,7 +435,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
             {
                 tablesLinkedList.remove(i);
                 pmemTableInfo.cleanUp();
-                tablesMetadataMap.remove(id);
+                tablesMetadataMap.remove(metadata.get().id);
                 break;
             }
             i++;
@@ -460,7 +445,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
     //Truncates base and index tables
     private void truncateTable()
     {
-        clearMemtableData(id);
+        clearMemtableData(metadata.get().id);
         if (!metadata.get().indexes.isEmpty())
         {
             Indexes tableIndexes = metadata().indexes;
@@ -609,7 +594,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
             tablesLinkedList.addFirst(tmpPmemTableInfo.handle());
             return tmpPmemTableInfo;
         });
-        tablesMetadataMap.putIfAbsent(id, pmemTableInfo);
+        tablesMetadataMap.putIfAbsent(metadata.get().id, pmemTableInfo);
     }
 
     //This class will provide PartitionUpdate and  UpdateTransaction object
@@ -649,6 +634,20 @@ public class PersistentMemoryMemtable extends AbstractMemtable
             }
         }
     }
+
+    private static TableMetadataRef updateMetadataRef(TableMetadataRef metadataRef)
+    {
+        //Since Index TableMetadata will contain base table Id ,
+        //converting Index name to Index table ID, which is required to differentiate Base and Index table.
+        String indexName = metadataRef.get().indexName().orElse(null);
+        if (indexName !=null)
+        {
+            TableMetadata tableMetadata = metadataRef.get().unbuild().id(TableId.fromUUID(UUID.nameUUIDFromBytes(indexName.getBytes()))).build();
+            return TableMetadataRef.forOfflineTools(tableMetadata);
+        }
+        return metadataRef;
+    }
+
 
     // Returns true if the given index is built else  returns false
     private boolean isBuilt(ColumnFamilyStore baseCfs, String indexName)

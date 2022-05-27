@@ -161,12 +161,12 @@ public class PmemPartition implements Partition
         long rowMapAddress = block.getLong(ROW_MAP_OFFSET);
         if (rowMapAddress != 0)
         {
-            pmemRowMap = PmemRowMap.loadFromAddress(heap, rowMapAddress, DeletionTime.LIVE, indexer, pmemTableInfo);
+            pmemRowMap = PmemRowMap.loadFromAddress(heap, rowMapAddress, indexer, pmemTableInfo);
         }
         final long rtmTreeHandle = block.getLong(RTM_INFO_OFFSET);
         if (rtmTreeHandle != 0)
         {
-            pmemRtmMap = PmemRowMap.loadFromRtmHandle(heap, rtmTreeHandle, DeletionTime.LIVE, UpdateTransaction.NO_OP, pmemTableInfo);
+            pmemRtmMap = PmemRowMap.loadFromRtmHandle(heap, rtmTreeHandle, UpdateTransaction.NO_OP, pmemTableInfo);
         }
         if (block.getLong(DELETION_INFO_OFFSET) > 0)
         {
@@ -204,10 +204,10 @@ public class PmemPartition implements Partition
         // Range Tombstone Marker
         final long rtmTreeHandle;
 
-        pmemRowMap = PmemRowMap.create(heap, update.partitionLevelDeletion(), indexer, pmemTableInfo);
+        pmemRowMap = PmemRowMap.create(heap, indexer, pmemTableInfo);
         rowMapAddress = pmemRowMap.getHandle(); //gets address of arTree
 
-        pmemRtmMap = PmemRowMap.createForTombstone(heap, update.partitionLevelDeletion(), UpdateTransaction.NO_OP, pmemTableInfo);
+        pmemRtmMap = PmemRowMap.createForTombstone(heap, UpdateTransaction.NO_OP, pmemTableInfo);
         rtmTreeHandle = pmemRtmMap.getRtmTreeHandle();//gets handle of RTM arTree
 
         for (Row r : update)
@@ -376,7 +376,7 @@ public class PmemPartition implements Partition
     {
         TransactionalMemoryBlock staticRowMemoryBlock = heap.memoryBlockFromHandle(staticRowAddress);
 
-        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(staticRowMemoryBlock, heap);
+        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(staticRowMemoryBlock);
 
         try
         {
@@ -537,7 +537,7 @@ public class PmemPartition implements Partition
     {
         try
         {
-            return DeletionTime.serializer.deserialize(new MemoryBlockDataInputPlus(referenceBlock, heap));
+            return DeletionTime.serializer.deserialize(new MemoryBlockDataInputPlus(referenceBlock));
         }
         catch (Exception e)
         {
@@ -583,7 +583,7 @@ public class PmemPartition implements Partition
         {
             LongART.Entry nextEntry = (LongART.Entry) tombstoneMarker.next();
             TransactionalMemoryBlock rangeMemoryBlock = heap.memoryBlockFromHandle(nextEntry.getValue());
-            DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(rangeMemoryBlock, heap);
+            DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(rangeMemoryBlock);
             try
             {
                 int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
@@ -955,10 +955,10 @@ public class PmemPartition implements Partition
             TransactionalMemoryBlock mb = heap.memoryBlockFromHandle(nextEntry.getValue());
 
             ByteComparable clusteringByteComparable = ByteComparable.fixedLength(nextEntry.getKey());
-            Clustering clustering = metadata.comparator.clusteringFromByteComparable(ByteArrayAccessor.instance, clusteringByteComparable);
+            Clustering<?> clustering = metadata.comparator.clusteringFromByteComparable(ByteArrayAccessor.instance, clusteringByteComparable);
             builder.newRow(clustering);
 
-            DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(mb, heap);
+            DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(mb);
             try
             {
                 int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();

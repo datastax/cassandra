@@ -20,23 +20,18 @@ package org.apache.cassandra.db.memtable.pmem;
 
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.io.UTFDataFormatException;
-import java.nio.charset.StandardCharsets;
 
-import com.intel.pmem.llpl.TransactionalHeap;
 import com.intel.pmem.llpl.TransactionalMemoryBlock;
 import org.apache.cassandra.io.util.DataInputPlus;
 
 public class MemoryBlockDataInputPlus implements DataInputPlus
 {
     private final TransactionalMemoryBlock block;
-    private final TransactionalHeap heap;
     private int position;
 
-    public MemoryBlockDataInputPlus(TransactionalMemoryBlock block, TransactionalHeap heap)
+    public MemoryBlockDataInputPlus(TransactionalMemoryBlock block)
     {
         this.block = block;
-        this.heap = heap;
         this.position = 0;
     }
 

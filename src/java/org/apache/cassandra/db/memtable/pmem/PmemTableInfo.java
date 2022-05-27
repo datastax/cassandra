@@ -65,11 +65,8 @@ public class PmemTableInfo
     {
         this.memtableCart = memtableCart;
         this.metadata = metadata;
-        //Since Index TableMetadata will contain base table Id ,
-        //converting Index name to Index table ID, which is required to differentiate Base and Index table.
-        TableId id = metadata.isIndex() ? TableId.fromUUID(UUID.nameUUIDFromBytes(metadata.indexName().get().getBytes())) : metadata.id;
         block = heap.allocateMemoryBlock(BLOCK_SIZE);
-        byte[] tableUUIDBytes = id.toString().getBytes();
+        byte[] tableUUIDBytes = metadata.id.toString().getBytes();
         block.copyFromArray(tableUUIDBytes, 0, TABLE_ID_OFFSET, tableUUIDBytes.length);
         block.setLong(CART_HANDLE_OFFSET, memtableCart.handle());
         this.sHeaderLongLinkedList = new LongLinkedList(heap);
@@ -207,8 +204,7 @@ public class PmemTableInfo
     private int getPreviousColumnCount()
     {
         int version = getMetadataVersion();
-        int columCount = getSerializationHeader(version).columns().size();
-        return columCount;
+        return getSerializationHeader(version).columns().size();
     }
 
     /**
@@ -262,7 +258,7 @@ public class PmemTableInfo
         {
             long sHeaderHandle = sHeaderLinkedList.next();
             TransactionalMemoryBlock sHeaderBlock = heap.memoryBlockFromHandle(sHeaderHandle);
-            DataInputPlus in = new MemoryBlockDataInputPlus(sHeaderBlock, heap);
+            DataInputPlus in = new MemoryBlockDataInputPlus(sHeaderBlock);
             try
             {
                 SerializationHeader.Component component = SerializationHeader.serializer.deserialize(BigFormat.latestVersion, in);
@@ -299,11 +295,10 @@ public class PmemTableInfo
         }
 
         TableMetadata tableMetadata = metadataBuilder.build();
-        SerializationHeader serializationHeader = new SerializationHeader(false,
-                                                                          tableMetadata,
-                                                                          tableMetadata.regularAndStaticColumns(),
-                                                                          EncodingStats.NO_STATS);
-        return serializationHeader;
+        return new SerializationHeader(false,
+                                       tableMetadata,
+                                       tableMetadata.regularAndStaticColumns(),
+                                       EncodingStats.NO_STATS);
     }
 }
 

@@ -167,7 +167,7 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
         ByteComparable clusteringByteComparable = ByteComparable.fixedLength(nextEntry.getKey());
         Clustering<?> clustering = metadata.comparator.clusteringFromByteComparable(ByteArrayAccessor.instance, clusteringByteComparable);
         builder.newRow(clustering);
-        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(cellMemoryBlock, heap);
+        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(cellMemoryBlock);
         try
         {
             int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
@@ -188,7 +188,7 @@ public class PmemRowAndRtmIterator extends AbstractIterator<Unfiltered> implemen
         Row.Builder builder = BTreeRow.sortedBuilder();
         LongART.Entry nextEntry = rtmTreeIterator.next();
         TransactionalMemoryBlock rangeMemoryBlock = heap.memoryBlockFromHandle(nextEntry.getValue());
-        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(rangeMemoryBlock, heap);
+        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(rangeMemoryBlock);
         try
         {
             int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();

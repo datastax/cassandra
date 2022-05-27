@@ -21,27 +21,21 @@ package org.apache.cassandra.db.memtable.pmem;
 import java.io.IOException;
 import java.io.UTFDataFormatException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 
 import com.intel.pmem.llpl.TransactionalMemoryBlock;
-import io.netty.util.concurrent.FastThreadLocal;
-import org.apache.cassandra.config.Config;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.Memory;
-import org.apache.cassandra.io.util.UnbufferedDataOutputStreamPlus;
 
 /*Extending DataOutputStreamPlus to reuse a few methods defined in it */
 public class MemoryBlockDataOutputPlus extends DataOutputStreamPlus implements DataOutputPlus
 {
     private final TransactionalMemoryBlock block;
-    private final long size;
     private int position;
 
     public MemoryBlockDataOutputPlus(TransactionalMemoryBlock block, int initialPosition)
     {
         this.block = block;
-        size = block.size();
         position = initialPosition;
     }
 

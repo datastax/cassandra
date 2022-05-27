@@ -25,7 +25,6 @@ import com.intel.pmem.llpl.TransactionalHeap;
 import com.intel.pmem.llpl.TransactionalMemoryBlock;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.BTreeRow;
@@ -51,61 +50,59 @@ public class PmemRowMap {
     private static TransactionalHeap heap;
     private final LongART rowMapTree;
     private TableMetadata tableMetadata;
-    private DeletionTime partitionLevelDeletion;
     private final LongART rangeTombstoneMarkerTree;
     private final UpdateTransaction indexer;
     private final PmemTableInfo pmemTableInfo;
 
-    private PmemRowMap(TransactionalHeap heap, LongART rangeTombstoneMarkerTree, LongART arTree, DeletionTime partitionLevelDeletion, UpdateTransaction indexer, PmemTableInfo pmemTableInfo) {
+    private PmemRowMap(TransactionalHeap heap, LongART rangeTombstoneMarkerTree, LongART arTree, UpdateTransaction indexer, PmemTableInfo pmemTableInfo) {
         this.heap = heap;
         this.rowMapTree = arTree;
         this.tableMetadata = pmemTableInfo.getMetadata();
-        this.partitionLevelDeletion = partitionLevelDeletion;
         this.rangeTombstoneMarkerTree = rangeTombstoneMarkerTree;
         this.indexer = indexer;
         this.pmemTableInfo = pmemTableInfo;
     }
 
-    public static PmemRowMap create(TransactionalHeap heap, DeletionTime partitionLevelDeletion, UpdateTransaction indexer,  PmemTableInfo pmemTableInfo) {
+    public static PmemRowMap create(TransactionalHeap heap, UpdateTransaction indexer,  PmemTableInfo pmemTableInfo) {
         LongART arTree = new LongART(heap);
-        return (new PmemRowMap(heap, null, arTree, partitionLevelDeletion, indexer, pmemTableInfo));
+        return (new PmemRowMap(heap, null, arTree, indexer, pmemTableInfo));
     }
 
-    public static PmemRowMap createForTombstone(TransactionalHeap heap, DeletionTime partitionLevelDeletion, UpdateTransaction indexer, PmemTableInfo pmemTableInfo) {
+    public static PmemRowMap createForTombstone(TransactionalHeap heap, UpdateTransaction indexer, PmemTableInfo pmemTableInfo) {
         LongART arTree = new LongART(heap);
-        return (new PmemRowMap(heap, arTree, null, partitionLevelDeletion, indexer,pmemTableInfo));
+        return (new PmemRowMap(heap, arTree, null, indexer,pmemTableInfo));
     }
 
-    public static PmemRowMap loadFromAddress(TransactionalHeap heap, long address, DeletionTime partitionLevelDeletion, UpdateTransaction indexer,PmemTableInfo pmemTableInfo) {
+    public static PmemRowMap loadFromAddress(TransactionalHeap heap, long address, UpdateTransaction indexer,PmemTableInfo pmemTableInfo) {
         LongART arTree = LongART.fromHandle(heap, address);
-        return (new PmemRowMap(heap, null, arTree, partitionLevelDeletion, indexer,pmemTableInfo));
+        return (new PmemRowMap(heap, null, arTree , indexer,pmemTableInfo));
     }
 
-    public static PmemRowMap loadFromRtmHandle(TransactionalHeap heap, long handle, DeletionTime partitionLevelDeletion, UpdateTransaction indexer, PmemTableInfo pmemTableInfo) {
+    public static PmemRowMap loadFromRtmHandle(TransactionalHeap heap, long handle, UpdateTransaction indexer, PmemTableInfo pmemTableInfo) {
         LongART arTree = LongART.fromHandle(heap, handle);
-        return (new PmemRowMap(heap, arTree, null, partitionLevelDeletion, indexer, pmemTableInfo));
+        return (new PmemRowMap(heap, arTree, null, indexer, pmemTableInfo));
     }
 
-    public Row getRow(Clustering clustering, TableMetadata metadata) {
-        Row row = null;
+    public Row getRow(Clustering<?> clustering, TableMetadata metadata)
+    {
         Row.Builder builder = BTreeRow.sortedBuilder();
-
         ClusteringComparator clusteringComparator = metadata.comparator;
         ByteSource clusteringByteSource = clusteringComparator.asByteComparable(clustering).asComparableBytes(ByteComparable.Version.OSS41);
         byte[] clusteringBytes = ByteSourceInverse.readBytes(clusteringByteSource);
         long rowHandle = rowMapTree.get(clusteringBytes);
         TransactionalMemoryBlock block = heap.memoryBlockFromHandle(rowHandle);
-        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(block, heap);
-        try {
+        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(block);
+        try
+        {
             int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
             SerializationHeader serializationHeader = pmemTableInfo.getSerializationHeader(savedVersion);
             DeserializationHelper helper = new DeserializationHelper(metadata, -1, DeserializationHelper.Flag.LOCAL);
-            row = (Row) PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
-        } catch (IndexOutOfBoundsException | IOException e)
+            return (Row) PmemRowSerializer.serializer.deserialize(memoryBlockDataInputPlus, serializationHeader, helper, builder);
+        }
+        catch (IndexOutOfBoundsException | IOException e)
         {
             throw new IOError(e);
         }
-        return row;
     }
 
     public long getHandle() {
@@ -118,12 +115,12 @@ public class PmemRowMap {
 
     public Row getMergedRow(Row newRow, Long mb) {
 
-        Clustering clustering = newRow.clustering();
+        Clustering<?> clustering = newRow.clustering();
         Row.Builder builder = BTreeRow.sortedBuilder();
         builder.newRow(clustering);
 
         TransactionalMemoryBlock oldBlock = heap.memoryBlockFromHandle(mb);
-        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(oldBlock, heap);
+        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(oldBlock);
 
         Row currentRow;
         try {
@@ -181,14 +178,12 @@ public class PmemRowMap {
         {
             throw new IOError(e);
         }
-        long rowAddress = cellMemoryRegion.handle();
-        return rowAddress;
+        return cellMemoryRegion.handle();
     }
 
     @SuppressWarnings({ "resource" })
     Long saveRTM(Object newRTM, Long mb) {
         Unfiltered unfiltered = (Unfiltered) newRTM;
-        TransactionalMemoryBlock oldBlock = null;
         TransactionalMemoryBlock rtmMemoryRegion;
         SerializationHeader serializationHeader = new SerializationHeader(false,
                 tableMetadata,
@@ -201,7 +196,7 @@ public class PmemRowMap {
 
         try {
             if (mb != 0) {
-                oldBlock = heap.memoryBlockFromHandle(mb);
+                TransactionalMemoryBlock oldBlock = heap.memoryBlockFromHandle(mb);
                 if (oldBlock.size() < size) {
                     rtmMemoryRegion = heap.allocateMemoryBlock(size);
                     oldBlock.free();
@@ -222,7 +217,6 @@ public class PmemRowMap {
         return rtmMemoryRegion.handle();
     }
 
-    ;
 
     public void put(Row row, PartitionUpdate update) {
         ClusteringComparator clusteringComparator = update.metadata().comparator;
