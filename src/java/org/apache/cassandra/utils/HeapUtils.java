@@ -17,14 +17,17 @@
  */
 package org.apache.cassandra.utils;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.lang.management.ManagementFactory;
 
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.text.StrBuilder;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.io.util.File;
 
 import static org.apache.cassandra.config.CassandraRelevantEnv.JAVA_HOME;
 
@@ -81,14 +84,8 @@ public final class HeapUtils
         if (javaHome == null)
             return null;
         File javaBinDirectory = new File(javaHome, "bin");
-        File[] files = javaBinDirectory.listFiles(new FilenameFilter()
-        {
-            public boolean accept(File dir, String name)
-            {
-                return name.startsWith("jcmd");
-            }
-        });
-        return ArrayUtils.isEmpty(files) ? null : files[0].getPath();
+        File[] files = javaBinDirectory.tryList((dir, name) -> name.startsWith("jcmd"));
+        return ArrayUtils.isEmpty(files) ? null : files[0].path();
     }
 
     /**
@@ -115,9 +112,9 @@ public final class HeapUtils
      * Retrieves the process ID or <code>null</code> if the process ID cannot be retrieved.
      * @return the process ID or <code>null</code> if the process ID cannot be retrieved.
      */
-    private static Long getProcessId()
+    public static Long getProcessId()
     {
-        long pid = NativeLibrary.getProcessID();
+        long pid = INativeLibrary.instance.getProcessID();
         if (pid >= 0)
             return pid;
 

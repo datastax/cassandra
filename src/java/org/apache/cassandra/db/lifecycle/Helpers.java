@@ -17,16 +17,26 @@
  */
 package org.apache.cassandra.db.lifecycle;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import com.google.common.base.Predicate;
-import com.google.common.collect.*;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 
-import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.utils.Throwables;
 
-import static com.google.common.base.Predicates.*;
+import static com.google.common.base.Predicates.and;
+import static com.google.common.base.Predicates.equalTo;
+import static com.google.common.base.Predicates.in;
+import static com.google.common.base.Predicates.not;
+import static com.google.common.base.Predicates.or;
 import static com.google.common.collect.Iterables.any;
 import static com.google.common.collect.Iterables.concat;
 import static com.google.common.collect.Iterables.filter;
@@ -40,7 +50,7 @@ class Helpers
      * really present, and that the items to add are not (unless we're also removing them)
      * @return a new set with the contents of the provided one modified
      */
-    static <T> Set<T> replace(Set<T> original, Set<T> remove, Iterable<T> add)
+    static <T> Set<T> replace(Set<T> original, Set<? extends T> remove, Iterable<? extends T> add)
     {
         return ImmutableSet.copyOf(replace(identityMap(original), remove, add).keySet());
     }
@@ -50,11 +60,11 @@ class Helpers
      * really present, and that the items to add are not (unless we're also removing them)
      * @return a new identity map with the contents of the provided one modified
      */
-    static <T> Map<T, T> replace(Map<T, T> original, Set<T> remove, Iterable<T> add)
+    static <T> Map<T, T> replace(Map<T, T> original, Set<? extends T> remove, Iterable<? extends T> add)
     {
         // ensure the ones being removed are the exact same ones present
         for (T reader : remove)
-            assert original.get(reader) == reader;
+            assert original.get(reader) == reader : String.format("%s not found in original set: %s", reader, original);
 
         // ensure we don't already contain any we're adding, that we aren't also removing
         assert !any(add, and(not(in(remove)), in(original.keySet()))) : String.format("original:%s remove:%s add:%s", original.keySet(), remove, add);
@@ -72,10 +82,10 @@ class Helpers
      * A convenience method for encapsulating this action over multiple SSTableReader with exception-safety
      * @return accumulate if not null (with any thrown exception attached), or any thrown exception otherwise
      */
-    static void setupOnline(Iterable<SSTableReader> readers)
+    static void setupOnline(ColumnFamilyStore cfs, Iterable<SSTableReader> readers)
     {
         for (SSTableReader reader : readers)
-            reader.setupOnline();
+            reader.setupOnline(cfs);
     }
 
     /**
@@ -107,12 +117,12 @@ class Helpers
             assert !reader.isReplaced();
     }
 
-    static Throwable markObsolete(List<LogTransaction.Obsoletion> obsoletions, Throwable accumulate)
+    static Throwable markObsolete(List<AbstractLogTransaction.Obsoletion> obsoletions, Throwable accumulate)
     {
         if (obsoletions == null || obsoletions.isEmpty())
             return accumulate;
 
-        for (LogTransaction.Obsoletion obsoletion : obsoletions)
+        for (AbstractLogTransaction.Obsoletion obsoletion : obsoletions)
         {
             try
             {
@@ -126,33 +136,26 @@ class Helpers
         return accumulate;
     }
 
-    static Throwable prepareForObsoletion(Iterable<SSTableReader> readers, LogTransaction txnLogs, List<LogTransaction.Obsoletion> obsoletions, Throwable accumulate)
+    static Throwable prepareForObsoletion(Iterable<SSTableReader> readers,
+                                          AbstractLogTransaction txnLogs,
+                                          List<AbstractLogTransaction.Obsoletion> obsoletions,
+                                          Tracker tracker,
+                                          Throwable accumulate)
     {
-        Map<SSTable, LogRecord> logRecords = txnLogs.makeRemoveRecords(readers);
-        for (SSTableReader reader : readers)
-        {
-            try
-            {
-                obsoletions.add(new LogTransaction.Obsoletion(reader, txnLogs.obsoleted(reader, logRecords.get(reader))));
-            }
-            catch (Throwable t)
-            {
-                accumulate = Throwables.merge(accumulate, t);
-            }
-        }
-        return accumulate;
+
+        return txnLogs.prepareForObsoletion(readers, obsoletions, tracker, accumulate);
     }
 
-    static Throwable abortObsoletion(List<LogTransaction.Obsoletion> obsoletions, Throwable accumulate)
+    static Throwable abortObsoletion(List<AbstractLogTransaction.Obsoletion> obsoletions, Throwable accumulate)
     {
         if (obsoletions == null || obsoletions.isEmpty())
             return accumulate;
 
-        for (LogTransaction.Obsoletion obsoletion : obsoletions)
+        for (AbstractLogTransaction.Obsoletion obsoletion : obsoletions)
         {
             try
             {
-                obsoletion.tidier.abort();
+                obsoletion.tidier.abort(accumulate);
             }
             catch (Throwable t)
             {

@@ -21,9 +21,9 @@ import java.util.Collection;
 import java.util.Set;
 import java.util.UUID;
 
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.index.Index;
@@ -52,25 +52,25 @@ public class CollatedViewIndexBuilder extends SecondaryIndexBuilder
         this.sstables = sstables;
     }
 
-    public CompactionInfo getCompactionInfo()
+    public OperationProgress getProgress()
     {
-        return new CompactionInfo(cfs.metadata(),
-                OperationType.INDEX_BUILD,
-                iter.getBytesRead(),
-                iter.getTotalBytes(),
-                compactionId,
-                sstables);
+        return new OperationProgress(cfs.metadata(),
+                                     OperationType.INDEX_BUILD,
+                                     iter.getBytesRead(),
+                                     iter.getTotalBytes(),
+                                     compactionId,
+                                     sstables);
     }
 
     public void build()
     {
         try
         {
-            int pageSize = cfs.indexManager.calculateIndexingPageSize();
+            PageSize pageSize = cfs.indexManager.calculateIndexingPageSize();
             while (iter.hasNext())
             {
                 if (isStopRequested())
-                    throw new CompactionInterruptedException(getCompactionInfo());
+                    throw new CompactionInterruptedException(getProgress());
                 DecoratedKey key = iter.next();
                 cfs.indexManager.indexPartition(key, indexers, pageSize);
             }

@@ -19,46 +19,74 @@
 package org.apache.cassandra.db;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.partitions.*;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.StubIndex;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.OrderCheckingIterator;
 
 import static org.apache.cassandra.SchemaLoader.standardCFMD;
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+@RunWith(Parameterized.class)
 public class RangeTombstoneTest
 {
     private static final String KSNAME = "RangeTombstoneTest";
     private static final String CFNAME = "StandardInteger1";
+    private static final String CFNAME_INDEXED = "StandardIntegerIndexed";
+    public static final int GC_GRACE = 5000;
+
+    @Parameterized.Parameters(name = "compaction={0}")
+    public static Iterable<CompactionParams> compactionParamSets()
+    {
+        return ImmutableSet.of(CompactionParams.stcs(ImmutableMap.of()),
+                               CompactionParams.ucs(ImmutableMap.of()));
+    }
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
@@ -66,7 +94,19 @@ public class RangeTombstoneTest
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KSNAME,
                                     KeyspaceParams.simple(1),
-                                    standardCFMD(KSNAME, CFNAME, 1, UTF8Type.instance, Int32Type.instance, Int32Type.instance));
+                                    standardCFMD(KSNAME, CFNAME, 1, UTF8Type.instance, Int32Type.instance, Int32Type.instance),
+                                    standardCFMD(KSNAME, CFNAME_INDEXED, 1, UTF8Type.instance, Int32Type.instance, Int32Type.instance));
+    }
+
+    public RangeTombstoneTest(CompactionParams compactionParams)
+    {
+        Keyspace ks = Keyspace.open(KSNAME);
+        ColumnFamilyStore cfs = ks.getColumnFamilyStore(CFNAME);
+        SchemaTestUtil.announceTableUpdate(cfs.metadata().unbuild().compaction(compactionParams).build());
+        cfs.disableAutoCompaction(); // don't trigger compaction at 4 sstables
+        cfs = ks.getColumnFamilyStore(CFNAME_INDEXED);
+        SchemaTestUtil.announceTableUpdate(cfs.metadata().unbuild().compaction(compactionParams).build());
+        cfs.disableAutoCompaction(); // don't trigger compaction at 4 sstables
     }
 
     @Test
@@ -85,7 +125,7 @@ public class RangeTombstoneTest
         for (int i = 0; i < 40; i += 2)
             builder.newRow(i).add("val", i);
         builder.applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         new RowUpdateBuilder(cfs.metadata(), 1, key).addRangeTombstone(10, 22).build().applyUnsafe();
 
@@ -235,7 +275,7 @@ public class RangeTombstoneTest
 
         int nowInSec = FBUtilities.nowInSeconds();
         new Mutation(PartitionUpdate.fullPartitionDelete(cfs.metadata(), Util.dk(key), 1000, nowInSec)).apply();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         assertTimes(sstable.getSSTableMetadata(), 1000, 1000, nowInSec);
@@ -257,7 +297,7 @@ public class RangeTombstoneTest
         key = "rt_times2";
         int nowInSec = FBUtilities.nowInSeconds();
         new Mutation(PartitionUpdate.fullPartitionDelete(cfs.metadata(), Util.dk(key), 1000, nowInSec)).apply();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         assertTimes(sstable.getSSTableMetadata(), 999, 1000, Integer.MAX_VALUE);
@@ -276,7 +316,7 @@ public class RangeTombstoneTest
 
         int nowInSec = FBUtilities.nowInSeconds();
         new RowUpdateBuilder(cfs.metadata(), nowInSec, 1000L, key).addRangeTombstone(1, 2).build().apply();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         assertTimes(sstable.getSSTableMetadata(), 1000, 1000, nowInSec);
@@ -298,9 +338,9 @@ public class RangeTombstoneTest
         key = "rt_times2";
         int nowInSec = FBUtilities.nowInSeconds();
         new Mutation(PartitionUpdate.fullPartitionDelete(cfs.metadata(), Util.dk(key), 1000, nowInSec)).apply();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         assertTimes(sstable.getSSTableMetadata(), 999, 1000, Integer.MAX_VALUE);
         cfs.forceMajorCompaction();
@@ -320,7 +360,8 @@ public class RangeTombstoneTest
     {
         Keyspace ks = Keyspace.open(KSNAME);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(CFNAME);
-        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(2).build(), true);
+        SchemaTestUtil.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(2).build());
+        cfs.truncateBlocking();
 
         String key = "7810";
 
@@ -328,14 +369,83 @@ public class RangeTombstoneTest
         for (int i = 10; i < 20; i ++)
             builder.newRow(i).add("val", i);
         builder.apply();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         new RowUpdateBuilder(cfs.metadata(), 1, key).addRangeTombstone(10, 11).build().apply();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
-        Thread.sleep(5);
+        Thread.sleep(3000);
         cfs.forceMajorCompaction();
-        assertEquals(8, Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build()).rowCount());
+        checkUnfilteredContains(cfs, key, 8);
+    }
+
+
+    @Test
+    public void testDB4980_mid() throws ExecutionException, InterruptedException
+    {
+        testDB4980("4980_m", 9, 11, 12, 14, 10, 13);
+    }
+
+    @Test
+    public void testDB4980_left() throws ExecutionException, InterruptedException
+    {
+        testDB4980("4980_l", 10, 13, 12, 14, 9, 11);
+    }
+
+    @Test
+    public void testDB4980_right() throws ExecutionException, InterruptedException
+    {
+        testDB4980("4980_r", 9, 11, 10, 13, 12, 14);
+    }
+
+    public void testDB4980(String key, int start1, int end1, int start2, int end2, int start3, int end3) throws ExecutionException, InterruptedException
+    {
+        Keyspace ks = Keyspace.open(KSNAME);
+        ColumnFamilyStore cfs = ks.getColumnFamilyStore(CFNAME);
+        SchemaTestUtil.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(GC_GRACE).build());
+        cfs.truncateBlocking();
+
+        UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), key).withTimestamp(0);
+        for (int i = 10; i < 20; i ++)
+            builder.newRow(i).add("val", i);
+        builder.apply();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+
+        int localTime = FBUtilities.nowInSeconds();
+        new RowUpdateBuilder(cfs.metadata(), localTime - (GC_GRACE + 100), 1, 0, key)
+            .addRangeTombstone(start1, end1)
+            .build()
+            .apply();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+
+        new RowUpdateBuilder(cfs.metadata(), localTime - (GC_GRACE + 30), 2, 0, key)
+            .addRangeTombstone(start2, end2)
+            .build()
+            .apply();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+
+        // This one should stay
+        new RowUpdateBuilder(cfs.metadata(), localTime, 3, 0, key)
+            .addRangeTombstone(start3, end3)
+            .build()
+            .apply();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+
+        cfs.forceMajorCompaction();
+        checkUnfilteredContains(cfs, key, 7);
+    }
+
+    private void checkUnfilteredContains(ColumnFamilyStore cfs, String key, int expected)
+    {
+        assertEquals(1, cfs.getLiveSSTables().size());
+        DecoratedKey dkey = cfs.metadata().partitioner.decorateKey(((AbstractType<String>) cfs.metadata().partitionKeyType).decompose(key));
+        UnfilteredRowIterator iter = cfs.getLiveSSTables().iterator().next().iterator(dkey,
+                                                                                      Slices.ALL,
+                                                                                      ColumnFilter.NONE,
+                                                                                      false,
+                                                                                      SSTableReadsListener.NOOP_LISTENER);
+        iter = new OrderCheckingIterator(iter);
+        assertEquals(expected, Iterators.size(iter));
     }
 
     @Test
@@ -343,17 +453,18 @@ public class RangeTombstoneTest
     {
         Keyspace ks = Keyspace.open(KSNAME);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(CFNAME);
-        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(2).build(), true);
+        SchemaTestUtil.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(2).build());
+        cfs.truncateBlocking();
 
         String key = "7808_1";
         UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), key).withTimestamp(0);
         for (int i = 0; i < 40; i += 2)
             builder.newRow(i).add("val", i);
         builder.apply();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         new Mutation(PartitionUpdate.fullPartitionDelete(cfs.metadata(), Util.dk(key), 1, 1)).apply();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         Thread.sleep(5);
         cfs.forceMajorCompaction();
     }
@@ -363,23 +474,24 @@ public class RangeTombstoneTest
     {
         Keyspace ks = Keyspace.open(KSNAME);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(CFNAME);
-        MigrationManager.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(2).build(), true);
+        SchemaTestUtil.announceTableUpdate(cfs.metadata().unbuild().gcGraceSeconds(2).build());
+        cfs.truncateBlocking();
 
         String key = "7808_2";
         UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), key).withTimestamp(0);
         for (int i = 10; i < 20; i ++)
             builder.newRow(i).add("val", i);
         builder.apply();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         new Mutation(PartitionUpdate.fullPartitionDelete(cfs.metadata(), Util.dk(key), 0, 0)).apply();
 
         UpdateBuilder.create(cfs.metadata(), key).withTimestamp(1).newRow(5).add("val", 5).apply();
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         Thread.sleep(5);
         cfs.forceMajorCompaction();
-        assertEquals(1, Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build()).rowCount());
+        checkUnfilteredContains(cfs, key, 1);
     }
 
     @Test
@@ -396,16 +508,16 @@ public class RangeTombstoneTest
         for (int i = 0; i < 20; i++)
             builder.newRow(i).add("val", i);
         builder.applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         new RowUpdateBuilder(cfs.metadata(), 1, key).addRangeTombstone(5, 15).build().applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         new RowUpdateBuilder(cfs.metadata(), 1, key).addRangeTombstone(5, 10).build().applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         new RowUpdateBuilder(cfs.metadata(), 2, key).addRangeTombstone(5, 8).build().applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         Partition partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).build());
         int nowInSec = FBUtilities.nowInSeconds();
@@ -447,11 +559,11 @@ public class RangeTombstoneTest
         String key = "k3";
 
         UpdateBuilder.create(cfs.metadata(), key).withTimestamp(0).newRow(2).add("val", 2).applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         new RowUpdateBuilder(cfs.metadata(), 1, key).addRangeTombstone(0, 10).build().applyUnsafe();
         UpdateBuilder.create(cfs.metadata(), key).withTimestamp(2).newRow(1).add("val", 1).applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         // Get the last value of the row
         FilteredPartition partition = Util.getOnlyPartition(Util.cmd(cfs, key).build());
@@ -465,7 +577,7 @@ public class RangeTombstoneTest
     public void testRowWithRangeTombstonesUpdatesSecondaryIndex() throws Exception
     {
         Keyspace table = Keyspace.open(KSNAME);
-        ColumnFamilyStore cfs = table.getColumnFamilyStore(CFNAME);
+        ColumnFamilyStore cfs = table.getColumnFamilyStore(CFNAME_INDEXED);
         ByteBuffer key = ByteBufferUtil.bytes("k5");
         ByteBuffer indexedColumnName = ByteBufferUtil.bytes("val");
 
@@ -489,7 +601,7 @@ public class RangeTombstoneTest
                 current.unbuild()
                        .indexes(current.indexes.with(indexDef))
                        .build();
-            MigrationManager.announceTableUpdate(updated, true);
+            SchemaTestUtil.announceTableUpdate(updated);
         }
 
         Future<?> rebuild = cfs.indexManager.addIndex(indexDef, false);
@@ -508,10 +620,10 @@ public class RangeTombstoneTest
         for (int i = 0; i < 10; i++)
             builder.newRow(i).add("val", i);
         builder.applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         new RowUpdateBuilder(cfs.metadata(), 0, key).addRangeTombstone(0, 7).build().applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         assertEquals(10, index.rowsInserted.size());
 
@@ -538,10 +650,10 @@ public class RangeTombstoneTest
         for (int i = 0; i < 10; i += 2)
             builder.newRow(i).add("val", i);
         builder.applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         new RowUpdateBuilder(cfs.metadata(), 0, key).addRangeTombstone(0, 7).build().applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         // there should be 2 sstables
         assertEquals(2, cfs.getLiveSSTables().size());
@@ -571,7 +683,7 @@ public class RangeTombstoneTest
     public void testOverwritesToDeletedColumns() throws Exception
     {
         Keyspace table = Keyspace.open(KSNAME);
-        ColumnFamilyStore cfs = table.getColumnFamilyStore(CFNAME);
+        ColumnFamilyStore cfs = table.getColumnFamilyStore(CFNAME_INDEXED);
         ByteBuffer key = ByteBufferUtil.bytes("k6");
         ByteBuffer indexedColumnName = ByteBufferUtil.bytes("val");
 
@@ -595,7 +707,7 @@ public class RangeTombstoneTest
                 current.unbuild()
                        .indexes(current.indexes.with(indexDef))
                        .build();
-            MigrationManager.announceTableUpdate(updated, true);
+            SchemaTestUtil.announceTableUpdate(updated);
         }
 
         Future<?> rebuild = cfs.indexManager.addIndex(indexDef, false);
@@ -614,7 +726,7 @@ public class RangeTombstoneTest
         // now re-insert that column
         UpdateBuilder.create(cfs.metadata(), key).withTimestamp(2).newRow(1).add("val", 1).applyUnsafe();
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         // We should have 1 insert and 1 update to the indexed "1" column
         // CASSANDRA-6640 changed index update to just update, not insert then delete

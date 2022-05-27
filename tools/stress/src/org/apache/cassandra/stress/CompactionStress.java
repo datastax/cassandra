@@ -21,27 +21,41 @@ package org.apache.cassandra.stress;
 import java.io.File;
 import java.io.IOError;
 import java.net.URI;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Uninterruptibles;
 
-import io.airlift.airline.*;
+import io.airlift.airline.Cli;
+import io.airlift.airline.Command;
+import io.airlift.airline.Help;
+import io.airlift.airline.HelpOption;
+import io.airlift.airline.Option;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.StressCQLSSTableWriter;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.StressCQLSSTableWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -133,7 +147,7 @@ public abstract class CompactionStress implements Runnable
 
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(entry.getKey(), components, cfs);
+                    SSTableReader sstable = entry.getKey().getFormat().getReaderFactory().openNoValidation(entry.getKey(), components, cfs);
                     sstables.add(sstable);
                 }
                 catch (Exception e)
@@ -150,7 +164,7 @@ public abstract class CompactionStress implements Runnable
                 throw new IllegalStateException("CompactionStress does not support secondary indexes");
 
             //Register with cfs
-            cfs.addSSTables(sstables);
+            cfs.addSSTables(sstables, OperationType.COMPACTION);
         }
 
         return cfs;
@@ -212,14 +226,13 @@ public abstract class CompactionStress implements Runnable
         public void run()
         {
             //Setup
-            SystemKeyspace.finishStartup(); //needed for early-open
             CompactionManager.instance.setMaximumCompactorThreads(threads);
             CompactionManager.instance.setCoreCompactorThreads(threads);
             CompactionManager.instance.setRate(0);
 
             StressProfile stressProfile = getStressProfile();
             ColumnFamilyStore cfs = initCf(stressProfile, true);
-            cfs.getCompactionStrategyManager().compactionLogger.enable();
+            cfs.getCompactionStrategy().getCompactionLogger().enable();
 
             List<Future<?>> futures = new ArrayList<>(threads);
             if (maximal)
@@ -229,20 +242,20 @@ public abstract class CompactionStress implements Runnable
             else
             {
                 cfs.enableAutoCompaction();
-                cfs.getCompactionStrategyManager().enable();
+                cfs.getCompactionStrategyContainer().enable();
                 for (int i = 0; i < threads; i++)
-                    futures.addAll(CompactionManager.instance.submitBackground(cfs));
+                    futures.add(CompactionManager.instance.submitBackground(cfs));
             }
 
             long working;
             //Report compaction stats while working
-            while ((working = futures.stream().filter(f -> !f.isDone()).count()) > 0 || CompactionManager.instance.getActiveCompactions() > 0 || (!maximal && cfs.getCompactionStrategyManager().getEstimatedRemainingTasks() > 0))
+            while ((working = futures.stream().filter(f -> !f.isDone()).count()) > 0 || CompactionManager.instance.getActiveCompactions() > 0 || (!maximal && cfs.getCompactionStrategy().getEstimatedRemainingTasks() > 0))
             {
                 //Re-up any bg jobs
                 if (!maximal)
                 {
                     for (long i = working; i < threads; i++)
-                        futures.addAll(CompactionManager.instance.submitBackground(cfs));
+                        futures.add(CompactionManager.instance.submitBackground(cfs));
                 }
 
                 reportCompactionStats();

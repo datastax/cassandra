@@ -18,48 +18,51 @@
 */
 package org.apache.cassandra.db;
 
-import java.io.File;
-import java.io.FileReader;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
 
+import com.google.common.collect.Iterators;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Assume;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.utils.Pair;
-import org.json.simple.JSONArray;
-import org.json.simple.JSONObject;
-import org.json.simple.parser.JSONParser;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-
-import com.google.common.collect.Iterators;
-import org.apache.cassandra.*;
+import com.googlecode.concurrenttrees.common.Iterables;
+import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.UpdateBuilder;
+import org.apache.cassandra.Util;
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
-import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileReader;
 import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.WrappedRunnable;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+
 import static junit.framework.Assert.assertNotNull;
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.*;
 
 public class ColumnFamilyStoreTest
 {
@@ -103,14 +106,14 @@ public class ColumnFamilyStoreTest
                 .add("val", "asdf")
                 .build()
                 .applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         new RowUpdateBuilder(cfs.metadata(), 1, "key1")
                 .clustering("Column1")
                 .add("val", "asdf")
                 .build()
                 .applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear(); // resets counts
         Util.getAll(Util.cmd(cfs, "key1").includeRow("c1").build());
@@ -160,6 +163,27 @@ public class ColumnFamilyStoreTest
     }
 
     @Test
+    public void testDiscardSSTables() throws ExecutionException, InterruptedException
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
+
+        new RowUpdateBuilder(cfs.metadata(), 0, "key1").clustering("Column1").build().applyUnsafe();
+        cfs.forceFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS).get();
+
+        new RowUpdateBuilder(cfs.metadata(), 0, "key1").clustering("Column1").build().applyUnsafe();
+        cfs.forceFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS).get();
+
+        Set<SSTableReader> sstables = cfs.getLiveSSTables();
+        assertEquals(2, sstables.size());
+
+        SSTableReader discarded = sstables.iterator().next();
+        cfs.discardSSTables(sstables, s -> s == discarded, OperationType.SSTABLE_DISCARD);
+
+        assertEquals(1, cfs.getLiveSSTables().size());
+        assertFalse(cfs.getLiveSSTables().contains(discarded));
+    }
+
+    @Test
     public void testDeleteStandardRowSticksAfterFlush() throws Throwable
     {
         // test to make sure flushing after a delete doesn't resurrect delted cols.
@@ -180,7 +204,7 @@ public class ColumnFamilyStoreTest
         assertRangeCount(cfs, col, val, 2);
 
         // flush.
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         // insert, don't flush
         new RowUpdateBuilder(cfs.metadata(), 1, "key3").clustering("Column1").add("val", "val1").build().applyUnsafe();
@@ -195,7 +219,7 @@ public class ColumnFamilyStoreTest
         assertRangeCount(cfs, col, val, 2);
 
         // flush
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         // re-verify delete. // first breakage is right here because of CASSANDRA-1837.
         assertRangeCount(cfs, col, val, 2);
@@ -213,7 +237,7 @@ public class ColumnFamilyStoreTest
         assertRangeCount(cfs, col, val, 4);
 
         // and it remains so after flush. (this wasn't failing before, but it's good to check.)
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         assertRangeCount(cfs, col, val, 4);
     }
 
@@ -270,7 +294,7 @@ public class ColumnFamilyStoreTest
         .add("val", "asdf")
         .build()
         .applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         // snapshot
         cfs.snapshot("basic", null, false, false);
@@ -302,17 +326,16 @@ public class ColumnFamilyStoreTest
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE2).getColumnFamilyStore(CF_STANDARD1);
         new RowUpdateBuilder(cfs.metadata(), 0, ByteBufferUtil.bytes("key1")).clustering("Column1").add("val", "asdf").build().applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         new RowUpdateBuilder(cfs.metadata(), 0, ByteBufferUtil.bytes("key2")).clustering("Column1").add("val", "asdf").build().applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
-        for (int version = 1; version <= 2; ++version)
+        for (SSTableReader liveSSTable : cfs.getLiveSSTables())
         {
-            Descriptor existing = new Descriptor(cfs.getDirectories().getDirectoryForNewSSTables(), KEYSPACE2, CF_STANDARD1, version,
-                                                 SSTableFormat.Type.BIG);
-            Descriptor desc = new Descriptor(Directories.getBackupsDirectory(existing), KEYSPACE2, CF_STANDARD1, version, SSTableFormat.Type.BIG);
-            for (Component c : new Component[]{ Component.DATA, Component.PRIMARY_INDEX, Component.FILTER, Component.STATS })
-                assertTrue("Cannot find backed-up file:" + desc.filenameFor(c), new File(desc.filenameFor(c)).exists());
+            Descriptor existing = liveSSTable.descriptor;
+            Descriptor desc = new Descriptor(Directories.getBackupsDirectory(existing), KEYSPACE2, CF_STANDARD1, liveSSTable.descriptor.id, liveSSTable.descriptor.formatType);
+            for (Component c : liveSSTable.components)
+                assertTrue("Cannot find backed-up file:" + desc.fileFor(c), desc.fileFor(c).exists());
         }
     }
 
@@ -443,7 +466,7 @@ public class ColumnFamilyStoreTest
     public void reTest(ColumnFamilyStore cfs, Runnable verify) throws Exception
     {
         verify.run();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         verify.run();
     }
 
@@ -482,10 +505,10 @@ public class ColumnFamilyStoreTest
                                              .add("birthdate", 1L)
                                              .add("notbirthdate", 2L);
         new Mutation(builder.build()).applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         String snapshotName = "newSnapshot";
-        cfs.snapshotWithoutFlush(snapshotName);
+        cfs.snapshotWithoutMemtable(snapshotName);
 
         File snapshotManifestFile = cfs.getDirectories().getSnapshotManifestFile(snapshotName);
         JSONParser parser = new JSONParser();
@@ -498,9 +521,15 @@ public class ColumnFamilyStoreTest
         // Snapshot of the secondary index is stored in the subfolder with the same file name
         String baseTableFile = (String) files.get(0);
         String indexTableFile = (String) files.get(1);
-        assert !baseTableFile.equals(indexTableFile);
-        assert Directories.isSecondaryIndexFolder(new File(indexTableFile).getParentFile());
-        assert indexTableFile.endsWith(baseTableFile);
+        assertThat(baseTableFile).isNotEqualTo(indexTableFile);
+        assertThat(Directories.isSecondaryIndexFolder(new File(indexTableFile).parent())).isTrue();
+
+        Set<File> originalFiles = new HashSet<>();
+        Iterables.toList(cfs.concatWithIndexes()).stream()
+                 .flatMap(c -> c.getLiveSSTables().stream().map(t -> t.descriptor.fileFor(Component.DATA)))
+                 .forEach(originalFiles::add);
+        assertThat(originalFiles.stream().anyMatch(f -> f.toString().endsWith(indexTableFile))).isTrue();
+        assertThat(originalFiles.stream().anyMatch(f -> f.toString().endsWith(baseTableFile))).isTrue();
     }
 
     @Test
@@ -508,7 +537,7 @@ public class ColumnFamilyStoreTest
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
         List<String> dataPaths = cfs.getDataPaths();
-        Assert.assertFalse(dataPaths.isEmpty());
+        assertFalse(dataPaths.isEmpty());
 
         Path path = Paths.get(dataPaths.get(0));
 
@@ -527,16 +556,16 @@ public class ColumnFamilyStoreTest
         ColumnFamilyStore.scrubDataDirectories(cfs.metadata());
 
         new RowUpdateBuilder(cfs.metadata(), 2, "key").clustering("name").add("val", "2").build().applyUnsafe();
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
 
         // Nuke the metadata and reload that sstable
         Collection<SSTableReader> ssTables = cfs.getLiveSSTables();
         assertEquals(1, ssTables.size());
         SSTableReader ssTable = ssTables.iterator().next();
 
-        String dataFileName = ssTable.descriptor.filenameFor(Component.DATA);
-        String tmpDataFileName = ssTable.descriptor.tmpFilenameFor(Component.DATA);
-        new File(dataFileName).renameTo(new File(tmpDataFileName));
+        File dataFileName = ssTable.descriptor.fileFor(Component.DATA);
+        File tmpDataFile = ssTable.descriptor.tmpFileFor(Component.DATA);
+        dataFileName.tryMove(tmpDataFile);
 
         ssTable.selfRef().release();
 
@@ -546,5 +575,27 @@ public class ColumnFamilyStoreTest
         assertNotNull(ssTableFiles);
         assertEquals(0, ssTableFiles.size());
         cfs.clearUnsafe();
+    }
+
+    @Test
+    public void testMutateRepaired() throws IOException
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
+
+        new RowUpdateBuilder(cfs.metadata(), 0, "key1").clustering("Column1").add("val", "val1").build().applyUnsafe();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+
+        Set<SSTableReader> sstables = cfs.getLiveSSTables();
+        assertEquals(1, sstables.size());
+
+        SSTableReader sstable = sstables.iterator().next();
+        assertFalse(sstable.isRepaired());
+
+        int repaired = cfs.mutateRepaired(sstables, 1, null, false);
+        assertEquals(1, repaired);
+
+        sstables = cfs.getLiveSSTables();
+        sstable = sstables.iterator().next();
+        assertTrue(sstable.isRepaired());
     }
 }

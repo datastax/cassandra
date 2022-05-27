@@ -54,6 +54,7 @@
                  <exclude name="**/cassandra-murmur.yaml"/>
                  <exclude name="**/cassandra-seeds.yaml"/>
                  <exclude NAME="**/doc/antora.yml"/>
+                 <exclude name="**/test/conf/bigtable.yaml"/>
                  <exclude name="**/test/conf/cassandra.yaml"/>
                  <exclude name="**/test/conf/cassandra_deprecated_parameters_names.yaml"/>
                  <exclude name="**/test/conf/cassandra_encryption.yaml"/>
@@ -66,6 +67,7 @@
                  <exclude name="**/test/data/jmxdump/cassandra-3.0-jmx.yaml"/>
                  <exclude name="**/test/data/jmxdump/cassandra-3.11-jmx.yaml"/>
                  <exclude name="**/test/data/jmxdump/cassandra-4.0-jmx.yaml"/>
+                 <exclude name="**/test/data/jmxdump/cassandra-4.0-cc-jmx.yaml"/>
                  <exclude name="**/tools/cqlstress-counter-example.yaml"/>
                  <exclude name="**/tools/cqlstress-example.yaml"/>
                  <exclude name="**/tools/cqlstress-insanity-example.yaml"/>

@@ -22,9 +22,10 @@ import java.util.Objects;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.TableMetadata;
 
-public class CustomIndexExpression
+public class CustomIndexExpression implements ExternalRestriction
 {
     private final ColumnIdentifier valueColId = new ColumnIdentifier("custom index expression", false);
 
@@ -46,7 +47,7 @@ public class CustomIndexExpression
         value.collectMarkerSpecification(boundNames);
     }
 
-    public void addToRowFilter(RowFilter filter, TableMetadata table, QueryOptions options)
+    public void addToRowFilter(RowFilter.Builder filter, TableMetadata table, QueryOptions options)
     {
         filter.addCustomIndexExpression(table,
                                         table.indexes
@@ -58,6 +59,17 @@ public class CustomIndexExpression
     public String toCQLString()
     {
         return String.format("expr(%s,%s)", targetIndex.toCQLString(), valueRaw.getText());
+    }
+
+    public boolean needsFiltering(Index.Group indexGroup)
+    {
+        String indexName = targetIndex.getName();
+
+        for (Index index : indexGroup.getIndexes())
+            if (index.getIndexMetadata().name.equals(indexName))
+                return false;
+
+        return true;
     }
 
     @Override

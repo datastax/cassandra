@@ -84,7 +84,7 @@ public class CassandraEntireSSTableStreamWriter
             logger.debug("[Stream #{}] Streaming {}.{} gen {} component {} size {}", session.planId(),
                          sstable.getKeyspaceName(),
                          sstable.getColumnFamilyName(),
-                         sstable.descriptor.generation,
+                         sstable.descriptor.id,
                          component,
                          prettyPrintMemory(length));
 
@@ -93,13 +93,13 @@ public class CassandraEntireSSTableStreamWriter
             long bytesWritten = out.writeFileToChannel(channel, limiter);
             progress += bytesWritten;
 
-            session.progress(sstable.descriptor.filenameFor(component), ProgressInfo.Direction.OUT, bytesWritten, length);
+            session.progress(sstable.descriptor.fileFor(component).toString(), ProgressInfo.Direction.OUT, bytesWritten, length);
 
             logger.debug("[Stream #{}] Finished streaming {}.{} gen {} component {} to {}, xfered = {}, length = {}, totalSize = {}",
                          session.planId(),
                          sstable.getKeyspaceName(),
                          sstable.getColumnFamilyName(),
-                         sstable.descriptor.generation,
+                         sstable.descriptor.id,
                          component,
                          session.peer,
                          prettyPrintMemory(bytesWritten),

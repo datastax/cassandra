@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.hints;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,9 +32,10 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.SyncUtil;
 
 import static java.util.stream.Collectors.groupingBy;
@@ -148,24 +148,24 @@ final class HintsCatalog
 
     void fsyncDirectory()
     {
-        int fd = NativeLibrary.tryOpenDirectory(hintsDirectory.getAbsolutePath());
+        int fd = INativeLibrary.instance.tryOpenDirectory(hintsDirectory.toAbsolute());
         if (fd != -1)
         {
             try
             {
                 SyncUtil.trySync(fd);
-                NativeLibrary.tryCloseFD(fd);
+                INativeLibrary.instance.tryCloseFD(fd);
             }
             catch (FSError e) // trySync failed
             {
-                logger.error("Unable to sync directory {}", hintsDirectory.getAbsolutePath(), e);
+                logger.error("Unable to sync directory {}", hintsDirectory.toAbsolute(), e);
                 FileUtils.handleFSErrorAndPropagate(e);
             }
         }
         else if (!FBUtilities.isWindows)
         {
-            logger.error("Unable to open directory {}", hintsDirectory.getAbsolutePath());
-            FileUtils.handleFSErrorAndPropagate(new FSWriteError(new IOException(String.format("Unable to open hint directory %s", hintsDirectory.getAbsolutePath())), hintsDirectory.getAbsolutePath()));
+            logger.error("Unable to open directory {}", hintsDirectory.toAbsolute());
+            FileUtils.handleFSErrorAndPropagate(new FSWriteError(new IOException(String.format("Unable to open hint directory %s", hintsDirectory.absolutePath())), hintsDirectory.absolutePath()));
         }
     }
 

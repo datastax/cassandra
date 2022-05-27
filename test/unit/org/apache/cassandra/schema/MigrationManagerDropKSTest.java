@@ -30,6 +30,7 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -54,6 +55,7 @@ public class MigrationManagerDropKSTest
                                     SchemaLoader.standardCFMD(KEYSPACE1, TABLE1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, TABLE2));
     }
+
     @Test
     public void dropKS() throws ConfigurationException
     {
@@ -70,10 +72,10 @@ public class MigrationManagerDropKSTest
                                            "dropKs", "col" + i, "anyvalue");
         ColumnFamilyStore cfs = Keyspace.open(cfm.keyspace).getColumnFamilyStore(cfm.name);
         assertNotNull(cfs);
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         assertTrue(!cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).list().isEmpty());
 
-        MigrationManager.announceKeyspaceDrop(ks.name);
+        SchemaTestUtil.announceKeyspaceDrop(ks.name);
 
         assertNull(Schema.instance.getKeyspaceMetadata(ks.name));
 

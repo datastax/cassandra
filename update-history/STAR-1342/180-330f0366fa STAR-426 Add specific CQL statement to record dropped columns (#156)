@@ -1,0 +1,149 @@
+--- a/src/java/org/apache/cassandra/schema/TableMetadata.java
++++ b/src/java/org/apache/cassandra/schema/TableMetadata.java
+@@ -1355,13 +1355,9 @@
+         }
+         else
+         {
+-<<<<<<<
+             if (includeDroppedColumns)
+                 appendDropColumns(builder);
+-            params.appendCqlTo(builder);
+-=======
+             params.appendCqlTo(builder, isView());
+->>>>>>>
+         }
+         builder.append(";");
+     }
+diff --git a/src/java/org/apache/cassandra/db/ColumnFamilyStore.java b/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
+index d6c3f74f77..4fa47b46b0 100644
+--- a/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
++++ b/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
+@@ -24,19 +24,7 @@ import java.lang.reflect.Constructor;
+ import java.lang.reflect.InvocationTargetException;
+ import java.nio.ByteBuffer;
+ import java.nio.file.Files;
+-import java.util.ArrayList;
+-import java.util.Arrays;
+-import java.util.Collection;
+-import java.util.Collections;
+-import java.util.HashMap;
+-import java.util.HashSet;
+-import java.util.Iterator;
+-import java.util.LinkedHashMap;
+-import java.util.List;
+-import java.util.Map;
+-import java.util.Objects;
+-import java.util.Set;
+-import java.util.UUID;
++import java.util.*;
+ import java.util.concurrent.Callable;
+ import java.util.concurrent.CountDownLatch;
+ import java.util.concurrent.ExecutionException;
+@@ -66,10 +54,7 @@ import com.google.common.base.Joiner;
+ import com.google.common.base.Predicate;
+ import com.google.common.base.Predicates;
+ import com.google.common.base.Throwables;
+-import com.google.common.collect.ImmutableSet;
+-import com.google.common.collect.Iterables;
+-import com.google.common.collect.Lists;
+-import com.google.common.collect.Sets;
++import com.google.common.collect.*;
+ import com.google.common.util.concurrent.ListenableFuture;
+ import com.google.common.util.concurrent.ListenableFutureTask;
+ import com.google.common.util.concurrent.RateLimiter;
+--- a/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
++++ b/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
+@@ -24,24 +24,7 @@
+ import java.lang.reflect.InvocationTargetException;
+ import java.nio.ByteBuffer;
+ import java.nio.file.Files;
+-<<<<<<<
+ import java.util.*;
+-=======
+-import java.util.ArrayList;
+-import java.util.Arrays;
+-import java.util.Collection;
+-import java.util.Collections;
+-import java.util.Comparator;
+-import java.util.HashMap;
+-import java.util.HashSet;
+-import java.util.Iterator;
+-import java.util.LinkedHashMap;
+-import java.util.List;
+-import java.util.Map;
+-import java.util.Objects;
+-import java.util.Set;
+-import java.util.UUID;
+->>>>>>>
+ import java.util.concurrent.Callable;
+ import java.util.concurrent.CountDownLatch;
+ import java.util.concurrent.ExecutionException;
+@@ -71,15 +54,8 @@
+ import com.google.common.base.Predicate;
+ import com.google.common.base.Predicates;
+ import com.google.common.base.Throwables;
+-<<<<<<<
+-import com.google.common.collect.*;
+-=======
+ import com.google.common.collect.ImmutableList;
+-import com.google.common.collect.ImmutableSet;
+-import com.google.common.collect.Iterables;
+-import com.google.common.collect.Lists;
+-import com.google.common.collect.Sets;
+->>>>>>>
++import com.google.common.collect.*;
+ import com.google.common.util.concurrent.ListenableFuture;
+ import com.google.common.util.concurrent.ListenableFutureTask;
+ import com.google.common.util.concurrent.RateLimiter;
+diff --git a/update-history/STAR-1342/180-330f0366fa STAR-426 Add specific CQL statement to record dropped columns (#156) b/update-history/STAR-1342/180-330f0366fa STAR-426 Add specific CQL statement to record dropped columns (#156)
+index 28134a8704..03f1bef377 100644
+--- a/update-history/STAR-1342/180-330f0366fa STAR-426 Add specific CQL statement to record dropped columns (#156)	
++++ b/update-history/STAR-1342/180-330f0366fa STAR-426 Add specific CQL statement to record dropped columns (#156)	
+@@ -51,3 +51,47 @@ index d6c3f74f77..4fa47b46b0 100644
+  import com.google.common.util.concurrent.ListenableFuture;
+  import com.google.common.util.concurrent.ListenableFutureTask;
+  import com.google.common.util.concurrent.RateLimiter;
++--- a/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
+++++ b/src/java/org/apache/cassandra/db/ColumnFamilyStore.java
++@@ -24,24 +24,7 @@
++ import java.lang.reflect.InvocationTargetException;
++ import java.nio.ByteBuffer;
++ import java.nio.file.Files;
++-<<<<<<<
++ import java.util.*;
++-=======
++-import java.util.ArrayList;
++-import java.util.Arrays;
++-import java.util.Collection;
++-import java.util.Collections;
++-import java.util.Comparator;
++-import java.util.HashMap;
++-import java.util.HashSet;
++-import java.util.Iterator;
++-import java.util.LinkedHashMap;
++-import java.util.List;
++-import java.util.Map;
++-import java.util.Objects;
++-import java.util.Set;
++-import java.util.UUID;
++->>>>>>>
++ import java.util.concurrent.Callable;
++ import java.util.concurrent.CountDownLatch;
++ import java.util.concurrent.ExecutionException;
++@@ -71,15 +54,8 @@
++ import com.google.common.base.Predicate;
++ import com.google.common.base.Predicates;
++ import com.google.common.base.Throwables;
++-<<<<<<<
++-import com.google.common.collect.*;
++-=======
++ import com.google.common.collect.ImmutableList;
++-import com.google.common.collect.ImmutableSet;
++-import com.google.common.collect.Iterables;
++-import com.google.common.collect.Lists;
++-import com.google.common.collect.Sets;
++->>>>>>>
+++import com.google.common.collect.*;
++ import com.google.common.util.concurrent.ListenableFuture;
++ import com.google.common.util.concurrent.ListenableFutureTask;
++ import com.google.common.util.concurrent.RateLimiter;

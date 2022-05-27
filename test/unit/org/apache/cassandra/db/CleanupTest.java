@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,7 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.compaction.CompactionManager;
@@ -56,6 +58,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -65,6 +68,7 @@ public class CleanupTest
     public static final String KEYSPACE1 = "CleanupTest1";
     public static final String CF_INDEXED1 = "Indexed1";
     public static final String CF_STANDARD1 = "Standard1";
+    public static final String CF_STANDARD_UCS1 = "StandardUCS1";
 
     public static final String KEYSPACE2 = "CleanupTestMultiDc";
     public static final String CF_INDEXED2 = "Indexed2";
@@ -87,7 +91,8 @@ public class CleanupTest
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1),
+                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD1)
+                                                .compaction(CompactionParams.stcs(new HashMap<>())),
                                     SchemaLoader.compositeIndexCFMD(KEYSPACE1, CF_INDEXED1, true));
 
 
@@ -108,8 +113,11 @@ public class CleanupTest
 
         SchemaLoader.createKeyspace(KEYSPACE2,
                                     KeyspaceParams.nts("DC1", 1),
-                                    SchemaLoader.standardCFMD(KEYSPACE2, CF_STANDARD2),
-                                    SchemaLoader.compositeIndexCFMD(KEYSPACE2, CF_INDEXED2, true));
+                                    SchemaLoader.standardCFMD(KEYSPACE2, CF_STANDARD2)
+                                                .compaction(CompactionParams.stcs(new HashMap<>())),
+                                    SchemaLoader.compositeIndexCFMD(KEYSPACE2, CF_INDEXED2, true),
+                                    SchemaLoader.standardCFMD(KEYSPACE2, CF_STANDARD_UCS1)
+                                                .compaction(CompactionParams.ucs(new HashMap<>())));
         SchemaLoader.createKeyspace(KEYSPACE3,
                                     KeyspaceParams.nts("DC1", 1),
                                     SchemaLoader.standardCFMD(KEYSPACE3, CF_STANDARD3));
@@ -159,7 +167,7 @@ public class CleanupTest
         while (!cfs.getBuiltIndexes().contains(indexName) && System.nanoTime() - start < TimeUnit.SECONDS.toNanos(10))
             Thread.sleep(10);
 
-        RowFilter cf = RowFilter.create();
+        RowFilter.Builder cf = RowFilter.builder();
         cf.add(cdef, Operator.EQ, VALUE);
         assertEquals(LOOPS, Util.getAll(Util.cmd(cfs).filterOn("birthdate", Operator.EQ, VALUE).build()).size());
 
@@ -209,18 +217,30 @@ public class CleanupTest
     }
 
     @Test
-    public void testCleanupWithNoTokenRange() throws Exception
+    public void testCleanupSTCSWithNoTokenRange() throws Exception
     {
-        testCleanupWithNoTokenRange(false);
+        testCleanupWithNoTokenRange(CF_STANDARD2, false);
     }
 
     @Test
-    public void testUserDefinedCleanupWithNoTokenRange() throws Exception
+    public void testUserDefinedCleanupSTCSWithNoTokenRange() throws Exception
     {
-        testCleanupWithNoTokenRange(true);
+        testCleanupWithNoTokenRange(CF_STANDARD2, true);
     }
 
-    private void testCleanupWithNoTokenRange(boolean isUserDefined) throws Exception
+    @Test
+    public void testCleanupUCSWithNoTokenRange() throws Exception
+    {
+        testCleanupWithNoTokenRange(CF_STANDARD_UCS1, false);
+    }
+
+    @Test
+    public void testUserDefinedCleanupUCSWithNoTokenRange() throws Exception
+    {
+        testCleanupWithNoTokenRange(CF_STANDARD_UCS1, true);
+    }
+
+    private void testCleanupWithNoTokenRange(String cfsName, boolean isUserDefined) throws Exception
     {
 
         TokenMetadata tmd = StorageService.instance.getTokenMetadata();
@@ -232,7 +252,7 @@ public class CleanupTest
 
         Keyspace keyspace = Keyspace.open(KEYSPACE2);
         keyspace.setMetadata(KeyspaceMetadata.create(KEYSPACE2, KeyspaceParams.nts("DC1", 1)));
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD2);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfsName);
 
         // insert data and verify we get it back w/ range query
         fillCF(cfs, "val", LOOPS);
@@ -283,7 +303,7 @@ public class CleanupTest
             .add("val", VALUE)
             .build()
             .applyUnsafe();
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(UNIT_TESTS);
         }
 
         Set<SSTableReader> beforeFirstCleanup = Sets.newHashSet(cfs.getLiveSSTables());
@@ -432,7 +452,7 @@ public class CleanupTest
                     .applyUnsafe();
         }
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
     }
 
     protected List<Long> getMaxTimestampList(ColumnFamilyStore cfs)

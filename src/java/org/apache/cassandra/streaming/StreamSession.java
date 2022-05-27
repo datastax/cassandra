@@ -27,6 +27,7 @@ import com.google.common.collect.*;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 
 import org.slf4j.Logger;
@@ -402,7 +403,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     {
         failIfFinished();
         Collection<ColumnFamilyStore> stores = getColumnFamilyStores(keyspace, columnFamilies);
-        if (flushTables)
+        if (flushTables && DatabaseDescriptor.supportsFlushBeforeStreaming())
             flushSSTables(stores);
 
         //Was it safe to remove this normalize, sorting seems not to matter, merging? Maybe we should have?
@@ -947,7 +948,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     {
         List<Future<?>> flushes = new ArrayList<>();
         for (ColumnFamilyStore cfs : stores)
-            flushes.add(cfs.forceFlush());
+            flushes.add(cfs.forceFlush(ColumnFamilyStore.FlushReason.STREAMING));
         FBUtilities.waitOnFutures(flushes);
     }
 

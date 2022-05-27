@@ -18,13 +18,23 @@
 package org.apache.cassandra.service;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
-import java.nio.file.*;
+import java.nio.file.FileVisitResult;
+import java.nio.file.FileVisitor;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -36,27 +46,28 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.jpountz.lz4.LZ4Factory;
-import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.io.sstable.UUIDBasedSSTableId;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JavaUtils;
-import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.SigarLibrary;
 
-import static java.lang.String.format;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COM_SUN_MANAGEMENT_JMXREMOTE_PORT;
 import static org.apache.cassandra.config.CassandraRelevantProperties.JAVA_VERSION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.JAVA_VM_NAME;
@@ -272,7 +283,7 @@ public class StartupChecks
         public void execute() throws StartupException
         {
             // Fail-fast if the native library could not be linked.
-            if (!NativeLibrary.isAvailable())
+            if (!INativeLibrary.instance.isAvailable())
                 throw new StartupException(StartupException.ERR_WRONG_MACHINE_STATE, "The native library could not be initialized properly. ");
         }
     };
@@ -335,30 +346,28 @@ public class StartupChecks
     public static final StartupCheck checkDataDirs = () ->
     {
         // check all directories(data, commitlog, saved cache) for existence and permission
-        Iterable<String> dirs = Iterables.concat(Arrays.asList(DatabaseDescriptor.getAllDataFileLocations()),
+        Iterable<File> dirs = Iterables.concat(Arrays.asList(DatabaseDescriptor.getAllDataFileLocations()),
                                                  Arrays.asList(DatabaseDescriptor.getCommitLogLocation(),
                                                                DatabaseDescriptor.getSavedCachesLocation(),
-                                                               DatabaseDescriptor.getHintsDirectory().getAbsolutePath()));
-
-        for (String dataDir : dirs)
+                                                               DatabaseDescriptor.getHintsDirectory()));
+        for (File dir : dirs)
         {
-            logger.debug("Checking directory {}", dataDir);
-            File dir = new File(dataDir);
+            logger.debug("Checking directory {}", dir);
 
             // check that directories exist.
             if (!dir.exists())
             {
-                logger.warn("Directory {} doesn't exist", dataDir);
+                logger.warn("Directory {} doesn't exist", dir);
                 // if they don't, failing their creation, stop cassandra.
-                if (!dir.mkdirs())
+                if (!dir.tryCreateDirectories())
                     throw new StartupException(StartupException.ERR_WRONG_DISK_STATE,
-                                               "Has no permission to create directory "+ dataDir);
+                                               "Has no permission to create directory "+ dir);
             }
 
             // if directories exist verify their permissions
-            if (!Directories.verifyFullPermissions(dir, dataDir))
+            if (!Directories.verifyFullPermissions(dir))
                 throw new StartupException(StartupException.ERR_WRONG_DISK_STATE,
-                                           "Insufficient permissions on directory " + dataDir);
+                                           "Insufficient permissions on directory " + dir);
         }
     };
 
@@ -368,6 +377,7 @@ public class StartupChecks
         {
             final Set<String> invalid = new HashSet<>();
             final Set<String> nonSSTablePaths = new HashSet<>();
+            final List<String> withIllegalGenId = new ArrayList<>();
             nonSSTablePaths.add(FileUtils.getCanonicalPath(DatabaseDescriptor.getCommitLogLocation()));
             nonSSTablePaths.add(FileUtils.getCanonicalPath(DatabaseDescriptor.getSavedCachesLocation()));
             nonSSTablePaths.add(FileUtils.getCanonicalPath(DatabaseDescriptor.getHintsDirectory()));
@@ -376,14 +386,18 @@ public class StartupChecks
             {
                 public FileVisitResult visitFile(Path path, BasicFileAttributes attrs)
                 {
-                    File file = path.toFile();
+                    File file = new File(path);
                     if (!Descriptor.isValidFile(file))
                         return FileVisitResult.CONTINUE;
 
                     try
                     {
-                        if (!Descriptor.fromFilename(file).isCompatible())
+                        Descriptor desc = Descriptor.fromFilename(file);
+                        if (!desc.isCompatible())
                             invalid.add(file.toString());
+
+                        if (!DatabaseDescriptor.isUUIDSSTableIdentifiersEnabled() && desc.id instanceof UUIDBasedSSTableId)
+                            withIllegalGenId.add(file.toString());
                     }
                     catch (Exception e)
                     {
@@ -397,17 +411,17 @@ public class StartupChecks
                     String name = dir.getFileName().toString();
                     return (name.equals(Directories.SNAPSHOT_SUBDIR)
                             || name.equals(Directories.BACKUPS_SUBDIR)
-                            || nonSSTablePaths.contains(dir.toFile().getCanonicalPath()))
+                            || nonSSTablePaths.contains(PathUtils.toCanonicalPath(dir).toString()))
                            ? FileVisitResult.SKIP_SUBTREE
                            : FileVisitResult.CONTINUE;
                 }
             };
 
-            for (String dataDir : DatabaseDescriptor.getAllDataFileLocations())
+            for (File dataDir : DatabaseDescriptor.getAllDataFileLocations())
             {
                 try
                 {
-                    Files.walkFileTree(Paths.get(dataDir), sstableVisitor);
+                    Files.walkFileTree(dataDir.toPath(), sstableVisitor);
                 }
                 catch (IOException e)
                 {
@@ -423,6 +437,15 @@ public class StartupChecks
                                                          "upgradesstables",
                                                          Joiner.on(",").join(invalid)));
 
+            if (!withIllegalGenId.isEmpty())
+                throw new StartupException(StartupException.ERR_WRONG_CONFIG,
+                                           "UUID sstable identifiers are disabled but some sstables have been " +
+                                           "created with UUID identifiers. You have to either delete those " +
+                                           "sstables or enable UUID based sstable identifers in cassandra.yaml " +
+                                           "(enable_uuid_sstable_identifiers). The list of affected sstables is: " +
+                                           Joiner.on(", ").join(withIllegalGenId) + ". If you decide to delete sstables, " +
+                                           "and have that data replicated over other healthy nodes, those will be brought" +
+                                           "back during repair");
         }
     };
 

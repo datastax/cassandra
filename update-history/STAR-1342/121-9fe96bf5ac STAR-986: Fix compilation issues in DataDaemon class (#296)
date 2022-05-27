@@ -1,0 +1,38 @@
+--- a/src/java/org/apache/cassandra/service/StorageService.java
++++ b/src/java/org/apache/cassandra/service/StorageService.java
+@@ -5057,16 +5057,6 @@
+             }
+ 
+             if (!isFinalShutdown)
+-<<<<<<<
+-=======
+-                setMode(Mode.DRAINING, "clearing mutation stage", false);
+-            Stage.shutdownAndAwaitMutatingExecutors(false,
+-                                                    DRAIN_EXECUTOR_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
+-
+-            StorageProxy.instance.verifyNoHintsInProgress();
+-
+-            if (!isFinalShutdown)
+->>>>>>>
+                 setMode(Mode.DRAINING, "flushing column families", false);
+ 
+             // we don't want to start any new compactions while we are draining
+@@ -5131,15 +5121,9 @@
+             barriers.forEach(OpOrder.Barrier::await); // we could parallelize this...
+ 
+             if (!isFinalShutdown)
+-                setMode(Mode.DRAINING, "clearing mutation stages", false);
+-
+-            viewMutationStage.shutdown();
+-            counterMutationStage.shutdown();
+-            mutationStage.shutdown();
+-            // FIXME? should these *really* take up to one hour?
+-            viewMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
+-            counterMutationStage.awaitTermination(3600, TimeUnit.SECONDS);
+-            mutationStage.awaitTermination(3600, TimeUnit.SECONDS);
++                setMode(Mode.DRAINING, "clearing mutation stage", false);
++            Stage.shutdownAndAwaitMutatingExecutors(false,
++                                                    DRAIN_EXECUTOR_TIMEOUT_MS.getInt(), TimeUnit.MILLISECONDS);
+ 
+             StorageProxy.instance.verifyNoHintsInProgress();
+ 

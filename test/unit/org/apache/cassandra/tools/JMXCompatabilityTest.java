@@ -29,6 +29,7 @@ import org.junit.rules.TemporaryFolder;
 
 import com.datastax.driver.core.SimpleStatement;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.GCInspector;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
@@ -160,6 +161,16 @@ public class JMXCompatabilityTest extends CQLTester
         diff(excludeObjects, excludeAttributes, excludeOperations, "test/data/jmxdump/cassandra-4.0-jmx.yaml");
     }
 
+    @Test
+    public void diff41() throws Throwable
+    {
+        List<String> excludeObjects = Arrays.asList();
+        List<String> excludeAttributes = Arrays.asList();
+        List<String> excludeOperations = Arrays.asList();
+
+        diff(excludeObjects, excludeAttributes, excludeOperations, "test/data/jmxdump/cassandra-4.0-cc-jmx.yaml");
+    }
+
     private void diff(List<String> excludeObjects, List<String> excludeAttributes, List<String> excludeOperations, String original) throws Throwable
     {
         setupStandardTables();
@@ -172,6 +183,11 @@ public class JMXCompatabilityTest extends CQLTester
             args.add("--exclude-object");
             args.add(a);
         });
+        if (SSTableFormat.Type.current() == SSTableFormat.Type.BTI)
+        {
+            args.add("--exclude-object");
+            args.add("org.apache.cassandra.metrics:type=Index,scope=RowIndexEntry,name=.*");
+        }
         excludeAttributes.forEach(a -> {
             args.add("--exclude-attribute");
             args.add(a);

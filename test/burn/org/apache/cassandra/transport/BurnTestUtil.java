@@ -27,6 +27,7 @@ import java.util.function.Function;
 import com.datastax.driver.core.SimpleStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -35,6 +36,9 @@ import org.apache.cassandra.net.AbstractMessageHandler;
 import org.apache.cassandra.net.ResourceLimits;
 import org.apache.cassandra.transport.messages.QueryMessage;
 import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.utils.concurrent.NonBlockingRateLimiter;
+
+import static org.apache.cassandra.utils.concurrent.NonBlockingRateLimiter.NO_OP_LIMITER;
 
 public class BurnTestUtil
 {
@@ -75,7 +79,7 @@ public class BurnTestUtil
         QueryOptions queryOptions = QueryOptions.create(ConsistencyLevel.ONE,
                                                         values,
                                                         true,
-                                                        10,
+                                                        PageSize.inRows(10),
                                                         null,
                                                         null,
                                                         version,
@@ -143,6 +147,12 @@ public class BurnTestUtil
                     return delegate.endpointWaitQueue();
                 }
 
+                @Override
+                public NonBlockingRateLimiter requestRateLimiter()
+                {
+                    return NO_OP_LIMITER;
+                }
+                
                 public void release()
                 {
                     delegate.release();

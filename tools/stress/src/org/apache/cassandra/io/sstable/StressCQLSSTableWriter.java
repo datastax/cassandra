@@ -21,21 +21,22 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.SortedSet;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.ArrayUtils;
 
 import org.antlr.runtime.RecognitionException;
-import org.apache.cassandra.cql3.CQLStatement;
-import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
-import org.apache.cassandra.cql3.statements.schema.CreateTypeStatement;
-import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.cql3.CQLFragmentParser;
+import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.CqlParser;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -43,7 +44,12 @@ import org.apache.cassandra.cql3.UpdateParameters;
 import org.apache.cassandra.cql3.functions.UDHelper;
 import org.apache.cassandra.cql3.functions.types.TypeCodec;
 import org.apache.cassandra.cql3.statements.UpdateStatement;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
+import org.apache.cassandra.cql3.statements.schema.CreateTypeStatement;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -52,9 +58,13 @@ import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaTransformations;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.Types;
-import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -241,20 +251,21 @@ public class StressCQLSSTableWriter implements Closeable
         if (values.size() != boundNames.size())
             throw new InvalidRequestException(String.format("Invalid number of arguments, expecting %d values but got %d", boundNames.size(), values.size()));
 
+        QueryState state = QueryState.forInternalCalls();
         QueryOptions options = QueryOptions.forInternalCalls(null, values);
-        List<ByteBuffer> keys = insert.buildPartitionKeyNames(options);
-        SortedSet<Clustering<?>> clusterings = insert.createClustering(options);
+        List<ByteBuffer> keys = insert.buildPartitionKeyNames(options, state);
+        SortedSet<Clustering<?>> clusterings = insert.createClustering(options, state);
 
         long now = System.currentTimeMillis();
         // Note that we asks indexes to not validate values (the last 'false' arg below) because that triggers a 'Keyspace.open'
         // and that forces a lot of initialization that we don't want.
         UpdateParameters params = new UpdateParameters(insert.metadata(),
                                                        insert.updatedColumns(),
+                                                       state,
                                                        options,
                                                        insert.getTimestamp(TimeUnit.MILLISECONDS.toMicros(now), options),
                                                        (int) TimeUnit.MILLISECONDS.toSeconds(now),
-                                                       insert.getTimeToLive(options),
-                                                       Collections.emptyMap());
+                                                       insert.getTimeToLive(options), Collections.emptyMap());
 
         try
         {
@@ -329,7 +340,7 @@ public class StressCQLSSTableWriter implements Closeable
      */
     public File getInnermostDirectory()
     {
-        return cfs.getDirectories().getDirectoryForNewSSTables();
+        return cfs.getDirectories().getDirectoryForNewSSTables().toJavaIOFile();
     }
 
     /**
@@ -566,15 +577,14 @@ public class StressCQLSSTableWriter implements Closeable
             }
         }
 
-        private static void createTypes(String keyspace, List<CreateTypeStatement.Raw> typeStatements)
+        private static Types createTypes(String keyspace, List<CreateTypeStatement.Raw> typeStatements)
         {
             KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(keyspace);
             Types.RawBuilder builder = Types.rawBuilder(keyspace);
             for (CreateTypeStatement.Raw st : typeStatements)
                 st.addToRawBuilder(builder);
 
-            ksm = ksm.withSwapped(builder.build());
-            Schema.instance.load(ksm);
+            return builder.build();
         }
 
         public static ColumnFamilyStore createOfflineTable(String schema, List<File> directoryList)
@@ -590,10 +600,10 @@ public class StressCQLSSTableWriter implements Closeable
         {
             String keyspace = schemaStatement.keyspace();
 
-            if (Schema.instance.getKeyspaceMetadata(keyspace) == null)
-                Schema.instance.load(KeyspaceMetadata.create(keyspace, KeyspaceParams.simple(1)));
+            Schema.instance.transform(SchemaTransformations.addKeyspace(KeyspaceMetadata.create(keyspace, KeyspaceParams.simple(1)), true));
 
-            createTypes(keyspace, typeStatements);
+            Types types = createTypes(keyspace, typeStatements);
+            Schema.instance.transform(SchemaTransformations.addTypes(types, true));
 
             KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(keyspace);
 
@@ -601,8 +611,8 @@ public class StressCQLSSTableWriter implements Closeable
             if (tableMetadata != null)
                 return Schema.instance.getColumnFamilyStoreInstance(tableMetadata.id);
 
-            ClientState state = ClientState.forInternalCalls();
-            CreateTableStatement statement = schemaStatement.prepare(state);
+            QueryState state = QueryState.forInternalCalls();
+            CreateTableStatement statement = schemaStatement.prepare(state.getClientState());
             statement.validate(state);
 
             //Build metadata with a portable tableId
@@ -611,13 +621,13 @@ public class StressCQLSSTableWriter implements Closeable
                                      .build();
 
             Keyspace.setInitialized();
-            Directories directories = new Directories(tableMetadata, directoryList.stream().map(Directories.DataDirectory::new).collect(Collectors.toList()));
+            Directories directories = new Directories(tableMetadata, directoryList.stream().map(f -> new Directories.DataDirectory(new org.apache.cassandra.io.util.File(f.toPath()))).collect(Collectors.toList()));
 
             Keyspace ks = Keyspace.openWithoutSSTables(keyspace);
             ColumnFamilyStore cfs =  ColumnFamilyStore.createColumnFamilyStore(ks, tableMetadata.name, TableMetadataRef.forOfflineTools(tableMetadata), directories, false, false, true);
 
             ks.initCfCustom(cfs);
-            Schema.instance.load(ksm.withSwapped(ksm.tables.with(cfs.metadata())));
+            Schema.instance.transform(SchemaTransformations.addTable(tableMetadata, true));
 
             return cfs;
         }
@@ -634,8 +644,8 @@ public class StressCQLSSTableWriter implements Closeable
          */
         private UpdateStatement prepareInsert()
         {
-            ClientState state = ClientState.forInternalCalls();
-            CQLStatement cqlStatement = insertStatement.prepare(state);
+            QueryState state = QueryState.forInternalCalls();
+            CQLStatement cqlStatement = insertStatement.prepare(state.getClientState());
             UpdateStatement insert = (UpdateStatement) cqlStatement;
             insert.validate(state);
 

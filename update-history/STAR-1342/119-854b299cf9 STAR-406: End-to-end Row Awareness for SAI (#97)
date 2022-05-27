@@ -1,0 +1,38 @@
+--- a/test/microbench/org/apache/cassandra/test/microbench/index/sai/v1/AbstractOnDiskBenchmark.java
++++ b/test/microbench/org/apache/cassandra/test/microbench/index/sai/v1/AbstractOnDiskBenchmark.java
+@@ -47,10 +47,6 @@
+ import org.apache.cassandra.index.sai.disk.v1.LongArray;
+ import org.apache.cassandra.index.sai.utils.IndexFileUtils;
+ import org.apache.cassandra.io.sstable.Descriptor;
+-<<<<<<<
+-=======
+-import org.apache.cassandra.io.sstable.SSTableIdFactory;
+->>>>>>>
+ import org.apache.cassandra.io.util.File;
+ import org.apache.cassandra.io.util.FileHandle;
+ import org.apache.cassandra.io.util.FileUtils;
+@@ -116,7 +112,6 @@
+         DatabaseDescriptor.daemonInitialization(); // required to use ChunkCache
+         assert ChunkCache.instance != null;
+ 
+-<<<<<<<
+         String keyspaceName = "ks";
+         String tableName = this.getClass().getSimpleName();
+         metadata = TableMetadata
+@@ -129,15 +124,10 @@
+         descriptor = new Descriptor(new File(Files.createTempDirectory("jmh").toFile()),
+                                     metadata.keyspace,
+                                     metadata.name,
+-                                    SSTableIdFactory.instance.defaultBuilder().generator(Stream.empty()).get());
++                                    Util.newUUIDGen().get());
+         indexDescriptor = IndexDescriptor.create(descriptor, metadata.partitioner, metadata.comparator);
+         index = "test";
+         indexContext = SAITester.createIndexContext(index, IntegerType.instance);
+-=======
+-        descriptor = new Descriptor(new File(Files.createTempDirectory("jmh")), "ks", this.getClass().getSimpleName(), Util.newUUIDGen().get());
+-        groupComponents = IndexComponents.perSSTable(descriptor, null);
+-        indexComponents = IndexComponents.create("col", descriptor, null);
+->>>>>>>
+ 
+         // write per-sstable components: token and offset
+         writeSSTableComponents(numRows());

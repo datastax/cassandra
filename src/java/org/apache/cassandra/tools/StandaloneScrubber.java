@@ -18,8 +18,6 @@
  */
 package org.apache.cassandra.tools;
 
-import java.io.File;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -39,6 +37,7 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.AbstractStrategyHolder;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.db.compaction.LeveledCompactionStrategy;
 import org.apache.cassandra.db.compaction.LeveledManifest;
@@ -49,6 +48,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableHeaderFix;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.tools.BulkLoader.CmdLineOptions;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -85,7 +85,7 @@ public class StandaloneScrubber
         try
         {
             // load keyspace descriptions.
-            Schema.instance.loadFromDisk(false);
+            Schema.instance.loadFromDisk();
 
             if (Schema.instance.getKeyspaceMetadata(options.keyspaceName) == null)
                 throw new IllegalArgumentException(String.format("Unknown keyspace %s", options.keyspaceName));
@@ -125,7 +125,7 @@ public class StandaloneScrubber
                 listResult.add(Pair.create(descriptor, components));
 
                 File snapshotDirectory = Directories.getSnapshotDirectory(descriptor, snapshotName);
-                SSTableReader.createLinks(descriptor, components, snapshotDirectory.getPath());
+                SSTableReader.createLinks(descriptor, components, snapshotDirectory.path());
             }
             System.out.println(String.format("Pre-scrub sstables snapshotted into snapshot %s", snapshotName));
 
@@ -142,7 +142,7 @@ public class StandaloneScrubber
                     headerFixBuilder = headerFixBuilder.dryRun();
 
                 for (Pair<Descriptor, Set<Component>> p : listResult)
-                    headerFixBuilder.withPath(Paths.get(p.left.filenameFor(Component.DATA)));
+                    headerFixBuilder.withPath(p.left.fileFor(Component.DATA).toPath());
 
                 SSTableHeaderFix headerFix = headerFixBuilder.build();
                 try
@@ -201,7 +201,7 @@ public class StandaloneScrubber
 
                 try
                 {
-                    SSTableReader sstable = SSTableReader.openNoValidation(descriptor, components, cfs);
+                    SSTableReader sstable = descriptor.getFormat().getReaderFactory().openNoValidation(descriptor, components, cfs);
                     sstables.add(sstable);
                 }
                 catch (Exception e)
@@ -242,7 +242,7 @@ public class StandaloneScrubber
             }
 
             // Check (and repair) manifests
-            checkManifest(cfs.getCompactionStrategyManager(), cfs, sstables);
+            checkManifest(cfs, sstables);
             CompactionManager.instance.finishCompactionsAndShutdown(5, TimeUnit.MINUTES);
             LifecycleTransaction.waitForDeletions();
             System.exit(0); // We need that to stop non daemonized threads
@@ -256,17 +256,18 @@ public class StandaloneScrubber
         }
     }
 
-    private static void checkManifest(CompactionStrategyManager strategyManager, ColumnFamilyStore cfs, Collection<SSTableReader> sstables)
+    private static void checkManifest(ColumnFamilyStore cfs, Collection<? extends CompactionSSTable> sstables)
     {
-        if (strategyManager.getCompactionParams().klass().equals(LeveledCompactionStrategy.class))
+        if (cfs.getCompactionParams().klass().equals(LeveledCompactionStrategy.class))
         {
-            int maxSizeInMB = (int)((cfs.getCompactionStrategyManager().getMaxSSTableBytes()) / (1024L * 1024L));
-            int fanOut = cfs.getCompactionStrategyManager().getLevelFanoutSize();
-            for (AbstractStrategyHolder.GroupedSSTableContainer sstableGroup : strategyManager.groupSSTables(sstables))
+            int maxSizeInMB = (int)((cfs.getCompactionStrategy().getMaxSSTableBytes()) / (1024L * 1024L));
+            int fanOut = cfs.getCompactionStrategy().getLevelFanoutSize();
+            CompactionStrategyManager csm = (CompactionStrategyManager) cfs.getCompactionStrategyContainer();
+            for (AbstractStrategyHolder.GroupedSSTableContainer<?> sstableGroup : csm.groupSSTables(sstables))
             {
                 for (int i = 0; i < sstableGroup.numGroups(); i++)
                 {
-                    List<SSTableReader> groupSSTables = new ArrayList<>(sstableGroup.getGroup(i));
+                    List<CompactionSSTable> groupSSTables = new ArrayList<>(sstableGroup.getGroup(i));
                     // creating the manifest makes sure the leveling is sane:
                     LeveledManifest.create(cfs, maxSizeInMB, fanOut, groupSSTables);
                 }

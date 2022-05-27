@@ -65,6 +65,8 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+
 public class CompactionAllocationTest
 {
     private static final Logger logger = LoggerFactory.getLogger(CompactionAllocationTest.class);
@@ -384,10 +386,10 @@ public class CompactionAllocationTest
         }
 
         ColumnFamilyStore cfs = workload.getCfs();
-        ActiveCompactions active = new ActiveCompactions();
+        ActiveOperations active = new ActiveOperations();
         Set<SSTableReader> sstables = cfs.getLiveSSTables();
 
-        CompactionTasks tasks = cfs.getCompactionStrategyManager()
+        CompactionTasks tasks = cfs.getCompactionStrategyContainer()
                                    .getUserDefinedTasks(sstables, FBUtilities.nowInSeconds());
         Assert.assertFalse(tasks.isEmpty());
 
@@ -483,11 +485,11 @@ public class CompactionAllocationTest
                         if (!overlap || f == 0)
                         {
                             QueryOptions options = QueryProcessor.makeInternalOptions(select, new Object[]{f});
-                            ReadQuery query = select.getQuery(options, queryState.getNowInSeconds());
+                            ReadQuery query = select.getQuery(queryState, options, queryState.getNowInSeconds());
                             reads.add(() -> runQuery(query, cfs.metadata.get()));
                         }
                     }
-                    cfs.forceBlockingFlush();
+                    cfs.forceBlockingFlush(UNIT_TESTS);
                 }
 
                 Assert.assertEquals(numSSTable, cfs.getLiveSSTables().size());
@@ -598,11 +600,11 @@ public class CompactionAllocationTest
                         if (!overlap || f == 0)
                         {
                             QueryOptions options = QueryProcessor.makeInternalOptions(select, new Object[]{key});
-                            ReadQuery query = select.getQuery(options, queryState.getNowInSeconds());
+                            ReadQuery query = select.getQuery(queryState, options, queryState.getNowInSeconds());
                             reads.add(() -> runQuery(query, cfs.metadata.get()));
                         }
                     }
-                    cfs.forceBlockingFlush();
+                    cfs.forceBlockingFlush(UNIT_TESTS);
                 }
 
                 Assert.assertEquals(numSSTable, cfs.getLiveSSTables().size());
@@ -698,11 +700,11 @@ public class CompactionAllocationTest
                         if (!overlap || f == 0)
                         {
                             QueryOptions options = QueryProcessor.makeInternalOptions(select, new Object[]{key});
-                            ReadQuery query = select.getQuery(options, queryState.getNowInSeconds());
+                            ReadQuery query = select.getQuery(queryState, options, queryState.getNowInSeconds());
                             reads.add(() -> runQuery(query, cfs.metadata.get()));
                         }
                     }
-                    cfs.forceBlockingFlush();
+                    cfs.forceBlockingFlush(UNIT_TESTS);
                 }
 
                 Assert.assertEquals(numSSTable, cfs.getLiveSSTables().size());

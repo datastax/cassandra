@@ -22,9 +22,7 @@ package org.apache.cassandra.db.commitlog;
 
 import java.io.DataInput;
 import java.io.EOFException;
-import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -40,6 +38,8 @@ import com.google.common.base.Objects;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSReadError;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.security.EncryptionContext;
 import org.json.simple.JSONValue;
@@ -57,16 +57,24 @@ public class CommitLogDescriptor
     static final String COMPRESSION_PARAMETERS_KEY = "compressionParameters";
     static final String COMPRESSION_CLASS_KEY = "compressionClass";
 
+    /**
+     * the versions below ARE NOT the same thing as MessagingService versions
+     * see {@link #getMessagingVersion()}
+     */
     // We don't support anything pre-3.0
-    public static final int VERSION_30 = 6;
-    public static final int VERSION_40 = 7;
+    private static final int VERSION_30 = 6;
+    private static final int VERSION_40 = 7;
+    // For compatibility with CNDB
+    private static final int VERSION_DSE_68 = 680;
+    // Stargazer 1.0 messaging
+    private static final int VERSION_SG_10 = 100;
 
     /**
      * Increment this number if there is a changes in the commit log disc layout or MessagingVersion changes.
      * Note: make sure to handle {@link #getMessagingVersion()}
      */
     @VisibleForTesting
-    public static final int current_version = VERSION_40;
+    public static final int current_version = VERSION_SG_10;
 
     final int version;
     public final long id;
@@ -131,9 +139,8 @@ public class CommitLogDescriptor
 
     public static CommitLogDescriptor fromHeader(File file, EncryptionContext encryptionContext)
     {
-        try (RandomAccessFile raf = new RandomAccessFile(file, "r"))
+        try (FileInputStreamPlus raf = new FileInputStreamPlus(file))
         {
-            assert raf.getFilePointer() == 0;
             return readHeader(raf, encryptionContext);
         }
         catch (EOFException e)
@@ -208,7 +215,10 @@ public class CommitLogDescriptor
             case VERSION_30:
                 return MessagingService.VERSION_30;
             case VERSION_40:
+            case VERSION_DSE_68:
                 return MessagingService.VERSION_40;
+            case VERSION_SG_10:
+                return MessagingService.VERSION_SG_10;
             default:
                 throw new IllegalStateException("Unknown commitlog version " + version);
         }

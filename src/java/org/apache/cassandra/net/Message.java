@@ -24,12 +24,10 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,9 +50,11 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
 import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
-import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
+import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
+import static org.apache.cassandra.net.MessagingService.VERSION_41;
+import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
 import static org.apache.cassandra.net.MessagingService.instance;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 import static org.apache.cassandra.utils.vint.VIntCoding.computeUnsignedVIntSize;
@@ -241,6 +241,18 @@ public class Message<T>
         return outWithParam(0, verb, payload, null, null);
     }
 
+    /**
+     * Used by the {@code MultiRangeReadCommand} to split multi-range responses from a replica
+     * into single-range responses.
+     */
+    public static <T> Message<T> remoteResponse(InetAddressAndPort from, Verb verb, T payload)
+    {
+        assert verb.isResponse();
+        long createdAtNanos = approxTime.now();
+        long expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
+        return new Message<>(new Header(0, verb, from, createdAtNanos, expiresAtNanos, 0, NO_PARAMS), payload);
+    }
+
     /** Builds a response Message with provided payload, and all the right fields inferred from request Message */
     public <T> Message<T> responseWith(T payload)
     {
@@ -422,6 +434,15 @@ public class Message<T>
         public TraceType traceType()
         {
             return (TraceType) params.getOrDefault(ParamType.TRACE_TYPE, TraceType.QUERY);
+        }
+
+        /**
+         * Keyspace that is beeing traced by the trace session attached to this message (if any).
+         */
+        @Nullable
+        public String traceKeyspace()
+        {
+            return (String) params.get(ParamType.TRACE_KEYSPACE);
         }
     }
 
@@ -1339,6 +1360,8 @@ public class Message<T>
     private int serializedSize30;
     private int serializedSize3014;
     private int serializedSize40;
+    private int serializedSize41;
+    private int serializedSizeSG10;
 
     /**
      * Serialized size of the entire message, for the provided messaging version. Caches the calculated value.
@@ -1359,6 +1382,14 @@ public class Message<T>
                 if (serializedSize40 == 0)
                     serializedSize40 = serializer.serializedSize(this, VERSION_40);
                 return serializedSize40;
+            case VERSION_41:
+                if (serializedSize41 == 0)
+                    serializedSize41 = serializer.serializedSize(this, VERSION_41);
+                return serializedSize41;
+            case VERSION_SG_10:
+                if (serializedSizeSG10 == 0)
+                    serializedSizeSG10 = (int) serializer.serializedSize(this, VERSION_SG_10);
+                return serializedSizeSG10;
             default:
                 throw new IllegalStateException();
         }
@@ -1367,6 +1398,8 @@ public class Message<T>
     private int payloadSize30   = -1;
     private int payloadSize3014 = -1;
     private int payloadSize40   = -1;
+    private int payloadSize41   = -1;
+    private int payloadSizeSG10 = -1;
 
     private int payloadSize(int version)
     {
@@ -1384,6 +1417,14 @@ public class Message<T>
                 if (payloadSize40 < 0)
                     payloadSize40 = serializer.payloadSize(this, VERSION_40);
                 return payloadSize40;
+            case VERSION_41:
+                if (payloadSize41 < 0)
+                    payloadSize41 = serializer.payloadSize(this, VERSION_41);
+                return payloadSize41;
+            case VERSION_SG_10:
+                if (payloadSizeSG10 < 0)
+                    payloadSizeSG10 = serializer.payloadSize(this, VERSION_SG_10);
+                return payloadSizeSG10;
             default:
                 throw new IllegalStateException();
         }

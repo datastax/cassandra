@@ -20,19 +20,23 @@
  */
 package org.apache.cassandra.utils;
 
-import java.io.*;
+import java.io.FileDescriptor;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.SyncFailedException;
 import java.lang.reflect.Field;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.FileChannel;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import org.apache.cassandra.config.Config;
-import org.apache.cassandra.service.CassandraDaemon;
 
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.io.util.File;
 
 /*
  * A wrapper around various mechanisms for syncing files that makes it possible it intercept
@@ -173,16 +177,16 @@ public class SyncUtil
         }
     }
 
-    public static void sync(RandomAccessFile ras) throws IOException
-    {
-        Preconditions.checkNotNull(ras);
-        sync(ras.getFD());
-    }
-
     public static void sync(FileOutputStream fos) throws IOException
     {
         Preconditions.checkNotNull(fos);
         sync(fos.getFD());
+    }
+
+    public static void sync(FileChannel fc) throws IOException
+    {
+        Objects.requireNonNull(fc);
+        sync(INativeLibrary.instance.getFileDescriptor(fc));
     }
 
     public static void trySync(int fd)
@@ -190,7 +194,7 @@ public class SyncUtil
         if (SKIP_SYNC)
             return;
         else
-            NativeLibrary.trySync(fd);
+            INativeLibrary.instance.trySync(fd);
     }
 
     public static void trySyncDir(File dir)
@@ -198,14 +202,14 @@ public class SyncUtil
         if (SKIP_SYNC)
             return;
 
-        int directoryFD = NativeLibrary.tryOpenDirectory(dir.getPath());
+        int directoryFD = INativeLibrary.instance.tryOpenDirectory(dir);
         try
         {
             trySync(directoryFD);
         }
         finally
         {
-            NativeLibrary.tryCloseFD(directoryFD);
+            INativeLibrary.instance.tryCloseFD(directoryFD);
         }
     }
 }

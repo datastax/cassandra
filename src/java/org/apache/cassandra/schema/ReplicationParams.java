@@ -57,6 +57,11 @@ public final class ReplicationParams
         return new ReplicationParams(SimpleStrategy.class, ImmutableMap.of("replication_factor", replicationFactor));
     }
 
+    static ReplicationParams everywhere()
+    {
+        return new ReplicationParams(EverywhereStrategy.class, ImmutableMap.of());
+    }
+
     static ReplicationParams nts(Object... args)
     {
         assert args.length % 2 == 0;
@@ -73,7 +78,7 @@ public final class ReplicationParams
     public void validate(String name)
     {
         // Attempt to instantiate the ARS, which will throw a ConfigurationException if the options aren't valid.
-        TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+        TokenMetadata tmd = StorageService.instance.getTokenMetadataForKeyspace(name);
         IEndpointSnitch eps = DatabaseDescriptor.getEndpointSnitch();
         AbstractReplicationStrategy.validateReplicationStrategy(name, klass, tmd, eps, options);
     }

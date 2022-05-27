@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.tools;
 
-import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -35,11 +34,13 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.io.sstable.LegacySSTableTest;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
 import org.assertj.core.api.Assertions;
 import org.assertj.core.util.Lists;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 
 /*
@@ -50,7 +51,7 @@ import static org.junit.Assert.assertEquals;
  */
 public class StandaloneUpgraderOnSStablesTest
 {
-    String legacyId = LegacySSTableTest.legacyVersions[LegacySSTableTest.legacyVersions.length - 1];
+    String legacyId = "ma";
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
@@ -141,7 +142,7 @@ public class StandaloneUpgraderOnSStablesTest
     private List<String> getSStableFiles(String ks, String table) throws StartupException
     {
         ColumnFamilyStore cfs = Keyspace.open(ks).getColumnFamilyStore(table);
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         ColumnFamilyStore.scrubDataDirectories(cfs.metadata());
 
         Set<SSTableReader> sstables = cfs.getLiveSSTables();
@@ -149,8 +150,8 @@ public class StandaloneUpgraderOnSStablesTest
             return Lists.emptyList();
 
         String sstableFileName = sstables.iterator().next().getFilename();
-        File sstablesDir = new File(sstableFileName).getParentFile();
-        return Arrays.asList(sstablesDir.listFiles())
+        File sstablesDir = new File(sstableFileName).parent();
+        return Arrays.asList(sstablesDir.tryList())
                      .stream()
                      .filter(f -> f.isFile())
                      .map(file -> file.toString())

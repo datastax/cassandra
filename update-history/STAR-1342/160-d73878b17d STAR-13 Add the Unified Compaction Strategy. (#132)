@@ -1,0 +1,225 @@
+--- a/src/java/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriter.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriter.java
+@@ -161,8 +161,7 @@
+     @Override
+     public long getBytesWritten()
+     {
+-<<<<<<<
+-        long bytesWritten = currentWriter.getBytesWritten();
++        long bytesWritten = currentWriter != null ? currentWriter.getBytesWritten() : 0L;
+         for (SSTableMultiWriter writer : finishedWriters)
+             bytesWritten += writer.getBytesWritten();
+         return bytesWritten;
+@@ -171,7 +170,7 @@
+     @Override
+     public long getOnDiskBytesWritten()
+     {
+-        long bytesWritten = currentWriter.getOnDiskBytesWritten();
++        long bytesWritten = currentWriter != null ? currentWriter.getOnDiskBytesWritten() : 0L;
+         for (SSTableMultiWriter writer : finishedWriters)
+             bytesWritten += writer.getOnDiskBytesWritten();
+         return bytesWritten;
+@@ -181,9 +180,6 @@
+     public int getSegmentCount()
+     {
+         return finishedWriters.size() + 1;
+-=======
+-       return currentWriter != null ? currentWriter.getFilePointer() : 0L;
+->>>>>>>
+     }
+ 
+     @Override
+--- a/test/microbench/org/apache/cassandra/test/microbench/index/sai/v1/AbstractOnDiskBenchmark.java
++++ b/test/microbench/org/apache/cassandra/test/microbench/index/sai/v1/AbstractOnDiskBenchmark.java
+@@ -36,7 +36,6 @@
+ import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+ import org.apache.cassandra.index.sai.utils.LongArray;
+ import org.apache.cassandra.io.sstable.Descriptor;
+-import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
+ import org.apache.cassandra.io.util.FileHandle;
+ import org.apache.cassandra.io.util.FileUtils;
+ import org.apache.lucene.store.IndexInput;
+@@ -98,11 +97,7 @@
+         DatabaseDescriptor.daemonInitialization(); // required to use ChunkCache
+         assert ChunkCache.instance != null;
+ 
+-<<<<<<<
+         descriptor = new Descriptor(Files.createTempDirectory("jmh").toFile(), "ks", this.getClass().getSimpleName(), Util.newUUIDGen().get());
+-=======
+-        descriptor = new Descriptor(Files.createTempDirectory("jmh").toFile(), "ks", this.getClass().getSimpleName(), new SequenceBasedSSTableId(1));
+->>>>>>>
+         groupComponents = IndexComponents.perSSTable(descriptor, null);
+         indexComponents = IndexComponents.create("col", descriptor, null);
+ 
+--- a/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
++++ b/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
+@@ -37,20 +37,9 @@
+ import org.junit.BeforeClass;
+ import org.junit.Test;
+ 
+-<<<<<<<
+ import org.apache.cassandra.SchemaLoader;
+ import org.apache.cassandra.UpdateBuilder;
+ import org.apache.cassandra.Util;
+-=======
+-import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-import static org.assertj.core.api.Assertions.assertThat;
+-import static org.junit.Assert.assertEquals;
+-import static org.junit.Assert.assertFalse;
+-import static org.junit.Assert.assertTrue;
+-
+-import com.google.common.collect.Iterators;
+-import org.apache.cassandra.*;
+->>>>>>>
+ import org.apache.cassandra.cql3.Operator;
+ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+ import org.apache.cassandra.db.lifecycle.SSTableSet;
+@@ -71,8 +60,7 @@
+ import static junit.framework.Assert.assertNotNull;
+ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+ import static org.assertj.core.api.Assertions.assertThat;
+-import static org.junit.Assert.assertEquals;
+-import static org.junit.Assert.assertTrue;
++import static org.junit.Assert.*;
+ 
+ public class ColumnFamilyStoreTest
+ {
+diff --git a/src/java/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriter.java b/src/java/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriter.java
+index ad46a31987..aaf41fe960 100644
+--- a/src/java/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriter.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriter.java
+@@ -161,7 +161,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
+     @Override
+     public long getBytesWritten()
+     {
+-        long bytesWritten = currentWriter.getBytesWritten();
++        long bytesWritten = currentWriter != null ? currentWriter.getBytesWritten() : 0L;
+         for (SSTableMultiWriter writer : finishedWriters)
+             bytesWritten += writer.getBytesWritten();
+         return bytesWritten;
+@@ -170,7 +170,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
+     @Override
+     public long getOnDiskBytesWritten()
+     {
+-        long bytesWritten = currentWriter.getOnDiskBytesWritten();
++        long bytesWritten = currentWriter != null ? currentWriter.getOnDiskBytesWritten() : 0L;
+         for (SSTableMultiWriter writer : finishedWriters)
+             bytesWritten += writer.getOnDiskBytesWritten();
+         return bytesWritten;
+diff --git a/test/microbench/org/apache/cassandra/test/microbench/index/sai/v1/AbstractOnDiskBenchmark.java b/test/microbench/org/apache/cassandra/test/microbench/index/sai/v1/AbstractOnDiskBenchmark.java
+index 03647149be..0d20e609cb 100644
+--- a/test/microbench/org/apache/cassandra/test/microbench/index/sai/v1/AbstractOnDiskBenchmark.java
++++ b/test/microbench/org/apache/cassandra/test/microbench/index/sai/v1/AbstractOnDiskBenchmark.java
+@@ -36,7 +36,6 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListener;
+ import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+ import org.apache.cassandra.index.sai.utils.LongArray;
+ import org.apache.cassandra.io.sstable.Descriptor;
+-import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
+ import org.apache.cassandra.io.util.FileHandle;
+ import org.apache.cassandra.io.util.FileUtils;
+ import org.apache.lucene.store.IndexInput;
+diff --git a/test/unit/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriterTest.java b/test/unit/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriterTest.java
+index 4b36a9584c..3a29f633a5 100644
+--- a/test/unit/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriterTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriterTest.java
+@@ -24,9 +24,9 @@ import org.junit.BeforeClass;
+ import org.junit.Test;
+ 
+ import org.apache.cassandra.SchemaLoader;
++import org.apache.cassandra.config.Config;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.db.ColumnFamilyStore;
+-import org.apache.cassandra.db.DiskBoundaries;
+ import org.apache.cassandra.db.Keyspace;
+ import org.apache.cassandra.db.SerializationHeader;
+ import org.apache.cassandra.db.compaction.OperationType;
+@@ -47,8 +47,11 @@ public class RangeAwareSSTableWriterTest
+     @BeforeClass
+     public static void defineSchema() throws Exception
+     {
+-        DatabaseDescriptor.daemonInitialization();
+-        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
++        DatabaseDescriptor.daemonInitialization(() -> {
++            Config config = DatabaseDescriptor.loadConfig();
++            config.partitioner = Murmur3Partitioner.class.getName();
++            return config;
++        });
+         SchemaLoader.cleanupAndLeaveDirs();
+         Keyspace.setInitialized();
+         StorageService.instance.initServer();
+@@ -85,7 +88,6 @@ public class RangeAwareSSTableWriterTest
+                                                                      SerializationHeader.make(cfs.metadata(),
+                                                                                               cfs.getLiveSSTables()));
+         assertEquals(cfs.metadata.id, writer.getTableId());
+-        assertEquals(0L, writer.getFilePointer());
+-
++        assertEquals(0L, writer.getBytesWritten());
+     }
+ }
+\ No newline at end of file
+--- a/src/java/org/apache/cassandra/io/sstable/format/big/BigTableReader.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/big/BigTableReader.java
+@@ -187,13 +187,8 @@
+             if (!bf.isPresent((DecoratedKey)key))
+             {
+                 listener.onSSTableSkipped(this, SkippingReason.BLOOM_FILTER);
+-<<<<<<<
+                 Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.id);
+-                bloomFilterTracker.addTrueNegative();
+-=======
+-                Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.id.asString());
+                 getBloomFilterTracker().addTrueNegative();
+->>>>>>>
+                 return null;
+             }
+         }
+diff --git a/src/java/org/apache/cassandra/db/compaction/LeveledManifest.java b/src/java/org/apache/cassandra/db/compaction/LeveledManifest.java
+index 39ac7c4cf0..e2b39c3512 100644
+--- a/src/java/org/apache/cassandra/db/compaction/LeveledManifest.java
++++ b/src/java/org/apache/cassandra/db/compaction/LeveledManifest.java
+@@ -195,7 +195,7 @@ public class LeveledManifest
+         {
+             builder.append(sstable.getColumnFamilyName())
+                    .append('-')
+-                   .append(sstable.getId().asString())
++                   .append(sstable.getId())
+                    .append("(L")
+                    .append(sstable.getSSTableLevel())
+                    .append("), ");
+diff --git a/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexSSTableReader.java b/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexSSTableReader.java
+index 88aa79714c..8028e6cf41 100644
+--- a/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexSSTableReader.java
++++ b/src/java/org/apache/cassandra/io/sstable/format/trieindex/TrieIndexSSTableReader.java
+@@ -328,7 +328,7 @@ public class TrieIndexSSTableReader extends SSTableReader
+         if (!bf.isPresent(dk))
+         {
+             listener.onSSTableSkipped(this, SkippingReason.BLOOM_FILTER);
+-            Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.id.asString());
++            Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.id);
+             if (updateStats)
+                 getBloomFilterTracker().addTrueNegative();
+             return null;
+diff --git a/update-history/STAR-1342/160-d73878b17d STAR-13 Add the Unified Compaction Strategy. (#132) b/update-history/STAR-1342/160-d73878b17d STAR-13 Add the Unified Compaction Strategy. (#132)
+index 7694cfb888..55adbe80b0 100644
+--- a/update-history/STAR-1342/160-d73878b17d STAR-13 Add the Unified Compaction Strategy. (#132)	
++++ b/update-history/STAR-1342/160-d73878b17d STAR-13 Add the Unified Compaction Strategy. (#132)	
+@@ -157,3 +157,19 @@ index 4b36a9584c..3a29f633a5 100644
+      }
+  }
+ \ No newline at end of file
++--- a/src/java/org/apache/cassandra/io/sstable/format/big/BigTableReader.java
+++++ b/src/java/org/apache/cassandra/io/sstable/format/big/BigTableReader.java
++@@ -187,13 +187,8 @@
++             if (!bf.isPresent((DecoratedKey)key))
++             {
++                 listener.onSSTableSkipped(this, SkippingReason.BLOOM_FILTER);
++-<<<<<<<
++                 Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.id);
++-                bloomFilterTracker.addTrueNegative();
++-=======
++-                Tracing.trace("Bloom filter allows skipping sstable {}", descriptor.id.asString());
++                 getBloomFilterTracker().addTrueNegative();
++->>>>>>>
++                 return null;
++             }
++         }

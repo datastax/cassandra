@@ -18,19 +18,24 @@
  */
 package org.apache.cassandra.io.util;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.Random;
 
+import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.utils.FastByteOperations;
+import org.apache.cassandra.utils.INativeLibrary;
+import org.apache.cassandra.utils.NativeLibrary;
 import org.assertj.core.api.Assertions;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -77,6 +82,13 @@ public class FileUtilsTest
     }
 
     @Test
+    public void testDelete()
+    {
+        File file = FileUtils.createDeletableTempFile("testTruncate", "1");
+        FileUtils.delete(file);
+    }
+
+    @Test
     public void testTruncate() throws IOException
     {
         File file = FileUtils.createDeletableTempFile("testTruncate", "1");
@@ -88,11 +100,11 @@ public class FileUtilsTest
         byte[] b = Files.readAllBytes(file.toPath());
         assertEquals(expected, new String(b, StandardCharsets.UTF_8));
 
-        FileUtils.truncate(file.getAbsolutePath(), 10);
+        FileUtils.truncate(file.absolutePath(), 10);
         b = Files.readAllBytes(file.toPath());
         assertEquals("The quick ", new String(b, StandardCharsets.UTF_8));
 
-        FileUtils.truncate(file.getAbsolutePath(), 0);
+        FileUtils.truncate(file.absolutePath(), 0);
         b = Files.readAllBytes(file.toPath());
         assertEquals(0, b.length);
     }
@@ -100,10 +112,10 @@ public class FileUtilsTest
     @Test
     public void testFolderSize() throws Exception
     {
-        File folder = createFolder(Paths.get(DatabaseDescriptor.getAllDataFileLocations()[0], "testFolderSize"));
+        File folder = createFolder(DatabaseDescriptor.getAllDataFileLocations()[0], "testFolderSize");
         folder.deleteOnExit();
 
-        File childFolder = createFolder(Paths.get(folder.getPath(), "child"));
+        File childFolder = createFolder(folder, "child");
 
         File[] files = {
                        createFile(new File(folder, "001"), 10000),
@@ -219,17 +231,69 @@ public class FileUtilsTest
                   .hasMessageContaining("is not a directory");
     }
 
-
-    private File createFolder(Path path)
+    @Test
+    public void testSize() throws IOException
     {
-        File folder = path.toFile();
+        Path tmpDir = Files.createTempDirectory(this.getClass().getSimpleName());
+        Path path = tmpDir.resolve("a.txt");
+        Assert.assertEquals(0, FileUtils.size(path));
+
+        createFile(new File(path), 10000);
+        Assert.assertEquals(10000, FileUtils.size(path));
+    }
+
+    @Test
+    public void testCreateHardLinkWithoutConfirm() throws Throwable
+    {
+        Assume.assumeTrue(NativeLibrary.instance.isOS(INativeLibrary.OSType.LINUX));
+
+        Path tmpDir = Files.createTempDirectory(this.getClass().getSimpleName());
+
+        Path from = tmpDir.resolve("b.txt");
+        writeData(new File(from), 100);
+        Assert.assertTrue(Files.exists(from));
+        Assert.assertEquals(1, Files.getAttribute(from, "unix:nlink"));
+
+        Path to = tmpDir.resolve("c.txt");
+        Assert.assertFalse(Files.exists(to));
+    }
+
+    @Test
+    public void testCopyWithOutConfirm() throws Throwable
+    {
+        Assume.assumeTrue(NativeLibrary.instance.isOS(INativeLibrary.OSType.LINUX));
+
+        Path tmpDir = Files.createTempDirectory(this.getClass().getSimpleName());
+
+        Path from = tmpDir.resolve("b.txt");
+        writeData(new File(from), 100);
+        Assert.assertTrue(Files.exists(from));
+        Assert.assertEquals(1, Files.getAttribute(from, "unix:nlink"));
+
+        Path to = tmpDir.resolve("c.txt");
+        Assert.assertFalse(Files.exists(to));
+
+        FileUtils.copyWithOutConfirm(new File(from), new File(to));
+        compareFile(from, to);
+        Assert.assertEquals(1, Files.getAttribute(from, "unix:nlink"));
+        Assert.assertEquals(1, Files.getAttribute(to, "unix:nlink"));
+
+        File nonExisting = new File(from.resolveSibling("non_existing.txt"));
+        to = tmpDir.resolve("d.txt");
+        FileUtils.copyWithOutConfirm(nonExisting, new File(to));
+        Assert.assertFalse(new File(to).exists());
+    }
+
+    private File createFolder(File folder, String additionalName)
+    {
+        folder = folder.resolve(additionalName);
         FileUtils.createDirectory(folder);
         return folder;
     }
 
     private File createFile(File file, long size)
     {
-        try (RandomAccessFile f = new RandomAccessFile(file, "rw"))
+        try (RandomAccessFile f = new RandomAccessFile(file.toJavaIOFile(), "rw"))
         {
             f.setLength(size);
         }
@@ -238,5 +302,23 @@ public class FileUtilsTest
             System.err.println(e);
         }
         return file;
+    }
+
+    private File writeData(File file, int size) throws Throwable
+    {
+        Random random = new Random();
+        try (RandomAccessFile f = new RandomAccessFile(file.toJavaIOFile(), "rw"))
+        {
+            byte[] bytes = new byte[size];
+            random.nextBytes(bytes);
+
+            f.write(bytes);
+        }
+        return file;
+    }
+
+    private boolean compareFile(Path left, Path right) throws IOException
+    {
+        return FastByteOperations.compareUnsigned(ByteBuffer.wrap(Files.readAllBytes(left)), ByteBuffer.wrap(Files.readAllBytes(right))) == 0;
     }
 }

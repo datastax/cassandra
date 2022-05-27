@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.hints;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -41,10 +40,11 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.MigrationManager;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadata;
 
 import static junit.framework.Assert.assertEquals;
@@ -196,7 +196,7 @@ public class HintsReaderTest
                                     SchemaLoader.standardCFMD(ks, CF_STANDARD1),
                                     SchemaLoader.standardCFMD(ks, CF_STANDARD2));
         int numTable = 2;
-        directory = Files.createTempDirectory(null).toFile();
+        directory = new File(Files.createTempDirectory(null));
         try
         {
             generateHints(3, ks);
@@ -206,7 +206,7 @@ public class HintsReaderTest
         }
         finally
         {
-            directory.delete();
+            directory.deleteRecursive();
         }
     }
 
@@ -219,7 +219,7 @@ public class HintsReaderTest
                                     SchemaLoader.standardCFMD(ks, CF_STANDARD1),
                                     SchemaLoader.standardCFMD(ks, CF_STANDARD2));
         int numTable = 2;
-        directory = Files.createTempDirectory(null).toFile();
+        directory = new File(Files.createTempDirectory(null));
         try
         {
             generateHints(3, ks);
@@ -227,7 +227,7 @@ public class HintsReaderTest
         }
         finally
         {
-            directory.delete();
+            directory.tryDelete();
         }
     }
 
@@ -240,16 +240,16 @@ public class HintsReaderTest
                                     SchemaLoader.standardCFMD(ks, CF_STANDARD1),
                                     SchemaLoader.standardCFMD(ks, CF_STANDARD2));
 
-        directory = Files.createTempDirectory(null).toFile();
+        directory = new File(Files.createTempDirectory(null));
         try
         {
             generateHints(3, ks);
-            MigrationManager.announceTableDrop(ks, CF_STANDARD1, true);
+            SchemaTestUtil.announceTableDrop(ks, CF_STANDARD1);
             readHints(3, 1);
         }
         finally
         {
-            directory.delete();
+            directory.tryDelete();
         }
     }
 }

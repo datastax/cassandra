@@ -22,9 +22,12 @@ import java.util.*;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.collect.ImmutableSet;
 import org.junit.BeforeClass;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.SchemaLoader;
@@ -40,12 +43,29 @@ import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 
+@RunWith(Parameterized.class)
 public class LongCompactionsTest
 {
     public static final String KEYSPACE1 = "Keyspace1";
     public static final String CF_STANDARD = "Standard1";
+
+    @Parameterized.Parameters(name = "useCursors={0}")
+    public static Iterable<Boolean> useCursorChoices()
+    {
+        return ImmutableSet.of(false, true);
+    }
+
+    private final boolean useCursors;
+    private ColumnFamilyStore cfs;
+
+    public LongCompactionsTest(boolean useCursors)
+    {
+        this.useCursors = useCursors;
+    }
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
@@ -62,7 +82,7 @@ public class LongCompactionsTest
     public void cleanupFiles()
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("Standard1");
+        cfs = keyspace.getColumnFamilyStore("Standard1");
         cfs.truncateBlocking();
     }
 
@@ -127,7 +147,7 @@ public class LongCompactionsTest
         try (LifecycleTransaction txn = store.getTracker().tryModify(sstables, OperationType.COMPACTION))
         {
             assert txn != null : "Cannot markCompacting all sstables";
-            new CompactionTask(store, txn, gcBefore).execute(ActiveCompactionsTracker.NOOP);
+            new CompactionTask(store, txn, gcBefore, false, CompactionTaskTest.mockStrategy(cfs, useCursors)).execute();
         }
         System.out.println(String.format("%s: sstables=%d rowsper=%d colsper=%d: %d ms",
                                          this.getClass().getName(),
@@ -165,7 +185,7 @@ public class LongCompactionsTest
 
                 inserted.add(key);
             }
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(UNIT_TESTS);
             CompactionsTest.assertMaxTimestamp(cfs, maxTimestampExpected);
 
             assertEquals(inserted.toString(), inserted.size(), Util.getAll(Util.cmd(cfs).build()).size());
@@ -189,7 +209,7 @@ public class LongCompactionsTest
         {
             ArrayList<Future<?>> compactions = new ArrayList<Future<?>>();
             for (int i = 0; i < 10; i++)
-                compactions.addAll(CompactionManager.instance.submitBackground(cfs));
+                compactions.add(CompactionManager.instance.submitBackground(cfs));
             // another compaction attempt will be launched in the background by
             // each completing compaction: not much we can do to control them here
             FBUtilities.waitOnFutures(compactions);

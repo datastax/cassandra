@@ -49,6 +49,7 @@ import org.apache.cassandra.streaming.messages.OutgoingStreamMessage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Ref;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
@@ -84,7 +85,7 @@ public class StreamTransferTaskTest
         for (int i = 0; i < 2; i++)
         {
             SchemaLoader.insertData(KEYSPACE1, CF_STANDARD, i, 1);
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(UNIT_TESTS);
         }
 
         // create streaming task that streams those two sstables
@@ -135,17 +136,17 @@ public class StreamTransferTaskTest
         for (int i = 0; i < 2; i++)
         {
             SchemaLoader.insertData(KEYSPACE1, CF_STANDARD, i, 1);
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(UNIT_TESTS);
         }
 
         // create streaming task that streams those two sstables
         StreamTransferTask task = new StreamTransferTask(session, cfs.metadata.id);
-        List<Ref<SSTableReader>> refs = new ArrayList<>(cfs.getLiveSSTables().size());
+        List<Ref<? extends SSTableReader>> refs = new ArrayList<>(cfs.getLiveSSTables().size());
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
             List<Range<Token>> ranges = new ArrayList<>();
             ranges.add(new Range<>(sstable.first.getToken(), sstable.last.getToken()));
-            Ref<SSTableReader> ref = sstable.selfRef();
+            Ref<? extends SSTableReader> ref = sstable.selfRef();
             refs.add(ref);
             task.addTransferStream(new CassandraOutgoingFile(StreamOperation.BOOTSTRAP, ref, sstable.getPositionsForRanges(ranges), ranges, 1));
         }
@@ -167,7 +168,7 @@ public class StreamTransferTaskTest
         session.onError(new Exception("Fake exception")).get(5, TimeUnit.SECONDS);
 
         //make sure reference was not released
-        for (Ref<SSTableReader> ref : refs)
+        for (Ref<? extends SSTableReader> ref : refs)
         {
             assertEquals(1, ref.globalCount());
         }
@@ -189,7 +190,7 @@ public class StreamTransferTaskTest
         }
 
         //now reference should be released
-        for (Ref<SSTableReader> ref : refs)
+        for (Ref<? extends SSTableReader> ref : refs)
         {
             assertEquals(0, ref.globalCount());
         }

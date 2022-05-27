@@ -24,9 +24,9 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -47,8 +47,11 @@ public class RangeAwareSSTableWriterTest
     @BeforeClass
     public static void defineSchema() throws Exception
     {
-        DatabaseDescriptor.daemonInitialization();
-        DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
+        DatabaseDescriptor.daemonInitialization(() -> {
+            Config config = DatabaseDescriptor.loadConfig();
+            config.partitioner = Murmur3Partitioner.class.getName();
+            return config;
+        });
         SchemaLoader.cleanupAndLeaveDirs();
         Keyspace.setInitialized();
         StorageService.instance.initServer();
@@ -69,9 +72,9 @@ public class RangeAwareSSTableWriterTest
     {
 
         SchemaLoader.insertData(KEYSPACE1, CF_STANDARD, 0, 1);
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
-        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.STREAM);
+        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.STREAM, cfs.metadata);
 
         RangeAwareSSTableWriter writer = new RangeAwareSSTableWriter(cfs,
                                                                      0,
@@ -85,7 +88,6 @@ public class RangeAwareSSTableWriterTest
                                                                      SerializationHeader.make(cfs.metadata(),
                                                                                               cfs.getLiveSSTables()));
         assertEquals(cfs.metadata.id, writer.getTableId());
-        assertEquals(0L, writer.getFilePointer());
-
+        assertEquals(0L, writer.getBytesWritten());
     }
 }

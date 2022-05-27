@@ -227,12 +227,12 @@ public abstract class Message
                 {
                     shouldTrace = true;
                     tracingSessionId = UUIDGen.getTimeUUID();
-                    Tracing.instance.newSession(tracingSessionId, getCustomPayload());
+                    Tracing.instance.newSession(queryState.getClientState(), tracingSessionId, getCustomPayload());
                 }
                 else if (StorageService.instance.shouldTraceProbablistically())
                 {
                     shouldTrace = true;
-                    Tracing.instance.newSession(getCustomPayload());
+                    Tracing.instance.newSession(queryState.getClientState(), getCustomPayload());
                 }
             }
 
@@ -253,7 +253,7 @@ public abstract class Message
             return response;
         }
 
-        void setTracingRequested()
+        public void setTracingRequested()
         {
             tracingRequested = true;
         }
@@ -277,13 +277,13 @@ public abstract class Message
                 throw new IllegalArgumentException();
         }
 
-        Message setTracingId(UUID tracingId)
+        public Message setTracingId(UUID tracingId)
         {
             this.tracingId = tracingId;
             return this;
         }
 
-        UUID getTracingId()
+        public UUID getTracingId()
         {
             return tracingId;
         }

@@ -1,0 +1,321 @@
+--- a/src/java/org/apache/cassandra/db/partitions/AtomicBTreePartition.java
++++ b/src/java/org/apache/cassandra/db/partitions/AtomicBTreePartition.java
+@@ -103,55 +103,6 @@
+         return true;
+     }
+ 
+-<<<<<<<
+-=======
+-    private long[] addAllWithSizeDeltaInternal(RowUpdater updater, PartitionUpdate update, UpdateTransaction indexer)
+-    {
+-        Holder current = ref;
+-        updater.ref = current;
+-        updater.reset();
+-
+-        if (!update.deletionInfo().getPartitionDeletion().isLive())
+-            indexer.onPartitionDeletion(update.deletionInfo().getPartitionDeletion());
+-
+-        if (update.deletionInfo().hasRanges())
+-            update.deletionInfo().rangeIterator(false).forEachRemaining(indexer::onRangeTombstone);
+-
+-        DeletionInfo deletionInfo;
+-        if (update.deletionInfo().mayModify(current.deletionInfo))
+-        {
+-            if (updater.inputDeletionInfoCopy == null)
+-                updater.inputDeletionInfoCopy = update.deletionInfo().copy(HeapAllocator.instance);
+-
+-            deletionInfo = current.deletionInfo.mutableCopy().add(updater.inputDeletionInfoCopy);
+-            updater.onAllocatedOnHeap(deletionInfo.unsharedHeapSize() - current.deletionInfo.unsharedHeapSize());
+-        }
+-        else
+-        {
+-            deletionInfo = current.deletionInfo;
+-        }
+-
+-        RegularAndStaticColumns columns = update.columns().mergeTo(current.columns);
+-        updater.onAllocatedOnHeap(columns.unsharedHeapSize() - current.columns.unsharedHeapSize());
+-        Row newStatic = update.staticRow();
+-        Row staticRow = newStatic.isEmpty()
+-                        ? current.staticRow
+-                        : (current.staticRow.isEmpty() ? updater.apply(newStatic) : updater.apply(current.staticRow, newStatic));
+-        Object[] tree = BTree.update(current.tree, update.holder().tree, update.metadata().comparator, updater);
+-        EncodingStats newStats = current.stats.mergeWith(update.stats());
+-        updater.onAllocatedOnHeap(newStats.unsharedHeapSize() - current.stats.unsharedHeapSize());
+-
+-        if (tree != null && refUpdater.compareAndSet(this, current, new Holder(columns, tree, deletionInfo, staticRow, newStats)))
+-        {
+-            updater.finish();
+-            return new long[]{ updater.dataSize, updater.colUpdateTimeDelta };
+-        }
+-        else
+-        {
+-            return null;
+-        }
+-    }
+->>>>>>>
+     /**
+      * Adds a given update to this in-memtable partition.
+      *
+@@ -353,97 +304,4 @@
+             return wasteTracker + 1;
+         return wasteTracker;
+     }
+-<<<<<<<
+-=======
+-
+-    // the function we provide to the btree utilities to perform any column replacements
+-    private static final class RowUpdater implements UpdateFunction<Row, Row>
+-    {
+-        final AtomicBTreePartition updating;
+-        final MemtableAllocator allocator;
+-        final OpOrder.Group writeOp;
+-        final UpdateTransaction indexer;
+-        Holder ref;
+-        Row.Builder regularBuilder;
+-        long dataSize;
+-        long heapSize;
+-        long colUpdateTimeDelta = Long.MAX_VALUE;
+-        List<Row> inserted; // TODO: replace with walk of aborted BTree
+-
+-        DeletionInfo inputDeletionInfoCopy = null;
+-
+-        private RowUpdater(AtomicBTreePartition updating, MemtableAllocator allocator, OpOrder.Group writeOp, UpdateTransaction indexer)
+-        {
+-            this.updating = updating;
+-            this.allocator = allocator;
+-            this.writeOp = writeOp;
+-            this.indexer = indexer;
+-        }
+-
+-        private Row.Builder builder(Clustering<?> clustering)
+-        {
+-            boolean isStatic = clustering == Clustering.STATIC_CLUSTERING;
+-            // We know we only insert/update one static per PartitionUpdate, so no point in saving the builder
+-            if (isStatic)
+-                return allocator.rowBuilder(writeOp);
+-
+-            if (regularBuilder == null)
+-                regularBuilder = allocator.rowBuilder(writeOp);
+-            return regularBuilder;
+-        }
+-
+-        public Row apply(Row insert)
+-        {
+-            Row data = Rows.copy(insert, builder(insert.clustering())).build();
+-            indexer.onInserted(insert);
+-
+-            this.dataSize += data.dataSize();
+-            onAllocatedOnHeap(data.unsharedHeapSizeExcludingData());
+-            if (inserted == null)
+-                inserted = new ArrayList<>();
+-            inserted.add(data);
+-            return data;
+-        }
+-
+-        public Row apply(Row existing, Row update)
+-        {
+-            Row.Builder builder = builder(existing.clustering());
+-            colUpdateTimeDelta = Math.min(colUpdateTimeDelta, Rows.merge(existing, update, builder));
+-
+-            Row reconciled = builder.build();
+-
+-            indexer.onUpdated(existing, reconciled);
+-
+-            dataSize += reconciled.dataSize() - existing.dataSize();
+-            onAllocatedOnHeap(reconciled.unsharedHeapSizeExcludingData() - existing.unsharedHeapSizeExcludingData());
+-            if (inserted == null)
+-                inserted = new ArrayList<>();
+-            inserted.add(reconciled);
+-
+-            return reconciled;
+-        }
+-
+-        protected void reset()
+-        {
+-            this.dataSize = 0;
+-            this.heapSize = 0;
+-            if (inserted != null)
+-                inserted.clear();
+-        }
+-        public boolean abortEarly()
+-        {
+-            return updating.ref != ref;
+-        }
+-
+-        public void onAllocatedOnHeap(long heapSize)
+-        {
+-            this.heapSize += heapSize;
+-        }
+-
+-        protected void finish()
+-        {
+-            allocator.onHeap().adjust(heapSize, writeOp);
+-        }
+-    }
+->>>>>>>
+ }
+--- a/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
++++ b/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
+@@ -24,39 +24,22 @@
+ import java.nio.ByteBuffer;
+ import java.nio.file.Path;
+ import java.nio.file.Paths;
+-import java.util.Collection;
+-import java.util.HashSet;
+-import java.util.Iterator;
+-import java.util.LinkedList;
+-import java.util.List;
+-import java.util.Map;
+-import java.util.Set;
++import java.util.*;
+ 
+ import com.google.common.collect.Iterators;
++import com.googlecode.concurrenttrees.common.Iterables;
++import org.json.simple.JSONArray;
++import org.json.simple.JSONObject;
++import org.json.simple.parser.JSONParser;
+ import org.junit.Assert;
+ import org.junit.Assume;
+ import org.junit.Before;
+ import org.junit.BeforeClass;
+ import org.junit.Test;
+ 
+-import com.googlecode.concurrenttrees.common.Iterables;
+-<<<<<<<
+ import org.apache.cassandra.SchemaLoader;
+ import org.apache.cassandra.UpdateBuilder;
+ import org.apache.cassandra.Util;
+-=======
+-import org.json.simple.JSONArray;
+-import org.json.simple.JSONObject;
+-import org.json.simple.parser.JSONParser;
+-
+-import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+-import static org.assertj.core.api.Assertions.assertThat;
+-import static org.junit.Assert.assertEquals;
+-import static org.junit.Assert.assertTrue;
+-
+-import com.google.common.collect.Iterators;
+-import org.apache.cassandra.*;
+->>>>>>>
+ import org.apache.cassandra.cql3.Operator;
+ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+ import org.apache.cassandra.db.lifecycle.SSTableSet;
+@@ -73,11 +56,9 @@
+ import org.apache.cassandra.utils.ByteBufferUtil;
+ import org.apache.cassandra.utils.FBUtilities;
+ import org.apache.cassandra.utils.WrappedRunnable;
+-import org.json.simple.JSONArray;
+-import org.json.simple.JSONObject;
+-import org.json.simple.parser.JSONParser;
+ 
+ import static junit.framework.Assert.assertNotNull;
++import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+ import static org.assertj.core.api.Assertions.assertThat;
+ import static org.junit.Assert.assertEquals;
+ import static org.junit.Assert.assertTrue;
+@@ -291,7 +272,7 @@
+         .add("val", "asdf")
+         .build()
+         .applyUnsafe();
+-        cfs.forceBlockingFlush();
++        cfs.forceBlockingFlush(UNIT_TESTS);
+ 
+         // snapshot
+         cfs.snapshot("basic", null, false, false);
+diff --git a/src/java/org/apache/cassandra/db/partitions/BTreePartitionUpdater.java b/src/java/org/apache/cassandra/db/partitions/BTreePartitionUpdater.java
+index 75253aa240..c1984580f1 100644
+--- a/src/java/org/apache/cassandra/db/partitions/BTreePartitionUpdater.java
++++ b/src/java/org/apache/cassandra/db/partitions/BTreePartitionUpdater.java
+@@ -71,7 +71,7 @@ public class BTreePartitionUpdater implements UpdateFunction<Row, Row>
+         indexer.onInserted(insert);
+ 
+         this.dataSize += data.dataSize();
+-        allocated(data.unsharedHeapSizeExcludingData());
++        onAllocatedOnHeap(data.unsharedHeapSizeExcludingData());
+         return data;
+     }
+ 
+@@ -85,7 +85,7 @@ public class BTreePartitionUpdater implements UpdateFunction<Row, Row>
+         indexer.onUpdated(existing, reconciled);
+ 
+         dataSize += reconciled.dataSize() - existing.dataSize();
+-        allocated(reconciled.unsharedHeapSizeExcludingData() - existing.unsharedHeapSizeExcludingData());
++        onAllocatedOnHeap(reconciled.unsharedHeapSizeExcludingData() - existing.unsharedHeapSizeExcludingData());
+ 
+         return reconciled;
+     }
+@@ -105,7 +105,7 @@ public class BTreePartitionUpdater implements UpdateFunction<Row, Row>
+         // memory we shouldn't hold into. But we don't ever store this off-heap currently so we just default to the
+         // HeapAllocator (rather than using 'allocator').
+         DeletionInfo newInfo = existing.mutableCopy().add(update.copy(HeapAllocator.instance));
+-        allocated(newInfo.unsharedHeapSize() - existing.unsharedHeapSize());
++        onAllocatedOnHeap(newInfo.unsharedHeapSize() - existing.unsharedHeapSize());
+         return newInfo;
+     }
+ 
+@@ -114,7 +114,7 @@ public class BTreePartitionUpdater implements UpdateFunction<Row, Row>
+         if (current == null)
+         {
+             current = BTreePartitionData.EMPTY;
+-            this.allocated(BTreePartitionData.UNSHARED_HEAP_SIZE);
++            this.onAllocatedOnHeap(BTreePartitionData.UNSHARED_HEAP_SIZE);
+         }
+ 
+         try
+@@ -136,7 +136,7 @@ public class BTreePartitionUpdater implements UpdateFunction<Row, Row>
+ 
+         RegularAndStaticColumns columns = current.columns;
+         RegularAndStaticColumns newColumns = update.columns().mergeTo(columns);
+-        allocated(newColumns.unsharedHeapSize() - columns.unsharedHeapSize());
++        onAllocatedOnHeap(newColumns.unsharedHeapSize() - columns.unsharedHeapSize());
+         Row newStatic = update.staticRow();
+         newStatic = newStatic.isEmpty()
+                     ? current.staticRow
+@@ -144,9 +144,9 @@ public class BTreePartitionUpdater implements UpdateFunction<Row, Row>
+                        ? this.apply(newStatic)
+                        : this.apply(current.staticRow, newStatic));
+ 
+-        Object[] tree = BTree.update(current.tree, update.metadata().comparator, update, update.rowCount(), this);
++        Object[] tree = BTree.update(current.tree, update.holder().tree, update.metadata().comparator, this);
+         EncodingStats newStats = current.stats.mergeWith(update.stats());
+-        allocated(newStats.unsharedHeapSize() - current.stats.unsharedHeapSize());
++        onAllocatedOnHeap(newStats.unsharedHeapSize() - current.stats.unsharedHeapSize());
+ 
+         return new BTreePartitionData(newColumns, tree, newDeletionInfo, newStatic, newStats);
+     }
+@@ -156,7 +156,7 @@ public class BTreePartitionUpdater implements UpdateFunction<Row, Row>
+         return false;
+     }
+ 
+-    public void allocated(long heapSize)
++    public void onAllocatedOnHeap(long heapSize)
+     {
+         this.heapSize += heapSize;
+     }
+diff --git a/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java b/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
+index 3b02335260..a7084f5ffd 100644
+--- a/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
++++ b/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
+@@ -272,7 +272,7 @@ public class ColumnFamilyStoreTest
+         .add("val", "asdf")
+         .build()
+         .applyUnsafe();
+-        cfs.forceBlockingFlush();
++        cfs.forceBlockingFlush(UNIT_TESTS);
+ 
+         // snapshot
+         cfs.snapshot("basic", null, false, false);
+diff --git a/test/unit/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriterTest.java b/test/unit/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriterTest.java
+index 7ae69ea38e..4b36a9584c 100644
+--- a/test/unit/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriterTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriterTest.java
+@@ -69,7 +69,7 @@ public class RangeAwareSSTableWriterTest
+     {
+ 
+         SchemaLoader.insertData(KEYSPACE1, CF_STANDARD, 0, 1);
+-        cfs.forceBlockingFlush();
++        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+ 
+         LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.STREAM);
+ 

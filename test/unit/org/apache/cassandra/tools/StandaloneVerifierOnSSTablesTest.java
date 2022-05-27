@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.tools;
 
-import java.io.File;
 import java.io.RandomAccessFile;
 
 import org.apache.commons.io.FileUtils;
@@ -35,6 +34,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
@@ -42,6 +42,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.SchemaLoader.standardCFMD;
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 
 /**
@@ -100,7 +101,7 @@ public class StandaloneVerifierOnSSTablesTest extends OfflineToolUtils
             File testDataDir = new File("test/data/legacy-sstables/ma/legacy_tables/legacy_ma_simple");
             for (File cfsDir : cfs.getDirectories().getCFDirectories())
             {
-                FileUtils.copyDirectory(testDataDir, cfsDir);
+                FileUtils.copyDirectory(testDataDir.toJavaIOFile(), cfsDir.toJavaIOFile());
             }
         });
 
@@ -131,7 +132,7 @@ public class StandaloneVerifierOnSSTablesTest extends OfflineToolUtils
         String corruptStatsTable = "corruptStatsTable";
         createAndPopulateTable(keyspaceName, corruptStatsTable, cfs -> {
             SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
-            try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.filenameFor(Component.STATS), "rw"))
+            try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.fileFor(Component.STATS).toJavaIOFile(), "rw"))
             {
                 file.seek(0);
                 file.writeBytes(StringUtils.repeat('z', 2));
@@ -217,6 +218,6 @@ public class StandaloneVerifierOnSSTablesTest extends OfflineToolUtils
                          .apply();
         }
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
     }
 }

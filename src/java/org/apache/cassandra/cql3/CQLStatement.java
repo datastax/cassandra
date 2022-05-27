@@ -29,6 +29,14 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 public interface CQLStatement
 {
     /**
+     * The query string that produced that statement, if available.
+     *
+     * @return the raw query string that produced that statement, or {@code null} if said string is not available
+     * (typically because the statement has not be built from a string). Note that said string may contain bind markers.
+     */
+    public String getRawCQLStatement();
+
+    /**
      * Returns all bind variables for the statement
      */
     default List<ColumnSpecification> getBindVariables()
@@ -66,9 +74,9 @@ public interface CQLStatement
     /**
      * Perform additional validation required by the statment. To be overriden by subclasses if needed.
      *
-     * @param state the current client state
+     * @param state the current query state
      */
-    public void validate(ClientState state);
+    public void validate(QueryState state);
 
     /**
      * Execute the statement and return the resulting result or null if there is no result.
@@ -101,7 +109,18 @@ public interface CQLStatement
 
     public static abstract class Raw
     {
+        protected String rawCQLStatement;
         protected VariableSpecifications bindVariables;
+
+        public void setRawCQLStatement(String queryString)
+        {
+            this.rawCQLStatement = queryString;
+        }
+
+        public String getRawCQLStatement()
+        {
+            return rawCQLStatement;
+        }
 
         public void setBindVariables(List<ColumnIdentifier> variables)
         {
@@ -111,8 +130,14 @@ public interface CQLStatement
         public abstract CQLStatement prepare(ClientState state);
     }
 
+    /**
+     * A marker for the statements (prepared) which run against an exact keyspace.
+     */
     public static interface SingleKeyspaceCqlStatement extends CQLStatement
     {
+        /**
+         * Returns a keyspace name associated with this statement.
+         */
         public String keyspace();
     }
 }

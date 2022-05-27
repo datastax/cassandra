@@ -172,6 +172,11 @@ public class VersionedValue implements Comparable<VersionedValue>
             return new VersionedValue(String.valueOf(load));
         }
 
+        public VersionedValue diskUsage(String state)
+        {
+            return new VersionedValue(state);
+        }
+
         public VersionedValue schema(UUID newVersion)
         {
             return new VersionedValue(newVersion.toString());
@@ -243,6 +248,11 @@ public class VersionedValue implements Comparable<VersionedValue>
         public VersionedValue shutdown(boolean value)
         {
             return new VersionedValue(VersionedValue.SHUTDOWN + VersionedValue.DELIMITER + value);
+        }
+
+        public VersionedValue indexStatus(String status)
+        {
+            return new VersionedValue(status);
         }
 
         public VersionedValue datacenter(String dcId)

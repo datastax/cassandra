@@ -22,17 +22,21 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.UnaryOperator;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
@@ -50,9 +54,9 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
 {
     protected final String typeName;
 
-    public AlterTypeStatement(String keyspaceName, String typeName)
+    public AlterTypeStatement(String queryString, String keyspaceName, String typeName)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.typeName = typeName;
     }
 
@@ -97,12 +101,23 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
     {
         private final FieldIdentifier fieldName;
         private final CQL3Type.Raw type;
+        private QueryState state;
 
-        private AddField(String keyspaceName, String typeName, FieldIdentifier fieldName, CQL3Type.Raw type)
+        private AddField(String queryString, String keyspaceName, String typeName,
+                         FieldIdentifier fieldName, CQL3Type.Raw type)
         {
-            super(keyspaceName, typeName);
+            super(queryString, keyspaceName, typeName);
             this.fieldName = fieldName;
             this.type = type;
+        }
+
+        @Override
+        public void validate(QueryState state)
+        {
+            super.validate(state);
+
+            // save the query state to use it for guardrails validation in #apply
+            this.state = state;
         }
 
         UserType apply(KeyspaceMetadata keyspace, UserType userType)
@@ -125,6 +140,9 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
             List<FieldIdentifier> fieldNames = new ArrayList<>(userType.fieldNames()); fieldNames.add(fieldName);
             List<AbstractType<?>> fieldTypes = new ArrayList<>(userType.fieldTypes()); fieldTypes.add(fieldType);
 
+            int newSize = userType.size() + 1;
+            Guardrails.fieldsPerUDT.guard(newSize, userType.getNameAsString(), false, state);
+
             return new UserType(keyspaceName, userType.name, fieldNames, fieldTypes, true);
         }
 
@@ -142,9 +160,10 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
     {
         private final Map<FieldIdentifier, FieldIdentifier> renamedFields;
 
-        private RenameFields(String keyspaceName, String typeName, Map<FieldIdentifier, FieldIdentifier> renamedFields)
+        private RenameFields(String queryString, String keyspaceName, String typeName,
+                             Map<FieldIdentifier, FieldIdentifier> renamedFields)
         {
-            super(keyspaceName, typeName);
+            super(queryString, keyspaceName, typeName);
             this.renamedFields = renamedFields;
         }
 
@@ -186,9 +205,9 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
 
     private static final class AlterField extends AlterTypeStatement
     {
-        private AlterField(String keyspaceName, String typeName)
+        private AlterField(String queryString, String keyspaceName, String typeName)
         {
-            super(keyspaceName, typeName);
+            super(queryString, keyspaceName, typeName);
         }
 
         UserType apply(KeyspaceMetadata keyspace, UserType userType)
@@ -197,7 +216,7 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
         }
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<AlterTypeStatement>
     {
         private enum Kind
         {
@@ -220,16 +239,20 @@ public abstract class AlterTypeStatement extends AlterSchemaStatement
             this.name = name;
         }
 
-        public AlterTypeStatement prepare(ClientState state)
+        @Override
+        public AlterTypeStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace());
             String typeName = name.getStringTypeName();
 
             switch (kind)
             {
-                case     ADD_FIELD: return new AddField(keyspaceName, typeName, newFieldName, newFieldType);
-                case RENAME_FIELDS: return new RenameFields(keyspaceName, typeName, renamedFields);
-                case   ALTER_FIELD: return new AlterField(keyspaceName, typeName);
+                case     ADD_FIELD:
+                    if (keyspaceMapper != Constants.IDENTITY_STRING_MAPPER)
+                        newFieldType.forEachUserType(utName -> utName.updateKeyspaceIfDefined(keyspaceMapper));
+                    return new AddField(rawCQLStatement, keyspaceName, typeName, newFieldName, newFieldType);
+                case RENAME_FIELDS: return new RenameFields(rawCQLStatement, keyspaceName, typeName, renamedFields);
+                case   ALTER_FIELD: return new AlterField(rawCQLStatement, keyspaceName, typeName);
             }
 
             throw new AssertionError();

@@ -30,14 +30,12 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.utils.obs.OffHeapBitSet;
-
-import java.io.File;
-import java.io.FileInputStream;
 
 public class SerializationsTest extends AbstractSerializationsTester
 {
@@ -66,7 +64,7 @@ public class SerializationsTest extends AbstractSerializationsTester
                 if (oldBfFormat)
                     serializeOldBfFormat((BloomFilter) bf, out);
                 else
-                    BloomFilterSerializer.serialize((BloomFilter) bf, out);
+                    BloomFilter.serializer.serialize((BloomFilter) bf, out);
             }
         }
     }
@@ -80,8 +78,8 @@ public class SerializationsTest extends AbstractSerializationsTester
             testBloomFilterWrite1000(true);
         }
 
-        try (DataInputStream in = getInput("4.0", "utils.BloomFilter1000.bin");
-             IFilter filter = BloomFilterSerializer.deserialize(in, false))
+        try (FileInputStreamPlus in = getInput("4.0", "utils.BloomFilter1000.bin");
+             IFilter filter = BloomFilter.serializer.deserialize(in, false))
         {
             boolean present;
             for (int i = 0 ; i < 1000 ; i++)
@@ -96,8 +94,8 @@ public class SerializationsTest extends AbstractSerializationsTester
             }
         }
 
-        try (DataInputStream in = getInput("3.0", "utils.BloomFilter1000.bin");
-             IFilter filter = BloomFilterSerializer.deserialize(in, true))
+        try (FileInputStreamPlus in = getInput("3.0", "utils.BloomFilter1000.bin");
+             IFilter filter = BloomFilter.serializer.deserialize(in, true))
         {
             boolean present;
             for (int i = 0 ; i < 1000 ; i++)
@@ -123,8 +121,8 @@ public class SerializationsTest extends AbstractSerializationsTester
     {
         Murmur3Partitioner partitioner = new Murmur3Partitioner();
 
-        try (DataInputStream in = new DataInputStream(new FileInputStream(new File(file)));
-             IFilter filter = BloomFilterSerializer.deserialize(in, oldBfFormat))
+        try (DataInputStream in = new DataInputStream(new FileInputStreamPlus(new File(file)));
+             IFilter filter = BloomFilter.serializer.deserialize(in, oldBfFormat))
         {
             for (int i = 1; i <= 10; i++)
             {
@@ -176,7 +174,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         if (EXECUTE_WRITES)
             testEstimatedHistogramWrite();
 
-        try (DataInputStreamPlus in = getInput("utils.EstimatedHistogram.bin"))
+        try (FileInputStreamPlus in = getInput("utils.EstimatedHistogram.bin"))
         {
             Assert.assertNotNull(EstimatedHistogram.serializer.deserialize(in));
             Assert.assertNotNull(EstimatedHistogram.serializer.deserialize(in));

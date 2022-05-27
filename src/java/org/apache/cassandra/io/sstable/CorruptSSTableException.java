@@ -17,20 +17,26 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.io.File;
+import org.apache.cassandra.io.util.File;
 
 public class CorruptSSTableException extends RuntimeException
 {
-    public final File path;
+    public final File file;
 
-    public CorruptSSTableException(Throwable cause, File path)
+    public CorruptSSTableException(Throwable cause, File file)
     {
-        super("Corrupted: " + path, cause);
-        this.path = path;
+        super("Corrupted: " + file, cause);
+        this.file = file;
     }
 
     public CorruptSSTableException(Throwable cause, String path)
     {
         this(cause, new File(path));
+    }
+
+    protected CorruptSSTableException(String msg, Throwable cause, File file)
+    {
+        super(msg, cause);
+        this.file = file;
     }
 }

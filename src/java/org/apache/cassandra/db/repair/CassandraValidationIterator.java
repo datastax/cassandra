@@ -30,18 +30,17 @@ import java.util.function.LongPredicate;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Collections2;
 import com.google.common.collect.Maps;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
-import org.apache.cassandra.db.compaction.ActiveCompactionsTracker;
 import org.apache.cassandra.db.compaction.CompactionController;
 import org.apache.cassandra.db.compaction.CompactionIterator;
-import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -50,11 +49,11 @@ import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.repair.ValidationPartitionIterator;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.concurrent.Refs;
 
@@ -102,9 +101,9 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
 
     private static class ValidationCompactionIterator extends CompactionIterator
     {
-        public ValidationCompactionIterator(List<ISSTableScanner> scanners, ValidationCompactionController controller, int nowInSec, ActiveCompactionsTracker activeCompactions)
+        public ValidationCompactionIterator(List<ISSTableScanner> scanners, ValidationCompactionController controller, int nowInSec)
         {
-            super(OperationType.VALIDATION, scanners, controller, nowInSec, UUIDGen.getTimeUUID(), activeCompactions);
+            super(OperationType.VALIDATION, scanners, controller, nowInSec, UUIDGen.getTimeUUID());
         }
     }
 
@@ -166,7 +165,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
     private final boolean isGlobalSnapshotValidation;
 
     private final boolean isSnapshotValidation;
-    private final AbstractCompactionStrategy.ScannerList scanners;
+    private final ScannerList scanners;
     private final ValidationCompactionController controller;
 
     private final CompactionIterator ci;
@@ -195,15 +194,22 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
         }
         else
         {
-            if (!isIncremental)
+            if (!isIncremental && DatabaseDescriptor.enableMemtableAndCommitLog())
             {
                 // flush first so everyone is validating data that is as similar as possible
-                StorageService.instance.forceKeyspaceFlush(cfs.keyspace.getName(), cfs.name);
+                cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.REPAIR);
+                // Note: we also flush for incremental repair during the anti-compaction process.
             }
             sstables = getSSTablesToValidate(cfs, ranges, parentId, isIncremental);
         }
 
+        // Persistent memtables will not flush or snapshot to sstables, make an sstable with their data.
+        cfs.writeAndAddMemtableRanges(parentId,
+                                      () -> Collections2.transform(Range.normalize(ranges), Range::makeRowRange),
+                                      sstables);
+
         Preconditions.checkArgument(sstables != null);
+
         ActiveRepairService.ParentRepairSession prs = ActiveRepairService.instance.getParentRepairSession(parentId);
         if (prs != null)
         {
@@ -216,8 +222,8 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
         }
 
         controller = new ValidationCompactionController(cfs, getDefaultGcBefore(cfs, nowInSec));
-        scanners = cfs.getCompactionStrategyManager().getScanners(sstables, ranges);
-        ci = new ValidationCompactionIterator(scanners.scanners, controller, nowInSec, CompactionManager.instance.active);
+        scanners = cfs.getCompactionStrategyContainer().getScanners(sstables, ranges);
+        ci = new ValidationCompactionIterator(scanners.scanners, controller, nowInSec);
 
         long allPartitions = 0;
         rangePartitionCounts = Maps.newHashMapWithExpectedSize(ranges.size());

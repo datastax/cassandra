@@ -164,12 +164,14 @@ public class HelpersTest
     public void testMarkObsolete()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        LogTransaction txnLogs = new LogTransaction(OperationType.UNKNOWN);
+        AbstractLogTransaction txnLogs = ILogTransactionsFactory.instance.createLogTransaction(OperationType.UNKNOWN,
+                                                                                               LifecycleTransaction.newId(),
+                                                                                               cfs.metadata);
         Iterable<SSTableReader> readers = Lists.newArrayList(MockSchema.sstable(1, cfs), MockSchema.sstable(2, cfs));
         Iterable<SSTableReader> readersToKeep = Lists.newArrayList(MockSchema.sstable(3, cfs), MockSchema.sstable(4, cfs));
 
-        List<LogTransaction.Obsoletion> obsoletions = new ArrayList<>();
-        Helpers.prepareForObsoletion(readers, txnLogs, obsoletions, null);
+        List<AbstractLogTransaction.Obsoletion> obsoletions = new ArrayList<>();
+        Helpers.prepareForObsoletion(readers, txnLogs, obsoletions, null, null);
         assertNotNull(obsoletions);
         assertEquals(2, obsoletions.size());
 
@@ -191,7 +193,9 @@ public class HelpersTest
     public void testObsoletionPerformance()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        LogTransaction txnLogs = new LogTransaction(OperationType.UNKNOWN);
+        AbstractLogTransaction txnLogs = ILogTransactionsFactory.instance.createLogTransaction(OperationType.UNKNOWN,
+                                                                                               LifecycleTransaction.newId(),
+                                                                                               cfs.metadata);
         List<SSTableReader> readers = new ArrayList<>();
 
         for (int i = 0; i < 10000; i++)
@@ -200,7 +204,7 @@ public class HelpersTest
         }
         long start = System.currentTimeMillis();
 
-        Helpers.prepareForObsoletion(readers.subList(0, 500), txnLogs, new ArrayList<>(),null );
+        Helpers.prepareForObsoletion(readers.subList(0, 500), txnLogs, new ArrayList<>(),null, null);
         txnLogs.finish();
         long time = System.currentTimeMillis() - start;
         assertTrue(time < 20000);

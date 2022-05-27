@@ -21,15 +21,15 @@ import java.io.PrintStream;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
@@ -65,7 +65,7 @@ public class SSTableLevelResetter
         try
         {
             // load keyspace descriptions.
-            Schema.instance.loadFromDisk(false);
+            Schema.instance.loadFromDisk();
 
             String keyspaceName = args[1];
             String columnfamily = args[2];
@@ -97,12 +97,12 @@ public class SSTableLevelResetter
                     StatsMetadata metadata = (StatsMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.STATS);
                     if (metadata.sstableLevel > 0)
                     {
-                        out.println("Changing level from " + metadata.sstableLevel + " to 0 on " + descriptor.filenameFor(Component.DATA));
+                        out.println("Changing level from " + metadata.sstableLevel + " to 0 on " + descriptor.fileFor(Component.DATA));
                         descriptor.getMetadataSerializer().mutateLevel(descriptor, 0);
                     }
                     else
                     {
-                        out.println("Skipped " + descriptor.filenameFor(Component.DATA) + " since it is already on level 0");
+                        out.println("Skipped " + descriptor.fileFor(Component.DATA) + " since it is already on level 0");
                     }
                 }
             }

@@ -17,20 +17,22 @@
  */
 package org.apache.cassandra.io.sstable.format;
 
+import java.util.Set;
+
 import com.google.common.base.CharMatcher;
 
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.db.RowIndexEntry;
-import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 
 /**
  * Provides the accessors to data on disk.
  */
 public interface SSTableFormat
 {
-    static boolean enableSSTableDevelopmentTestMode = Boolean.getBoolean("cassandra.test.sstableformatdevelopment");
+    public final static String FORMAT_DEFAULT_PROP = "cassandra.sstable.format.default";
 
+    Type getType();
 
     Version getLatestVersion();
     Version getVersion(String version);
@@ -38,22 +40,23 @@ public interface SSTableFormat
     SSTableWriter.Factory getWriterFactory();
     SSTableReader.Factory getReaderFactory();
 
-    RowIndexEntry.IndexSerializer<?> getIndexSerializer(TableMetadata metadata, Version version, SerializationHeader header);
-
-    public static enum Type
+    public enum Type
     {
         //The original sstable format
-        BIG("big", BigFormat.instance);
+        BIG("big", BigFormat.instance),
+
+        //Sstable format with trie indices
+        BTI("bti", TrieIndexFormat.instance);
 
         public final SSTableFormat info;
         public final String name;
 
         public static Type current()
         {
-            return BIG;
+            return Type.valueOf(System.getProperty(FORMAT_DEFAULT_PROP, BTI.name()).toUpperCase());
         }
 
-        private Type(String name, SSTableFormat info)
+        Type(String name, SSTableFormat info)
         {
             //Since format comes right after generation
             //we disallow formats with numeric names
@@ -74,4 +77,27 @@ public interface SSTableFormat
             throw new IllegalArgumentException("No Type constant " + name);
         }
     }
+
+    /**
+     * Returns components required by the particular implementation of SSTable reader so that it can operate on
+     * the SSTable in a regular way.
+     */
+    Set<Component> requiredComponents();
+
+    /**
+     * Returns all the components, both mandatory and optional, which are used by the particular implemetation of
+     * SSTable format.
+     */
+    Set<Component> supportedComponents();
+
+    /**
+     * Returns all the components of the particular implementation of SSTable format which are suitable for streaming.
+     */
+    Set<Component> streamingComponents();
+
+    /**
+     * Returns all primary index components required for index iteration and reading keys
+     */
+    Set<Component> primaryIndexComponents();
+
 }

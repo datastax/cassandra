@@ -25,7 +25,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import com.google.common.annotations.VisibleForTesting;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +36,7 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
+import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -194,7 +194,7 @@ import static org.apache.cassandra.utils.Throwables.maybeFail;
  * implemented in {@link org.apache.cassandra.db.virtual.InternodeInboundTable} and
  * {@link org.apache.cassandra.db.virtual.InternodeOutboundTable} respectively.
  */
-public final class MessagingService extends MessagingServiceMBeanImpl
+public class MessagingService extends MessagingServiceMBeanImpl
 {
     private static final Logger logger = LoggerFactory.getLogger(MessagingService.class);
 
@@ -202,16 +202,27 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     public static final int VERSION_30 = 10;
     public static final int VERSION_3014 = 11;
     public static final int VERSION_40 = 12;
+    public static final int VERSION_41 = 13;
+    // Current Stargazer version while we have serialization differences
+    // If differences get merged upstream then we can revert to OS versioning
+    public static final int VERSION_SG_10 = 100;
     public static final int minimum_version = VERSION_30;
-    public static final int current_version = VERSION_40;
+    public static final int current_version = VERSION_SG_10;
+    // DSE 6.8 version for backward compatibility
+    public static final int VERSION_DSE_68 = 168;
+
     static AcceptVersions accept_messaging = new AcceptVersions(minimum_version, current_version);
     static AcceptVersions accept_streaming = new AcceptVersions(current_version, current_version);
 
+    public final static boolean NON_GRACEFUL_SHUTDOWN = Boolean.getBoolean("cassandra.test.messagingService.nonGracefulShutdown");
+
     public enum Version
     {
-        VERSION_30(10),
-        VERSION_3014(11),
-        VERSION_40(12);
+        VERSION_30(MessagingService.VERSION_30),
+        VERSION_3014(MessagingService.VERSION_3014),
+        VERSION_40(MessagingService.VERSION_40),
+        VERSION_41(MessagingService.VERSION_41),
+        STARGAZER_10(MessagingService.VERSION_SG_10);
 
         public final int value;
 
@@ -258,7 +269,13 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     @VisibleForTesting
     MessagingService(boolean testOnly)
     {
-        super(testOnly);
+        this(testOnly, new EndpointMessagingVersions(), new MessagingMetrics());
+    }
+
+    @VisibleForTesting
+    MessagingService(boolean testOnly, EndpointMessagingVersions versions, MessagingMetrics metrics)
+    {
+        super(testOnly, versions, metrics);
         OutboundConnections.scheduleUnusedConnectionMonitoring(this, ScheduledExecutors.scheduledTasks, 1L, TimeUnit.HOURS);
     }
 
@@ -426,7 +443,10 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      */
     public void shutdown()
     {
-        shutdown(1L, MINUTES, true, true);
+        if (NON_GRACEFUL_SHUTDOWN)
+            shutdown(100, TimeUnit.MILLISECONDS, false, true);
+        else
+            shutdown(1L, MINUTES, true, true);
     }
 
     public void shutdown(long timeout, TimeUnit units, boolean shutdownGracefully, boolean shutdownExecutors)
@@ -454,7 +474,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                       () -> {
                           List<ExecutorService> inboundExecutors = new ArrayList<>();
                           inboundSockets.close(synchronizedList(inboundExecutors)::add).get();
-                          ExecutorUtils.awaitTermination(1L, TimeUnit.MINUTES, inboundExecutors);
+                          ExecutorUtils.awaitTermination(timeout, units, inboundExecutors);
                       },
                       () -> {
                           if (shutdownExecutors)
@@ -474,15 +494,25 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                 closing.add(pool.close(false));
 
             long deadline = System.nanoTime() + units.toNanos(timeout);
-            maybeFail(() -> new FutureCombiner(closing).get(timeout, units),
-                      () -> {
-                          if (shutdownExecutors)
-                              shutdownExecutors(deadline);
-                      },
-                      () -> ExecutorUtils.awaitTermination(timeout, units, inboundExecutors),
-                      () -> callbacks.awaitTerminationUntil(deadline),
-                      inboundSink::clear,
-                      outboundSink::clear);
+            try
+            {
+                maybeFail(() -> new FutureCombiner(closing).get(timeout, units),
+                          () -> {
+                              if (shutdownExecutors)
+                                  shutdownExecutors(deadline);
+                          },
+                          () -> ExecutorUtils.awaitTermination(timeout, units, inboundExecutors),
+                          () -> callbacks.awaitTerminationUntil(deadline),
+                          inboundSink::clear,
+                          outboundSink::clear);
+            }
+            catch (Throwable t)
+            {
+                if (NON_GRACEFUL_SHUTDOWN)
+                    logger.info("Timeout when waiting for messaging service shutdown", t);
+                else
+                    throw t;
+            }
         }
     }
 

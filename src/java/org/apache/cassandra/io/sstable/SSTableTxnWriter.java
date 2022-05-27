@@ -62,11 +62,6 @@ public class SSTableTxnWriter extends Transactional.AbstractTransactional implem
         return writer.getFilename();
     }
 
-    public long getFilePointer()
-    {
-        return writer.getFilePointer();
-    }
-
     protected Throwable doCommit(Throwable accumulate)
     {
         return writer.commit(txn.commit(accumulate));
@@ -101,7 +96,7 @@ public class SSTableTxnWriter extends Transactional.AbstractTransactional implem
     @SuppressWarnings("resource") // log and writer closed during doPostCleanup
     public static SSTableTxnWriter create(ColumnFamilyStore cfs, Descriptor descriptor, long keyCount, long repairedAt, UUID pendingRepair, boolean isTransient, int sstableLevel, SerializationHeader header)
     {
-        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE);
+        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, cfs.metadata);
         SSTableMultiWriter writer = cfs.createSSTableMultiWriter(descriptor, keyCount, repairedAt, pendingRepair, isTransient, sstableLevel, header, txn);
         return new SSTableTxnWriter(txn, writer);
     }
@@ -119,7 +114,7 @@ public class SSTableTxnWriter extends Transactional.AbstractTransactional implem
     {
 
         ColumnFamilyStore cfs = Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name);
-        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE);
+        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, cfs.metadata);
         SSTableMultiWriter writer;
         try
         {
@@ -144,12 +139,12 @@ public class SSTableTxnWriter extends Transactional.AbstractTransactional implem
                                           boolean isTransient,
                                           int sstableLevel,
                                           SerializationHeader header,
-                                          Collection<Index> indexes)
+                                          Collection<Index.Group> indexGroups)
     {
         // if the column family store does not exist, we create a new default SSTableMultiWriter to use:
-        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE);
+        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, metadata);
         MetadataCollector collector = new MetadataCollector(metadata.get().comparator).sstableLevel(sstableLevel);
-        SSTableMultiWriter writer = SimpleSSTableMultiWriter.create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, collector, header, indexes, txn);
+        SSTableMultiWriter writer = SimpleSSTableMultiWriter.create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, collector, header, indexGroups, txn);
         return new SSTableTxnWriter(txn, writer);
     }
 

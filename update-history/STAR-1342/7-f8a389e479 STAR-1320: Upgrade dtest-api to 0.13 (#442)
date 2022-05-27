@@ -1,0 +1,14 @@
+--- a/test/distributed/org/apache/cassandra/distributed/impl/Instance.java
++++ b/test/distributed/org/apache/cassandra/distributed/impl/Instance.java
+@@ -36,11 +36,8 @@
+ import java.util.concurrent.ExecutorService;
+ import java.util.concurrent.Future;
+ import java.util.concurrent.TimeoutException;
+-<<<<<<<
+ import java.util.concurrent.atomic.AtomicLong;
+-=======
+ import java.util.stream.Stream;
+->>>>>>>
+ import javax.management.ListenerNotFoundException;
+ import javax.management.Notification;
+ import javax.management.NotificationListener;

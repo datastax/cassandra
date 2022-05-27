@@ -1,0 +1,14 @@
+--- a/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
++++ b/test/unit/org/apache/cassandra/db/ColumnFamilyStoreTest.java
+@@ -37,11 +37,8 @@
+ import org.apache.cassandra.UpdateBuilder;
+ import org.apache.cassandra.Util;
+ import org.apache.cassandra.cql3.Operator;
+-<<<<<<<
+ import org.apache.cassandra.db.compaction.OperationType;
+-=======
+ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+->>>>>>>
+ import org.apache.cassandra.db.lifecycle.SSTableSet;
+ import org.apache.cassandra.db.partitions.FilteredPartition;
+ import org.apache.cassandra.db.rows.Cell;

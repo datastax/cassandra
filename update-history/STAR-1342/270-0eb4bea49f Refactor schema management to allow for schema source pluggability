@@ -1,0 +1,209 @@
+--- a/src/java/org/apache/cassandra/schema/MigrationCoordinator.java
++++ b/src/java/org/apache/cassandra/schema/MigrationCoordinator.java
+@@ -37,13 +37,9 @@
+ import java.util.concurrent.Executor;
+ import java.util.concurrent.ExecutorService;
+ import java.util.concurrent.Future;
+-<<<<<<<
+-import java.util.concurrent.FutureTask;
+-import java.util.concurrent.RejectedExecutionException;
+-=======
+ import java.util.concurrent.ScheduledExecutorService;
+ import java.util.concurrent.ScheduledFuture;
+->>>>>>>
++import java.util.concurrent.RejectedExecutionException;
+ import java.util.concurrent.TimeUnit;
+ import java.util.concurrent.atomic.AtomicReference;
+ import java.util.function.BiConsumer;
+@@ -57,6 +53,7 @@
+ import org.slf4j.LoggerFactory;
+ 
+ import org.apache.cassandra.concurrent.ScheduledExecutors;
++import org.apache.cassandra.concurrent.Stage;
+ import org.apache.cassandra.config.CassandraRelevantProperties;
+ import org.apache.cassandra.db.Mutation;
+ import org.apache.cassandra.exceptions.RequestFailureReason;
+@@ -74,11 +71,9 @@
+ import org.apache.cassandra.utils.Pair;
+ import org.apache.cassandra.utils.concurrent.WaitQueue;
+ 
+-<<<<<<<
+ import static org.apache.cassandra.config.CassandraRelevantProperties.IGNORED_SCHEMA_CHECK_ENDPOINTS;
+ import static org.apache.cassandra.config.CassandraRelevantProperties.IGNORED_SCHEMA_CHECK_VERSIONS;
+ 
+-=======
+ import static org.apache.cassandra.net.Verb.SCHEMA_PUSH_REQ;
+ 
+ /**
+@@ -89,7 +84,6 @@
+  * It works in close cooperation with {@link DefaultSchemaUpdateHandler} which is responsible for maintaining local
+  * schema metadata stored in {@link SchemaKeyspace}.
+  */
+->>>>>>>
+ public class MigrationCoordinator
+ {
+     private static final Logger logger = LoggerFactory.getLogger(MigrationCoordinator.class);
+@@ -450,7 +444,6 @@
+ 
+     CompletableFuture<Collection<Mutation>> pullSchemaFromAnyNode()
+     {
+-<<<<<<<
+         Optional<InetAddressAndPort> endpoint = gossiper.getLiveMembers()
+                                                         .stream()
+                                                         .filter(this::shouldPullFromEndpoint)
+@@ -459,7 +452,6 @@
+         return endpoint.map(this::pullSchemaFrom).orElse(CompletableFuture.completedFuture(Collections.emptyList()));
+     }
+ 
+-
+     void announce(UUID schemaVersion)
+     {
+         if (gossiper.isEnabled())
+@@ -478,36 +470,6 @@
+         {
+             return CompletableFuture.runAsync(task, executor);
+         }
+-=======
+-        boolean skipped = false;
+-        try
+-        {
+-            if (Stage.MIGRATION.executor().isShutdown() || Stage.MIGRATION.executor().isTerminated())
+-            {
+-                skipped = true;
+-                return null;
+-            }
+-            return Stage.MIGRATION.submit(task);
+-        }
+-        catch (RejectedExecutionException ex)
+-        {
+-            skipped = true;
+-            return null;
+-        }
+-        finally
+-        {
+-            if (skipped)
+-            {
+-                logger.info("Skipped scheduled pulling schema from other nodes: the MIGRATION executor service has been shutdown.");
+-            }
+-        }
+-    }
+-
+-    @VisibleForTesting
+-    protected void mergeSchemaFrom(InetAddressAndPort endpoint, Collection<Mutation> mutations)
+-    {
+-        Schema.instance.mergeAndAnnounceVersion(mutations);
+->>>>>>>
+     }
+ 
+     private class Callback implements RequestCallback<Collection<Mutation>>
+--- a/test/distributed/org/apache/cassandra/distributed/action/GossipHelper.java
++++ b/test/distributed/org/apache/cassandra/distributed/action/GossipHelper.java
+@@ -221,13 +221,8 @@
+             pullTo.acceptsOnInstance((InetSocketAddress pullFrom) -> {
+                 InetAddressAndPort endpoint = toCassandraInetAddressAndPort(pullFrom);
+                 EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+-<<<<<<<
+                 Gossiper.instance.doOnChangeNotifications(endpoint, ApplicationState.SCHEMA, state.getApplicationState(ApplicationState.SCHEMA));
+                 Schema.instance.waitUntilReady(Duration.ofSeconds(10));
+-=======
+-                MigrationCoordinator.instance.reportEndpointVersion(endpoint, state);
+-                assertTrue("schema is ready", MigrationCoordinator.instance.awaitSchemaRequests(TimeUnit.SECONDS.toMillis(10)));
+->>>>>>>
+             }).accept(pullFrom);
+         }
+     }
+--- a/test/distributed/org/apache/cassandra/distributed/impl/Instance.java
++++ b/test/distributed/org/apache/cassandra/distributed/impl/Instance.java
+@@ -102,10 +102,7 @@
+ import org.apache.cassandra.net.MessagingService;
+ import org.apache.cassandra.net.NoPayload;
+ import org.apache.cassandra.net.Verb;
+-<<<<<<<
+-=======
+ import org.apache.cassandra.schema.MigrationCoordinator;
+->>>>>>>
+ import org.apache.cassandra.schema.Schema;
+ import org.apache.cassandra.schema.SchemaConstants;
+ import org.apache.cassandra.service.ActiveRepairService;
+@@ -546,10 +543,6 @@
+                 StorageService.instance.registerDaemon(CassandraDaemon.getInstanceForTesting());
+                 if (config.has(GOSSIP))
+                 {
+-<<<<<<<
+-=======
+-                    MigrationCoordinator.setUptimeFn(() -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt.get()));
+->>>>>>>
+                     StorageService.instance.initServer();
+                     StorageService.instance.removeShutdownHook();
+                     Gossiper.waitToSettle();
+--- a/test/unit/org/apache/cassandra/cql3/CQLTester.java
++++ b/test/unit/org/apache/cassandra/cql3/CQLTester.java
+@@ -59,17 +59,13 @@
+ import com.google.common.base.Objects;
+ import com.google.common.base.Strings;
+ import com.google.common.collect.ImmutableSet;
+-<<<<<<<
+ import com.google.common.collect.Iterables;
+ 
+-import org.junit.*;
+-=======
+ import org.junit.After;
+ import org.junit.AfterClass;
+ import org.junit.Assert;
+ import org.junit.Before;
+ import org.junit.BeforeClass;
+->>>>>>>
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+diff --git a/src/java/org/apache/cassandra/schema/DefaultSchemaUpdateHandler.java b/src/java/org/apache/cassandra/schema/DefaultSchemaUpdateHandler.java
+index 5f8bf99461..e6e14c4ee2 100644
+--- a/src/java/org/apache/cassandra/schema/DefaultSchemaUpdateHandler.java
++++ b/src/java/org/apache/cassandra/schema/DefaultSchemaUpdateHandler.java
+@@ -114,7 +114,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
+                     Schema.instance.getVersion(),
+                     migrationCoordinator.outstandingVersions(),
+                     CassandraRelevantProperties.BOOTSTRAP_SKIP_SCHEMA_CHECK.getKey(),
+-                    MigrationCoordinator.IGNORED_ENDPOINTS_PROP, MigrationCoordinator.IGNORED_VERSIONS_PROP);
++                    CassandraRelevantProperties.IGNORED_SCHEMA_CHECK_ENDPOINTS.getKey(), CassandraRelevantProperties.IGNORED_SCHEMA_CHECK_VERSIONS.getKey());
+ 
+         if (requireSchemas)
+         {
+diff --git a/src/java/org/apache/cassandra/schema/MigrationCoordinator.java b/src/java/org/apache/cassandra/schema/MigrationCoordinator.java
+index e6a4931e85..82a2d16f6e 100644
+--- a/src/java/org/apache/cassandra/schema/MigrationCoordinator.java
++++ b/src/java/org/apache/cassandra/schema/MigrationCoordinator.java
+@@ -452,33 +452,6 @@ public class MigrationCoordinator
+         return endpoint.map(this::pullSchemaFrom).orElse(CompletableFuture.completedFuture(Collections.emptyList()));
+     }
+ 
+-    private static Future<?> submitToMigrationIfNotShutdown(Runnable task)
+-    {
+-        boolean skipped = false;
+-        try
+-        {
+-            if (Stage.MIGRATION.executor().isShutdown() || Stage.MIGRATION.executor().isTerminated())
+-            {
+-                skipped = true;
+-                return null;
+-            }
+-            return Stage.MIGRATION.submit(task);
+-        }
+-        catch (RejectedExecutionException ex)
+-        {
+-            skipped = true;
+-            return null;
+-        }
+-        finally
+-        {
+-            if (skipped)
+-            {
+-                logger.info("Skipped scheduled pulling schema from other nodes: the MIGRATION executor service has been shutdown.");
+-            }
+-        }
+-    }
+-
+-
+     void announce(UUID schemaVersion)
+     {
+         if (gossiper.isEnabled())

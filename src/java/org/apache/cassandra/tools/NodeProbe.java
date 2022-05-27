@@ -98,7 +98,7 @@ import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.cassandra.tools.nodetool.GetTimeout;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.INativeLibrary;
 
 /**
  * JMX client operations for Cassandra.
@@ -1610,6 +1610,8 @@ public class NodeProbe implements AutoCloseable
                 case "CompletedTasks":
                 case "PendingTasks":
                 case "PendingTasksByTableName":
+                case "WriteAmplificationByTableName":
+                case "AggregateCompactions":
                     return JMX.newMBeanProxy(mbeanServerConn,
                             new ObjectName("org.apache.cassandra.metrics:type=Compaction,name=" + metricName),
                             CassandraMetricsRegistry.JmxGaugeMBean.class).getValue();
@@ -1723,7 +1725,7 @@ public class NodeProbe implements AutoCloseable
 
     public long getPid()
     {
-        return NativeLibrary.getProcessID();
+        return INativeLibrary.instance.getProcessID();
     }
 
     public void resumeBootstrap(PrintStream out) throws IOException

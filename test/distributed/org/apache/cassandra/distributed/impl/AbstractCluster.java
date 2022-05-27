@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.distributed.impl;
 
-import java.io.File;
 import java.lang.annotation.Annotation;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
@@ -77,6 +76,8 @@ import org.apache.cassandra.distributed.shared.Shared;
 import org.apache.cassandra.distributed.shared.ShutdownException;
 import org.apache.cassandra.distributed.shared.Versions;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
@@ -235,6 +236,12 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster<I
         }
 
         @Override
+        public boolean isValid()
+        {
+            return delegate != null;
+        }
+
+        @Override
         public synchronized void startup()
         {
             startup(AbstractCluster.this);
@@ -383,7 +390,7 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster<I
 
     protected AbstractCluster(AbstractBuilder<I, ? extends ICluster<I>, ?> builder)
     {
-        this.root = builder.getRoot();
+        this.root = new File(builder.getRoot());
         this.sharedClassLoader = builder.getSharedClassLoader();
         this.subnet = builder.getSubnet();
         this.tokenSupplier = builder.getTokenSupplier();
@@ -424,6 +431,7 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster<I
         long token = tokenSupplier.token(nodeNum);
         NetworkTopology topology = buildNetworkTopology(provisionStrategy, nodeIdTopology);
         InstanceConfig config = InstanceConfig.generate(nodeNum, provisionStrategy, topology, root, Long.toString(token), datadirCount);
+        logger.info("Instance {} config: {}", nodeNum, config);
         config.set(Constants.KEY_DTEST_API_CLUSTER_ID, clusterId.toString());
         if (configUpdater != null)
             configUpdater.accept(config);
@@ -778,7 +786,13 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster<I
 
         protected boolean isCompleted()
         {
-            return instances.stream().allMatch(i -> !i.config().has(Feature.GOSSIP) || i.liveMemberCount() == instances.size());
+            return instances.stream().allMatch(i -> {
+                if (!i.config().has(Feature.GOSSIP))
+                    return true;
+
+                logger.info("Instance {} reports {} live members count, required {}", i, i.liveMemberCount(), instances.size());
+                return i.liveMemberCount() == instances.size();
+            });
         }
 
         protected String getMonitorTimeoutMessage()
@@ -852,6 +866,7 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster<I
 
         instances.clear();
         instanceMap.clear();
+        PathUtils.setDeletionListener(ignore -> {});
         // Make sure to only delete directory when threads are stopped
         if (root.exists())
             FileUtils.deleteRecursive(root);

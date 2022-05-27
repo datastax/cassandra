@@ -1,0 +1,63 @@
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -1,7 +1,9 @@
+ Future version (tbd)
+  * Require only MODIFY permission on base when updating table with MV (STAR-564)
+ 
+-<<<<<<<
++4.1
++ * Request-Based Native Transport Rate-Limiting (CASSANDRA-16663)
++
+ 4.0.5
+  * silence benign SslClosedEngineException (CASSANDRA-17565)
+ Merged from 3.11:
+@@ -10,11 +12,6 @@
+  * Suppress CVE-2022-24823 (CASSANDRA-17633)
+  * fsync TOC and digest files (CASSANDRA-10709)
+ 
+-=======
+-4.1
+- * Request-Based Native Transport Rate-Limiting (CASSANDRA-16663)
+->>>>>>>
+-
+ 4.0.4
+  * Optimise BTree build,update and transform operations (CASSANDRA-15510)
+  * Clean up schema migration coordinator and tests (CASSANDRA-17533)
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -2,12 +2,9 @@
+  * Require only MODIFY permission on base when updating table with MV (STAR-564)
+ 
+ 4.1
+-<<<<<<<
+  * Request-Based Native Transport Rate-Limiting (CASSANDRA-16663)
+-=======
+  * Save sstable id as string in activity table (CASSANDRA-17585)
+  * Add support for UUID based sstable generation identifiers (CASSANDRA-17048)
+->>>>>>>
+ 
+ 4.0.5
+  * silence benign SslClosedEngineException (CASSANDRA-17565)
+diff --git a/update-history/STAR-1342/136-34374c13d6 STAR-887: Port Request-Based Native Transport Rate-Limiting (CASSANDRA-16663) (#262) b/update-history/STAR-1342/136-34374c13d6 STAR-887: Port Request-Based Native Transport Rate-Limiting (CASSANDRA-16663) (#262)
+index 3bbd6c1641..ce17b7db3d 100644
+--- a/update-history/STAR-1342/136-34374c13d6 STAR-887: Port Request-Based Native Transport Rate-Limiting (CASSANDRA-16663) (#262)	
++++ b/update-history/STAR-1342/136-34374c13d6 STAR-887: Port Request-Based Native Transport Rate-Limiting (CASSANDRA-16663) (#262)	
+@@ -23,3 +23,18 @@
+  4.0.4
+   * Optimise BTree build,update and transform operations (CASSANDRA-15510)
+   * Clean up schema migration coordinator and tests (CASSANDRA-17533)
++--- a/CHANGES.txt
+++++ b/CHANGES.txt
++@@ -2,12 +2,9 @@
++  * Require only MODIFY permission on base when updating table with MV (STAR-564)
++ 
++ 4.1
++-<<<<<<<
++  * Request-Based Native Transport Rate-Limiting (CASSANDRA-16663)
++-=======
++  * Save sstable id as string in activity table (CASSANDRA-17585)
++  * Add support for UUID based sstable generation identifiers (CASSANDRA-17048)
++->>>>>>>
++ 
++ 4.0.5
++  * silence benign SslClosedEngineException (CASSANDRA-17565)

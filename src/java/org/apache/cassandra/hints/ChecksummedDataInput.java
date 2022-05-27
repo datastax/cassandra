@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.hints;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.zip.CRC32;
@@ -25,10 +24,13 @@ import java.util.zip.CRC32;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.io.compress.BufferType;
-import org.apache.cassandra.io.util.*;
-import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.io.util.ChannelProxy;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.RebufferingInputStream;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.Throwables;
-import org.apache.cassandra.utils.NativeLibrary;
 
 /**
  * A {@link RandomAccessReader} wrapper that calculates the CRC in place.
@@ -224,7 +226,7 @@ public class ChecksummedDataInput extends RebufferingInputStream
 
     public void tryUncacheRead()
     {
-        NativeLibrary.trySkipCache(getChannel().getFileDescriptor(), 0, getSourcePosition(), getPath());
+        INativeLibrary.instance.trySkipCache(getChannel().getFileDescriptor(), 0, getSourcePosition(), getFile().toString());
     }
 
     private void updateCrc()
@@ -248,9 +250,9 @@ public class ChecksummedDataInput extends RebufferingInputStream
         channel.close();
     }
 
-    protected String getPath()
+    protected File getFile()
     {
-        return channel.filePath();
+        return channel.getFile();
     }
 
     public ChannelProxy getChannel()

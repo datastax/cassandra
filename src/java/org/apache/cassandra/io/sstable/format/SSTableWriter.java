@@ -18,18 +18,37 @@
 
 package org.apache.cassandra.io.sstable.format;
 
-import java.util.*;
+import java.io.IOException;
+import java.nio.BufferOverflowException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.RowIndexEntry;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionPurger;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
+import org.apache.cassandra.db.rows.ComplexColumnData;
+import org.apache.cassandra.db.rows.PartitionSerializationException;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
@@ -40,9 +59,12 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 /**
@@ -53,28 +75,21 @@ import org.apache.cassandra.utils.concurrent.Transactional;
  */
 public abstract class SSTableWriter extends SSTable implements Transactional
 {
+    private static final Logger logger = LoggerFactory.getLogger(SSTableWriter.class);
+
     protected long repairedAt;
     protected UUID pendingRepair;
     protected boolean isTransient;
     protected long maxDataAge = -1;
     protected final long keyCount;
     protected final MetadataCollector metadataCollector;
-    protected final RowIndexEntry.IndexSerializer rowIndexEntrySerializer;
     protected final SerializationHeader header;
-    protected final TransactionalProxy txnProxy = txnProxy();
     protected final Collection<SSTableFlushObserver> observers;
 
-    protected abstract TransactionalProxy txnProxy();
-
-    // due to lack of multiple inheritance, we use an inner class to proxy our Transactional implementation details
-    protected abstract class TransactionalProxy extends AbstractTransactional
-    {
-        // should be set during doPrepare()
-        protected SSTableReader finalReader;
-        protected boolean openResult;
-    }
+    protected abstract AbstractTransactional txnProxy();
 
     protected SSTableWriter(Descriptor descriptor,
+                            Set<Component> components,
                             long keyCount,
                             long repairedAt,
                             UUID pendingRepair,
@@ -84,15 +99,28 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                             SerializationHeader header,
                             Collection<SSTableFlushObserver> observers)
     {
-        super(descriptor, components(metadata.getLocal()), metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
+        super(descriptor, components, metadata, DatabaseDescriptor.getDiskOptimizationStrategy());
         this.keyCount = keyCount;
         this.repairedAt = repairedAt;
         this.pendingRepair = pendingRepair;
         this.isTransient = isTransient;
         this.metadataCollector = metadataCollector;
         this.header = header;
-        this.rowIndexEntrySerializer = descriptor.version.getSSTableFormat().getIndexSerializer(metadata.get(), descriptor.version, header);
         this.observers = observers == null ? Collections.emptySet() : observers;
+    }
+
+    private static Set<Component> indexComponents(Collection<Index.Group> indexGroups)
+    {
+        if (indexGroups == null)
+            return Collections.emptySet();
+
+        Set<Component> components = new HashSet<>();
+        for (Index.Group group : indexGroups)
+        {
+            components.addAll(group.getComponents());
+        }
+
+        return components;
     }
 
     public static SSTableWriter create(Descriptor descriptor,
@@ -103,11 +131,12 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                        TableMetadataRef metadata,
                                        MetadataCollector metadataCollector,
                                        SerializationHeader header,
-                                       Collection<Index> indexes,
+                                       Collection<Index.Group> indexGroups,
                                        LifecycleNewTracker lifecycleNewTracker)
     {
         Factory writerFactory = descriptor.getFormat().getWriterFactory();
-        return writerFactory.open(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers(descriptor, indexes, lifecycleNewTracker.opType()), lifecycleNewTracker);
+        return writerFactory.open(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers(descriptor, indexGroups, lifecycleNewTracker, metadata.get()), lifecycleNewTracker,
+                                  indexComponents(indexGroups));
     }
 
     public static SSTableWriter create(Descriptor descriptor,
@@ -117,11 +146,11 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                        boolean isTransient,
                                        int sstableLevel,
                                        SerializationHeader header,
-                                       Collection<Index> indexes,
+                                       Collection<Index.Group> indexGroups,
                                        LifecycleNewTracker lifecycleNewTracker)
     {
         TableMetadataRef metadata = Schema.instance.getTableMetadataRef(descriptor);
-        return create(metadata, descriptor, keyCount, repairedAt, pendingRepair, isTransient, sstableLevel, header, indexes, lifecycleNewTracker);
+        return create(metadata, descriptor, keyCount, repairedAt, pendingRepair, isTransient, sstableLevel, header, indexGroups, lifecycleNewTracker);
     }
 
     public static SSTableWriter create(TableMetadataRef metadata,
@@ -132,11 +161,11 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                        boolean isTransient,
                                        int sstableLevel,
                                        SerializationHeader header,
-                                       Collection<Index> indexes,
+                                       Collection<Index.Group> indexGroups,
                                        LifecycleNewTracker lifecycleNewTracker)
     {
         MetadataCollector collector = new MetadataCollector(metadata.get().comparator).sstableLevel(sstableLevel);
-        return create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, collector, header, indexes, lifecycleNewTracker);
+        return create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, collector, header, indexGroups, lifecycleNewTracker);
     }
 
     @VisibleForTesting
@@ -146,48 +175,24 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                        UUID pendingRepair,
                                        boolean isTransient,
                                        SerializationHeader header,
-                                       Collection<Index> indexes,
+                                       Collection<Index.Group> indexGroups,
                                        LifecycleNewTracker lifecycleNewTracker)
     {
-        return create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, 0, header, indexes, lifecycleNewTracker);
-    }
-
-    private static Set<Component> components(TableMetadata metadata)
-    {
-        Set<Component> components = new HashSet<Component>(Arrays.asList(Component.DATA,
-                Component.PRIMARY_INDEX,
-                Component.STATS,
-                Component.SUMMARY,
-                Component.TOC,
-                Component.DIGEST));
-
-        if (metadata.params.bloomFilterFpChance < 1.0)
-            components.add(Component.FILTER);
-
-        if (metadata.params.compression.isEnabled())
-        {
-            components.add(Component.COMPRESSION_INFO);
-        }
-        else
-        {
-            // it would feel safer to actually add this component later in maybeWriteDigest(),
-            // but the components are unmodifiable after construction
-            components.add(Component.CRC);
-        }
-        return components;
+        return create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, 0, header, indexGroups, lifecycleNewTracker);
     }
 
     private static Collection<SSTableFlushObserver> observers(Descriptor descriptor,
-                                                              Collection<Index> indexes,
-                                                              OperationType operationType)
+                                                              Collection<Index.Group> indexGroups,
+                                                              LifecycleNewTracker tracker,
+                                                              TableMetadata metadata)
     {
-        if (indexes == null)
+        if (indexGroups == null)
             return Collections.emptyList();
 
-        List<SSTableFlushObserver> observers = new ArrayList<>(indexes.size());
-        for (Index index : indexes)
+        List<SSTableFlushObserver> observers = new ArrayList<>(indexGroups.size());
+        for (Index.Group group : indexGroups)
         {
-            SSTableFlushObserver observer = index.getFlushObserver(descriptor, operationType);
+            SSTableFlushObserver observer = group.getFlushObserver(descriptor, tracker, metadata);
             if (observer != null)
             {
                 observer.begin();
@@ -203,13 +208,55 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     /**
      * Appends partition data to this writer.
      *
-     * @param iterator the partition to write
+     * @param partition the partition to write
      * @return the created index entry if something was written, that is if {@code iterator}
      * wasn't empty, {@code null} otherwise.
      *
      * @throws FSWriteError if a write to the dataFile fails
      */
-    public abstract RowIndexEntry append(UnfilteredRowIterator iterator);
+    public RowIndexEntry append(UnfilteredRowIterator partition)
+    {
+        if (partition.isEmpty())
+            return null;
+
+        try
+        {
+            if (!startPartition(partition.partitionKey(), partition.partitionLevelDeletion()))
+                return null;
+
+            if (!partition.staticRow().isEmpty())
+                addUnfiltered(partition.staticRow());
+
+            while (partition.hasNext())
+                addUnfiltered(partition.next());
+
+            return endPartition();
+        }
+        catch (BufferOverflowException boe)
+        {
+            throw new PartitionSerializationException(partition, boe);
+        }
+        catch (IOException e)
+        {
+            throw new FSWriteError(e, getFilename());
+        }
+    }
+
+    /**
+     * Start a partition. Will be followed by a sequence of addUnfiltered(), and finished with endPartition().
+     * The static row may be given in the first addUnfiltered() (by cursors), or via addStaticRow() called before any
+     * other addUnfiltered() (by append(UnfilteredRowIterator) above).
+     *
+     * @param key
+     * @param partitionLevelDeletion
+     * @return true if the partition was successfully started, false if there is a problem (e.g. key not in order).
+     * @throws IOException
+     */
+    public abstract boolean startPartition(DecoratedKey key, DeletionTime partitionLevelDeletion) throws IOException;
+
+    public abstract void addUnfiltered(Unfiltered unfiltered) throws IOException;
+
+    public abstract RowIndexEntry endPartition() throws IOException;
 
     public abstract long getFilePointer();
 
@@ -235,16 +282,12 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         return this;
     }
 
-    public SSTableWriter setOpenResult(boolean openResult)
-    {
-        txnProxy.openResult = openResult;
-        return this;
-    }
+    public abstract SSTableWriter setOpenResult(boolean openResult);
 
     /**
      * Open the resultant SSTableReader before it has been fully written
      */
-    public abstract SSTableReader openEarly();
+    public abstract boolean openEarly(Consumer<SSTableReader> callWhenReady);
 
     /**
      * Open the resultant SSTableReader once it has been fully written, but before the
@@ -263,7 +306,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     public SSTableReader finish(boolean openResult)
     {
         setOpenResult(openResult);
-        txnProxy.finish();
+        txnProxy().finish();
         observers.forEach(SSTableFlushObserver::complete);
         return finished();
     }
@@ -272,42 +315,54 @@ public abstract class SSTableWriter extends SSTable implements Transactional
      * Open the resultant SSTableReader once it has been fully written, and all related state
      * is ready to be finalised including other sstables being written involved in the same operation
      */
-    public SSTableReader finished()
-    {
-        return txnProxy.finalReader;
-    }
+    public abstract SSTableReader finished();
 
     // finalise our state on disk, including renaming
     public final void prepareToCommit()
     {
-        txnProxy.prepareToCommit();
-    }
-
-    public final Throwable commit(Throwable accumulate)
-    {
         try
         {
-            return txnProxy.commit(accumulate);
+            txnProxy().prepareToCommit();
         }
         finally
         {
+            // need to generate all index files before commit, so they will be included in txn log
             observers.forEach(SSTableFlushObserver::complete);
         }
     }
 
+    public final Throwable commit(Throwable accumulate)
+    {
+        return txnProxy().commit(accumulate);
+    }
+
     public final Throwable abort(Throwable accumulate)
     {
-        return txnProxy.abort(accumulate);
+        try
+        {
+            return txnProxy().abort(accumulate);
+        }
+        finally
+        {
+            observers.forEach(observer -> observer.abort(accumulate));
+        }
     }
 
     public final void close()
     {
-        txnProxy.close();
+        txnProxy().close();
     }
 
     public final void abort()
     {
-        txnProxy.abort();
+        try
+        {
+            txnProxy().abort();
+        }
+        finally
+        {
+            observers.forEach(observer -> observer.abort(null));
+        }
     }
 
     protected Map<MetadataType, MetadataComponent> finalizeMetadata()
@@ -334,46 +389,98 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     {
         for (Component component : Sets.difference(components, Sets.newHashSet(Component.DATA, Component.SUMMARY)))
         {
-            FileUtils.renameWithConfirm(tmpdesc.filenameFor(component), newdesc.filenameFor(component));
+            tmpdesc.fileFor(component).move(newdesc.fileFor(component));
         }
 
         // do -Data last because -Data present should mean the sstable was completely renamed before crash
-        FileUtils.renameWithConfirm(tmpdesc.filenameFor(Component.DATA), newdesc.filenameFor(Component.DATA));
+        tmpdesc.fileFor(Component.DATA).move(newdesc.fileFor(Component.DATA));
 
         // rename it without confirmation because summary can be available for loadNewSSTables but not for closeAndOpenReader
-        FileUtils.renameWithOutConfirm(tmpdesc.filenameFor(Component.SUMMARY), newdesc.filenameFor(Component.SUMMARY));
+        if (components.contains(Component.SUMMARY))
+            tmpdesc.fileFor(Component.SUMMARY).tryMove(newdesc.fileFor(Component.SUMMARY));
     }
 
     public static void copy(Descriptor tmpdesc, Descriptor newdesc, Set<Component> components)
     {
         for (Component component : Sets.difference(components, Sets.newHashSet(Component.DATA, Component.SUMMARY)))
         {
-            FileUtils.copyWithConfirm(tmpdesc.filenameFor(component), newdesc.filenameFor(component));
+            FileUtils.copyWithConfirm(tmpdesc.fileFor(component), newdesc.fileFor(component));
         }
 
         // do -Data last because -Data present should mean the sstable was completely copied before crash
-        FileUtils.copyWithConfirm(tmpdesc.filenameFor(Component.DATA), newdesc.filenameFor(Component.DATA));
+        FileUtils.copyWithConfirm(tmpdesc.fileFor(Component.DATA), newdesc.fileFor(Component.DATA));
 
         // copy it without confirmation because summary can be available for loadNewSSTables but not for closeAndOpenReader
-        FileUtils.copyWithOutConfirm(tmpdesc.filenameFor(Component.SUMMARY), newdesc.filenameFor(Component.SUMMARY));
+        if (components.contains(Component.SUMMARY))
+            FileUtils.copyWithOutConfirm(tmpdesc.fileFor(Component.SUMMARY), newdesc.fileFor(Component.SUMMARY));
     }
 
     public static void hardlink(Descriptor tmpdesc, Descriptor newdesc, Set<Component> components)
     {
         for (Component component : Sets.difference(components, Sets.newHashSet(Component.DATA, Component.SUMMARY)))
         {
-            FileUtils.createHardLinkWithConfirm(tmpdesc.filenameFor(component), newdesc.filenameFor(component));
+            FileUtils.createHardLinkWithConfirm(tmpdesc.fileFor(component), newdesc.fileFor(component));
         }
 
         // do -Data last because -Data present should mean the sstable was completely copied before crash
-        FileUtils.createHardLinkWithConfirm(tmpdesc.filenameFor(Component.DATA), newdesc.filenameFor(Component.DATA));
+        FileUtils.createHardLinkWithConfirm(tmpdesc.fileFor(Component.DATA), newdesc.fileFor(Component.DATA));
 
         // copy it without confirmation because summary can be available for loadNewSSTables but not for closeAndOpenReader
-        FileUtils.createHardLinkWithoutConfirm(tmpdesc.filenameFor(Component.SUMMARY), newdesc.filenameFor(Component.SUMMARY));
+        if (components.contains(Component.SUMMARY))
+            FileUtils.createHardLinkWithoutConfirm(tmpdesc.fileFor(Component.SUMMARY), newdesc.fileFor(Component.SUMMARY));
+    }
+
+    public interface SSTableSizeParameters
+    {
+        long partitionCount();
+        long partitionKeySize();
+        long dataSize();
+    }
+
+    public static void guardCollectionSize(TableMetadata metadata, DecoratedKey partitionKey, Unfiltered unfiltered)
+    {
+        if (!unfiltered.isRow() || SchemaConstants.isInternalKeyspace(metadata.keyspace))
+            return;
+
+        if (!Guardrails.collectionSize.enabled(null) && !Guardrails.itemsPerCollection.enabled(null))
+            return;
+
+        Row row = (Row) unfiltered;
+        for (ColumnMetadata column : row.columns())
+        {
+            if (!column.type.isCollection() || !column.type.isMultiCell())
+                continue;
+
+            ComplexColumnData cells = row.getComplexColumnData(column);
+            if (cells == null)
+                continue;
+
+            ComplexColumnData liveCells = cells.purge(DeletionPurger.PURGE_ALL, FBUtilities.nowInSeconds());
+            if (liveCells == null)
+                continue;
+
+            int cellsSize = liveCells.dataSize();
+            int cellsCount = liveCells.cellsCount();
+
+            if (!Guardrails.collectionSize.triggersOn(cellsSize, null) &&
+                !Guardrails.itemsPerCollection.triggersOn(cellsCount, null))
+                continue;
+
+            ByteBuffer key = partitionKey.getKey();
+            String keyString = metadata.primaryKeyAsCQLLiteral(key, row.clustering());
+            String msg = String.format("%s in row %s in table %s",
+                                       column.name.toString(),
+                                       keyString,
+                                       metadata);
+            Guardrails.collectionSize.guard(cellsSize, msg, true, null);
+            Guardrails.itemsPerCollection.guard(cellsCount, msg, true, null);
+        }
     }
 
     public static abstract class Factory
     {
+        public abstract long estimateSize(SSTableSizeParameters parameters);
+
         public abstract SSTableWriter open(Descriptor descriptor,
                                            long keyCount,
                                            long repairedAt,
@@ -383,6 +490,19 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                            MetadataCollector metadataCollector,
                                            SerializationHeader header,
                                            Collection<SSTableFlushObserver> observers,
-                                           LifecycleNewTracker lifecycleNewTracker);
+                                           LifecycleNewTracker lifecycleNewTracker,
+                                           Set<Component> indexComponents);
+    }
+
+    protected void maybeLogLargePartitionWarning(DecoratedKey key, long rowSize)
+    {
+        if (SchemaConstants.isInternalKeyspace(metadata().keyspace))
+            return;
+
+        if (Guardrails.partitionSize.triggersOn(rowSize, null))
+        {
+            String keyString = metadata().partitionKeyAsCQLLiteral(key.getKey());
+            Guardrails.partitionSize.guard(rowSize, String.format("%s in %s", keyString, metadata), true, null);
+        }
     }
 }

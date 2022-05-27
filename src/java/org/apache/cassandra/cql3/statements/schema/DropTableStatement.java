@@ -17,11 +17,14 @@
  */
 package org.apache.cassandra.cql3.statements.schema;
 
+import java.util.function.UnaryOperator;
+
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
@@ -39,9 +42,10 @@ public final class DropTableStatement extends AlterSchemaStatement
     private final String tableName;
     private final boolean ifExists;
 
-    public DropTableStatement(String keyspaceName, String tableName, boolean ifExists)
+    public DropTableStatement(String queryString, String keyspaceName, String tableName,
+                              boolean ifExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.tableName = tableName;
         this.ifExists = ifExists;
     }
@@ -97,7 +101,7 @@ public final class DropTableStatement extends AlterSchemaStatement
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, tableName);
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<DropTableStatement>
     {
         private final QualifiedName name;
         private final boolean ifExists;
@@ -108,10 +112,11 @@ public final class DropTableStatement extends AlterSchemaStatement
             this.ifExists = ifExists;
         }
 
-        public DropTableStatement prepare(ClientState state)
+        @Override
+        public DropTableStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
-            String keyspaceName = name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace();
-            return new DropTableStatement(keyspaceName, name.getName(), ifExists);
+            String keyspaceName = keyspaceMapper.apply(name.hasKeyspace() ? name.getKeyspace() : state.getKeyspace());
+            return new DropTableStatement(rawCQLStatement, keyspaceName, name.getName(), ifExists);
         }
     }
 }

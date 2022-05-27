@@ -70,6 +70,9 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.asserts.SyncTaskListAssert;
 
+import static org.apache.cassandra.net.Verb.SNAPSHOT_MSG;
+import static org.apache.cassandra.net.Verb.SYNC_REQ;
+import static org.apache.cassandra.net.Verb.VALIDATION_REQ;
 import static org.apache.cassandra.utils.asserts.SyncTaskAssert.assertThat;
 import static org.apache.cassandra.utils.asserts.SyncTaskListAssert.assertThat;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -110,7 +113,7 @@ public class RepairJobTest
                                         RepairParallelism parallelismDegree, boolean isIncremental, boolean pullRepair,
                                         PreviewKind previewKind, boolean optimiseStreams, String... cfnames)
         {
-            super(parentRepairSession, id, commonRange, keyspace, parallelismDegree, isIncremental, pullRepair, previewKind, optimiseStreams, cfnames);
+            super(parentRepairSession, id, commonRange, keyspace, parallelismDegree, isIncremental, false, pullRepair, previewKind, optimiseStreams, cfnames);
         }
 
         protected DebuggableThreadPoolExecutor createExecutor()
@@ -212,9 +215,9 @@ public class RepairJobTest
         // RepairJob should send out SNAPSHOTS -> VALIDATIONS -> done
         List<Verb> expectedTypes = new ArrayList<>();
         for (int i = 0; i < 3; i++)
-            expectedTypes.add(Verb.SNAPSHOT_MSG);
+            expectedTypes.add(SNAPSHOT_MSG);
         for (int i = 0; i < 3; i++)
-            expectedTypes.add(Verb.VALIDATION_REQ);
+            expectedTypes.add(VALIDATION_REQ);
 
         assertThat(observedMessages).extracting(Message::verb).containsExactlyElementsOf(expectedTypes);
     }
@@ -245,6 +248,7 @@ public class RepairJobTest
                                                                      addr4, // local
                                                                      noTransient(),
                                                                      session.isIncremental,
+                                                                     session.pushRepair,
                                                                      session.pullRepair,
                                                                      session.previewKind);
 
@@ -287,7 +291,7 @@ public class RepairJobTest
         assertThat(messages)
             .hasSize(2)
             .extracting(Message::verb)
-            .containsOnly(Verb.SYNC_REQ);
+            .containsOnly(SYNC_REQ);
     }
 
     @Test
@@ -313,6 +317,7 @@ public class RepairJobTest
                                                                                     addr1, // local
                                                                                     noTransient(), // transient
                                                                                     false,
+                                                                                    false,
                                                                                     pullRepair,
                                                                                     PreviewKind.ALL));
         assertThat(tasks).hasSize(2);
@@ -332,6 +337,40 @@ public class RepairJobTest
     }
 
     @Test
+    public void testCreateStandardSyncTasksWithPushRepair()
+    {
+        List<TreeResponse> treeResponses = Arrays.asList(treeResponse(addr1, RANGE_1, "1", RANGE_2, "1", RANGE_3, "1"),
+                                                         treeResponse(addr2, RANGE_1, "1", RANGE_2, "2", RANGE_3, "3"),
+                                                         treeResponse(addr3, RANGE_1, "2", RANGE_2, "3", RANGE_3, "1"));
+
+        Map<SyncNodePair, SyncTask> tasks = toMap(RepairJob.createStandardSyncTasks(JOB_DESC,
+                                                                                    treeResponses,
+                                                                                    addr1, // local
+                                                                                    noTransient(), // transient
+                                                                                    false,
+                                                                                    true,
+                                                                                    false,
+                                                                                    PreviewKind.ALL));
+        assertThat(tasks).hasSize(2);
+
+        // between local and addr2: range2 and rang3 are different
+        assertThat(tasks.get(pair(addr1, addr2)))
+        .isInstanceOf(LocalSyncTask.class)
+        .isLocal()
+        .isNotRequestRanges()
+        .hasTransferRanges(true)
+        .hasRanges(RANGE_2, RANGE_3);
+
+        // between local and addr3: range1 and rang2 are different
+        assertThat(tasks.get(pair(addr1, addr3)))
+        .isInstanceOf(LocalSyncTask.class)
+        .isLocal()
+        .isNotRequestRanges()
+        .hasTransferRanges(true)
+        .hasRanges(RANGE_1, RANGE_2);
+    }
+
+    @Test
     public void testStandardSyncTransient()
     {
         // Do not stream towards transient nodes
@@ -348,6 +387,7 @@ public class RepairJobTest
                                                                                     treeResponses,
                                                                                     addr1, // local
                                                                                     transientPredicate(addr2),
+                                                                                    false,
                                                                                     false,
                                                                                     pullRepair,
                                                                                     PreviewKind.ALL));
@@ -378,6 +418,7 @@ public class RepairJobTest
                                                                                     treeResponses,
                                                                                     addr1, // local
                                                                                     transientPredicate(addr1),
+                                                                                    false,
                                                                                     false,
                                                                                     pullRepair,
                                                                                     PreviewKind.ALL));
@@ -439,6 +480,7 @@ public class RepairJobTest
                                                                                     local, // local
                                                                                     isTransient,
                                                                                     false,
+                                                                                    false,
                                                                                     pullRepair,
                                                                                     PreviewKind.ALL));
 
@@ -456,6 +498,7 @@ public class RepairJobTest
                                                                                     treeResponses,
                                                                                     addr1, // local
                                                                                     ep -> ep.equals(addr3), // transient
+                                                                                    false,
                                                                                     false,
                                                                                     true,
                                                                                     PreviewKind.ALL));
@@ -487,6 +530,7 @@ public class RepairJobTest
                                                                                     treeResponses,
                                                                                     addr1, // local
                                                                                     isTransient, // transient
+                                                                                    false,
                                                                                     false,
                                                                                     true,
                                                                                     PreviewKind.ALL));
@@ -555,6 +599,7 @@ public class RepairJobTest
                                                                                     local, // local
                                                                                     isTransient, // transient
                                                                                     false,
+                                                                                    false,
                                                                                     pullRepair,
                                                                                     PreviewKind.ALL));
 
@@ -603,6 +648,7 @@ public class RepairJobTest
                                                                                     treeResponses,
                                                                                     addr4, // local
                                                                                     ep -> ep.equals(addr4) || ep.equals(addr5), // transient
+                                                                                    false,
                                                                                     false,
                                                                                     pullRepair,
                                                                                     PreviewKind.ALL));
@@ -815,21 +861,19 @@ public class RepairJobTest
                 messageCapture.add(message);
             }
 
-            switch (message.verb())
+            if (message.verb() == SNAPSHOT_MSG)
             {
-                case SNAPSHOT_MSG:
-                    MessagingService.instance().callbacks.removeAndRespond(message.id(), to, message.emptyResponse());
-                    break;
-                case VALIDATION_REQ:
-                    session.validationComplete(sessionJobDesc, to, mockTrees.get(to));
-                    break;
-                case SYNC_REQ:
-                    SyncRequest syncRequest = (SyncRequest) message.payload;
-                    session.syncComplete(sessionJobDesc, new SyncNodePair(syncRequest.src, syncRequest.dst),
-                                         true, Collections.emptyList());
-                    break;
-                default:
-                    break;
+                MessagingService.instance().callbacks.removeAndRespond(message.id(), to, message.emptyResponse());
+            }
+            else if (message.verb() == VALIDATION_REQ)
+            {
+                session.validationComplete(sessionJobDesc, to, mockTrees.get(to));
+            }
+            else if (message.verb() == SYNC_REQ)
+            {
+                SyncRequest syncRequest = (SyncRequest) message.payload;
+                session.syncComplete(sessionJobDesc, new SyncNodePair(syncRequest.src, syncRequest.dst),
+                                     true, Collections.emptyList());
             }
             return false;
         });

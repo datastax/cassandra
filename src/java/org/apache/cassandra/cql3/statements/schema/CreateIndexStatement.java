@@ -18,7 +18,10 @@
 package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.*;
+import java.util.function.UnaryOperator;
+import java.util.stream.StreamSupport;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 
@@ -29,14 +32,18 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget.Type;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.guardrails.Threshold;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
@@ -51,15 +58,30 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     private final List<IndexTarget.Raw> rawIndexTargets;
     private final IndexAttributes attrs;
     private final boolean ifNotExists;
+    private QueryState state;
 
-    public CreateIndexStatement(String keyspaceName,
+    private static final String DSE_INDEX_WARNING = "Index %s was not created. DSE custom index (%s) is not " +
+                                                    "supported. Consult the docs on alternatives (SAI indexes, " +
+                                                    "Secondary Indexes).";
+
+    @VisibleForTesting
+    public static final Set<String> DSE_INDEXES = ImmutableSet.of(
+        "com.datastax.bdp.cassandra.index.solr.SolrSecondaryIndex",
+        "com.datastax.bdp.cassandra.index.solr.ThriftSolrSecondaryIndex",
+        "com.datastax.bdp.cassandra.index.solr.Cql3SolrSecondaryIndex",
+        "com.datastax.bdp.search.solr.ThriftSolrSecondaryIndex",
+        "com.datastax.bdp.search.solr.Cql3SolrSecondaryIndex"
+    );
+
+    public CreateIndexStatement(String queryString,
+                                String keyspaceName,
                                 String tableName,
                                 String indexName,
                                 List<IndexTarget.Raw> rawIndexTargets,
                                 IndexAttributes attrs,
                                 boolean ifNotExists)
     {
-        super(keyspaceName);
+        super(queryString, keyspaceName);
         this.tableName = tableName;
         this.indexName = indexName;
         this.rawIndexTargets = rawIndexTargets;
@@ -67,8 +89,24 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         this.ifNotExists = ifNotExists;
     }
 
+    @Override
+    public void validate(QueryState state)
+    {
+        super.validate(state);
+
+        // save the query state to use it for guardrails validation in #apply
+        this.state = state;
+    }
+
     public Keyspaces apply(Keyspaces schema)
     {
+        if (isDseIndexCreateStatement())
+        {
+            // DSE indexes are not supported. The index is not created, the attempt is ignored (doesn't cause error),
+            // a meaningfull warning is returned instead.
+            return schema;
+        }
+
         attrs.validate();
 
         if (attrs.isCustom && attrs.customClass.equals(SASIIndex.class.getName()) && !DatabaseDescriptor.getEnableSASIIndexes())
@@ -96,7 +134,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if (table.isView())
             throw ire("Secondary indexes on materialized views aren't supported");
 
-        if (Keyspace.open(table.keyspace).getReplicationStrategy().hasTransientReplicas())
+        if (keyspace.createReplicationStrategy().hasTransientReplicas())
             throw new InvalidRequestException("Secondary indexes are not supported on transiently replicated keyspaces");
 
         List<IndexTarget> indexTargets = Lists.newArrayList(transform(rawIndexTargets, t -> t.prepare(table)));
@@ -115,15 +153,36 @@ public final class CreateIndexStatement extends AlterSchemaStatement
                     throw ire("Duplicate column '%s' in index target list", target.column);
         }
 
-        indexTargets.forEach(t -> validateIndexTarget(table, t));
+        IndexMetadata.Kind kind = attrs.isCustom ? IndexMetadata.Kind.CUSTOM : IndexMetadata.Kind.COMPOSITES;
+
+        indexTargets.forEach(t -> validateIndexTarget(table, kind, t));
 
         String name = null == indexName ? generateIndexName(keyspace, indexTargets) : indexName;
-
-        IndexMetadata.Kind kind = attrs.isCustom ? IndexMetadata.Kind.CUSTOM : IndexMetadata.Kind.COMPOSITES;
 
         Map<String, String> options = attrs.isCustom ? attrs.getOptions() : Collections.emptyMap();
 
         IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options);
+
+        String className = index.getIndexClassName();
+        IndexGuardrails guardRails = IndexGuardrails.forClassName(className);
+        String indexDescription = indexName == null ? String.format("on table %s", table.name) : String.format("%s on table %s", indexName, table.name);
+
+        // Guardrail to limit number of secondary indexes (per table)
+        if (guardRails.hasPerTableThreshold())
+        {
+            long indexesOnSameTable = table.indexes.stream().filter(other -> className.equals(other.getIndexClassName())).count();
+            guardRails.perTableThreshold.guard(indexesOnSameTable + 1, indexDescription,false, state);
+        }
+
+        // Guardrail to limit number of secondary indexes (total)
+        if (guardRails.hasTotalThreshold())
+        {
+            long indexesOnAllTables = StreamSupport.stream(Keyspace.all().spliterator(), false).flatMap(ks -> ks.getColumnFamilyStores().stream())
+                                                   .flatMap(ks -> ks.indexManager.listIndexes().stream())
+                                                   .map(i -> i.getIndexMetadata().getIndexClassName())
+                                                   .filter(otherClassName -> className.equals(otherClassName)).count();
+            guardRails.totalThreshold.guard(indexesOnAllTables + 1, indexDescription, false, state);
+        }
 
         // check to disallow creation of an index which duplicates an existing one in all but name
         IndexMetadata equalIndex = tryFind(table.indexes, i -> i.equalsWithoutName(index)).orNull();
@@ -147,15 +206,27 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if (attrs.isCustom && attrs.customClass.equals(SASIIndex.class.getName()))
             return ImmutableSet.of(SASIIndex.USAGE_WARNING);
 
+        if (isDseIndexCreateStatement())
+            return ImmutableSet.of(String.format(DSE_INDEX_WARNING, indexName, attrs.customClass));
+
         return ImmutableSet.of();
     }
 
-    private void validateIndexTarget(TableMetadata table, IndexTarget target)
+    private boolean isDseIndexCreateStatement()
+    {
+        return DSE_INDEXES.contains(attrs.customClass);
+    }
+
+    private void validateIndexTarget(TableMetadata table, IndexMetadata.Kind kind, IndexTarget target)
     {
         ColumnMetadata column = table.getColumn(target.column);
 
         if (null == column)
             throw ire("Column '%s' doesn't exist", target.column);
+
+        if ((kind == IndexMetadata.Kind.CUSTOM) && !SchemaConstants.isValidName(target.column.toString()))
+            throw ire("Column '%s' is longer than the permissible name length of %d characters or" +
+                      " contains non-alphanumeric-underscore characters", target.column, SchemaConstants.NAME_LENGTH);
 
         if (column.type.referencesDuration())
         {
@@ -229,7 +300,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         return String.format("%s (%s, %s)", getClass().getSimpleName(), keyspaceName, indexName);
     }
 
-    public static final class Raw extends CQLStatement.Raw
+    public static final class Raw extends RawKeyspaceAwareStatement<CreateIndexStatement>
     {
         private final QualifiedName tableName;
         private final QualifiedName indexName;
@@ -250,7 +321,8 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             this.ifNotExists = ifNotExists;
         }
 
-        public CreateIndexStatement prepare(ClientState state)
+        @Override
+        public CreateIndexStatement prepare(ClientState state, UnaryOperator<String> keyspaceMapper)
         {
             String keyspaceName = tableName.hasKeyspace()
                                 ? tableName.getKeyspace()
@@ -262,7 +334,51 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             if (indexName.hasKeyspace() && !keyspaceName.equals(indexName.getKeyspace()))
                 throw ire("Keyspace name '%s' doesn't match index name '%s'", keyspaceName, tableName);
 
-            return new CreateIndexStatement(keyspaceName, tableName.getName(), indexName.getName(), rawIndexTargets, attrs, ifNotExists);
+            return new CreateIndexStatement(rawCQLStatement, keyspaceMapper.apply(keyspaceName), tableName.getName(),
+                                            indexName.getName(), rawIndexTargets, attrs, ifNotExists);
         }
+    }
+
+    enum IndexGuardrails
+    {
+        LEGACY(Guardrails.secondaryIndexesPerTable, null),
+        SAI(Guardrails.indexesPerTableSai, Guardrails.indexesTotalSai),
+        SASI(Guardrails.indexesPerTableSasi, null),
+        UNKNOWN(null, null);
+
+        final Threshold perTableThreshold;
+        final Threshold totalThreshold;
+
+        IndexGuardrails(Threshold perTableThreshold, Threshold totalThreshold)
+        {
+            this.perTableThreshold = perTableThreshold;
+            this.totalThreshold = totalThreshold;
+        }
+
+        boolean hasPerTableThreshold()
+        {
+            return perTableThreshold != null;
+        }
+
+        boolean hasTotalThreshold()
+        {
+            return totalThreshold != null;
+        }
+
+        static IndexGuardrails forClassName(String className)
+        {
+            switch (className)
+            {
+                case "org.apache.cassandra.index.internal.CassandraIndex":
+                    return IndexGuardrails.LEGACY;
+                case "org.apache.cassandra.index.sasi.SASIIndex":
+                    return IndexGuardrails.SASI;
+                case "org.apache.cassandra.index.sai.StorageAttachedIndex":
+                    return IndexGuardrails.SAI;
+                default:
+                    return IndexGuardrails.UNKNOWN;
+            }
+        }
+
     }
 }

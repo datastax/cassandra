@@ -23,6 +23,10 @@ import java.util.regex.Pattern;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.PathUtils;
+
 /**
  * SSTables are made up of multiple components in separate files. Components are
  * identified by a type and an id, but required unique components (such as the Data
@@ -43,6 +47,10 @@ public class Component
         // the base data for an sstable: the remaining components can be regenerated
         // based on the data component
         DATA("Data.db"),
+        // partition index trie (TrieIndexFormat)
+        PARTITION_INDEX("Partitions.db"),
+        // row indices (TrieIndexFormat)
+        ROW_INDEX("Rows.db"),
         // index of the row keys with pointers to their positions in the data file
         PRIMARY_INDEX("Index.db"),
         // serialized bloom filter for the row keys in the sstable
@@ -85,6 +93,8 @@ public class Component
 
     // singleton components for types that don't need ids
     public final static Component DATA = new Component(Type.DATA);
+    public final static Component PARTITION_INDEX = new Component(Type.PARTITION_INDEX);
+    public final static Component ROW_INDEX = new Component(Type.ROW_INDEX);
     public final static Component PRIMARY_INDEX = new Component(Type.PRIMARY_INDEX);
     public final static Component FILTER = new Component(Type.FILTER);
     public final static Component COMPRESSION_INFO = new Component(Type.COMPRESSION_INFO);
@@ -135,6 +145,8 @@ public class Component
         switch (type)
         {
             case DATA:             return Component.DATA;
+            case PARTITION_INDEX:  return Component.PARTITION_INDEX;
+            case ROW_INDEX:        return Component.ROW_INDEX;
             case PRIMARY_INDEX:    return Component.PRIMARY_INDEX;
             case FILTER:           return Component.FILTER;
             case COMPRESSION_INFO: return Component.COMPRESSION_INFO;
@@ -147,6 +159,17 @@ public class Component
             case CUSTOM:           return new Component(Type.CUSTOM, name);
             default:               throw new AssertionError();
         }
+    }
+
+    public File getFile(String absolutePath)
+    {
+        File ret;
+        if (absolutePath.lastIndexOf(separator) != (absolutePath.length() - 1))
+            ret = new File(PathUtils.getPath(absolutePath + separator + name));
+        else
+            ret = new File(PathUtils.getPath(absolutePath + name));
+
+        return StorageProvider.instance.withOpenOptions(ret, this);
     }
 
     @Override

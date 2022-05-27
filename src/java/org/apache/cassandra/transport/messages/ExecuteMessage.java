@@ -135,7 +135,7 @@ public class ExecuteMessage extends Message.Request
             {
                 state.getClientState().warnAboutUseWithPreparedStatements(statementId, prepared.keyspace);
                 String msg = String.format("Tried to execute a prepared unqalified statement on a keyspace it was not prepared on. " +
-                                           " Executing the resulting prepared statement will return unexpected results: %s (on keyspace %s, previously prepared on %s)",
+                                           "Executing the resulting prepared statement will return unexpected results: %s (on keyspace %s, previously prepared on %s)",
                                            statementId, state.getClientState().getRawKeyspace(), prepared.keyspace);
                 nospam.error(msg);
             }
@@ -144,7 +144,7 @@ public class ExecuteMessage extends Message.Request
             CQLStatement statement = prepared.statement;
             options.prepare(statement.getBindVariables());
 
-            if (options.getPageSize() == 0)
+            if (options.getPageSize().getSize() == 0)
                 throw new ProtocolException("The page size cannot be 0");
 
             if (traceRequest)
@@ -158,7 +158,8 @@ public class ExecuteMessage extends Message.Request
 
             Message.Response response = handler.processPrepared(statement, state, queryOptions, getCustomPayload(), queryStartNanoTime);
 
-            QueryEvents.instance.notifyExecuteSuccess(prepared.statement, prepared.rawCQLStatement, options, state, requestStartTime, response);
+            QueryEvents.instance.notifyExecuteSuccess(prepared.statement, options, state,
+                                                      requestStartTime, response);
 
             if (response instanceof ResultMessage.Rows)
             {
@@ -203,14 +204,17 @@ public class ExecuteMessage extends Message.Request
     private void traceQuery(QueryState state, QueryHandler.Prepared prepared)
     {
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-        if (options.getPageSize() > 0)
-            builder.put("page_size", Integer.toString(options.getPageSize()));
+        if (options.getPageSize().isDefined())
+        {
+            builder.put("page_size", Integer.toString(options.getPageSize().getSize()));
+            builder.put("page_size_unit", options.getPageSize().getUnit().name());
+        }
         if (options.getConsistency() != null)
             builder.put("consistency_level", options.getConsistency().name());
-        if (options.getSerialConsistency() != null)
-            builder.put("serial_consistency_level", options.getSerialConsistency().name());
+        if (options.getSerialConsistency(state) != null)
+            builder.put("serial_consistency_level", options.getSerialConsistency(state).name());
 
-        builder.put("query", prepared.rawCQLStatement);
+        builder.put("query", prepared.statement.getRawCQLStatement());
 
         for (int i = 0; i < prepared.statement.getBindVariables().size(); i++)
         {

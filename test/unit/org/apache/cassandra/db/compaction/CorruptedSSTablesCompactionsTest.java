@@ -32,6 +32,7 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
@@ -57,6 +58,7 @@ public class CorruptedSSTablesCompactionsTest
     private static final String KEYSPACE1 = "CorruptedSSTablesCompactionsTest";
     private static final String STANDARD_STCS = "Standard_STCS";
     private static final String STANDARD_LCS = "Standard_LCS";
+    private static final String STANDARD_UCS = "Standard_UCS";
     private static int maxValueSize;
 
     @After
@@ -84,7 +86,8 @@ public class CorruptedSSTablesCompactionsTest
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     makeTable(STANDARD_STCS).compaction(CompactionParams.DEFAULT),
-                                    makeTable(STANDARD_LCS).compaction(CompactionParams.lcs(Collections.emptyMap())));
+                                    makeTable(STANDARD_LCS).compaction(CompactionParams.lcs(Collections.emptyMap())),
+                                    makeTable(STANDARD_UCS).compaction(CompactionParams.ucs(Collections.emptyMap())));
 
         maxValueSize = DatabaseDescriptor.getMaxValueSize();
         DatabaseDescriptor.setMaxValueSize(1024 * 1024);
@@ -127,6 +130,12 @@ public class CorruptedSSTablesCompactionsTest
         testCorruptedSSTables(STANDARD_LCS);
     }
 
+    @Test
+    public void testCorruptedSSTablesWithUnifiedCompactionStrategy() throws Exception
+    {
+        testCorruptedSSTables(STANDARD_UCS);
+    }
+
 
     public void testCorruptedSSTables(String tableName) throws Exception
     {
@@ -162,7 +171,7 @@ public class CorruptedSSTablesCompactionsTest
                 maxTimestampExpected = Math.max(timestamp, maxTimestampExpected);
                 inserted.add(key);
             }
-            cfs.forceBlockingFlush();
+            cfs.forceBlockingFlush(UNIT_TESTS);
             CompactionsTest.assertMaxTimestamp(cfs, maxTimestampExpected);
             assertEquals(inserted.toString(), inserted.size(), Util.getAll(Util.cmd(cfs).build()).size());
         }

@@ -17,21 +17,16 @@
  */
 package org.apache.cassandra.service;
 
-import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryPoolMXBean;
 import java.net.InetAddress;
 import java.net.URL;
 import java.net.UnknownHostException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
-
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
 import javax.management.remote.JMXConnectorServer;
@@ -50,7 +45,6 @@ import com.codahale.metrics.jvm.BufferPoolMetricSet;
 import com.codahale.metrics.jvm.FileDescriptorRatioGauge;
 import com.codahale.metrics.jvm.GarbageCollectorMetricSet;
 import com.codahale.metrics.jvm.MemoryUsageGaugeSet;
-
 import org.apache.cassandra.audit.AuditLogManager;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -71,12 +65,15 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.SSTableHeaderFix;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.StartupClusterConnectivityChecker;
+import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
@@ -87,7 +84,7 @@ import org.apache.cassandra.utils.JMXServerUtils;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.Mx4jTool;
-import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.WindowsTimer;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -255,7 +252,7 @@ public class CassandraDaemon
 
         logSystemInfo();
 
-        NativeLibrary.tryMlockall();
+        INativeLibrary.instance.tryMlockall();
 
         CommitLog.instance.start();
 
@@ -357,17 +354,17 @@ public class CassandraDaemon
         // Replay any CommitLogSegments found on disk
         try
         {
-            CommitLog.instance.recoverSegmentsOnDisk();
+            CommitLog.instance.recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason.STARTUP);
         }
         catch (IOException e)
         {
             throw new RuntimeException(e);
         }
 
+        Nodes.getInstance().reload();
+
         // Re-populate token metadata after commit log recover (new peers might be loaded onto system keyspace #10293)
         StorageService.instance.populateTokenMetadata();
-
-        SystemKeyspace.finishStartup();
 
         // Clean up system.size_estimates entries left lying around from missed keyspace drops (CASSANDRA-14905)
         StorageService.instance.cleanupSizeEstimates();
@@ -435,7 +432,7 @@ public class CassandraDaemon
             logger.debug("Completed submission of build tasks for any materialized views defined at startup");
         };
 
-        ScheduledExecutors.optionalTasks.schedule(viewRebuild, StorageService.RING_DELAY, TimeUnit.MILLISECONDS);
+        ScheduledExecutors.optionalTasks.schedule(viewRebuild, StorageService.RING_DELAY_MILLIS, TimeUnit.MILLISECONDS);
 
         if (!FBUtilities.getBroadcastAddressAndPort().equals(InetAddressAndPort.getLoopbackAddress()))
             Gossiper.waitToSettle();
@@ -450,7 +447,7 @@ public class CassandraDaemon
                 for (final ColumnFamilyStore store : cfs.concatWithIndexes())
                 {
                     store.reload(); //reload CFs in case there was a change of disk boundaries
-                    if (store.getCompactionStrategyManager().shouldBeEnabled())
+                    if (store.compactionShouldBeEnabled())
                     {
                         if (DatabaseDescriptor.getAutocompactionOnStartupEnabled())
                         {
@@ -515,47 +512,41 @@ public class CassandraDaemon
         //     the system keyspace location configured by the user (upgrade to 4.0)
         //  3) The system data are stored in the first data location and need to be moved to
         //     the system keyspace location configured by the user (system_data_file_directory has been configured)
-        Path target = Paths.get(DatabaseDescriptor.getLocalSystemKeyspacesDataFileLocations()[0]);
+        File target = DatabaseDescriptor.getLocalSystemKeyspacesDataFileLocations()[0];
 
-        String[] nonLocalSystemKeyspacesFileLocations = DatabaseDescriptor.getNonLocalSystemKeyspacesDataFileLocations();
-        String[] sources = DatabaseDescriptor.useSpecificLocationForLocalSystemData() ? nonLocalSystemKeyspacesFileLocations
+        File[] nonLocalSystemKeyspacesFileLocations = DatabaseDescriptor.getNonLocalSystemKeyspacesDataFileLocations();
+        File[] sources = DatabaseDescriptor.useSpecificLocationForLocalSystemData() ? nonLocalSystemKeyspacesFileLocations
                                                                                       : Arrays.copyOfRange(nonLocalSystemKeyspacesFileLocations,
                                                                                                            1,
                                                                                                            nonLocalSystemKeyspacesFileLocations.length);
 
-        for (String source : sources)
+        for (File dataFileLocation : sources)
         {
-            Path dataFileLocation = Paths.get(source);
-
-            if (!Files.exists(dataFileLocation))
+            if (!dataFileLocation.exists())
                 continue;
 
-            try (Stream<Path> locationChildren = Files.list(dataFileLocation))
+            List<File> keyspaceDirectories = new ArrayList<>();
+            dataFileLocation.forEach(f -> {
+                if (SchemaConstants.isLocalSystemKeyspace(f.name()))
+                    keyspaceDirectories.add(f);
+            });
+
+            for (File keyspaceDirectory : keyspaceDirectories)
             {
-                Path[] keyspaceDirectories = locationChildren.filter(p -> SchemaConstants.isLocalSystemKeyspace(p.getFileName().toString()))
-                                                             .toArray(Path[]::new);
+                List<File> tableDirectories = new ArrayList<>();
+                keyspaceDirectory.forEach(f -> {
+                    if (f.isDirectory() && !SystemKeyspace.TABLES_SPLIT_ACROSS_MULTIPLE_DISKS.contains(f.name()))
+                        tableDirectories.add(f);
+                });
 
-                for (Path keyspaceDirectory : keyspaceDirectories)
+                for (File tableDirectory : tableDirectories)
                 {
-                    try (Stream<Path> keyspaceChildren = Files.list(keyspaceDirectory))
-                    {
-                        Path[] tableDirectories = keyspaceChildren.filter(Files::isDirectory)
-                                                                  .filter(p -> !SystemKeyspace.TABLES_SPLIT_ACROSS_MULTIPLE_DISKS
-                                                                                              .contains(p.getFileName()
-                                                                                                         .toString()))
-                                                                  .toArray(Path[]::new);
+                    FileUtils.moveRecursively(tableDirectory, target.resolve(dataFileLocation.relativize(tableDirectory)));
+                }
 
-                        for (Path tableDirectory : tableDirectories)
-                        {
-                            FileUtils.moveRecursively(tableDirectory,
-                                                      target.resolve(dataFileLocation.relativize(tableDirectory)));
-                        }
-
-                        if (!SchemaConstants.SYSTEM_KEYSPACE_NAME.equals(keyspaceDirectory.getFileName().toString()))
-                        {
-                            FileUtils.deleteDirectoryIfEmpty(keyspaceDirectory);
-                        }
-                    }
+                if (!SchemaConstants.SYSTEM_KEYSPACE_NAME.equals(keyspaceDirectory.name()))
+                {
+                    FileUtils.deleteDirectoryIfEmpty(keyspaceDirectory);
                 }
             }
         }
@@ -609,6 +600,7 @@ public class CassandraDaemon
     public void completeSetup()
     {
         setupCompleted = true;
+        PathUtils.daemonSetupCompleted();
     }
 
     public boolean setupCompleted()
@@ -917,12 +909,12 @@ public class CassandraDaemon
     {
         public boolean isAvailable()
         {
-            return NativeLibrary.isAvailable();
+            return INativeLibrary.instance.isAvailable();
         }
 
         public boolean isMemoryLockable()
         {
-            return NativeLibrary.jnaMemoryLockable();
+            return INativeLibrary.instance.jnaMemoryLockable();
         }
     }
 

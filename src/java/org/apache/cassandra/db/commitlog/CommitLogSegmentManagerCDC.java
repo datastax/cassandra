@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.db.commitlog;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -28,6 +27,7 @@ import java.util.concurrent.*;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.RateLimiter;
+import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,10 +44,10 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
     static final Logger logger = LoggerFactory.getLogger(CommitLogSegmentManagerCDC.class);
     private final CDCSizeTracker cdcSizeTracker;
 
-    public CommitLogSegmentManagerCDC(final CommitLog commitLog, String storageDirectory)
+    public CommitLogSegmentManagerCDC(final CommitLog commitLog, File storageDirectory)
     {
         super(commitLog, storageDirectory);
-        cdcSizeTracker = new CDCSizeTracker(this, new File(DatabaseDescriptor.getCDCLogLocation()));
+        cdcSizeTracker = new CDCSizeTracker(this, DatabaseDescriptor.getCDCLogLocation());
     }
 
     @Override
@@ -163,8 +163,8 @@ public class CommitLogSegmentManagerCDC extends AbstractCommitLogSegmentManager
         super.handleReplayedSegment(file);
 
         // delete untracked cdc segment hard link files if their index files do not exist
-        File cdcFile = new File(DatabaseDescriptor.getCDCLogLocation(), file.getName());
-        File cdcIndexFile = new File(DatabaseDescriptor.getCDCLogLocation(), CommitLogDescriptor.fromFileName(file.getName()).cdcIndexFileName());
+        File cdcFile = new File(DatabaseDescriptor.getCDCLogLocation(), file.name());
+        File cdcIndexFile = new File(DatabaseDescriptor.getCDCLogLocation(), CommitLogDescriptor.fromFileName(file.name()).cdcIndexFileName());
         if (cdcFile.exists() && !cdcIndexFile.exists())
         {
             logger.trace("(Unopened) CDC segment {} is no longer needed and will be deleted now", cdcFile);

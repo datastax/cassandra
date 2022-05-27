@@ -28,8 +28,11 @@ import org.junit.Test;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
+
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 
 /* ViewComplexTest class has been split into multiple ones because of timeout issues (CASSANDRA-16670, CASSANDRA-17167)
  * Any changes here check if they apply to the other classes:
@@ -71,14 +74,14 @@ public class ViewComplexTombstoneTest extends ViewComplexTester
         updateView("Insert into %s (p, v1, v2) values (3, 1, 3) using timestamp 1;");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v2, WRITETIME(v2) from " + mv + " WHERE v1 = ? AND p = ?", 1, 3), row(3, 1L));
         // sstable 2
         updateView("UPdate %s using timestamp 2 set v2 = null where p = 3");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v2, WRITETIME(v2) from " + mv + " WHERE v1 = ? AND p = ?", 1, 3),
                                 row(null, null));
@@ -86,14 +89,14 @@ public class ViewComplexTombstoneTest extends ViewComplexTester
         updateView("UPdate %s using timestamp 3 set v1 = 2 where p = 3");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from " + mv), row(2, 3, null, null));
         // sstable 4
         updateView("UPdate %s using timestamp 4 set v1 = 1 where p = 3");
 
         if (flush)
-            FBUtilities.waitOnFutures(ks.flush());
+            FBUtilities.waitOnFutures(ks.flush(UNIT_TESTS));
 
         assertRowsIgnoringOrder(execute("SELECT v1, p, v2, WRITETIME(v2) from " + mv), row(1, 3, null, null));
 
@@ -103,7 +106,7 @@ public class ViewComplexTombstoneTest extends ViewComplexTester
             ColumnFamilyStore cfs = ks.getColumnFamilyStore(mv);
             List<String> sstables = cfs.getLiveSSTables()
                                        .stream()
-                                       .sorted(Comparator.comparingInt(s -> s.descriptor.generation))
+                                       .sorted(Comparator.comparing(s -> s.descriptor.id, SSTableIdFactory.COMPARATOR))
                                        .map(SSTableReader::getFilename)
                                        .collect(Collectors.toList());
             String dataFiles = String.join(",", Arrays.asList(sstables.get(1), sstables.get(2)));

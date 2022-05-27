@@ -19,12 +19,12 @@ package org.apache.cassandra.db.compaction.writers;
 
 import java.util.Set;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.RowIndexEntry;
+import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
@@ -35,20 +35,18 @@ public class MaxSSTableSizeWriter extends CompactionAwareWriter
     private final long maxSSTableSize;
     private final int level;
     private final long estimatedSSTables;
-    private final Set<SSTableReader> allSSTables;
-    private Directories.DataDirectory sstableDirectory;
 
-    public MaxSSTableSizeWriter(ColumnFamilyStore cfs,
+    public MaxSSTableSizeWriter(CompactionRealm realm,
                                 Directories directories,
                                 LifecycleTransaction txn,
                                 Set<SSTableReader> nonExpiredSSTables,
                                 long maxSSTableSize,
                                 int level)
     {
-        this(cfs, directories, txn, nonExpiredSSTables, maxSSTableSize, level, false);
+        this(realm, directories, txn, nonExpiredSSTables, maxSSTableSize, level, false);
     }
 
-    public MaxSSTableSizeWriter(ColumnFamilyStore cfs,
+    public MaxSSTableSizeWriter(CompactionRealm realm,
                                 Directories directories,
                                 LifecycleTransaction txn,
                                 Set<SSTableReader> nonExpiredSSTables,
@@ -56,19 +54,18 @@ public class MaxSSTableSizeWriter extends CompactionAwareWriter
                                 int level,
                                 boolean keepOriginals)
     {
-        super(cfs, directories, txn, nonExpiredSSTables, keepOriginals);
-        this.allSSTables = txn.originals();
+        super(realm, directories, txn, nonExpiredSSTables, keepOriginals);
         this.level = level;
         this.maxSSTableSize = maxSSTableSize;
 
-        long totalSize = getTotalWriteSize(nonExpiredSSTables, estimatedTotalKeys, cfs, txn.opType());
+        long totalSize = getTotalWriteSize(nonExpiredSSTables, estimatedTotalKeys, realm, txn.opType());
         estimatedSSTables = Math.max(1, totalSize / maxSSTableSize);
     }
 
     /**
      * Gets the estimated total amount of data to write during compaction
      */
-    private static long getTotalWriteSize(Iterable<SSTableReader> nonExpiredSSTables, long estimatedTotalKeys, ColumnFamilyStore cfs, OperationType compactionType)
+    private static long getTotalWriteSize(Iterable<SSTableReader> nonExpiredSSTables, long estimatedTotalKeys, CompactionRealm realm, OperationType compactionType)
     {
         long estimatedKeysBeforeCompaction = 0;
         for (SSTableReader sstable : nonExpiredSSTables)
@@ -76,36 +73,28 @@ public class MaxSSTableSizeWriter extends CompactionAwareWriter
         estimatedKeysBeforeCompaction = Math.max(1, estimatedKeysBeforeCompaction);
         double estimatedCompactionRatio = (double) estimatedTotalKeys / estimatedKeysBeforeCompaction;
 
-        return Math.round(estimatedCompactionRatio * cfs.getExpectedCompactedFileSize(nonExpiredSSTables, compactionType));
-    }
-
-    protected boolean realAppend(UnfilteredRowIterator partition)
-    {
-        RowIndexEntry rie = sstableWriter.append(partition);
-        if (sstableWriter.currentWriter().getEstimatedOnDiskBytesWritten() > maxSSTableSize)
-        {
-            switchCompactionLocation(sstableDirectory);
-        }
-        return rie != null;
+        return Math.round(estimatedCompactionRatio * realm.getExpectedCompactedFileSize(nonExpiredSSTables, compactionType));
     }
 
     @Override
-    public void switchCompactionLocation(Directories.DataDirectory location)
+    protected boolean shouldSwitchWriterInCurrentLocation(DecoratedKey key)
     {
-        sstableDirectory = location;
-        @SuppressWarnings("resource")
-        SSTableWriter writer = SSTableWriter.create(cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(sstableDirectory)),
-                                                    estimatedTotalKeys / estimatedSSTables,
-                                                    minRepairedAt,
-                                                    pendingRepair,
-                                                    isTransient,
-                                                    cfs.metadata,
-                                                    new MetadataCollector(allSSTables, cfs.metadata().comparator, level),
-                                                    SerializationHeader.make(cfs.metadata(), nonExpiredSSTables),
-                                                    cfs.indexManager.listIndexes(),
-                                                    txn);
+        return sstableWriter.currentWriter().getEstimatedOnDiskBytesWritten() > maxSSTableSize;
+    }
 
-        sstableWriter.switchWriter(writer);
+    @Override
+    protected SSTableWriter sstableWriter(Directories.DataDirectory directory, PartitionPosition diskBoundary)
+    {
+        return SSTableWriter.create(realm.newSSTableDescriptor(getDirectories().getLocationForDisk(directory)),
+                                    estimatedTotalKeys / estimatedSSTables,
+                                    minRepairedAt,
+                                    pendingRepair,
+                                    isTransient,
+                                    realm.metadataRef(),
+                                    new MetadataCollector(txn.originals(), realm.metadata().comparator, level),
+                                    SerializationHeader.make(realm.metadata(), nonExpiredSSTables),
+                                    realm.getIndexManager().listIndexGroups(),
+                                    txn);
     }
 
     @Override

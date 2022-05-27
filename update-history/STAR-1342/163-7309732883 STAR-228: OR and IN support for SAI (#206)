@@ -1,0 +1,64 @@
+--- a/src/java/org/apache/cassandra/cql3/restrictions/StatementRestrictions.java
++++ b/src/java/org/apache/cassandra/cql3/restrictions/StatementRestrictions.java
+@@ -302,7 +302,6 @@
+             if (allowUseOfSecondaryIndices && type.allowUseOfSecondaryIndices())
+                 indexRegistry = IndexRegistry.obtain(table);
+ 
+-<<<<<<<
+             return doBuild(whereClause.root(), indexRegistry);
+         }
+ 
+@@ -312,7 +311,7 @@
+             ClusteringColumnRestrictions.Builder clusteringColumnsRestrictionSet = ClusteringColumnRestrictions.builder(table, allowFiltering, indexRegistry);
+             RestrictionSet.Builder nonPrimaryKeyRestrictionSet = RestrictionSet.builder();
+             ImmutableSet.Builder<ColumnMetadata> notNullColumnsBuilder = ImmutableSet.builder();
+-=======
++
+         /*
+          * WHERE clause. For a given entity, rules are:
+          *   - EQ relation conflicts with anything else (including a 2nd EQ)
+@@ -323,7 +322,7 @@
+          *     in CQL so far)
+          *   - CONTAINS and CONTAINS_KEY cannot be used with UPDATE or DELETE
+          */
+-        for (Relation relation : whereClause.relations)
++        for (Relation relation : element.relations())
+         {
+             if ((relation.isContains() || relation.isContainsKey()) && (type.isUpdate() || type.isDelete()))
+             {
+@@ -334,14 +333,6 @@
+             {
+                 if (!forView)
+                     throw invalidRequest("Unsupported restriction: %s", relation);
+->>>>>>>
+-
+-            for (Relation relation : element.relations())
+-            {
+-                if (relation.operator() == Operator.IS_NOT)
+-                {
+-                    if (!forView)
+-                        throw invalidRequest("Unsupported restriction: %s", relation);
+ 
+                     notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames).getColumnDefs());
+                 }
+diff --git a/test/microbench/org/apache/cassandra/test/microbench/index/sai/v1/AbstractOnDiskBenchmark.java b/test/microbench/org/apache/cassandra/test/microbench/index/sai/v1/AbstractOnDiskBenchmark.java
+index c2cb9468a4..0d20e609cb 100644
+--- a/test/microbench/org/apache/cassandra/test/microbench/index/sai/v1/AbstractOnDiskBenchmark.java
++++ b/test/microbench/org/apache/cassandra/test/microbench/index/sai/v1/AbstractOnDiskBenchmark.java
+@@ -23,6 +23,7 @@ import java.nio.file.Files;
+ import java.util.Random;
+ import java.util.stream.IntStream;
+ 
++import org.apache.cassandra.Util;
+ import org.apache.cassandra.cache.ChunkCache;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.index.sai.disk.SSTableComponentsWriter;
+@@ -96,7 +97,7 @@ public abstract class AbstractOnDiskBenchmark
+         DatabaseDescriptor.daemonInitialization(); // required to use ChunkCache
+         assert ChunkCache.instance != null;
+ 
+-        descriptor = new Descriptor(Files.createTempDirectory("jmh").toFile(), "ks", this.getClass().getSimpleName(), 1);
++        descriptor = new Descriptor(Files.createTempDirectory("jmh").toFile(), "ks", this.getClass().getSimpleName(), Util.newUUIDGen().get());
+         groupComponents = IndexComponents.perSSTable(descriptor, null);
+         indexComponents = IndexComponents.create("col", descriptor, null);
+ 

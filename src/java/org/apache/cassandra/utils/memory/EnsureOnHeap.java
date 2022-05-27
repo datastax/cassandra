@@ -32,6 +32,8 @@ import org.apache.cassandra.utils.SearchIterator;
 
 public abstract class EnsureOnHeap extends Transformation
 {
+    public static final EnsureOnHeap NOOP = new NoOp();
+
     public abstract DecoratedKey applyToPartitionKey(DecoratedKey key);
     public abstract UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition);
     public abstract SearchIterator<Clustering<?>, Row> applyToPartition(SearchIterator<Clustering<?>, Row> partition);
@@ -57,8 +59,9 @@ public abstract class EnsureOnHeap extends Transformation
 
         public Row applyToRow(Row row)
         {
-            if (row == null)
-                return null;
+            // If current "row" is Rows.EMPTY_STATIC_ROW, don't copy it again, as "copied_empty_static_row" != EMPTY_STATIC_ROW
+            if (row == null || row == Rows.EMPTY_STATIC_ROW)
+                return row;
             return Rows.copy(row, HeapAllocator.instance.cloningBTreeRowBuilder()).build();
         }
 

@@ -18,21 +18,25 @@
 */
 package org.apache.cassandra.io.sstable;
 
-import java.io.File;
 import java.io.IOException;
 
+import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 
-import org.junit.Assert;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.concurrent.AbstractTransactionalTest;
+import org.hamcrest.Matchers;
 
 public class BigTableWriterTest extends AbstractTransactionalTest
 {
@@ -44,6 +48,7 @@ public class BigTableWriterTest extends AbstractTransactionalTest
     @BeforeClass
     public static void defineSchema() throws Exception
     {
+        Assume.assumeThat(SSTableFormat.Type.current(), Matchers.is(SSTableFormat.Type.BIG));
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
@@ -78,7 +83,7 @@ public class BigTableWriterTest extends AbstractTransactionalTest
         private TestableBTW(Descriptor desc, SSTableTxnWriter sw)
         {
             super(sw);
-            this.file = new File(desc.filenameFor(Component.DATA));
+            this.file = desc.fileFor(Component.DATA);
             this.descriptor = desc;
             this.writer = sw;
 
@@ -123,13 +128,13 @@ public class BigTableWriterTest extends AbstractTransactionalTest
         private void assertExists(Component ... components)
         {
             for (Component component : components)
-                Assert.assertTrue(new File(descriptor.filenameFor(component)).exists());
+                Assert.assertTrue(descriptor.fileFor(component).exists());
         }
 
         private void assertNotExists(Component ... components)
         {
             for (Component component : components)
-                Assert.assertFalse(component.toString(), new File(descriptor.filenameFor(component)).exists());
+                Assert.assertFalse(component.toString(), descriptor.fileFor(component).exists());
         }
     }
 

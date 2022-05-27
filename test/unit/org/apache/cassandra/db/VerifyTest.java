@@ -19,8 +19,6 @@
 package org.apache.cassandra.db;
 
 import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.net.UnknownHostException;
@@ -28,13 +26,13 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
 
 import com.google.common.base.Charsets;
 import org.apache.commons.lang3.StringUtils;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -43,6 +41,7 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.batchlog.Batch;
 import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.Verifier;
 import org.apache.cassandra.db.marshal.UUIDType;
@@ -55,7 +54,10 @@ import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
@@ -63,11 +65,14 @@ import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.UUIDGen;
 
 import static org.apache.cassandra.SchemaLoader.counterCFMD;
 import static org.apache.cassandra.SchemaLoader.createKeyspace;
 import static org.apache.cassandra.SchemaLoader.loadSchema;
 import static org.apache.cassandra.SchemaLoader.standardCFMD;
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -75,7 +80,7 @@ import static org.junit.Assert.fail;
 
 /**
  * Test for {@link Verifier}.
- * 
+ *
  * Note: the complete coverage is composed of:
  * - {@link org.apache.cassandra.tools.StandaloneVerifierOnSSTablesTest}
  * - {@link org.apache.cassandra.tools.StandaloneVerifierTest}
@@ -94,6 +99,7 @@ public class VerifyTest
     public static final String COUNTER_CF4 = "Counter4";
     public static final String CORRUPT_CF = "Corrupt1";
     public static final String CORRUPT_CF2 = "Corrupt2";
+    public static final String CORRUPT_CF3 = "Corrupt3";
     public static final String CORRUPTCOUNTER_CF = "CounterCorrupt1";
     public static final String CORRUPTCOUNTER_CF2 = "CounterCorrupt2";
 
@@ -104,6 +110,8 @@ public class VerifyTest
     public static void defineSchema() throws ConfigurationException
     {
         CompressionParams compressionParameters = CompressionParams.snappy(32768);
+        DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setColumnIndexSizeInKB(0);
 
         loadSchema();
         createKeyspace(KEYSPACE,
@@ -114,6 +122,7 @@ public class VerifyTest
                        standardCFMD(KEYSPACE, CF4),
                        standardCFMD(KEYSPACE, CORRUPT_CF),
                        standardCFMD(KEYSPACE, CORRUPT_CF2),
+                       standardCFMD(KEYSPACE, CORRUPT_CF3),
                        counterCFMD(KEYSPACE, COUNTER_CF).compression(compressionParameters),
                        counterCFMD(KEYSPACE, COUNTER_CF2).compression(compressionParameters),
                        counterCFMD(KEYSPACE, COUNTER_CF3),
@@ -306,11 +315,11 @@ public class VerifyTest
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
 
-        try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.filenameFor(Component.DIGEST), "rw"))
+        try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.fileFor(Component.DIGEST).toJavaIOFile(), "rw"))
         {
             Long correctChecksum = Long.valueOf(file.readLine());
 
-            writeChecksum(++correctChecksum, sstable.descriptor.filenameFor(Component.DIGEST));
+            writeChecksum(++correctChecksum, sstable.descriptor.fileFor(Component.DIGEST));
         }
 
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).build()))
@@ -356,7 +365,7 @@ public class VerifyTest
             ChunkCache.instance.invalidateFile(sstable.getFilename());
 
         // Update the Digest to have the right Checksum
-        writeChecksum(simpleFullChecksum(sstable.getFilename()), sstable.descriptor.filenameFor(Component.DIGEST));
+        writeChecksum(simpleFullChecksum(sstable.getFilename()), sstable.descriptor.fileFor(Component.DIGEST));
 
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).build()))
         {
@@ -399,8 +408,8 @@ public class VerifyTest
 
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
-        String filenameToCorrupt = sstable.descriptor.filenameFor(Component.STATS);
-        RandomAccessFile file = new RandomAccessFile(filenameToCorrupt, "rw");
+        File filenameToCorrupt = sstable.descriptor.fileFor(Component.STATS);
+        RandomAccessFile file = new RandomAccessFile(filenameToCorrupt.toJavaIOFile(), "rw");
         file.seek(0);
         file.writeBytes(StringUtils.repeat('z', 2));
         file.close();
@@ -439,11 +448,11 @@ public class VerifyTest
 
         // break the sstable:
         Long correctChecksum;
-        try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.filenameFor(Component.DIGEST), "rw"))
+        try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.fileFor(Component.DIGEST).toJavaIOFile(), "rw"))
         {
             correctChecksum = Long.parseLong(file.readLine());
         }
-        writeChecksum(++correctChecksum, sstable.descriptor.filenameFor(Component.DIGEST));
+        writeChecksum(++correctChecksum, sstable.descriptor.fileFor(Component.DIGEST));
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().mutateRepairStatus(false).invokeDiskFailurePolicy(true).build()))
         {
             verifier.verify();
@@ -495,7 +504,7 @@ public class VerifyTest
     {
         CompactionManager.instance.disableAutoCompaction();
         Keyspace keyspace = Keyspace.open(KEYSPACE);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CORRUPT_CF2);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CORRUPT_CF3);
 
         fillCF(cfs, 2);
 
@@ -508,11 +517,11 @@ public class VerifyTest
 
         sstable = cfs.getLiveSSTables().iterator().next();
         Long correctChecksum;
-        try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.filenameFor(Component.DIGEST), "rw"))
+        try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.fileFor(Component.DIGEST).toJavaIOFile(), "rw"))
         {
             correctChecksum = Long.parseLong(file.readLine());
         }
-        writeChecksum(++correctChecksum, sstable.descriptor.filenameFor(Component.DIGEST));
+        writeChecksum(++correctChecksum, sstable.descriptor.fileFor(Component.DIGEST));
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).mutateRepairStatus(true).build()))
         {
             verifier.verify();
@@ -524,10 +533,26 @@ public class VerifyTest
     }
 
     @Test
-    public void testVerifyIndex() throws IOException
+    public void testVerifyPrimaryIndex() throws IOException
     {
+        Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BIG));
         testBrokenComponentHelper(Component.PRIMARY_INDEX);
     }
+
+    @Test
+    public void testVerifyPartitionIndex() throws IOException
+    {
+        Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BTI));
+        testBrokenComponentHelper(Component.PARTITION_INDEX);
+    }
+
+    @Test
+    public void testVerifyRowIndex() throws IOException
+    {
+        Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BTI));
+        testBrokenComponentHelper(Component.ROW_INDEX);
+    }
+
     @Test
     public void testVerifyBf() throws IOException
     {
@@ -537,6 +562,7 @@ public class VerifyTest
     @Test
     public void testVerifyIndexSummary() throws IOException
     {
+        Assume.assumeThat(SSTableFormat.Type.current(), is(SSTableFormat.Type.BIG));
         testBrokenComponentHelper(Component.SUMMARY);
     }
 
@@ -553,8 +579,8 @@ public class VerifyTest
         {
             verifier.verify(); //still not corrupt, should pass
         }
-        String filenameToCorrupt = sstable.descriptor.filenameFor(componentToBreak);
-        try (RandomAccessFile file = new RandomAccessFile(filenameToCorrupt, "rw"))
+        File filenameToCorrupt = sstable.descriptor.fileFor(componentToBreak);
+        try (RandomAccessFile file = new RandomAccessFile(filenameToCorrupt.toJavaIOFile(), "rw"))
         {
             file.setLength(3);
         }
@@ -584,11 +610,11 @@ public class VerifyTest
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
 
 
-        try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.filenameFor(Component.DIGEST), "rw"))
+        try (RandomAccessFile file = new RandomAccessFile(sstable.descriptor.fileFor(Component.DIGEST).toJavaIOFile(), "rw"))
         {
             Long correctChecksum = Long.valueOf(file.readLine());
 
-            writeChecksum(++correctChecksum, sstable.descriptor.filenameFor(Component.DIGEST));
+            writeChecksum(++correctChecksum, sstable.descriptor.fileFor(Component.DIGEST));
         }
 
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).build()))
@@ -699,10 +725,10 @@ public class VerifyTest
         tmd.updateNormalToken(new ByteOrderedPartitioner.BytesToken(tk1), InetAddressAndPort.getByName("127.0.0.1"));
         tmd.updateNormalToken(new ByteOrderedPartitioner.BytesToken(tk2), InetAddressAndPort.getByName("127.0.0.2"));
         // write some bogus to a localpartitioner table
-        Batch bogus = Batch.createLocal(UUID.randomUUID(), 0, Collections.emptyList());
+        Batch bogus = Batch.createLocal(UUIDGen.getTimeUUID(), 0, Collections.emptyList());
         BatchlogManager.store(bogus);
         ColumnFamilyStore cfs = Keyspace.open("system").getColumnFamilyStore("batches");
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
 
@@ -723,7 +749,7 @@ public class VerifyTest
         assertEquals(1.0, cfs.metadata().params.bloomFilterFpChance, 0.0);
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            File f = new File(sstable.descriptor.filenameFor(Component.FILTER));
+            File f = sstable.descriptor.fileFor(Component.FILTER);
             assertFalse(f.exists());
             try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().build()))
             {
@@ -760,7 +786,7 @@ public class VerifyTest
                          .apply();
         }
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
     }
 
     protected void fillCounterCF(ColumnFamilyStore cfs, int partitionsPerSSTable) throws WriteTimeoutException
@@ -772,12 +798,12 @@ public class VerifyTest
                          .apply();
         }
 
-        cfs.forceBlockingFlush();
+        cfs.forceBlockingFlush(UNIT_TESTS);
     }
 
     protected long simpleFullChecksum(String filename) throws IOException
     {
-        try (FileInputStream inputStream = new FileInputStream(filename))
+        try (FileInputStreamPlus inputStream = new FileInputStreamPlus(filename))
         {
             CRC32 checksum = new CRC32();
             CheckedInputStream cinStream = new CheckedInputStream(inputStream, checksum);
@@ -788,20 +814,19 @@ public class VerifyTest
         }
     }
 
-    public static void writeChecksum(long checksum, String filePath)
+    public static void writeChecksum(long checksum, File filePath)
     {
-        File outFile = new File(filePath);
         BufferedWriter out = null;
         try
         {
-            out = Files.newBufferedWriter(outFile.toPath(), Charsets.UTF_8);
+            out = Files.newBufferedWriter(filePath.toPath(), Charsets.UTF_8);
             out.write(String.valueOf(checksum));
             out.flush();
             out.close();
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, outFile);
+            throw new FSWriteError(e, filePath);
         }
         finally
         {

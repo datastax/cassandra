@@ -19,10 +19,11 @@ package org.apache.cassandra.io.compress;
 
 import java.io.DataOutputStream;
 import java.io.EOFException;
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
+import java.nio.file.StandardOpenOption;
 import java.util.Optional;
 import java.util.zip.CRC32;
 
@@ -31,6 +32,7 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.*;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -74,19 +76,19 @@ public class CompressedSequentialWriter extends SequentialWriter
      * @param sstableMetadataCollector Metadata collector
      */
     public CompressedSequentialWriter(File file,
-                                      String offsetsPath,
+                                      File offsetsPath,
                                       File digestFile,
                                       SequentialWriterOption option,
                                       CompressionParams parameters,
                                       MetadataCollector sstableMetadataCollector)
     {
         super(file, SequentialWriterOption.newBuilder()
-                            .bufferSize(option.bufferSize())
-                            .bufferType(option.bufferType())
-                            .bufferSize(parameters.chunkLength())
-                            .bufferType(parameters.getSstableCompressor().preferredBufferType())
-                            .finishOnClose(option.finishOnClose())
-                            .build());
+                                          .bufferSize(option.bufferSize())
+                                          .bufferType(option.bufferType())
+                                          .bufferSize(parameters.chunkLength())
+                                          .bufferType(parameters.getSstableCompressor().preferredBufferType())
+                                          .finishOnClose(option.finishOnClose())
+                                          .build());
         this.compressor = parameters.getSstableCompressor();
         this.digestFile = Optional.ofNullable(digestFile);
 
@@ -111,7 +113,7 @@ public class CompressedSequentialWriter extends SequentialWriter
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, getPath());
+            throw new FSReadError(e, getFile());
         }
     }
 
@@ -190,7 +192,7 @@ public class CompressedSequentialWriter extends SequentialWriter
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, getPath());
+            throw new FSWriteError(e, getFile());
         }
         if (toWrite == buffer)
             buffer.position(uncompressedLength);
@@ -246,12 +248,12 @@ public class CompressedSequentialWriter extends SequentialWriter
             compressed = compressor.preferredBufferType().allocate(chunkSize);
         }
 
-        try
+        try(FileChannel readChannel = FileChannel.open(getFile().toPath(), StandardOpenOption.READ))
         {
             compressed.clear();
             compressed.limit(chunkSize);
-            fchannel.position(chunkOffset);
-            fchannel.read(compressed);
+            readChannel.position(chunkOffset);
+            readChannel.read(compressed);
 
             try
             {
@@ -265,7 +267,7 @@ public class CompressedSequentialWriter extends SequentialWriter
             }
             catch (IOException e)
             {
-                throw new CorruptBlockException(getPath(), chunkOffset, chunkSize, e);
+                throw new CorruptBlockException(getFile().toString(), chunkOffset, chunkSize, e);
             }
 
             CRC32 checksum = new CRC32();
@@ -273,22 +275,22 @@ public class CompressedSequentialWriter extends SequentialWriter
             checksum.update(compressed);
 
             crcCheckBuffer.clear();
-            fchannel.read(crcCheckBuffer);
+            readChannel.read(crcCheckBuffer);
             crcCheckBuffer.flip();
             if (crcCheckBuffer.getInt() != (int) checksum.getValue())
-                throw new CorruptBlockException(getPath(), chunkOffset, chunkSize);
+                throw new CorruptBlockException(getFile().toString(), chunkOffset, chunkSize);
         }
         catch (CorruptBlockException e)
         {
-            throw new CorruptSSTableException(e, getPath());
+            throw new CorruptSSTableException(e, getFile());
         }
         catch (EOFException e)
         {
-            throw new CorruptSSTableException(new CorruptBlockException(getPath(), chunkOffset, chunkSize), getPath());
+            throw new CorruptSSTableException(new CorruptBlockException(getFile().toString(), chunkOffset, chunkSize), getFile());
         }
         catch (IOException e)
         {
-            throw new FSReadError(e, getPath());
+            throw new FSReadError(e, getFile());
         }
 
         // Mark as dirty so we can guarantee the newly buffered bytes won't be lost on a rebuffer
@@ -311,7 +313,7 @@ public class CompressedSequentialWriter extends SequentialWriter
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, getPath());
+            throw new FSWriteError(e, getFile());
         }
     }
 
@@ -328,9 +330,44 @@ public class CompressedSequentialWriter extends SequentialWriter
             }
             catch (IOException e)
             {
-                throw new FSReadError(e, getPath());
+                throw new FSReadError(e, getFile());
             }
         }
+    }
+
+    // Page management using chunk boundaries
+
+    @Override
+    public int maxBytesInPage()
+    {
+        return buffer.capacity();
+    }
+
+    @Override
+    public void padToPageBoundary() throws IOException
+    {
+        if (buffer.position() == 0)
+            return;
+
+        int padLength = buffer.remaining();
+
+        // Flush as much as we have
+        doFlush(0);
+        // But pretend we had a whole chunk
+        bufferOffset += padLength;
+        lastFlushOffset += padLength;
+    }
+
+    @Override
+    public int bytesLeftInPage()
+    {
+        return buffer.remaining();
+    }
+
+    @Override
+    public long paddedPosition()
+    {
+        return position() + (buffer.position() == 0 ? 0 : buffer.remaining());
     }
 
     protected class TransactionalProxy extends SequentialWriter.TransactionalProxy

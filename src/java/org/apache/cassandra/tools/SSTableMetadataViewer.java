@@ -17,20 +17,12 @@
  */
 package org.apache.cassandra.tools;
 
-import static org.apache.cassandra.tools.Util.BLUE;
-import static org.apache.cassandra.tools.Util.CYAN;
-import static org.apache.cassandra.tools.Util.RESET;
-import static org.apache.cassandra.tools.Util.WHITE;
-import static org.apache.commons.lang3.time.DurationFormatUtils.formatDurationWords;
-
 import java.io.DataInputStream;
-import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
@@ -38,7 +30,17 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.MinMaxPriorityQueue;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
+import org.apache.commons.cli.PosixParser;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -59,20 +61,18 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.tools.Util.TermHistogram;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.CommandLineParser;
-import org.apache.commons.cli.HelpFormatter;
-import org.apache.commons.cli.Option;
-import org.apache.commons.cli.Options;
-import org.apache.commons.cli.ParseException;
-import org.apache.commons.cli.PosixParser;
 
-import com.google.common.collect.MinMaxPriorityQueue;
+import static org.apache.cassandra.tools.Util.BLUE;
+import static org.apache.cassandra.tools.Util.CYAN;
+import static org.apache.cassandra.tools.Util.RESET;
+import static org.apache.cassandra.tools.Util.WHITE;
+import static org.apache.commons.lang3.time.DurationFormatUtils.formatDurationWords;
 
 /**
  * Shows the contents of sstable metadata
@@ -174,7 +174,7 @@ public class SSTableMetadataViewer
     private void printScannedOverview(Descriptor descriptor, StatsMetadata stats) throws IOException
     {
         TableMetadata cfm = Util.metadataFromSSTable(descriptor);
-        SSTableReader reader = SSTableReader.openNoValidation(descriptor, TableMetadataRef.forOfflineTools(cfm));
+        SSTableReader reader = descriptor.getFormat().getReaderFactory().openNoValidation(descriptor, TableMetadataRef.forOfflineTools(cfm));
         try (ISSTableScanner scanner = reader.getScanner())
         {
             long bytes = scanner.getLengthInBytes();
@@ -315,18 +315,18 @@ public class SSTableMetadataViewer
         }
     }
 
-    private void printSStableMetadata(String fname, boolean scan) throws IOException
+    private void printSStableMetadata(File dataFile, boolean scan) throws IOException
     {
-        Descriptor descriptor = Descriptor.fromFilename(fname);
+        Descriptor descriptor = Descriptor.fromFilename(dataFile);
         Map<MetadataType, MetadataComponent> metadata = descriptor.getMetadataSerializer()
                 .deserialize(descriptor, EnumSet.allOf(MetadataType.class));
         ValidationMetadata validation = (ValidationMetadata) metadata.get(MetadataType.VALIDATION);
         StatsMetadata stats = (StatsMetadata) metadata.get(MetadataType.STATS);
         CompactionMetadata compaction = (CompactionMetadata) metadata.get(MetadataType.COMPACTION);
         CompressionMetadata compression = null;
-        File compressionFile = new File(descriptor.filenameFor(Component.COMPRESSION_INFO));
+        File compressionFile = descriptor.fileFor(Component.COMPRESSION_INFO);
         if (compressionFile.exists())
-            compression = CompressionMetadata.create(fname);
+            compression = CompressionMetadata.create(dataFile);
         SerializationHeader.Component header = (SerializationHeader.Component) metadata
                 .get(MetadataType.HEADER);
 
@@ -355,20 +355,10 @@ public class SSTableMetadataViewer
             if (validation != null && header != null)
                 printMinMaxToken(descriptor, FBUtilities.newPartitioner(descriptor), header.getKeyType());
 
-            if (header != null && header.getClusteringTypes().size() == stats.minClusteringValues.size())
+            if (header != null)
             {
-                List<AbstractType<?>> clusteringTypes = header.getClusteringTypes();
-                List<ByteBuffer> minClusteringValues = stats.minClusteringValues;
-                List<ByteBuffer> maxClusteringValues = stats.maxClusteringValues;
-                String[] minValues = new String[clusteringTypes.size()];
-                String[] maxValues = new String[clusteringTypes.size()];
-                for (int i = 0; i < clusteringTypes.size(); i++)
-                {
-                    minValues[i] = clusteringTypes.get(i).getString(minClusteringValues.get(i));
-                    maxValues[i] = clusteringTypes.get(i).getString(maxClusteringValues.get(i));
-                }
-                field("minClusteringValues", Arrays.toString(minValues));
-                field("maxClusteringValues", Arrays.toString(maxValues));
+                ClusteringComparator comparator = new ClusteringComparator(header.getClusteringTypes());
+                field("covered clusterings", stats.coveredClustering.toString(comparator));
             }
             field("Estimated droppable tombstones",
                   stats.getEstimatedDroppableTombstoneRatio((int) (System.currentTimeMillis() / 1000) - this.gc));
@@ -476,7 +466,7 @@ public class SSTableMetadataViewer
     private void printMinMaxToken(Descriptor descriptor, IPartitioner partitioner, AbstractType<?> keyType)
             throws IOException
     {
-        File summariesFile = new File(descriptor.filenameFor(Component.SUMMARY));
+        File summariesFile = descriptor.fileFor(Component.SUMMARY);
         if (!summariesFile.exists())
             return;
 
@@ -543,7 +533,7 @@ public class SSTableMetadataViewer
             File sstable = new File(fname);
             if (sstable.exists())
             {
-                metawriter.printSStableMetadata(sstable.getAbsolutePath(), fullScan);
+                metawriter.printSStableMetadata(sstable, fullScan);
             }
             else
             {

@@ -21,82 +21,149 @@ package org.apache.cassandra;
 
 import java.io.Closeable;
 import java.io.EOFException;
-import java.io.File;
 import java.io.IOError;
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.math.BigInteger;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.IntFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import org.apache.commons.lang3.StringUtils;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.compaction.ActiveCompactionsTracker;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.db.AbstractReadCommandBuilder;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.Directories.DataDirectory;
+import org.apache.cassandra.db.DisallowedDirectories;
+import org.apache.cassandra.db.IMutation;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.compaction.AbstractCompactionTask;
+import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionTasks;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.locator.ReplicaCollection;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.ColumnIdentifier;
-
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.Directories.DataDirectory;
-import org.apache.cassandra.db.compaction.AbstractCompactionTask;
-import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.partitions.*;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.Cells;
+import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.db.rows.Rows;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.IPartitioner;
-
 import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.io.sstable.SSTableIdFactory;
+import org.apache.cassandra.io.sstable.SSTableLoader;
+import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
+import org.apache.cassandra.io.sstable.UUIDBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.locator.Replica;
+import org.apache.cassandra.locator.ReplicaCollection;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.pager.PagingState;
+import org.apache.cassandra.streaming.StreamResultFuture;
+import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.CounterId;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FilterFactory;
+import org.apache.cassandra.utils.OutputHandler;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.Throwables;
+import org.assertj.core.api.Assertions;
 import org.awaitility.Awaitility;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.equalTo;
 
 public class Util
 {
     private static final Logger logger = LoggerFactory.getLogger(Util.class);
 
     private static List<UUID> hostIdPool = new ArrayList<>();
+
+    public final static TimeUnit supportedMTimeGranularity = getSupportedMTimeGranularity();
 
     public static IPartitioner testPartitioner()
     {
@@ -201,7 +268,7 @@ public class Util
             rm.applyUnsafe();
 
         ColumnFamilyStore store = Keyspace.open(keyspaceName).getColumnFamilyStore(tableId);
-        store.forceBlockingFlush();
+        store.forceBlockingFlush(UNIT_TESTS);
         return store;
     }
 
@@ -246,7 +313,7 @@ public class Util
 
         // check that all nodes are in token metadata
         for (int i=0; i<endpointTokens.size(); ++i)
-            assertTrue(ss.getTokenMetadata().isMember(hosts.get(i)));
+            assertThat(ss.getTokenMetadata().isMember(hosts.get(i))).withFailMessage("%s is not a member of token metadata", hosts.get(i)).isTrue();
     }
 
     public static Future<?> compactAll(ColumnFamilyStore cfs, int gcBefore)
@@ -260,10 +327,10 @@ public class Util
     public static void compact(ColumnFamilyStore cfs, Collection<SSTableReader> sstables)
     {
         int gcBefore = cfs.gcBefore(FBUtilities.nowInSeconds());
-        try (CompactionTasks tasks = cfs.getCompactionStrategyManager().getUserDefinedTasks(sstables, gcBefore))
+        try (CompactionTasks tasks = cfs.getCompactionStrategy().getUserDefinedTasks(sstables, gcBefore))
         {
             for (AbstractCompactionTask task : tasks)
-                task.execute(ActiveCompactionsTracker.NOOP);
+                task.execute();
         }
     }
 
@@ -345,7 +412,7 @@ public class Util
             return getAllUnfiltered(command, controller);
         }
     }
-    
+
     public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command, ReadExecutionController controller)
     {
         List<ImmutableBTreePartition> results = new ArrayList<>();
@@ -369,7 +436,7 @@ public class Util
             return getAll(command, controller);
         }
     }
-    
+
     public static List<FilteredPartition> getAll(ReadCommand command, ReadExecutionController controller)
     {
         List<FilteredPartition> results = new ArrayList<>();
@@ -412,10 +479,10 @@ public class Util
             assert iterator.hasNext() : "Expecting one row in one partition but got nothing";
             try (RowIterator partition = iterator.next())
             {
-                assert !iterator.hasNext() : "Expecting a single partition but got more";
                 assert partition.hasNext() : "Expecting one row in one partition but got an empty partition";
                 Row row = partition.next();
                 assert !partition.hasNext() : "Expecting a single row but got more";
+                assert !iterator.hasNext() : "Expecting a single partition but got more";
                 return row;
             }
         }
@@ -428,7 +495,7 @@ public class Util
             return getOnlyPartitionUnfiltered(cmd, controller);
         }
     }
-    
+
     public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd, ReadExecutionController controller)
     {
         try (UnfilteredPartitionIterator iterator = cmd.executeLocally(controller))
@@ -446,7 +513,7 @@ public class Util
     {
         return getOnlyPartition(cmd, false);
     }
-    
+
     public static FilteredPartition getOnlyPartition(ReadCommand cmd, boolean trackRepairedStatus)
     {
         try (ReadExecutionController executionController = cmd.executionController(trackRepairedStatus);
@@ -747,6 +814,15 @@ public class Util
         return () -> DisallowedDirectories.clearUnwritableUnsafe();
     }
 
+    public static boolean getDirectoriesWriteable(ColumnFamilyStore cfs)
+    {
+        boolean ret = true;
+        for (File dir : cfs.getDirectories().getCFDirectories())
+            ret &= !DisallowedDirectories.isUnwritable(dir);
+
+        return ret;
+    }
+
     public static PagingState makeSomePagingState(ProtocolVersion protocolVersion)
     {
         return makeSomePagingState(protocolVersion, Integer.MAX_VALUE);
@@ -788,21 +864,216 @@ public class Util
     {
         LifecycleTransaction.waitForDeletions();
         assertEquals(expectedSSTableCount, cfs.getLiveSSTables().size());
-        Set<Integer> liveGenerations = cfs.getLiveSSTables().stream().map(sstable -> sstable.descriptor.generation).collect(Collectors.toSet());
+        Set<SSTableId> liveIdentifiers = cfs.getLiveSSTables().stream()
+                                            .map(sstable -> sstable.descriptor.id)
+                                            .collect(Collectors.toSet());
         int fileCount = 0;
         for (File f : cfs.getDirectories().getCFDirectories())
         {
-            for (File sst : f.listFiles())
+            for (File sst : f.tryList())
             {
-                if (sst.getName().contains("Data"))
+                if (sst.name().contains("Data"))
                 {
-                    Descriptor d = Descriptor.fromFilename(sst.getAbsolutePath());
-                    assertTrue(liveGenerations.contains(d.generation));
+                    Descriptor d = Descriptor.fromFilename(sst.absolutePath());
+                    assertTrue(liveIdentifiers.contains(d.id));
                     fileCount++;
                 }
             }
         }
         assertEquals(expectedSSTableCount, fileCount);
+    }
+
+    public static ByteBuffer generateMurmurCollision(ByteBuffer original, byte... bytesToAdd)
+    {
+        // Round size up to 16, and add another 16 bytes
+        ByteBuffer collision = ByteBuffer.allocate((original.remaining() + bytesToAdd.length + 31) & -16);
+        collision.put(original);    // we can use this as a copy of original with 0s appended at the end
+
+        original.flip();
+
+        long c1 = 0x87c37b91114253d5L;
+        long c2 = 0x4cf5ad432745937fL;
+
+        long h1 = 0;
+        long h2 = 0;
+
+        // Get hash of original
+        int index = 0;
+        final int length = original.limit();
+        while (index <= length - 16)
+        {
+            long k1 = Long.reverseBytes(collision.getLong(index + 0));
+            long k2 = Long.reverseBytes(collision.getLong(index + 8));
+
+            // 16 bytes
+            k1 *= c1;
+            k1 = rotl64(k1, 31);
+            k1 *= c2;
+            h1 ^= k1;
+            h1 = rotl64(h1, 27);
+            h1 += h2;
+            h1 = h1 * 5 + 0x52dce729;
+            k2 *= c2;
+            k2 = rotl64(k2, 33);
+            k2 *= c1;
+            h2 ^= k2;
+            h2 = rotl64(h2, 31);
+            h2 += h1;
+            h2 = h2 * 5 + 0x38495ab5;
+
+            index += 16;
+        }
+
+        long oh1 = h1;
+        long oh2 = h2;
+
+        // Process final unfilled chunk, but only adjust the original hash value
+        if (index < length)
+        {
+            long k1 = Long.reverseBytes(collision.getLong(index + 0));
+            long k2 = Long.reverseBytes(collision.getLong(index + 8));
+
+            // 16 bytes
+            k1 *= c1;
+            k1 = rotl64(k1, 31);
+            k1 *= c2;
+            oh1 ^= k1;
+
+            k2 *= c2;
+            k2 = rotl64(k2, 33);
+            k2 *= c1;
+            oh2 ^= k2;
+        }
+
+        // These are the hashes the original would provide, before final mixing
+        oh1 ^= original.capacity();
+        oh2 ^= original.capacity();
+
+        // Fill in the remaining bytes before the last 16 and get their hash
+        collision.put(bytesToAdd);
+        while ((collision.position() & 0x0f) != 0)
+            collision.put((byte) 0);
+
+        while (index < collision.position())
+        {
+            long k1 = Long.reverseBytes(collision.getLong(index + 0));
+            long k2 = Long.reverseBytes(collision.getLong(index + 8));
+
+            // 16 bytes
+            k1 *= c1;
+            k1 = rotl64(k1, 31);
+            k1 *= c2;
+            h1 ^= k1;
+            h1 = rotl64(h1, 27);
+            h1 += h2;
+            h1 = h1 * 5 + 0x52dce729;
+            k2 *= c2;
+            k2 = rotl64(k2, 33);
+            k2 *= c1;
+            h2 ^= k2;
+            h2 = rotl64(h2, 31);
+            h2 += h1;
+            h2 = h2 * 5 + 0x38495ab5;
+
+            index += 16;
+        }
+
+        // Working backwards, we must get this hash pair
+        long th1 = h1;
+        long th2 = h2;
+
+        // adjust ohx with length
+        h1 = oh1 ^ collision.capacity();
+        h2 = oh2 ^ collision.capacity();
+
+        // Get modulo-long inverses of the multipliers used in the computation
+        long i5i = inverse(5L);
+        long c1i = inverse(c1);
+        long c2i = inverse(c2);
+
+        // revert one step
+        h2 -= 0x38495ab5;
+        h2 *= i5i;
+        h2 -= h1;
+        h2 = rotl64(h2, 33);
+
+        h1 -= 0x52dce729;
+        h1 *= i5i;
+        h1 -= th2;  // use h2 before it's adjusted with k2
+        h1 = rotl64(h1, 37);
+
+        // extract the required modifiers and applies the inverse of their transformation
+        long k1 = h1 ^ th1;
+        k1 = c2i * k1;
+        k1 = rotl64(k1, 33);
+        k1 = c1i * k1;
+
+        long k2 = h2 ^ th2;
+        k2 = c1i * k2;
+        k2 = rotl64(k2, 31);
+        k2 = c2i * k2;
+
+        collision.putLong(Long.reverseBytes(k1));
+        collision.putLong(Long.reverseBytes(k2));
+        collision.flip();
+
+        return collision;
+    }
+
+    // Assumes a and b are positive
+    private static BigInteger[] xgcd(BigInteger a, BigInteger b) {
+        BigInteger x = a, y = b;
+        BigInteger[] qrem;
+        BigInteger[] result = new BigInteger[3];
+        BigInteger x0 = BigInteger.ONE, x1 = BigInteger.ZERO;
+        BigInteger y0 = BigInteger.ZERO, y1 = BigInteger.ONE;
+        while (true)
+        {
+            qrem = x.divideAndRemainder(y);
+            x = qrem[1];
+            x0 = x0.subtract(y0.multiply(qrem[0]));
+            x1 = x1.subtract(y1.multiply(qrem[0]));
+            if (x.equals(BigInteger.ZERO))
+            {
+                result[0] = y;
+                result[1] = y0;
+                result[2] = y1;
+                return result;
+            }
+
+            qrem = y.divideAndRemainder(x);
+            y = qrem[1];
+            y0 = y0.subtract(x0.multiply(qrem[0]));
+            y1 = y1.subtract(x1.multiply(qrem[0]));
+            if (y.equals(BigInteger.ZERO))
+            {
+                result[0] = x;
+                result[1] = x0;
+                result[2] = x1;
+                return result;
+            }
+        }
+    }
+
+    /**
+     * Find a mupltiplicative inverse for the given multiplier for long, i.e.
+     * such that x * inverse(x) = 1 where * is long multiplication.
+     * In other words, such an integer that x * inverse(x) == 1 (mod 2^64).
+     */
+    public static long inverse(long multiplier)
+    {
+        final BigInteger modulus = BigInteger.ONE.shiftLeft(64);
+        // Add the modulus to the multiplier to avoid problems with negatives (a + m == a (mod m))
+        BigInteger[] gcds = xgcd(BigInteger.valueOf(multiplier).add(modulus), modulus);
+        // xgcd gives g, a and b, such that ax + bm = g
+        // ie, ax = g (mod m). Return a
+        assert gcds[0].equals(BigInteger.ONE) : "Even number " + multiplier + " has no long inverse";
+        return gcds[1].longValueExact();
+    }
+
+    public static long rotl64(long v, int n)
+    {
+        return ((v << n) | (v >>> (64 - n)));
     }
 
     /**
@@ -849,5 +1120,142 @@ public class Util
             throw new RuntimeException(e);
         }
         Gossiper.instance.expireUpgradeFromVersion();
+    }
+
+    public static Supplier<SequenceBasedSSTableId> newSeqGen(int ... existing)
+    {
+        return SequenceBasedSSTableId.Builder.instance.generator(IntStream.of(existing).mapToObj(SequenceBasedSSTableId::new));
+    }
+
+    public static Supplier<UUIDBasedSSTableId> newUUIDGen()
+    {
+        return UUIDBasedSSTableId.Builder.instance.generator(Stream.empty());
+    }
+
+    public static Set<Descriptor> getSSTables(String ks, String tableName)
+    {
+        return Keyspace.open(ks)
+                       .getColumnFamilyStore(tableName)
+                       .getLiveSSTables()
+                       .stream()
+                       .map(sstr -> sstr.descriptor)
+                       .collect(Collectors.toSet());
+    }
+
+    public static Set<Descriptor> getSnapshots(String ks, String tableName, String snapshotTag)
+    {
+        try
+        {
+            return Keyspace.open(ks)
+                           .getColumnFamilyStore(tableName)
+                           .getSnapshotSSTableReaders(snapshotTag)
+                           .stream()
+                           .map(sstr -> sstr.descriptor)
+                           .collect(Collectors.toSet());
+        }
+        catch (IOException e)
+        {
+            throw Throwables.unchecked(e);
+        }
+    }
+
+    public static Set<Descriptor> getBackups(String ks, String tableName)
+    {
+        return Keyspace.open(ks)
+                       .getColumnFamilyStore(tableName)
+                       .getDirectories()
+                       .sstableLister(Directories.OnTxnErr.THROW)
+                       .onlyBackups(true)
+                       .list()
+                       .keySet();
+    }
+
+    public static StreamState bulkLoadSSTables(File dir, String targetKeyspace)
+    {
+        SSTableLoader.Client client = new SSTableLoader.Client()
+        {
+            private String keyspace;
+
+            public void init(String keyspace)
+            {
+                this.keyspace = keyspace;
+                for (Replica replica : StorageService.instance.getLocalReplicas(keyspace))
+                    addRangeForEndpoint(replica.range(), FBUtilities.getBroadcastAddressAndPort());
+            }
+
+            public TableMetadataRef getTableMetadata(String tableName)
+            {
+                return Schema.instance.getTableMetadataRef(keyspace, tableName);
+            }
+        };
+
+        SSTableLoader loader = new SSTableLoader(dir, client, new OutputHandler.LogOutput(), 1, targetKeyspace);
+        StreamResultFuture result = loader.stream();
+        return FBUtilities.waitOnFuture(result);
+    }
+
+    public static File relativizePath(File targetBasePath, File path, int components)
+    {
+        Preconditions.checkArgument(components > 0);
+        Preconditions.checkArgument(path.toPath().getNameCount() >= components);
+        Path relative = path.toPath().subpath(path.toPath().getNameCount() - components, path.toPath().getNameCount());
+        return new File(targetBasePath.toPath().resolve(relative));
+    }
+
+    public static void assertSSTableIds(SSTableId v1, SSTableId v2, IntFunction<Boolean> predicate)
+    {
+        Assertions.assertThat(Pair.create(v1, v2))
+                  .matches(p -> predicate.apply(SSTableIdFactory.COMPARATOR.compare(p.left, p.right)));
+    }
+
+    private static TimeUnit getSupportedMTimeGranularity() {
+        try
+        {
+            Path p = Files.createTempFile(Util.class.getSimpleName(), "dummy-file");
+            FileTime ft = Files.getLastModifiedTime(p);
+            Files.deleteIfExists(p);
+            Field f = FileTime.class.getDeclaredField("unit");
+            f.setAccessible(true);
+            return (TimeUnit) f.get(ft);
+        }
+        catch (IOException |  NoSuchFieldException | IllegalAccessException e)
+        {
+            throw new AssertionError("Failed to read supported file modification time granularity");
+        }
+    }
+
+    public static void markNodeAsDead(InetAddressAndPort address)
+    {
+        EndpointState endpointState = Gossiper.instance.getEndpointStateForEndpoint(address);
+        Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.markDead(address, endpointState));
+        IFailureDetector.instance.report(address);
+        IFailureDetector.instance.interpret(address);
+        assertFalse("Node not convicted", IFailureDetector.instance.isAlive(address));
+    }
+
+    public static void joinNodeToRing(InetAddressAndPort address, Token token, IPartitioner partitioner)
+    {
+        joinNodeToRing(address, token, partitioner, UUID.randomUUID(), 1);
+    }
+
+    public static void joinNodeToRing(InetAddressAndPort address, Token token, IPartitioner partitioner, UUID hostId, int generationNbr)
+    {
+        Gossiper.instance.initializeNodeUnsafe(address, hostId, MessagingService.current_version, generationNbr);
+        Gossiper.instance.injectApplicationState(address, ApplicationState.TOKENS, new VersionedValue.VersionedValueFactory(partitioner).tokens(Collections.singleton(token)));
+        StorageService.instance.onChange(address,
+                    ApplicationState.STATUS_WITH_PORT,
+                    new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(token)));
+    }
+    public static boolean isListeningOn(InetSocketAddress address)
+    {
+        try (ServerSocket socket = new ServerSocket())
+        {
+            socket.bind(address);
+            return false;
+        }
+        catch (IOException ex)
+        {
+            return true;
+        }
     }
 }

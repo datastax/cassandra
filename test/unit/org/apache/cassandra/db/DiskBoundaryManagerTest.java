@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.db;
 
-import java.io.File;
 import java.net.UnknownHostException;
 import java.util.List;
 
@@ -27,8 +26,10 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.dht.BootStrapper;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.service.StorageService;
@@ -37,7 +38,6 @@ import org.apache.cassandra.utils.FBUtilities;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class DiskBoundaryManagerTest extends CQLTester
@@ -64,7 +64,7 @@ public class DiskBoundaryManagerTest extends CQLTester
     public void getBoundariesTest()
     {
         DiskBoundaries dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(3, dbv.positions.size());
+        Assert.assertEquals(3, dbv.getPositions().size());
         assertEquals(dbv.directories, dirs.getWriteableLocations());
     }
 
@@ -72,11 +72,11 @@ public class DiskBoundaryManagerTest extends CQLTester
     public void disallowedDirectoriesTest()
     {
         DiskBoundaries dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(3, dbv.positions.size());
+        Assert.assertEquals(3, dbv.getPositions().size());
         assertEquals(dbv.directories, dirs.getWriteableLocations());
         DisallowedDirectories.maybeMarkUnwritable(new File("/tmp/3"));
         dbv = dbm.getDiskBoundaries(mock);
-        Assert.assertEquals(2, dbv.positions.size());
+        Assert.assertEquals(2, dbv.getPositions().size());
         Assert.assertEquals(Lists.newArrayList(new Directories.DataDirectory(new File("/tmp/1")),
                                         new Directories.DataDirectory(new File("/tmp/2"))),
                                  dbv.directories);
@@ -121,7 +121,7 @@ public class DiskBoundaryManagerTest extends CQLTester
     {
         MockCFS(ColumnFamilyStore cfs, Directories dirs)
         {
-            super(cfs.keyspace, cfs.getTableName(), 0, cfs.metadata, dirs, false, false, true);
+            super(cfs.keyspace, cfs.getTableName(), Util.newSeqGen(), cfs.metadata, dirs, false, false, true);
         }
     }
 }

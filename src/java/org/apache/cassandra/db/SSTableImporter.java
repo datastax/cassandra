@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.db;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -29,6 +28,8 @@ import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -136,7 +137,8 @@ public class SSTableImporter
                     Descriptor newDescriptor = cfs.getUniqueDescriptorFor(entry.getKey(), targetDir);
                     maybeMutateMetadata(entry.getKey(), options);
                     movedSSTables.add(new MovedSSTable(newDescriptor, entry.getKey(), entry.getValue()));
-                    SSTableReader sstable = SSTableReader.moveAndOpenSSTable(cfs, entry.getKey(), newDescriptor, entry.getValue(), options.copyData);
+                    SSTableReader sstable = newDescriptor.getFormat().getReaderFactory()
+                                                         .moveAndOpenSSTable(cfs, entry.getKey(), newDescriptor, entry.getValue(), options.copyData);
                     newSSTablesPerDirectory.add(sstable);
                 }
                 catch (Throwable t)
@@ -178,11 +180,18 @@ public class SSTableImporter
 
         try (Refs<SSTableReader> refs = Refs.ref(newSSTables))
         {
-            cfs.getTracker().addSSTables(newSSTables);
+            cfs.getTracker().addSSTables(newSSTables, OperationType.UNKNOWN);
             for (SSTableReader reader : newSSTables)
             {
-                if (options.invalidateCaches && cfs.isRowCacheEnabled())
-                    invalidateCachesForSSTable(reader.descriptor);
+                try
+                {
+                    if (options.invalidateCaches && cfs.isRowCacheEnabled())
+                        invalidateCachesForSSTable(reader);
+                }
+                catch (IOException ex)
+                {
+                    throw new RuntimeException(ex);
+                }
             }
 
         }
@@ -208,7 +217,7 @@ public class SSTableImporter
         SSTableReader sstable = null;
         try
         {
-            sstable = SSTableReader.open(descriptor, components, cfs.metadata);
+            sstable = descriptor.getFormat().getReaderFactory().open(descriptor, components, cfs.metadata);
             targetDirectory = cfs.getDirectories().getLocationForDisk(cfs.diskBoundaryManager.getDiskBoundaries(cfs).getCorrectDiskForSSTable(sstable));
         }
         finally
@@ -216,7 +225,7 @@ public class SSTableImporter
             if (sstable != null)
                 sstable.selfRef().release();
         }
-        return targetDirectory == null ? cfs.getDirectories().getWriteableLocationToLoadFile(new File(descriptor.baseFilename())) : targetDirectory;
+        return targetDirectory == null ? cfs.getDirectories().getWriteableLocationToLoadFile(new File(descriptor.baseFileUri())) : targetDirectory;
     }
 
     /**
@@ -237,7 +246,7 @@ public class SSTableImporter
                 {
                     throw new RuntimeException(String.format("Directory %s does not exist", path));
                 }
-                if (!Directories.verifyFullPermissions(dir, path))
+                if (!Directories.verifyFullPermissions(dir))
                 {
                     throw new RuntimeException("Insufficient permissions on directory " + path);
                 }
@@ -279,10 +288,10 @@ public class SSTableImporter
     {
         for (MovedSSTable movedSSTable : movedSSTables)
         {
-            if (new File(movedSSTable.newDescriptor.filenameFor(Component.DATA)).exists())
+            if (movedSSTable.newDescriptor.fileFor(Component.DATA).exists())
             {
-                logger.debug("Moving sstable {} back to {}", movedSSTable.newDescriptor.filenameFor(Component.DATA)
-                                                          , movedSSTable.oldDescriptor.filenameFor(Component.DATA));
+                logger.debug("Moving sstable {} back to {}", movedSSTable.newDescriptor.fileFor(Component.DATA)
+                                                          , movedSSTable.oldDescriptor.fileFor(Component.DATA));
                 SSTableWriter.rename(movedSSTable.newDescriptor, movedSSTable.oldDescriptor, movedSSTable.components);
             }
         }
@@ -299,7 +308,7 @@ public class SSTableImporter
         logger.debug("Removing copied SSTables which were left in data directories after failed SSTable import.");
         for (MovedSSTable movedSSTable : movedSSTables)
         {
-            if (new File(movedSSTable.newDescriptor.filenameFor(Component.DATA)).exists())
+            if (movedSSTable.newDescriptor.fileFor(Component.DATA).exists())
             {
                 // no logging here as for moveSSTablesBack case above as logging is done in delete method
                 SSTableWriter.delete(movedSSTable.newDescriptor, movedSSTable.components);
@@ -311,9 +320,9 @@ public class SSTableImporter
      * Iterates over all keys in the sstable index and invalidates the row cache
      */
     @VisibleForTesting
-    void invalidateCachesForSSTable(Descriptor desc)
+    void invalidateCachesForSSTable(SSTableReader reader) throws IOException
     {
-        try (KeyIterator iter = new KeyIterator(desc, cfs.metadata()))
+        try (KeyIterator iter = KeyIterator.forSSTable(reader))
         {
             while (iter.hasNext())
             {
@@ -335,7 +344,7 @@ public class SSTableImporter
         SSTableReader reader = null;
         try
         {
-            reader = SSTableReader.open(descriptor, components, cfs.metadata);
+            reader = descriptor.getFormat().getReaderFactory().open(descriptor, components, cfs.metadata);
             Verifier.Options verifierOptions = Verifier.options()
                                                        .extendedVerification(extendedVerify)
                                                        .checkOwnsTokens(verifyTokens)
@@ -364,7 +373,7 @@ public class SSTableImporter
      */
     private void maybeMutateMetadata(Descriptor descriptor, Options options) throws IOException
     {
-        if (new File(descriptor.filenameFor(Component.STATS)).exists())
+        if (descriptor.fileFor(Component.STATS).exists())
         {
             if (options.resetLevel)
             {
