@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
 import com.google.common.collect.Iterables;
@@ -197,13 +198,13 @@ public class CounterMutation implements IMutation
         {
             if (prev != l)
                 counter++;
-            if (prev == null)
-                prev = l;
+            prev = l;
         }
         return counter;
     }
 
-    private void grabCounterLocks(Keyspace keyspace, List<Lock> locks) throws WriteTimeoutException
+    @VisibleForTesting
+    public void grabCounterLocks(Keyspace keyspace, List<Lock> locks) throws WriteTimeoutException
     {
         long startTime = System.nanoTime();
 
