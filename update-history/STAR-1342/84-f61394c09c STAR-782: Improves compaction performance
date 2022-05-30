@@ -1,0 +1,27 @@
+--- a/src/java/org/apache/cassandra/db/Columns.java
++++ b/src/java/org/apache/cassandra/db/Columns.java
+@@ -19,11 +19,7 @@
+ 
+ import java.io.IOException;
+ import java.nio.ByteBuffer;
+-import java.util.AbstractCollection;
+-import java.util.Collection;
+-import java.util.Comparator;
+-import java.util.Iterator;
+-import java.util.Objects;
++import java.util.*;
+ import java.util.function.Consumer;
+ import java.util.function.Predicate;
+ 
+@@ -43,11 +39,7 @@
+ import org.apache.cassandra.utils.SearchIterator;
+ import org.apache.cassandra.utils.btree.BTree;
+ import org.apache.cassandra.utils.btree.BTreeRemoval;
+-<<<<<<<
+-=======
+ import org.apache.cassandra.utils.btree.BTreeSearchIterator;
+-import org.apache.cassandra.utils.btree.UpdateFunction;
+->>>>>>>
+ 
+ /**
+  * An immutable and sorted list of (non-PK) columns for a given table.

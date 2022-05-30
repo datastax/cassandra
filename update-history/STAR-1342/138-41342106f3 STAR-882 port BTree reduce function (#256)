@@ -1,0 +1,191 @@
+--- a/src/java/org/apache/cassandra/utils/btree/BTree.java
++++ b/src/java/org/apache/cassandra/utils/btree/BTree.java
+@@ -1908,7 +1908,6 @@
+         return accumulate(btree, accumulator, arg, null, null, initialValue);
+     }
+ 
+-<<<<<<<
+     /**
+      * Calculate the minimum height needed for this size of tree
+      *
+@@ -3984,18 +3983,10 @@
+             reset();
+             pool.offer(this);
+             pool = null;
+-=======
+-    public interface ReduceFunction<ACC, I> extends BiFunction<ACC, I, ACC>
+-    {
+-        default public boolean stop(ACC res)
+-        {
+-            return false;
+->>>>>>>
+         }
+     }
+ 
+     /**
+-<<<<<<<
+      * A base class for very simple walks of a tree without recursion, supporting reuse
+      */
+     private static abstract class SimpleTreeStack
+@@ -4179,7 +4170,16 @@
+             }
+         }
+     }
+-=======
++
++    public interface ReduceFunction<ACC, I> extends BiFunction<ACC, I, ACC>
++    {
++        default public boolean stop(ACC res)
++        {
++            return false;
++        }
++    }
++
++    /**
+      * Walk the btree forwards and apply a reduce function. Return the reduced value.
+      */
+     public static <R, V> R reduce(Object[] btree, R seed, ReduceFunction<R, V> function)
+@@ -4204,5 +4204,4 @@
+         return seed;
+     }
+ 
+->>>>>>>
+ }
+--- a/test/unit/org/apache/cassandra/utils/btree/BTreeTest.java
++++ b/test/unit/org/apache/cassandra/utils/btree/BTreeTest.java
+@@ -453,34 +453,12 @@
+             Arrays.fill(numberOfCalls, 0);
+         }
+     }
+-<<<<<<<
+-=======
+-
+-    @Test
+-    public void testTransformAndFilter()
+-    {
+-        List<Integer> r = seq(100);
+-
+-        Object[] b1 = BTree.build(r, UpdateFunction.noOp());
+-
+-        // replace all values
+-        Object[] b2 = BTree.transformAndFilter(b1, (x) -> (Integer) x * 2);
+-        assertEquals(BTree.size(b1), BTree.size(b2));
+-
+-        // remove odd numbers
+-        Object[] b3 = BTree.transformAndFilter(b1, (x) -> (Integer) x % 2 == 1 ? x : null);
+-        assertEquals(BTree.size(b1) / 2, BTree.size(b3));
+-
+-        // remove all values
+-        Object[] b4 = BTree.transformAndFilter(b1, (x) -> null);
+-        assertEquals(0, BTree.size(b4));
+-    }
+ 
+     @Test
+     public void testReduce()
+     {
+         List<Integer> input = seq(71);
+-        Object[] btree = BTree.build(input, noOp);
++        Object[] btree = BTree.build(input, UpdateFunction.noOp());
+ 
+         List<Integer> result = BTree.<List<Integer>, Integer>reduce(btree, new ArrayList(), (r, i) -> { r.add(i); return r; });
+         assertArrayEquals(input.toArray(), result.toArray());
+@@ -507,86 +485,4 @@
+         }
+     }
+ 
+-    private <C, K extends C, V extends C> Object[] buildBTreeLegacy(Iterable<K> source, UpdateFunction<K, V> updateF, int size)
+-    {
+-        assert updateF != null;
+-        NodeBuilder current = new NodeBuilder();
+-
+-        while ((size >>= FAN_SHIFT) > 0)
+-            current = current.ensureChild();
+-
+-        current.reset(EMPTY_LEAF, POSITIVE_INFINITY, updateF, null);
+-        for (K key : source)
+-            current.addNewKey(key);
+-
+-        current = current.ascendToRoot();
+-
+-        Object[] r = current.toNode();
+-        current.clear();
+-        return r;
+-    }
+-
+-    // Basic BTree validation to check the values and sizeOffsets. Return tree size.
+-    private int validateBTree(Object[] tree, int[] startingPos, boolean isRoot)
+-    {
+-        if (BTree.isLeaf(tree))
+-        {
+-            int size = BTree.size(tree);
+-            if (!isRoot)
+-            {
+-                assertTrue(size >= FAN_FACTOR / 2);
+-                assertTrue(size <= FAN_FACTOR);
+-            }
+-            for (int i = 0; i < size; i++)
+-            {
+-                assertEquals((int)tree[i], startingPos[0]);
+-                startingPos[0]++;
+-            }
+-            return size;
+-        }
+-
+-        int childNum = BTree.getChildCount(tree);
+-        assertTrue(childNum >= FAN_FACTOR / 2);
+-        assertTrue(childNum <= FAN_FACTOR + 1);
+-
+-        int childStart = BTree.getChildStart(tree);
+-        int[] sizeOffsets = BTree.getSizeMap(tree);
+-        int pos = 0;
+-        for (int i = 0; i < childNum; i++)
+-        {
+-            int childSize = validateBTree((Object[])tree[i + childStart], startingPos, false);
+-
+-            pos += childSize;
+-            assertEquals(sizeOffsets[i], pos);
+-            if (i != childNum - 1)
+-            {
+-                assertEquals((int)tree[i], startingPos[0]);
+-                pos++;
+-                startingPos[0]++;
+-            }
+-
+-        }
+-        return BTree.size(tree);
+-    }
+-
+-    @Test
+-    public void testBuildTree()
+-    {
+-        int maxCount = 1000;
+-
+-        for (int count = 0; count < maxCount; count++)
+-        {
+-            List<Integer> r = seq(count);
+-            Object[] b1 = BTree.build(r, UpdateFunction.noOp());
+-            Object[] b2 = buildBTreeLegacy(r, UpdateFunction.noOp(), count);
+-            assertTrue(BTree.equals(b1, b2));
+-
+-            int[] startingPos = new int[1];
+-            startingPos[0] = 0;
+-            assertEquals(count, validateBTree(b1, startingPos, true));
+-            startingPos[0] = 0;
+-            assertEquals(count, validateBTree(b2, startingPos, true));
+-        }
+-    }
+->>>>>>>
+ }
+diff --git a/src/java/org/apache/cassandra/service/StorageService.java b/src/java/org/apache/cassandra/service/StorageService.java
+index 4408ae0e03..cb6cc75a72 100644
+--- a/src/java/org/apache/cassandra/service/StorageService.java
++++ b/src/java/org/apache/cassandra/service/StorageService.java
+@@ -4228,7 +4228,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
+         {
+             throw new IllegalArgumentException("the local data center must be part of the repair");
+         }
+-        Set<String> existingDatacenters = tokenMetadata.cloneOnlyTokenMap().getTopology().getDatacenterEndpoints().keys().elementSet();
++        Set<String> existingDatacenters = getTokenMetadata().cloneOnlyTokenMap().getTopology().getDatacenterEndpoints().keys().elementSet();
+         List<String> datacenters = new ArrayList<>(options.getDataCenters());
+         if (!existingDatacenters.containsAll(datacenters))
+         {

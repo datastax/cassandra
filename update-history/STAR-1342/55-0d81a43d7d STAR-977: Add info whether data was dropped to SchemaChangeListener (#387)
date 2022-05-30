@@ -1,0 +1,66 @@
+--- a/test/unit/org/apache/cassandra/schema/RemoveWithoutDroppingTest.java
++++ b/test/unit/org/apache/cassandra/schema/RemoveWithoutDroppingTest.java
+@@ -18,10 +18,6 @@
+ 
+ package org.apache.cassandra.schema;
+ 
+-<<<<<<<
+-=======
+-import java.io.File;
+->>>>>>>
+ import java.util.Arrays;
+ import java.util.List;
+ import java.util.Set;
+@@ -34,10 +30,7 @@
+ 
+ import org.apache.cassandra.cql3.CQLTester;
+ import org.apache.cassandra.db.ColumnFamilyStore;
+-<<<<<<<
+-=======
+ import org.apache.cassandra.io.util.File;
+->>>>>>>
+ import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
+ import org.mockito.Mockito;
+ 
+@@ -87,30 +80,18 @@
+         executeInternal(String.format("INSERT INTO %s.%s (id, v) VALUES (?, ?)", ks, tab), 1, 2);
+         executeInternal(String.format("INSERT INTO %s.%s (id, v) VALUES (?, ?)", ks, tab), 3, 4);
+         ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(ks, tab);
+-<<<<<<<
+-        cfs.forceFlush().get();
+-=======
+         cfs.forceFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS).get();
+->>>>>>>
+ 
+         KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(ks);
+         TableMetadata tm = Schema.instance.getTableMetadata(ks, tab);
+ 
+         List<File> directories = cfs.getDirectories().getCFDirectories();
+-<<<<<<<
+-        Set<File> filesBefore = directories.stream().flatMap(d -> Arrays.stream(d.listFiles()).filter(f -> !f.isDirectory())).collect(Collectors.toSet());
+-=======
+         Set<File> filesBefore = directories.stream().flatMap(d -> Arrays.stream(d.tryList(f -> !f.isDirectory()))).collect(Collectors.toSet());
+->>>>>>>
+         assertThat(filesBefore).isNotEmpty();
+ 
+         executeInternal(String.format("DROP KEYSPACE %s", ks));
+ 
+-<<<<<<<
+-        Set<File> filesAfter = directories.stream().flatMap(d -> Arrays.stream(d.listFiles()).filter(f -> !f.isDirectory())).collect(Collectors.toSet());
+-=======
+         Set<File> filesAfter = directories.stream().flatMap(d -> Arrays.stream(d.tryList(f -> !f.isDirectory()))).collect(Collectors.toSet());
+->>>>>>>
+         if (expectDropped)
+             assertThat(filesAfter).isEmpty();
+         else
+@@ -127,10 +108,7 @@
+         String ks = "test_remove_without_dropping";
+         String tab = "test_table";
+         testRemoveKeyspace(ks, tab, false);
+-<<<<<<<
+-=======
+ 
+->>>>>>>
+     }
+ 
+     @Test

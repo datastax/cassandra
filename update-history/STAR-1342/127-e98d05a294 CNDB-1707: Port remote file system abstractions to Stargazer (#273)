@@ -1,0 +1,87 @@
+--- a/src/java/org/apache/cassandra/db/Directories.java
++++ b/src/java/org/apache/cassandra/db/Directories.java
+@@ -27,17 +27,6 @@
+ import java.util.stream.Stream;
+ import java.util.stream.StreamSupport;
+ 
+-<<<<<<<
+-=======
+-import java.io.IOError;
+-import java.io.IOException;
+-import java.nio.file.FileStore;
+-import java.nio.file.Files;
+-import java.nio.file.Path;
+-
+-import javax.annotation.Nullable;
+-
+->>>>>>>
+ import com.google.common.collect.ImmutableMap;
+ import com.google.common.collect.Iterables;
+ import com.google.common.collect.Maps;
+@@ -46,25 +35,19 @@
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
++import com.beust.jcommander.internal.Nullable;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+ import org.apache.cassandra.io.FSDiskFullWriteError;
+ import org.apache.cassandra.io.FSError;
+ import org.apache.cassandra.io.FSNoDiskAvailableForWriteError;
+ import org.apache.cassandra.io.FSWriteError;
+-<<<<<<<
+ import org.apache.cassandra.io.sstable.*;
+-import org.apache.cassandra.io.util.File;
+-import org.apache.cassandra.io.util.FileUtils;
+-=======
+ import org.apache.cassandra.io.storage.StorageProvider;
+ import org.apache.cassandra.io.util.File;
+ import org.apache.cassandra.io.util.FileUtils;
+-import org.apache.cassandra.io.sstable.*;
+-import org.apache.cassandra.schema.KeyspaceMetadata;
+-import org.apache.cassandra.schema.SchemaConstants;
+->>>>>>>
+ import org.apache.cassandra.io.util.PathUtils;
++import org.apache.cassandra.schema.KeyspaceMetadata;
+ import org.apache.cassandra.schema.SchemaConstants;
+ import org.apache.cassandra.schema.TableMetadata;
+ import org.apache.cassandra.utils.DirectorySizeCalculator;
+@@ -224,7 +207,7 @@
+      *
+      * @param metadata metadata of ColumnFamily
+      */
+-    public Directories(@Nullable KeyspaceMetadata ksMetadata,  final TableMetadata metadata, DataDirectory[] dirs)
++    public Directories(@Nullable KeyspaceMetadata ksMetadata, final TableMetadata metadata, DataDirectory[] dirs)
+     {
+         this.metadata = metadata;
+         this.paths = StorageProvider.instance.createDataDirectories(ksMetadata, metadata.keyspace, dirs);
+--- a/src/java/org/apache/cassandra/io/sstable/SSTable.java
++++ b/src/java/org/apache/cassandra/io/sstable/SSTable.java
+@@ -381,14 +381,9 @@
+     @SuppressWarnings("resource")
+     protected static void appendTOC(Descriptor descriptor, Collection<Component> components)
+     {
+-<<<<<<<
+         File tocFile = descriptor.fileFor(Component.TOC);
+-        try (PrintWriter w = new PrintWriter(tocFile.newWriter(APPEND)))
+-=======
+-        File tocFile = new File(descriptor.filenameFor(Component.TOC));
+         FileOutputStreamPlus fos = null;
+         try (PrintWriter w = new PrintWriter((fos = tocFile.newOutputStream(APPEND))))
+->>>>>>>
+         {
+             for (Component component : components)
+                 w.println(component.name);
+diff --git a/test/unit/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriterTest.java b/test/unit/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriterTest.java
+index 3a29f633a5..b1539539f0 100644
+--- a/test/unit/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriterTest.java
++++ b/test/unit/org/apache/cassandra/io/sstable/format/RangeAwareSSTableWriterTest.java
+@@ -74,7 +74,7 @@ public class RangeAwareSSTableWriterTest
+         SchemaLoader.insertData(KEYSPACE1, CF_STANDARD, 0, 1);
+         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+ 
+-        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.STREAM);
++        LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.STREAM, cfs.metadata);
+ 
+         RangeAwareSSTableWriter writer = new RangeAwareSSTableWriter(cfs,
+                                                                      0,

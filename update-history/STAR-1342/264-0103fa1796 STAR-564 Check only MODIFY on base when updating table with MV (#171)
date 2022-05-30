@@ -1,0 +1,63 @@
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -1,4 +1,6 @@
+-<<<<<<<
++Future version (tbd)
++ * Require only MODIFY permission on base when updating table with MV (STAR-564)
++
+ 4.0.5
+  * silence benign SslClosedEngineException (CASSANDRA-17565)
+ Merged from 3.11:
+@@ -7,10 +9,6 @@
+  * Suppress CVE-2022-24823 (CASSANDRA-17633)
+  * fsync TOC and digest files (CASSANDRA-10709)
+ 
+-=======
+-Future version (tbd)
+- * Require only MODIFY permission on base when updating table with MV (STAR-564)
+->>>>>>>
+ 
+ 4.0.4
+  * Optimise BTree build,update and transform operations (CASSANDRA-15510)
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -1,11 +1,9 @@
+-<<<<<<<
++Future version (tbd)
++ * Require only MODIFY permission on base when updating table with MV (STAR-564)
++
+ 4.1
+  * Save sstable id as string in activity table (CASSANDRA-17585)
+  * Add support for UUID based sstable generation identifiers (CASSANDRA-17048)
+-=======
+-Future version (tbd)
+- * Require only MODIFY permission on base when updating table with MV (STAR-564)
+->>>>>>>
+ 
+ 4.0.5
+  * silence benign SslClosedEngineException (CASSANDRA-17565)
+diff --git a/update-history/STAR-1342/264-0103fa1796 STAR-564 Check only MODIFY on base when updating table with MV (#171) b/update-history/STAR-1342/264-0103fa1796 STAR-564 Check only MODIFY on base when updating table with MV (#171)
+index a8be12bc04..5d35a4eda9 100644
+--- a/update-history/STAR-1342/264-0103fa1796 STAR-564 Check only MODIFY on base when updating table with MV (#171)	
++++ b/update-history/STAR-1342/264-0103fa1796 STAR-564 Check only MODIFY on base when updating table with MV (#171)	
+@@ -19,3 +19,20 @@
+  
+  4.0.4
+   * Optimise BTree build,update and transform operations (CASSANDRA-15510)
++--- a/CHANGES.txt
+++++ b/CHANGES.txt
++@@ -1,11 +1,9 @@
++-<<<<<<<
+++Future version (tbd)
+++ * Require only MODIFY permission on base when updating table with MV (STAR-564)
+++
++ 4.1
++  * Save sstable id as string in activity table (CASSANDRA-17585)
++  * Add support for UUID based sstable generation identifiers (CASSANDRA-17048)
++-=======
++-Future version (tbd)
++- * Require only MODIFY permission on base when updating table with MV (STAR-564)
++->>>>>>>
++ 
++ 4.0.5
++  * silence benign SslClosedEngineException (CASSANDRA-17565)

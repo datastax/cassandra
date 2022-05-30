@@ -1,0 +1,17 @@
+--- a/src/java/org/apache/cassandra/db/compaction/CompactionLogger.java
++++ b/src/java/org/apache/cassandra/db/compaction/CompactionLogger.java
+@@ -180,13 +180,8 @@
+     private JsonNode formatSSTable(CompactionSSTable sstable)
+     {
+         ObjectNode node = json.objectNode();
+-<<<<<<<
+-        node.put("generation", sstable.descriptor.id.toString());
+-        node.put("version", sstable.descriptor.version.getVersion());
+-=======
+-        node.put("generation", sstable.getDescriptor().id.asString());
++        node.put("generation", sstable.getDescriptor().id.toString());
+         node.put("version", sstable.getDescriptor().version.getVersion());
+->>>>>>>
+         node.put("size", sstable.onDiskLength());
+ 
+         // The details are only relevant or available for some strategies, e.g. LCS or Date tiered but
