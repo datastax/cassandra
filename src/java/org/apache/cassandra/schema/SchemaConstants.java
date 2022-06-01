@@ -72,8 +72,10 @@ public final class SchemaConstants
      *
      * Before CASSANDRA-16956, we used to care about not having the entire path longer than 255 characters because of
      * Windows support but this limit is by implementing CASSANDRA-16956 not in effect anymore.
+     *
+     * Note: This extended to 222 for CNDB tenant specific keyspaces.
      */
-    public static final int NAME_LENGTH = 48;
+    public static final int NAME_LENGTH = 222;
 
     // 59adb24e-f3cd-3e02-97f0-5b395827453f
     public static final UUID emptyVersion;
