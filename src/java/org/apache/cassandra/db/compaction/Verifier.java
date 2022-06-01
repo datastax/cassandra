@@ -23,6 +23,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 
 import org.apache.cassandra.dht.LocalPartitioner;
@@ -59,23 +60,24 @@ import java.io.IOError;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
-import java.util.function.LongPredicate;
+
+import javax.annotation.Nullable;
 
 import org.apache.cassandra.io.util.File;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
+
 public class Verifier implements Closeable
 {
-    private final CompactionRealm realm;
+    private final ColumnFamilyStore cfs;
     private final SSTableReader sstable;
-
-    private final CompactionController controller;
+    private final @Nullable Tracker tracker;
 
     private final ReadWriteLock fileAccessLock;
     private final RandomAccessReader dataFile;
@@ -94,18 +96,45 @@ public class Verifier implements Closeable
     private final OutputHandler outputHandler;
     private FileDigestValidator validator;
 
-    public Verifier(CompactionRealm realm, SSTableReader sstable, boolean isOffline, Options options)
+    /**
+     * Creates an instance of Verifier without providing a CompactionRealm. This is only
+     * allowed if the provided options have {@link Options#mutateRepairStatus} set to false.
+     * @param sstable The SSTable reader used to verify the SSTable files
+     * @param isOffline if set to true reading the SSTable data file is not rate limited
+     * @param options the verification options
+     */
+    public Verifier(SSTableReader sstable, boolean isOffline, Options options)
     {
-        this(realm, sstable, new OutputHandler.LogOutput(), isOffline, options);
+        this(sstable, new OutputHandler.LogOutput(), isOffline, options);
     }
 
-    public Verifier(CompactionRealm realm, SSTableReader sstable, OutputHandler outputHandler, boolean isOffline, Options options)
+    /**
+     * Creates an instance of Verifier without providing a CompactionRealm. This is only
+     * allowed if the provided options have {@link Options#mutateRepairStatus} set to false.
+     * @param sstable The SSTable reader used to verify the SSTable files
+     * @param outputHandler The output handler used for logging
+     * @param isOffline if set to true reading the SSTable data file is not rate limited
+     * @param options the verification options
+     */
+    public Verifier(SSTableReader sstable, OutputHandler outputHandler, boolean isOffline, Options options)
     {
-        this.realm = realm;
+        this(null, sstable, outputHandler, isOffline, options);
+    }
+
+    public Verifier(@Nullable ColumnFamilyStore cfs, SSTableReader sstable, boolean isOffline, Options options)
+    {
+        this(cfs, sstable, new OutputHandler.LogOutput(), isOffline, options);
+    }
+
+    public Verifier(@Nullable ColumnFamilyStore cfs, SSTableReader sstable, OutputHandler outputHandler, boolean isOffline, Options options)
+    {
+        checkArgument(!options.mutateRepairStatus || cfs != null,
+                      "Column family store must be provided with option mutateRepairStatus=true");
+
+        this.tracker = cfs != null ? cfs.getTracker() : null;
+        this.cfs = cfs;
         this.sstable = sstable;
         this.outputHandler = outputHandler;
-
-        this.controller = new VerifyController(realm);
 
         this.fileAccessLock = new ReentrantReadWriteLock();
         this.dataFile = isOffline
@@ -184,12 +213,12 @@ public class Verifier implements Closeable
             markAndThrow(t);
         }
 
-        if (options.checkOwnsTokens && !isOffline && !(realm.getPartitioner() instanceof LocalPartitioner))
+        if (options.checkOwnsTokens && !isOffline && !(cfs.getPartitioner() instanceof LocalPartitioner))
         {
             outputHandler.debug("Checking that all tokens are owned by the current node");
             try (KeyIterator iter = KeyIterator.forSSTable(sstable))
             {
-                List<Range<Token>> ownedRanges = Range.normalize(tokenLookup.apply(realm.metadataRef().keyspace));
+                List<Range<Token>> ownedRanges = Range.normalize(tokenLookup.apply(cfs.metadataRef().keyspace));
                 if (ownedRanges.isEmpty())
                     return;
                 RangeOwnHelper rangeOwnHelper = new RangeOwnHelper(ownedRanges);
@@ -247,7 +276,7 @@ public class Verifier implements Closeable
                 markAndThrow(new RuntimeException("First row position from index != 0: " + indexIterator.dataPosition()));
 
             List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(
-            realm.metadata().keyspace));
+            cfs.metadata().keyspace));
             RangeOwnHelper rangeOwnHelper = new RangeOwnHelper(ownedRanges);
             DecoratedKey prevKey = null;
 
@@ -271,7 +300,7 @@ public class Verifier implements Closeable
                     // check for null key below
                 }
 
-                if (options.checkOwnsTokens && !ownedRanges.isEmpty() && !(realm.getPartitioner() instanceof LocalPartitioner))
+                if (options.checkOwnsTokens && !ownedRanges.isEmpty() && !(cfs.getPartitioner() instanceof LocalPartitioner))
                 {
                     try
                     {
@@ -341,10 +370,6 @@ public class Verifier implements Closeable
         catch (Throwable t)
         {
             throw Throwables.propagate(t);
-        }
-        finally
-        {
-            controller.close();
         }
 
         outputHandler.output("Verify of " + sstable + " succeeded. All " + goodRows + " rows read successfully");
@@ -426,11 +451,11 @@ public class Verifier implements Closeable
     private void deserializeIndexSummary(SSTableReader sstable) throws IOException
     {
         File file = sstable.descriptor.fileFor(Component.SUMMARY);
-        TableMetadata metadata = realm.metadata();
+        TableMetadata metadata = cfs.metadata();
         try (DataInputStream iStream = new DataInputStream(Files.newInputStream(file.toPath())))
         {
             try (IndexSummary indexSummary = IndexSummary.serializer.deserialize(iStream,
-                                                                                 realm.getPartitioner(),
+                                                                                 cfs.getPartitioner(),
                                                                                  metadata.params.minIndexInterval,
                                                                                  metadata.params.maxIndexInterval))
             {
@@ -480,9 +505,10 @@ public class Verifier implements Closeable
     {
         if (mutateRepaired && options.mutateRepairStatus) // if we are able to mutate repaired flag, an incremental repair should be enough
         {
+            checkState(tracker != null, "Cannot mutate repair status as data tracker is null");
             try
             {
-                realm.mutateRepairedWithLock(ImmutableList.of(sstable), ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getPendingRepair(), sstable.isTransient());
+                cfs.mutateRepairedWithLock(ImmutableList.of(sstable), ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getPendingRepair(), sstable.isTransient());
             }
             catch(IOException ioe)
             {
@@ -541,20 +567,6 @@ public class Verifier implements Closeable
         public boolean isGlobal()
         {
             return false;
-        }
-    }
-
-    private static class VerifyController extends CompactionController
-    {
-        public VerifyController(CompactionRealm cfs)
-        {
-            super(cfs, Integer.MAX_VALUE);
-        }
-
-        @Override
-        public LongPredicate getPurgeEvaluator(DecoratedKey key)
-        {
-            return time -> false;
         }
     }
 
