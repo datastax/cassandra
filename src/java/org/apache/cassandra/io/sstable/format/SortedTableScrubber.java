@@ -181,7 +181,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     }
 
     @Override
-    public void scrub()
+    public List<SSTableReader>  scrub()
     {
         List<SSTableReader> finished = new ArrayList<>();
         outputHandler.output("Scrubbing %s (%s)", sstable, FBUtilities.prettyPrintMemory(dataFile.length()));
@@ -211,6 +211,8 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         }
 
         outputSummary(finished);
+
+        return finished; // already released
     }
 
     protected abstract void scrubInternal(SSTableRewriter writer) throws IOException;
@@ -259,8 +261,8 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     @VisibleForTesting
     public ScrubResult scrubWithResult()
     {
-        scrub();
-        return new ScrubResult(goodPartitions, badPartitions, emptyPartitions);
+        List<SSTableReader> scrubbed = scrub();
+        return new ScrubResult(goodPartitions, badPartitions, emptyPartitions, scrubbed);
     }
 
     @Override
