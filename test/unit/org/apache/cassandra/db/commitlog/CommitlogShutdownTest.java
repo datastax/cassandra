@@ -92,7 +92,7 @@ public class CommitlogShutdownTest
 
         StorageService.instance.drain();
 
-        List<CommitLogSegment> segmentsToCheck = new ArrayList<>(CommitLog.instance.segmentManager.getActiveSegments());
+        List<CommitLogSegment> segmentsToCheck = new ArrayList<>(CommitLog.instance.getSegmentManager().getActiveSegments());
         // remove the last, potentially active segment from the check
         if (!segmentsToCheck.isEmpty())
             segmentsToCheck.remove(segmentsToCheck.size() - 1);
@@ -101,7 +101,7 @@ public class CommitlogShutdownTest
         {
             Assert.assertFalse("An unused segment is left after drain: " + segment.getName()
                                + ", dirty tables: " + segment.dirtyString()
-                               + ", total segments: " + CommitLog.instance.segmentManager.getActiveSegments().size()
+                               + ", total segments: " + CommitLog.instance.getSegmentManager().getActiveSegments().size()
                                + ", commit log files: " + Arrays.toString(DatabaseDescriptor.getCommitLogLocation().tryList()),
                                segment.isUnused());
         }
