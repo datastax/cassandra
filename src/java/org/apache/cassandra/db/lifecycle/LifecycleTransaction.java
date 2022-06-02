@@ -18,13 +18,7 @@
 package org.apache.cassandra.db.lifecycle;
 
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiPredicate;
 
@@ -269,7 +263,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         accumulate = tracker.updateSizeTracking(logged.obsolete, logged.update, accumulate);
         accumulate = runOnCommitHooks(accumulate);
         accumulate = release(selfRefs(logged.obsolete), accumulate);
-        accumulate = tracker.notifySSTablesChanged(originals, logged.update, log.opType(), accumulate);
+        accumulate = tracker.notifySSTablesChanged(originals, logged.update, log.opType(), Optional.of(log.id()), accumulate);
 
         return accumulate;
     }
@@ -302,7 +296,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         List<SSTableReader> restored = restoreUpdatedOriginals();
         List<SSTableReader> invalid = Lists.newArrayList(Iterables.concat(logged.update, logged.obsolete));
         accumulate = tracker.apply(updateLiveSet(logged.update, restored), accumulate);
-        accumulate = tracker.notifySSTablesChanged(invalid, restored, OperationType.COMPACTION, accumulate);
+        accumulate = tracker.notifySSTablesChanged(invalid, restored, OperationType.COMPACTION, Optional.of(log.id()), accumulate);
         // setReplaced immediately preceding versions that have not been obsoleted
         accumulate = setReplaced(logged.update, accumulate);
         accumulate = runOnAbortooks(accumulate);
