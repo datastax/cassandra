@@ -23,7 +23,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 
 import org.apache.cassandra.dht.LocalPartitioner;
@@ -75,9 +74,8 @@ import static com.google.common.base.Preconditions.checkState;
 
 public class Verifier implements Closeable
 {
-    private final ColumnFamilyStore cfs;
+    private final @Nullable CompactionRealm realm;
     private final SSTableReader sstable;
-    private final @Nullable Tracker tracker;
 
     private final ReadWriteLock fileAccessLock;
     private final RandomAccessReader dataFile;
@@ -121,18 +119,17 @@ public class Verifier implements Closeable
         this(null, sstable, outputHandler, isOffline, options);
     }
 
-    public Verifier(@Nullable ColumnFamilyStore cfs, SSTableReader sstable, boolean isOffline, Options options)
+    public Verifier(@Nullable CompactionRealm realm, SSTableReader sstable, boolean isOffline, Options options)
     {
-        this(cfs, sstable, new OutputHandler.LogOutput(), isOffline, options);
+        this(realm, sstable, new OutputHandler.LogOutput(), isOffline, options);
     }
 
-    public Verifier(@Nullable ColumnFamilyStore cfs, SSTableReader sstable, OutputHandler outputHandler, boolean isOffline, Options options)
+    public Verifier(@Nullable CompactionRealm realm, SSTableReader sstable, OutputHandler outputHandler, boolean isOffline, Options options)
     {
-        checkArgument(!options.mutateRepairStatus || cfs != null,
-                      "Column family store must be provided with option mutateRepairStatus=true");
+        checkArgument(!options.mutateRepairStatus || realm != null,
+                      "Compaction realm must be provided with option mutateRepairStatus=true");
 
-        this.tracker = cfs != null ? cfs.getTracker() : null;
-        this.cfs = cfs;
+        this.realm = realm;
         this.sstable = sstable;
         this.outputHandler = outputHandler;
 
@@ -213,12 +210,12 @@ public class Verifier implements Closeable
             markAndThrow(t);
         }
 
-        if (options.checkOwnsTokens && !isOffline && !(cfs.getPartitioner() instanceof LocalPartitioner))
+        if (options.checkOwnsTokens && !isOffline && !(realm.getPartitioner() instanceof LocalPartitioner))
         {
             outputHandler.debug("Checking that all tokens are owned by the current node");
             try (KeyIterator iter = KeyIterator.forSSTable(sstable))
             {
-                List<Range<Token>> ownedRanges = Range.normalize(tokenLookup.apply(cfs.metadataRef().keyspace));
+                List<Range<Token>> ownedRanges = Range.normalize(tokenLookup.apply(realm.metadataRef().keyspace));
                 if (ownedRanges.isEmpty())
                     return;
                 RangeOwnHelper rangeOwnHelper = new RangeOwnHelper(ownedRanges);
@@ -276,7 +273,7 @@ public class Verifier implements Closeable
                 markAndThrow(new RuntimeException("First row position from index != 0: " + indexIterator.dataPosition()));
 
             List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(
-            cfs.metadata().keyspace));
+            realm.metadata().keyspace));
             RangeOwnHelper rangeOwnHelper = new RangeOwnHelper(ownedRanges);
             DecoratedKey prevKey = null;
 
@@ -300,7 +297,7 @@ public class Verifier implements Closeable
                     // check for null key below
                 }
 
-                if (options.checkOwnsTokens && !ownedRanges.isEmpty() && !(cfs.getPartitioner() instanceof LocalPartitioner))
+                if (options.checkOwnsTokens && !ownedRanges.isEmpty() && !(realm.getPartitioner() instanceof LocalPartitioner))
                 {
                     try
                     {
@@ -451,11 +448,11 @@ public class Verifier implements Closeable
     private void deserializeIndexSummary(SSTableReader sstable) throws IOException
     {
         File file = sstable.descriptor.fileFor(Component.SUMMARY);
-        TableMetadata metadata = cfs.metadata();
+        TableMetadata metadata = realm.metadata();
         try (DataInputStream iStream = new DataInputStream(Files.newInputStream(file.toPath())))
         {
             try (IndexSummary indexSummary = IndexSummary.serializer.deserialize(iStream,
-                                                                                 cfs.getPartitioner(),
+                                                                                 realm.getPartitioner(),
                                                                                  metadata.params.minIndexInterval,
                                                                                  metadata.params.maxIndexInterval))
             {
@@ -505,10 +502,10 @@ public class Verifier implements Closeable
     {
         if (mutateRepaired && options.mutateRepairStatus) // if we are able to mutate repaired flag, an incremental repair should be enough
         {
-            checkState(tracker != null, "Cannot mutate repair status as data tracker is null");
+            checkState(realm != null, "Cannot mutate repair status as compaction realm is null");
             try
             {
-                cfs.mutateRepairedWithLock(ImmutableList.of(sstable), ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getPendingRepair(), sstable.isTransient());
+                realm.mutateRepairedWithLock(ImmutableList.of(sstable), ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getPendingRepair(), sstable.isTransient());
             }
             catch(IOException ioe)
             {
