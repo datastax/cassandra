@@ -21,19 +21,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -1368,7 +1356,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
             if (memtable.isClean() || truncate)
             {
-                cfs.replaceFlushed(memtable, Collections.emptyList());
+                cfs.replaceFlushed(memtable, Collections.emptyList(), Optional.empty());
                 reclaim(memtable);
                 return Collections.emptyList();
             }
@@ -1478,8 +1466,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                         }
                     }
                 }
+
+                cfs.replaceFlushed(memtable, sstables, Optional.of(txn.opId()));
             }
-            cfs.replaceFlushed(memtable, sstables);
             reclaim(memtable);
             cfs.strategyFactory.getCompactionLogger().flush(sstables);
             logger.debug("Flushed to {} ({} sstables, {}), biggest {}, smallest {}",
@@ -1879,9 +1868,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         maybeFail(data.dropSSTables(Predicates.in(sstables), compactionType, null));
     }
 
-    void replaceFlushed(Memtable memtable, Collection<SSTableReader> sstables)
+    void replaceFlushed(Memtable memtable, Collection<SSTableReader> sstables, Optional<TimeUUID> operationId)
     {
-        data.replaceFlushed(memtable, sstables);
+        data.replaceFlushed(memtable, sstables, operationId);
         if (sstables != null && !sstables.isEmpty())
             CompactionManager.instance.submitBackground(this);
     }
