@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -161,7 +162,8 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         SSTableListChangedNotification notification;
         notification = new SSTableListChangedNotification(Collections.singleton(sstable1),
                                                           Collections.emptyList(),
-                                                          OperationType.COMPACTION);
+                                                          OperationType.COMPACTION,
+                                                          Optional.empty());
         compactionStrategyContainer.handleNotification(notification, cfs.getTracker());
 
         Assert.assertFalse(repairedContains(sstable1));
@@ -176,7 +178,8 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
         // remove and add
         notification = new SSTableListChangedNotification(Collections.singleton(sstable2),
                                                           Collections.singleton(sstable1),
-                                                          OperationType.COMPACTION);
+                                                          OperationType.COMPACTION,
+                                                          Optional.empty());
         compactionStrategyContainer.handleNotification(notification, cfs.getTracker());
 
         Assert.assertFalse(repairedContains(sstable1));
