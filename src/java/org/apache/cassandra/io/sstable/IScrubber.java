@@ -18,16 +18,18 @@
 
 package org.apache.cassandra.io.sstable;
 
+import java.util.List;
 import java.util.StringJoiner;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.db.compaction.TableOperation;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Closeable;
 
 public interface IScrubber extends Closeable
 {
-    void scrub();
+    List<SSTableReader> scrub();
 
     void close();
 
@@ -46,12 +48,14 @@ public interface IScrubber extends Closeable
         public final int goodPartitions;
         public final int badPartitions;
         public final int emptyPartitions;
+        public final List<SSTableReader> scrubbed;
 
-        public ScrubResult(int goodPartitions, int badPartitions, int emptyPartitions)
+        public ScrubResult(int goodPartitions, int badPartitions, int emptyPartitions, List<SSTableReader> scrubbed)
         {
             this.goodPartitions = goodPartitions;
             this.badPartitions = badPartitions;
             this.emptyPartitions = emptyPartitions;
+            this.scrubbed = scrubbed;
         }
     }
 
