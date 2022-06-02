@@ -24,6 +24,7 @@ import javax.annotation.Nullable;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.TimeUUID;
 
 /**
  * Notification sent after SSTables are added to their {@link org.apache.cassandra.db.ColumnFamilyStore}.
@@ -40,6 +41,9 @@ public class SSTableAddedNotification implements INotification
     /** The type of operation that created the sstables */
     public final OperationType operationType;
 
+    /** The id of the operation that created the sstables, if available */
+    public final Optional<TimeUUID> operationId;
+
     /**
      * Creates a new {@code SSTableAddedNotification} for the specified SSTables and optional memtable using
      * an unknown operation type.
@@ -50,7 +54,7 @@ public class SSTableAddedNotification implements INotification
      */
     public SSTableAddedNotification(Iterable<SSTableReader> added, @Nullable Memtable memtable)
     {
-        this(added, memtable, OperationType.UNKNOWN);
+        this(added, memtable, OperationType.UNKNOWN, Optional.empty());
     }
 
     /**
@@ -61,11 +65,12 @@ public class SSTableAddedNotification implements INotification
      *                 or {@code null} if they don't come from a flush
      * @param operationType the type of operation that created the sstables
      */
-    public SSTableAddedNotification(Iterable<SSTableReader> added, @Nullable Memtable memtable, OperationType operationType)
+    public SSTableAddedNotification(Iterable<SSTableReader> added, @Nullable Memtable memtable, OperationType operationType, Optional<TimeUUID> operationId)
     {
         this.added = added;
         this.memtable = memtable;
         this.operationType = operationType;
+        this.operationId = operationId;
     }
 
     /**
