@@ -37,6 +37,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -1551,7 +1552,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      * and stash a reference to it to be released when they are. Once all such references are
      * released, this shared tidy will be performed.
      */
-    static final class GlobalTidy implements RefCounted.Tidy
+    public static final class GlobalTidy implements RefCounted.Tidy
     {
         static final WeakReference<ScheduledFuture<?>> NULL = new WeakReference<>(null);
         // keyed by descriptor, mapping to the shared GlobalTidy for that descriptor
@@ -1618,7 +1619,26 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
             }
         }
 
-        @Override
+        /**
+         * Used by CNDB RepairRemoteStorageHandler to abort existing tidier before reloading sstable with orphan reference
+         *
+         * @return sstable reader tidier if exists
+         */
+        @Nullable
+        public AbstractLogTransaction.ReaderTidier getTidier()
+        {
+            return obsoletion;
+        }
+
+        /**
+         * Used by CNDB RepairRemoteStorageHandler to reset reader tidier before reloading sstable with orphan reference
+         * @param tidier new reader tidier for the global tidy. could be null
+         */
+        public void setTidier(@Nullable AbstractLogTransaction.ReaderTidier tidier)
+        {
+            this.obsoletion = tidier;
+        }
+
         public void tidy()
         {
             // Before proceeding with lookup.remove(desc) and with the tidier,

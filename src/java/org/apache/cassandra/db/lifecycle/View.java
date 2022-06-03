@@ -30,6 +30,9 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
@@ -61,6 +64,8 @@ import static org.apache.cassandra.db.lifecycle.Helpers.replace;
  */
 public class View
 {
+    private static final Logger logger = LoggerFactory.getLogger(View.class);
+
     /**
      * ordinarily a list of size 1, but when preparing to flush will contain both the memtable we will flush
      * and the new replacement memtable, until all outstanding write operations on the old table complete.
@@ -287,7 +292,11 @@ public class View
             {
                 for (SSTableReader reader : readers)
                     if (view.compacting.contains(reader) || view.sstablesMap.get(reader) != reader || reader.isMarkedCompacted())
+                    {
+                        logger.debug("Refusing to compact {}, already compacting={}, suspect={}, compacted={}", reader,
+                                     view.compacting.contains(reader), reader.isMarkedSuspect(), reader.isMarkedCompacted());
                         return false;
+                    }
                 return true;
             }
         };
