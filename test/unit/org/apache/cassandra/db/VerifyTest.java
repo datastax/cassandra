@@ -36,6 +36,8 @@ import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.batchlog.Batch;
@@ -54,6 +56,7 @@ import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
@@ -63,8 +66,10 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.UUIDGen;
 
 import static org.apache.cassandra.SchemaLoader.counterCFMD;
@@ -758,6 +763,34 @@ public class VerifyTest
         }
     }
 
+    @Test
+    public void testVerifyWithoutRealm()
+    {
+        CompactionManager.instance.disableAutoCompaction();
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF3);
+
+        fillCF(cfs, 2);
+
+        Descriptor descriptor = cfs.getLiveSSTables().iterator().next().getDescriptor();
+        SSTableReader sstable = descriptor.getFormat()
+                                          .getReaderFactory()
+                                          .openNoValidation(descriptor,
+                                                            SSTableReader.componentsFor(descriptor),
+                                                            TableMetadataRef.forOfflineTools(cfs.metadata()));
+
+        try (Verifier verifier = new Verifier(sstable,
+                                              new OutputHandler.CustomLogOutput(LoggerFactory.getLogger(Verifier.class)),
+                                              true,
+                                              Verifier.options().invokeDiskFailurePolicy(true).build()))
+        {
+            verifier.verify();
+        }
+        catch (CorruptSSTableException err)
+        {
+            fail("Unexpected CorruptSSTableException");
+        }
+    }
 
 
     private DecoratedKey dk(long l)
