@@ -66,6 +66,7 @@ public enum OperationType
     // operations used for sstables on remote storage
     REMOTE_RELOAD("Remote reload", false, 6, true), // reload locally sstables that already exist remotely
     REMOTE_COMPACTION("Remote compaction", false, 6, true), // no longer used, kept for backward compatibility
+    REMOTE_RELOAD_FOR_REPAIR("Remote reload for repair", false, 6, true, false), // reload locally sstables that already exist remotely for repair
     TRUNCATE_TABLE("Table truncated", false, 6),
     DROP_TABLE("Table dropped", false, 6),
     REMOVE_UNREADEABLE("Remove unreadable sstables", false, 6),
@@ -78,6 +79,8 @@ public enum OperationType
     public final String fileName;
     /** true if the transaction of this type should NOT be uploaded remotely */
     public final boolean localOnly;
+    /** true if the transaction should remove unfinished leftovers for CNDB */
+    public final boolean removeTransactionLeftovers;
 
     /**
      * For purposes of calculating space for interim compactions in flight, whether or not this OperationType is expected
@@ -98,11 +101,17 @@ public enum OperationType
 
     OperationType(String type, boolean writesData, int priority, boolean localOnly)
     {
+        this(type, writesData, priority, localOnly, true);
+    }
+
+    OperationType(String type, boolean writesData, int priority, boolean localOnly, boolean removeTransactionLeftovers)
+    {
         this.type = type;
         this.fileName = type.toLowerCase().replace(" ", "");
         this.writesData = writesData;
         this.priority = priority;
         this.localOnly = localOnly;
+        this.removeTransactionLeftovers = removeTransactionLeftovers;
     }
 
     public static OperationType fromFileName(String fileName)
