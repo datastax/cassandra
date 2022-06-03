@@ -215,6 +215,11 @@ public class StreamPlan
         return coordinator.getPendingRepair();
     }
 
+    public TimeUUID getPlanId()
+    {
+        return planId;
+    }
+
     public boolean getFlushBeforeTransfer()
     {
         return flushBeforeTransfer;
