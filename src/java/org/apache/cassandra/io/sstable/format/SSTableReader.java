@@ -45,7 +45,6 @@ import java.util.stream.Collector;
 import javax.annotation.Nonnull;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.RateLimiter;
@@ -138,7 +137,6 @@ import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;

@@ -448,11 +448,11 @@ public class Verifier implements Closeable
     private void deserializeIndexSummary(SSTableReader sstable) throws IOException
     {
         File file = sstable.descriptor.fileFor(Component.SUMMARY);
-        TableMetadata metadata = realm.metadata();
+        TableMetadata metadata = sstable.metadata();
         try (DataInputStream iStream = new DataInputStream(Files.newInputStream(file.toPath())))
         {
             try (IndexSummary indexSummary = IndexSummary.serializer.deserialize(iStream,
-                                                                                 realm.getPartitioner(),
+                                                                                 sstable.getPartitioner(),
                                                                                  metadata.params.minIndexInterval,
                                                                                  metadata.params.maxIndexInterval))
             {

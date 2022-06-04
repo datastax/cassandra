@@ -41,7 +41,7 @@ public interface OutputHandler
 
     public static class LogOutput implements OutputHandler
     {
-        private static Logger LOGGER_LOGOUTPUT = LoggerFactory.getLogger(LogOutput.class);
+        private static final Logger LOGGER_LOGOUTPUT = LoggerFactory.getLogger(LogOutput.class);
 
         private final Logger logger;
 

@@ -24,15 +24,19 @@ import java.io.RandomAccessFile;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
 
 import com.google.common.base.Charsets;
 import org.apache.commons.lang3.StringUtils;
+import org.junit.After;
 import org.junit.Assume;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -111,6 +115,8 @@ public class VerifyTest
     public static final String CF_UUID = "UUIDKeys";
     public static final String BF_ALWAYS_PRESENT = "BfAlwaysPresent";
 
+    private String savedProp;
+
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
@@ -138,6 +144,18 @@ public class VerifyTest
                        standardCFMD(KEYSPACE, BF_ALWAYS_PRESENT).bloomFilterFpChance(1.0));
     }
 
+    @Before
+    public void before() {
+        savedProp = System.getProperty(SSTableFormat.FORMAT_DEFAULT_PROP);
+    }
+
+    @After
+    public void after() {
+        if (savedProp == null)
+            System.getProperties().remove(SSTableFormat.FORMAT_DEFAULT_PROP);
+        else
+            System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, savedProp);
+    }
 
     @Test
     public void testVerifyCorrect()
@@ -768,11 +786,42 @@ public class VerifyTest
     {
         CompactionManager.instance.disableAutoCompaction();
         Keyspace keyspace = Keyspace.open(KEYSPACE);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF3);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
 
         fillCF(cfs, 2);
 
         Descriptor descriptor = cfs.getLiveSSTables().iterator().next().getDescriptor();
+        SSTableReader sstable = descriptor.getFormat()
+                                          .getReaderFactory()
+                                          .openNoValidation(descriptor,
+                                                            SSTableReader.componentsFor(descriptor),
+                                                            TableMetadataRef.forOfflineTools(cfs.metadata()));
+
+        try (Verifier verifier = new Verifier(sstable,
+                                              true,
+                                              Verifier.options().invokeDiskFailurePolicy(true).build()))
+        {
+            verifier.verify();
+        }
+        catch (CorruptSSTableException err)
+        {
+            fail("Unexpected CorruptSSTableException");
+        }
+    }
+
+    @Test
+    public void testVerifyWithoutRealmMismatch()
+    {
+        System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, SSTableFormat.Type.BIG.name);
+        CompactionManager.instance.disableAutoCompaction();
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
+
+        fillCF(cfs, 2);
+
+        Collection<SSTableReader> sstables = SSTableReader.selectOnlyBigTableReaders(cfs.getLiveSSTables(), Collectors.toList());
+        assertEquals(1, sstables.size());
+        Descriptor descriptor = sstables.iterator().next().getDescriptor();
         SSTableReader sstable = descriptor.getFormat()
                                           .getReaderFactory()
                                           .openNoValidation(descriptor,
