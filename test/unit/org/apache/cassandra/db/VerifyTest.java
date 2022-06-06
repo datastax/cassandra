@@ -24,11 +24,10 @@ import java.io.RandomAccessFile;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
-import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
 
@@ -63,6 +62,8 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
@@ -70,7 +71,6 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.OutputHandler;
@@ -84,6 +84,7 @@ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -145,12 +146,14 @@ public class VerifyTest
     }
 
     @Before
-    public void before() {
+    public void before()
+    {
         savedProp = System.getProperty(SSTableFormat.FORMAT_DEFAULT_PROP);
     }
 
     @After
-    public void after() {
+    public void after()
+    {
         if (savedProp == null)
             System.getProperties().remove(SSTableFormat.FORMAT_DEFAULT_PROP);
         else
@@ -782,7 +785,7 @@ public class VerifyTest
     }
 
     @Test
-    public void testVerifyWithoutRealm()
+    public void testVerifyWithoutRealmBTI()
     {
         CompactionManager.instance.disableAutoCompaction();
         Keyspace keyspace = Keyspace.open(KEYSPACE);
@@ -791,15 +794,16 @@ public class VerifyTest
         fillCF(cfs, 2);
 
         Descriptor descriptor = cfs.getLiveSSTables().iterator().next().getDescriptor();
-        SSTableReader sstable = descriptor.getFormat()
-                                          .getReaderFactory()
-                                          .openNoValidation(descriptor,
-                                                            SSTableReader.componentsFor(descriptor),
-                                                            TableMetadataRef.forOfflineTools(cfs.metadata()));
+        Set<Component> components = SSTableReader.componentsFor(descriptor);
+        SSTableFormat trieFormat = descriptor.getFormat();
+        SSTableReader.Factory readerFactory = trieFormat.getReaderFactory();
 
-        try (Verifier verifier = new Verifier(sstable,
-                                              true,
-                                              Verifier.options().invokeDiskFailurePolicy(true).build()))
+        assertTrue(trieFormat instanceof TrieIndexFormat);
+
+        SSTableReader sstable = readerFactory.openNoValidation(descriptor, components, cfs.metadata);
+        Verifier.Options options = Verifier.options().invokeDiskFailurePolicy(true).build();
+
+        try (Verifier verifier = new Verifier(sstable, true, options))
         {
             verifier.verify();
         }
@@ -810,7 +814,7 @@ public class VerifyTest
     }
 
     @Test
-    public void testVerifyWithoutRealmMismatch()
+    public void testVerifyWithoutRealmBIG()
     {
         System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, SSTableFormat.Type.BIG.name);
         CompactionManager.instance.disableAutoCompaction();
@@ -819,19 +823,18 @@ public class VerifyTest
 
         fillCF(cfs, 2);
 
-        Collection<SSTableReader> sstables = SSTableReader.selectOnlyBigTableReaders(cfs.getLiveSSTables(), Collectors.toList());
-        assertEquals(1, sstables.size());
-        Descriptor descriptor = sstables.iterator().next().getDescriptor();
-        SSTableReader sstable = descriptor.getFormat()
-                                          .getReaderFactory()
-                                          .openNoValidation(descriptor,
-                                                            SSTableReader.componentsFor(descriptor),
-                                                            TableMetadataRef.forOfflineTools(cfs.metadata()));
+        Descriptor descriptor = cfs.getLiveSSTables().iterator().next().getDescriptor();
+        Set<Component> components = SSTableReader.componentsFor(descriptor);
+        SSTableFormat bigFormat = descriptor.getFormat();
+        SSTableReader.Factory readerFactory = bigFormat.getReaderFactory();
 
-        try (Verifier verifier = new Verifier(sstable,
-                                              new OutputHandler.CustomLogOutput(LoggerFactory.getLogger(Verifier.class)),
-                                              true,
-                                              Verifier.options().invokeDiskFailurePolicy(true).build()))
+        assertTrue(bigFormat instanceof BigFormat);
+
+        SSTableReader sstable = readerFactory.openNoValidation(descriptor, components, cfs.metadata);
+        OutputHandler.CustomLogOutput handler = new OutputHandler.CustomLogOutput(LoggerFactory.getLogger(Verifier.class));
+        Verifier.Options options = Verifier.options().invokeDiskFailurePolicy(true).build();
+
+        try (Verifier verifier = new Verifier(sstable, handler, true, options))
         {
             verifier.verify();
         }
@@ -839,6 +842,24 @@ public class VerifyTest
         {
             fail("Unexpected CorruptSSTableException");
         }
+    }
+
+    @Test
+    public void testVerifierIllegalArgument()
+    {
+        CompactionManager.instance.disableAutoCompaction();
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
+
+        fillCF(cfs, 2);
+
+        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+
+        // Check that is not possible to create a Verifier without passing a ColumnFamilyStore
+        // if mutateRepairStatus is true.
+        Verifier.Options optionsRepairTrue = Verifier.options().mutateRepairStatus(true).build();
+        assertThrows(IllegalArgumentException.class,
+                     () -> new Verifier(sstable, false, optionsRepairTrue));
     }
 
 
