@@ -1902,7 +1902,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     }
 
     /**
-     * Returns a new verifier for this sstable. Note that the reader must match the provided cfs.
+     * Returns a new verifier for this sstable. Note that the reader must match the provided cfs unless cfs is null.
      */
     public abstract IVerifier getVerifier(ColumnFamilyStore cfs,
                                           OutputHandler outputHandler,
