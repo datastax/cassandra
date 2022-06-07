@@ -82,6 +82,7 @@ import static org.apache.cassandra.SchemaLoader.standardCFMD;
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -115,6 +116,8 @@ public class VerifyTest
     public static final String CF_UUID = "UUIDKeys";
     public static final String BF_ALWAYS_PRESENT = "BfAlwaysPresent";
 
+    private String savedProp;
+
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
@@ -141,7 +144,6 @@ public class VerifyTest
                        standardCFMD(KEYSPACE, CF_UUID, 0, UUIDType.instance),
                        standardCFMD(KEYSPACE, BF_ALWAYS_PRESENT).bloomFilterFpChance(1.0));
     }
-
 
     @Test
     public void testVerifyCorrect()
@@ -778,6 +780,46 @@ public class VerifyTest
         }
     }
 
+    @Test
+    public void testVerifyWithoutRealm()
+    {
+        CompactionManager.instance.disableAutoCompaction();
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
+
+        fillCF(cfs, 2);
+
+        Descriptor descriptor = cfs.getLiveSSTables().iterator().next().getDescriptor();
+        SSTableReader sstable = SSTableReader.openNoValidation(null, descriptor, cfs.metadata);
+        IVerifier.Options options = IVerifier.options().invokeDiskFailurePolicy(true).build();
+
+        try (IVerifier verifier = sstable.getVerifier(null, new OutputHandler.LogOutput(logger), true, options))
+        {
+            verifier.verify();
+        }
+        catch (CorruptSSTableException err)
+        {
+            fail("Unexpected CorruptSSTableException");
+        }
+    }
+
+    @Test
+    public void testVerifierIllegalArgument()
+    {
+        CompactionManager.instance.disableAutoCompaction();
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
+
+        fillCF(cfs, 2);
+
+        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+
+        // Check that is not possible to create a Verifier without passing a ColumnFamilyStore
+        // if mutateRepairStatus is true.
+        IVerifier.Options options = IVerifier.options().mutateRepairStatus(true).build();
+        assertThrows(IllegalArgumentException.class,
+                     () -> sstable.getVerifier(null, new OutputHandler.LogOutput(logger), false, options));
+    }
 
     private DecoratedKey dk(long l)
     {
