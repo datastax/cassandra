@@ -190,11 +190,11 @@ public class CounterMutation implements IMutation
         applyCounterMutation();
     }
 
-    private int getNrLocks(Iterable<Lock> locks)
+    private int countDistinctLocks(Iterable<Lock> sortedLocks)
     {
         Lock prev = null;
         int counter = 0;
-        for(Lock l: locks)
+        for(Lock l: sortedLocks)
         {
             if (prev != l)
                 counter++;
@@ -209,31 +209,41 @@ public class CounterMutation implements IMutation
         long startTime = System.nanoTime();
 
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
-        Iterable<Lock> iterableLocks = LOCKS.bulkGet(getCounterLockKeys());
-        locksPerUpdate.update(getNrLocks(iterableLocks));
-        for (Lock lock : iterableLocks)
+        Iterable<Lock> sortedLocks = LOCKS.bulkGet(getCounterLockKeys());
+        locksPerUpdate.update(countDistinctLocks(sortedLocks));
+
+        try
         {
-            long timeout = getTimeout(NANOSECONDS) - (System.nanoTime() - startTime);
-            try
+            for (Lock lock : sortedLocks)
             {
-                if (!lock.tryLock(timeout, NANOSECONDS))
-                    handleLockTimeoutAndThrow(replicationStrategy, startTime);
-                locks.add(lock);
-            }
-            catch (InterruptedException e)
-            {
-                handleLockTimeoutAndThrow(replicationStrategy, startTime);
+                long timeout = getTimeout(NANOSECONDS) - (System.nanoTime() - startTime);
+                try
+                {
+                    if (!lock.tryLock(timeout, NANOSECONDS))
+                        handleLockTimeoutAndThrow(replicationStrategy);
+                    locks.add(lock);
+                }
+                catch (InterruptedException e)
+                {
+                    handleLockTimeoutAndThrow(replicationStrategy);
+                }
             }
         }
-        lockAcquireTime.addNano(System.nanoTime() - startTime);
+        finally
+        {
+            lockAcquireTime.addNano(System.nanoTime() - startTime);
+        }
     }
 
-    private void handleLockTimeoutAndThrow(AbstractReplicationStrategy replicationStrategy, long startTime)
+    private void handleLockTimeoutAndThrow(AbstractReplicationStrategy replicationStrategy)
     {
-        lockAcquireTime.addNano(System.nanoTime() - startTime);
         lockTimeout.inc();
-        nospamLogger.error(LOCK_TIMEOUT_MESSAGE, getKeyspaceName(), DatabaseDescriptor.getCounterWriteRpcTimeout(MILLISECONDS));
+
+        nospamLogger.error(LOCK_TIMEOUT_MESSAGE,
+                           getKeyspaceName(),
+                           DatabaseDescriptor.getCounterWriteRpcTimeout(MILLISECONDS));
         Tracing.trace(LOCK_TIMEOUT_TRACE, DatabaseDescriptor.getCounterWriteRpcTimeout(MILLISECONDS));
+
         throw new WriteTimeoutException(WriteType.COUNTER, consistency(), 0, consistency().blockFor(replicationStrategy));
     }
 

@@ -145,25 +145,26 @@ public class BatchMetricsTest extends SchemaLoader
         for (int ix = 0; ix < rounds.length; ix++)
         {
             long partitionsPerLoggedBatchCountPre = metrics.partitionsPerLoggedBatch.getCount();
-            long columnsPerLoggedBatchCountPre = metrics.columnsPerLoggedBatch.getCount();
             long expectedPartitionsPerLoggedBatchCount = partitionsPerLoggedBatchCountPre + (batchTypeTested == BatchStatement.Type.LOGGED ? 1 : 0);
-            long expectedColumnsPerLoggedBatchCount = columnsPerLoggedBatchCountPre + (batchTypeTested == BatchStatement.Type.LOGGED ? 1 : 0);
             long partitionsPerUnloggedBatchCountPre = metrics.partitionsPerUnloggedBatch.getCount();
-            long columnsPerUnloggedBatchCountPre = metrics.columnsPerUnloggedBatch.getCount();
             long expectedPartitionsPerUnloggedBatchCount = partitionsPerUnloggedBatchCountPre + (batchTypeTested == BatchStatement.Type.UNLOGGED ? 1 : 0);
-            long expectedColumnsPerUnloggedBatchCount = columnsPerUnloggedBatchCountPre + (batchTypeTested == BatchStatement.Type.UNLOGGED ? 1 : 0);
             long partitionsPerCounterBatchCountPre = metrics.partitionsPerCounterBatch.getCount();
-            long columnsPerCounterBatchCountPre = metrics.columnsPerCounterBatch.getCount();
             long expectedPartitionsPerCounterBatchCount = partitionsPerCounterBatchCountPre + (batchTypeTested == BatchStatement.Type.COUNTER ? 1 : 0);
+
+            long columnsPerLoggedBatchCountPre = metrics.columnsPerLoggedBatch.getCount();
+            long expectedColumnsPerLoggedBatchCount = columnsPerLoggedBatchCountPre + (batchTypeTested == BatchStatement.Type.LOGGED ? 1 : 0);
+            long columnsPerUnloggedBatchCountPre = metrics.columnsPerUnloggedBatch.getCount();
+            long expectedColumnsPerUnloggedBatchCount = columnsPerUnloggedBatchCountPre + (batchTypeTested == BatchStatement.Type.UNLOGGED ? 1 : 0);
+            long columnsPerCounterBatchCountPre = metrics.columnsPerCounterBatch.getCount();
             long expectedColumnsPerCounterBatchCount = columnsPerCounterBatchCountPre + (batchTypeTested == BatchStatement.Type.COUNTER ? 1 : 0);
 
             executeLoggerBatch(batchTypeTested, distinctPartitions, rounds[ix]);
 
             assertEquals(expectedPartitionsPerUnloggedBatchCount, metrics.partitionsPerUnloggedBatch.getCount());
-            assertEquals(expectedColumnsPerUnloggedBatchCount, metrics.columnsPerUnloggedBatch.getCount());
             assertEquals(expectedPartitionsPerLoggedBatchCount, metrics.partitionsPerLoggedBatch.getCount());
-            assertEquals(expectedColumnsPerLoggedBatchCount, metrics.columnsPerLoggedBatch.getCount());
             assertEquals(expectedPartitionsPerCounterBatchCount, metrics.partitionsPerCounterBatch.getCount());
+            assertEquals(expectedColumnsPerUnloggedBatchCount, metrics.columnsPerUnloggedBatch.getCount());
+            assertEquals(expectedColumnsPerLoggedBatchCount, metrics.columnsPerLoggedBatch.getCount());
             assertEquals(expectedColumnsPerCounterBatchCount, metrics.columnsPerCounterBatch.getCount());
 
             EstimatedHistogramReservoirSnapshot partitionsPerLoggedBatchSnapshot = (EstimatedHistogramReservoirSnapshot) metrics.partitionsPerLoggedBatch.getSnapshot();
