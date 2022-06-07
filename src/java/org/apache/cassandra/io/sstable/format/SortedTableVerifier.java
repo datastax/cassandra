@@ -31,6 +31,7 @@ import java.util.function.Function;
 import java.util.function.LongPredicate;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
@@ -56,6 +57,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -89,6 +91,8 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
 
     public SortedTableVerifier(CompactionRealm realm, R sstable, OutputHandler outputHandler, boolean isOffline, Options options)
     {
+        Preconditions.checkArgument(realm != null || !options.mutateRepairStatus);
+
         this.realm = realm;
         this.sstable = sstable;
         this.outputHandler = outputHandler;
@@ -152,7 +156,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
 
         verifyBloomFilter();
 
-        if (options.checkOwnsTokens && !isOffline && !(realm.getPartitioner() instanceof LocalPartitioner))
+        if (options.checkOwnsTokens && !isOffline && !(sstable.getPartitioner() instanceof LocalPartitioner))
         {
             if (verifyOwnedRanges() == 0)
                 return;
@@ -218,7 +222,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
         outputHandler.debug("Checking that all tokens are owned by the current node");
         try (KeyIterator iter = sstable.keyIterator())
         {
-            ownedRanges = Range.normalize(tokenLookup.apply(realm.getKeyspaceName()));
+            ownedRanges = Range.normalize(tokenLookup.apply(sstable.getKeyspaceName()));
             if (ownedRanges.isEmpty())
                 return 0;
             RangeOwnHelper rangeOwnHelper = new RangeOwnHelper(ownedRanges);
@@ -268,14 +272,13 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
     {
         outputHandler.output("Extended Verify requested, proceeding to inspect values");
 
-        try (VerifyController verifyController = new VerifyController(realm);
+        try (VerifyController verifyController = VerifyController.create(this);
              KeyReader indexIterator = sstable.keyReader())
         {
             if (indexIterator.dataPosition() != 0)
                 markAndThrow(new RuntimeException("First row position from index != 0: " + indexIterator.dataPosition()));
 
-            List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(
-            realm.metadata().keyspace));
+            List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(sstable.getKeyspaceName()));
             RangeOwnHelper rangeOwnHelper = new RangeOwnHelper(ownedRanges);
             DecoratedKey prevKey = null;
 
@@ -298,7 +301,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
                     markAndThrow(th);
                 }
 
-                if (options.checkOwnsTokens && !ownedRanges.isEmpty() && !(realm.getPartitioner() instanceof LocalPartitioner))
+                if (options.checkOwnsTokens && !ownedRanges.isEmpty() && !(sstable.getPartitioner() instanceof LocalPartitioner))
                 {
                     try
                     {
@@ -515,9 +518,22 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
 
     protected static class VerifyController extends CompactionController
     {
-        public VerifyController(CompactionRealm cfs)
+        public static VerifyController create(SortedTableVerifier<?> verifier)
         {
-            super(cfs, Integer.MAX_VALUE);
+            if (verifier.realm != null)
+                return new VerifyController(verifier.realm);
+            else
+                return new VerifyController(verifier.sstable.metadata());
+        }
+
+        public VerifyController(CompactionRealm realm)
+        {
+            super(realm, Integer.MAX_VALUE);
+        }
+
+        public VerifyController(TableMetadata metadata)
+        {
+            super(null, null, Integer.MAX_VALUE, null, metadata.params.compaction.tombstoneOption());
         }
 
         @Override
