@@ -514,7 +514,7 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
     @Override
     public IVerifier getVerifier(ColumnFamilyStore cfs, OutputHandler outputHandler, boolean isOffline, IVerifier.Options options)
     {
-        Preconditions.checkArgument(cfs.metadata().equals(metadata()));
+        Preconditions.checkArgument(cfs == null || cfs.metadata().equals(metadata()));
         return new BigTableVerifier(cfs, this, outputHandler, isOffline, options);
     }
 
