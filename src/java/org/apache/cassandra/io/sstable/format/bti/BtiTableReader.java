@@ -493,7 +493,7 @@ public class BtiTableReader extends SSTableReaderWithFilter
     @Override
     public IVerifier getVerifier(ColumnFamilyStore cfs, OutputHandler outputHandler, boolean isOffline, IVerifier.Options options)
     {
-        Preconditions.checkArgument(cfs.metadata().equals(metadata()));
+        Preconditions.checkArgument(cfs == null || cfs.metadata().equals(metadata()));
         return new BtiTableVerifier(cfs, this, outputHandler, isOffline, options);
     }
 

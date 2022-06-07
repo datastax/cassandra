@@ -57,7 +57,19 @@ public interface OutputHandler
 
     class LogOutput implements OutputHandler
     {
-        private static Logger logger = LoggerFactory.getLogger(LogOutput.class);
+        private static final Logger LOGGER_LOGOUTPUT = LoggerFactory.getLogger(LogOutput.class);
+
+        private final Logger logger;
+
+        public LogOutput(Logger logger)
+        {
+            this.logger = logger;
+        }
+
+        public LogOutput()
+        {
+            this(LOGGER_LOGOUTPUT);
+        }
 
         public void output(String msg)
         {
@@ -77,6 +89,15 @@ public interface OutputHandler
         public void warn(Throwable th, String msg)
         {
             logger.warn(msg, th);
+        }
+    }
+
+    @DseLegacy
+    class CustomLogOutput extends LogOutput
+    {
+        public CustomLogOutput(Logger customLogger)
+        {
+            super(customLogger);
         }
     }
 
