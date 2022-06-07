@@ -272,7 +272,9 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             for (int i = 0; i < expectedTs.length; i++)
             {
                 UnifiedCompactionStrategy.Bucket bucket = buckets.get(i);
-                if (bucket.sstables.size() >= expectedTs[i])
+                assertEquals(i, bucket.getIndex());
+
+                if (bucket.getSSTables().size() >= expectedTs[i])
                     assertFalse(bucket.getCompactionAggregate(entry.getKey(), Collections.EMPTY_SET, controller, dataSetSizeBytes).isEmpty());
                 else
                     assertTrue(bucket.getCompactionAggregate(entry.getKey(), Collections.EMPTY_SET, controller, dataSetSizeBytes).isEmpty());
@@ -632,6 +634,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         long topBucketMaxCompactionSize = T * topBucketMaxSstableSize;
         when(controller.getDataSetSizeBytes()).thenReturn(topBucketMaxCompactionSize * numShards);
         when(controller.random()).thenCallRealMethod();
+
+        when(controller.getOverheadSizeInBytes(any(CompactionPick.class))).thenAnswer(inv -> ((CompactionPick)inv.getArgument(0)).totSizeInBytes());
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         List<SSTableReader> allSstables = new ArrayList<>();
