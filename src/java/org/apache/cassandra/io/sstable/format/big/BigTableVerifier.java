@@ -126,7 +126,7 @@ public class BigTableVerifier extends SortedTableVerifier<BigTableReader> implem
 
     private void deserializeIndexSummary(SSTableReader sstable) throws IOException
     {
-        IndexSummaryComponent summaryComponent = IndexSummaryComponent.load(sstable.descriptor.fileFor(Components.SUMMARY), realm.metadata());
+        IndexSummaryComponent summaryComponent = IndexSummaryComponent.load(sstable.descriptor.fileFor(Components.SUMMARY), sstable.metadata());
         if (summaryComponent == null)
             throw new NoSuchFileException("Index summary component of sstable " + sstable.descriptor + " is missing");
         FileUtils.closeQuietly(summaryComponent.indexSummary);
