@@ -31,27 +31,35 @@ import static org.apache.cassandra.schema.SchemaConstants.VIRTUAL_VIEWS;
 
 public final class SystemViewsKeyspace extends VirtualKeyspace
 {
+    private static final boolean ONLY_LOCAL_AND_PEERS = Boolean.getBoolean("cassandra.system_view.only_local_and_peers_table");
+
     public static SystemViewsKeyspace instance = new SystemViewsKeyspace();
 
     private SystemViewsKeyspace()
     {
-        super(VIRTUAL_VIEWS, new ImmutableList.Builder<VirtualTable>()
-                    .add(new CachesTable(VIRTUAL_VIEWS))
-                    .add(new ClientsTable(VIRTUAL_VIEWS))
-                    .add(new SettingsTable(VIRTUAL_VIEWS))
-                    .add(new SystemPropertiesTable(VIRTUAL_VIEWS))
-                    .add(new SSTableTasksTable(VIRTUAL_VIEWS))
-                    .add(new ThreadPoolsTable(VIRTUAL_VIEWS))
-                    .add(new InternodeOutboundTable(VIRTUAL_VIEWS))
-                    .add(new InternodeInboundTable(VIRTUAL_VIEWS))
-                    .add(new SSTablesSystemView(VIRTUAL_VIEWS))
-                    .add(new SegmentsSystemView(VIRTUAL_VIEWS))
-                    .add(new IndexesSystemView(VIRTUAL_VIEWS))
-                    .add(new AnalyzerView(VIRTUAL_VIEWS))
-                    .addAll(TableMetricTables.getAll(VIRTUAL_VIEWS))
-                    .add(new LocalNodeSystemView())
-                    .add(new PeersSystemView())
-                    .add(new LegacyPeersSystemView())
-                    .build());
+        super(VIRTUAL_VIEWS, ONLY_LOCAL_AND_PEERS ?
+                             new ImmutableList.Builder<VirtualTable>()
+                             .add(new LocalNodeSystemView())
+                             .add(new PeersSystemView())
+                             .add(new LegacyPeersSystemView())
+                             .build() :
+                             new ImmutableList.Builder<VirtualTable>()
+                             .add(new CachesTable(VIRTUAL_VIEWS))
+                             .add(new ClientsTable(VIRTUAL_VIEWS))
+                             .add(new SettingsTable(VIRTUAL_VIEWS))
+                             .add(new SystemPropertiesTable(VIRTUAL_VIEWS))
+                             .add(new SSTableTasksTable(VIRTUAL_VIEWS))
+                             .add(new ThreadPoolsTable(VIRTUAL_VIEWS))
+                             .add(new InternodeOutboundTable(VIRTUAL_VIEWS))
+                             .add(new InternodeInboundTable(VIRTUAL_VIEWS))
+                             .add(new SSTablesSystemView(VIRTUAL_VIEWS))
+                             .add(new SegmentsSystemView(VIRTUAL_VIEWS))
+                             .add(new IndexesSystemView(VIRTUAL_VIEWS))
+                             .add(new AnalyzerView(VIRTUAL_VIEWS))
+                             .addAll(TableMetricTables.getAll(VIRTUAL_VIEWS))
+                             .add(new LocalNodeSystemView())
+                             .add(new PeersSystemView())
+                             .add(new LegacyPeersSystemView())
+                             .build());
     }
 }
