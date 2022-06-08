@@ -45,11 +45,12 @@ import org.apache.cassandra.schema.TableMetadata;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-public class CounterMutationMetricsTest {
+public class CounterMutationMetricsTest
+{
     private static final String KEYSPACE1 = "CounterMutationMetricsTest";
     private static final String CF1 = "Counter1";
     private static final String CF2 = "Counter2";
-    private static final long LOCKTIMEOUTMILIS = DatabaseDescriptor.getCounterWriteRpcTimeout(TimeUnit.MILLISECONDS);
+    private static final long LOCK_TIMEOUT_MILLIS = DatabaseDescriptor.getCounterWriteRpcTimeout(TimeUnit.MILLISECONDS);
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
@@ -65,8 +66,8 @@ public class CounterMutationMetricsTest {
     public void after()
     {
         long currentTimeout = DatabaseDescriptor.getCounterWriteRpcTimeout(TimeUnit.MILLISECONDS);
-        if (currentTimeout != LOCKTIMEOUTMILIS)
-            DatabaseDescriptor.setCounterWriteRpcTimeout(LOCKTIMEOUTMILIS);
+        if (currentTimeout != LOCK_TIMEOUT_MILLIS)
+            DatabaseDescriptor.setCounterWriteRpcTimeout(LOCK_TIMEOUT_MILLIS);
     }
 
     @Test
@@ -163,7 +164,7 @@ public class CounterMutationMetricsTest {
 
         public AssertMetrics()
         {
-            this(LOCKTIMEOUTMILIS);
+            this(LOCK_TIMEOUT_MILLIS);
         }
 
         public AssertMetrics(long timeoutInMilis)
@@ -173,7 +174,7 @@ public class CounterMutationMetricsTest {
             prevMaxLockAcquireTime = CounterMutation.lockAcquireTime.latency.getSnapshot().getMax();
 
             this.lockTimeoutMilis = timeoutInMilis;
-            if (timeoutInMilis != LOCKTIMEOUTMILIS)
+            if (timeoutInMilis != LOCK_TIMEOUT_MILLIS)
                 DatabaseDescriptor.setCounterWriteRpcTimeout(lockTimeoutMilis);
         }
 
