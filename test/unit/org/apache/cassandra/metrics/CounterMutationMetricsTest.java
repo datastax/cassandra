@@ -50,7 +50,7 @@ public class CounterMutationMetricsTest
     private static final String KEYSPACE1 = "CounterMutationMetricsTest";
     private static final String CF1 = "Counter1";
     private static final String CF2 = "Counter2";
-    private static final long LOCK_TIMEOUT_MILLIS = DatabaseDescriptor.getCounterWriteRpcTimeout(TimeUnit.MILLISECONDS);
+    private static long LOCK_TIMEOUT_MILLIS;
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
@@ -60,6 +60,7 @@ public class CounterMutationMetricsTest
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.counterCFMD(KEYSPACE1, CF1),
                                     SchemaLoader.counterCFMD(KEYSPACE1, CF2));
+        LOCK_TIMEOUT_MILLIS = DatabaseDescriptor.getCounterWriteRpcTimeout(TimeUnit.MILLISECONDS);
     }
 
     @After
