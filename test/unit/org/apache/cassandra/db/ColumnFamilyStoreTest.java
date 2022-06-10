@@ -610,24 +610,25 @@ public class ColumnFamilyStoreTest
     @Test
     public void testInvalidateWithDropping()
     {
-        testInvalidate(true);
+        testInvalidateCFS(true);
     }
 
     @Test
     public void testInvalidateWithoutDropping()
     {
-        testInvalidate(false);
+        testInvalidateCFS(false);
     }
 
-    private void testInvalidate(boolean dropData)
+    private void testInvalidateCFS(boolean dropData)
     {
         DatabaseDescriptor.setIncrementalBackupsEnabled(false);
-        // test invalidated CFS
         ColumnFamilyStore cfs = MockSchema.newCFS();
         assertTrue(cfs.isValid());
         Tracker tracker = cfs.getTracker();
 
-        Collection<SSTableReader> readers = IntStream.range(0, 10).mapToObj(i -> MockSchema.sstable(i, 10, true, cfs)).collect(Collectors.toList());
+        Collection<SSTableReader> readers = IntStream.range(0, 10)
+                                                     .mapToObj(i -> MockSchema.sstable(i, 10, true, cfs))
+                                                     .collect(Collectors.toList());
         tracker.addInitialSSTables(readers);
         readers.forEach(reader -> assertEquals(1, reader.selfRef().globalCount()));
 
