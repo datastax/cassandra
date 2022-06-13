@@ -357,7 +357,7 @@ public class Tracker
      */
     public void unloadSSTables()
     {
-        unloadSSTables(null);
+        maybeFail(unloadSSTables(null));
     }
 
     public Throwable unloadSSTables(@Nullable Throwable accumulate)
