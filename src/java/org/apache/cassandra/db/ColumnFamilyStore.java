@@ -21,7 +21,20 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -283,7 +296,39 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     private final String mbeanName;
     @Deprecated
     private final String oldMBeanName;
-    private volatile boolean valid = true;
+
+    public enum STATUS
+    {
+        /**
+         * Initial status when CFS is created
+         */
+        VALID,
+        /**
+         * When table is invalidated with unloading data
+         */
+        INVALID_UNLOADED,
+        /**
+         * When table is invalidated with dropping data
+         */
+        INVALID_DROPPED;
+
+        /**
+         * @return true if CFS is not invalidated
+         */
+        public boolean isValid()
+        {
+            return this == VALID;
+        }
+
+        /**
+         * @return true if CFS is invalidated and sstables should be dropped locally and remotely
+         */
+        public boolean isInvalidAndShouldDropData()
+        {
+            return this == INVALID_DROPPED;
+        }
+    }
+    private volatile STATUS status = STATUS.VALID;
 
     private volatile Memtable.Factory memtableFactory;
 
@@ -779,7 +824,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public void invalidate(boolean expectMBean, boolean dropData)
     {
         // disable and cancel in-progress compactions before invalidating
-        valid = false;
+        status = dropData ? STATUS.INVALID_DROPPED : STATUS.INVALID_UNLOADED;
 
         try
         {
@@ -802,7 +847,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             SystemKeyspace.removeTruncationRecord(metadata.id);
 
         storageHandler.runWithReloadingDisabled(() -> {
-            if (dropData)
+            if (status.isInvalidAndShouldDropData())
             {
                 data.dropSSTables();
 
@@ -819,7 +864,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
             storageHandler.unload();
 
-            if (dropData)
+            if (status.isInvalidAndShouldDropData())
             {
                 LifecycleTransaction.waitForDeletions(); // just in case an index had a reference on the sstable
             }
@@ -1877,9 +1922,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public boolean isValid()
     {
-        return valid;
+        return status.isValid();
     }
 
+    /**
+     * @return status of the current column family store
+     */
+    public STATUS status()
+    {
+        return status;
+    }
+    
     /**
      * Package protected for access from the CompactionManager.
      */
