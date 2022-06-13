@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collection;
@@ -30,40 +31,44 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterators;
-import com.googlecode.concurrenttrees.common.Iterables;
-import org.apache.cassandra.db.commitlog.CommitLogPosition;
-import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.memtable.AbstractMemtable;
-import org.apache.cassandra.db.memtable.Memtable;
-import org.apache.cassandra.db.partitions.Partition;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import com.googlecode.concurrenttrees.common.Iterables;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore.FlushReason;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.lifecycle.Tracker;
+import org.apache.cassandra.db.memtable.AbstractMemtable;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
@@ -75,6 +80,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
 import org.apache.cassandra.service.snapshot.SnapshotManifest;
@@ -85,6 +91,8 @@ import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.concurrent.OpOrder.Barrier;
 import org.apache.cassandra.utils.concurrent.OpOrder.Group;
 
+import static org.apache.cassandra.db.ColumnFamilyStore.STATUS.INVALID_DROPPED;
+import static org.apache.cassandra.db.ColumnFamilyStore.STATUS.INVALID_UNLOADED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -720,7 +728,7 @@ public class ColumnFamilyStoreTest
 
         return schemaAndManifestFileSizes;
     }
-    
+
     @Test
     public void testMutateRepaired() throws IOException
     {
@@ -741,6 +749,43 @@ public class ColumnFamilyStoreTest
         sstables = cfs.getLiveSSTables();
         sstable = sstables.iterator().next();
         assertTrue(sstable.isRepaired());
+    }
+
+    @Test
+    public void testInvalidateWithDropping()
+    {
+        testInvalidateCFS(true);
+    }
+
+    @Test
+    public void testInvalidateWithoutDropping()
+    {
+        testInvalidateCFS(false);
+    }
+
+    private void testInvalidateCFS(boolean dropData)
+    {
+        DatabaseDescriptor.setIncrementalBackupsEnabled(false);
+        ColumnFamilyStore cfs = MockSchema.newCFS();
+        assertTrue(cfs.isValid());
+        Tracker tracker = cfs.getTracker();
+
+        Collection<SSTableReader> readers = IntStream.range(0, 10)
+                                                     .mapToObj(i -> MockSchema.sstable(i, 10, true, cfs))
+                                                     .collect(Collectors.toList());
+        tracker.addInitialSSTables(readers);
+        readers.forEach(reader -> assertEquals(1, reader.selfRef().globalCount()));
+
+        cfs.invalidate(false, dropData);
+        assertFalse(cfs.isValid());
+        assertThat(cfs.status()).isEqualTo(dropData ? INVALID_DROPPED : INVALID_UNLOADED);
+        System.gc();
+        System.gc();
+
+        readers.forEach(reader -> {
+            assertEquals(0, reader.selfRef().globalCount());
+            assertEquals(!dropData, Files.exists(reader.descriptor.pathFor(Components.DATA)));
+        });
     }
 
     private Memtable fakeMemTableWithMinTS(ColumnFamilyStore cfs, long minTS)
