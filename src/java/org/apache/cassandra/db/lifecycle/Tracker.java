@@ -17,9 +17,16 @@
  */
 package org.apache.cassandra.db.lifecycle;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
@@ -294,10 +301,22 @@ public class Tracker
                           SSTableIntervalTree.empty()));
     }
 
-    public Throwable dropSSTablesIfInvalid(Throwable accumulate)
+    public Throwable dropOrUnloadSSTablesIfInvalid(String message, @Nullable Throwable accumulate)
     {
         if (!isDummy() && !cfstore.isValid())
-            accumulate = dropSSTables(accumulate);
+        {
+            ColumnFamilyStore.STATUS status = cfstore.status();
+            if (status.isInvalidAndShouldDropData())
+            {
+                logger.info("Dropping sstables for invalidated table {} with status {} {}", metadata.toString(), status, message);
+                return dropSSTables(accumulate);
+            }
+            else
+            {
+                logger.info("Unloading sstables for invalidated table {} with status {} {}", metadata.toString(), status, message);
+                return unloadSSTables(accumulate);
+            }
+        }
         return accumulate;
     }
 
@@ -316,6 +335,9 @@ public class Tracker
      */
     public Throwable dropSSTables(final Predicate<SSTableReader> remove, OperationType operationType, Throwable accumulate)
     {
+        logger.debug("Dropping sstables for {} with operation {}: {}",
+                     metadata.name, operationType, accumulate == null ? "null" : accumulate.getMessage());
+
         try (AbstractLogTransaction txnLogs = ILogTransactionsFactory.instance.createLogTransaction(operationType,
                                                                                                     LifecycleTransaction.newId(),
                                                                                                     metadata))
@@ -355,6 +377,8 @@ public class Tracker
             accumulate = Throwables.merge(accumulate, t);
         }
 
+        logger.debug("Sstables for {} dropped with operation {}: {}",
+                     metadata.name, operationType, accumulate == null ? "null" : accumulate.getMessage());
         return accumulate;
     }
 
@@ -363,12 +387,19 @@ public class Tracker
      */
     public void unloadSSTables()
     {
+        maybeFail(unloadSSTables(null));
+    }
+
+    public Throwable unloadSSTables(@Nullable Throwable accumulate)
+    {
         Pair<View, View> result = apply(view -> {
             Set<SSTableReader> toUnload = copyOf(filter(view.sstables, notIn(view.compacting)));
             return updateLiveSet(toUnload, emptySet()).apply(view);
         });
 
-        release(selfRefs(result.left.sstables));
+        // compacting sstables will be cleaned up by their transaction in {@link LifecycleTransaction#unmarkCompacting}
+        Set<SSTableReader> toRelease = Sets.difference(result.left.sstables, result.right.sstables);
+        return release(selfRefs(toRelease), accumulate);
     }
 
     /**
@@ -454,8 +485,7 @@ public class Tracker
         // make sure index sees flushed index files before dicarding memtable index
         notifyDiscarded(memtable);
 
-        if (!isDummy() && !cfstore.isValid())
-            dropSSTables();
+        fail = dropOrUnloadSSTablesIfInvalid("during flush", fail);
 
         maybeFail(fail);
     }
