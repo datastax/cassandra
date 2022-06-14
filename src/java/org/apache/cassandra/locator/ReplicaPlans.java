@@ -598,8 +598,11 @@ public class ReplicaPlans
                                                    SpeculativeRetryPolicy retry)
     {
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
-        EndpointsForToken candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forTokenReadLiveSorted(replicationStrategy, token).natural());
-        EndpointsForToken contacts = contactForRead(replicationStrategy, consistencyLevel, retry.equals(AlwaysSpeculativeRetryPolicy.INSTANCE), candidates);
+        IEndpointSnitch endpointSnitch = DatabaseDescriptor.getEndpointSnitch();
+        EndpointsForToken candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forTokenReadLiveSorted(replicationStrategy, token).natural())
+                                       .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
+        EndpointsForToken contacts = contactForRead(replicationStrategy, consistencyLevel, retry.equals(AlwaysSpeculativeRetryPolicy.INSTANCE), candidates)
+                                     .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
 
         assureSufficientLiveReplicasForRead(replicationStrategy, consistencyLevel, contacts);
         return new ReplicaPlan.ForTokenRead(keyspace, replicationStrategy, consistencyLevel, candidates, contacts);
@@ -619,8 +622,11 @@ public class ReplicaPlans
                                                         int vnodeCount)
     {
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
-        EndpointsForRange candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forRangeReadLiveSorted(replicationStrategy, range).natural());
-        EndpointsForRange contacts = contactForRead(replicationStrategy, consistencyLevel, false, candidates);
+        IEndpointSnitch endpointSnitch = DatabaseDescriptor.getEndpointSnitch();
+        EndpointsForRange candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forRangeReadLiveSorted(replicationStrategy, range).natural())
+                                       .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
+        EndpointsForRange contacts = contactForRead(replicationStrategy, consistencyLevel, false, candidates)
+                                     .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
 
         assureSufficientLiveReplicasForRead(replicationStrategy, consistencyLevel, contacts);
         return new ReplicaPlan.ForRangeRead(keyspace, replicationStrategy, consistencyLevel, range, candidates, contacts, vnodeCount);
