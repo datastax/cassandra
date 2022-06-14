@@ -19,6 +19,7 @@ package org.apache.cassandra.locator;
 
 import java.net.InetSocketAddress;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.utils.FBUtilities;
@@ -116,4 +117,13 @@ public interface IEndpointSnitch
         return true;
     }
 
+    /**
+     * Filters the given {@code addresses} by affinity to the given keyspace.
+     * <br/><br/>
+     * Always returns true by default.
+     */
+    default Predicate<Replica> filterByAffinity(String keyspace)
+    {
+        return replica -> true;
+    }
 }
