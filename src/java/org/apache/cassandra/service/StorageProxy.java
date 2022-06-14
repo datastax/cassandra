@@ -1841,7 +1841,9 @@ public class StorageProxy implements StorageProxyMBean
         EndpointsForToken replicas = replicationStrategy.getNaturalReplicasForToken(key);
 
         // CASSANDRA-13043: filter out those endpoints not accepting clients yet, maybe because still bootstrapping
-        replicas = replicas.filter(replica -> StorageService.instance.isRpcReady(replica.endpoint()));
+        // We have a keyspace, so filter by affinity too
+        replicas = replicas.filter(replica -> StorageService.instance.isRpcReady(replica.endpoint()))
+                           .filter(snitch.filterByAffinity(keyspace.getName()));
 
         // CASSANDRA-17411: filter out endpoints that are not alive
         replicas = replicas.filter(replica -> FailureDetector.instance.isAlive(replica.endpoint()));
