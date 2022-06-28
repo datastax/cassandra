@@ -44,7 +44,13 @@ public interface Mutator
     /**
      * Used for standard inserts and unlogged batchs.
      */
-    AbstractWriteResponseHandler<IMutation> mutateStandard(IMutation mutation, ConsistencyLevel consistencyLevel, String localDataCenter, StorageProxy.WritePerformer standardWritePerformer, Runnable runnable, WriteType plainWriteType, long queryStartNanoTime);
+    AbstractWriteResponseHandler<IMutation> mutateStandard(IMutation mutation,
+                                                           ConsistencyLevel consistencyLevel,
+                                                           String localDataCenter,
+                                                           StorageProxy.WritePerformer writePerformer,
+                                                           Runnable callback,
+                                                           WriteType writeType,
+                                                           long queryStartNanoTime);
 
     /**
      * Used for LWT mutation at the last (COMMIT) phase of Paxos.

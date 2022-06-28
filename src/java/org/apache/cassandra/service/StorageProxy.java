@@ -172,9 +172,9 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         @Override
-        public AbstractWriteResponseHandler<IMutation> mutateStandard(IMutation mutation, ConsistencyLevel consistencyLevel, String localDataCenter, WritePerformer standardWritePerformer, Runnable runnable, WriteType writeType, long queryStartNanoTime)
+        public AbstractWriteResponseHandler<IMutation> mutateStandard(IMutation mutation, ConsistencyLevel consistencyLevel, String localDataCenter, WritePerformer standardWritePerformer, Runnable callback, WriteType writeType, long queryStartNanoTime)
         {
-            return performWrite(mutation, consistencyLevel, localDataCenter, standardWritePerformer, runnable, writeType, queryStartNanoTime);
+            return performWrite(mutation, consistencyLevel, localDataCenter, standardWritePerformer, callback, writeType, queryStartNanoTime);
         }
 
         @Override

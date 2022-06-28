@@ -56,7 +56,7 @@ public abstract class MutatorProvider
         }
     }
 
-    protected static Mutator getDefaultMutator()
+    public static Mutator getDefaultMutator()
     {
         return new StorageProxy.DefaultMutator();
     }
