@@ -23,6 +23,7 @@ import javax.annotation.Nullable;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.CounterMutation;
 import org.apache.cassandra.db.IMutation;
+import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.service.paxos.Commit;
 
@@ -44,7 +45,7 @@ public interface Mutator
     /**
      * Used for standard inserts and unlogged batchs.
      */
-    AbstractWriteResponseHandler<IMutation> mutateStandard(IMutation mutation,
+    AbstractWriteResponseHandler<IMutation> mutateStandard(Mutation mutation,
                                                            ConsistencyLevel consistencyLevel,
                                                            String localDataCenter,
                                                            StorageProxy.WritePerformer writePerformer,

@@ -172,7 +172,7 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         @Override
-        public AbstractWriteResponseHandler<IMutation> mutateStandard(IMutation mutation, ConsistencyLevel consistencyLevel, String localDataCenter, WritePerformer standardWritePerformer, Runnable callback, WriteType writeType, long queryStartNanoTime)
+        public AbstractWriteResponseHandler<IMutation> mutateStandard(Mutation mutation, ConsistencyLevel consistencyLevel, String localDataCenter, WritePerformer standardWritePerformer, Runnable callback, WriteType writeType, long queryStartNanoTime)
         {
             return performWrite(mutation, consistencyLevel, localDataCenter, standardWritePerformer, callback, writeType, queryStartNanoTime);
         }
@@ -896,7 +896,7 @@ public class StorageProxy implements StorageProxyMBean
                 if (mutation instanceof CounterMutation)
                     responseHandlers.add(mutateCounter((CounterMutation)mutation, localDataCenter, queryStartNanoTime));
                 else
-                    responseHandlers.add(mutator.mutateStandard(mutation, consistencyLevel, localDataCenter, standardWritePerformer, null, plainWriteType, queryStartNanoTime));
+                    responseHandlers.add(mutator.mutateStandard((Mutation)mutation, consistencyLevel, localDataCenter, standardWritePerformer, null, plainWriteType, queryStartNanoTime));
             }
 
             // upgrade to full quorum any failed cheap quorums
