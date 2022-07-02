@@ -486,7 +486,7 @@ public class ByteSourceSequenceTest
             assertEquals(ByteSource.NEXT_COMPONENT, comparableBytes.next());
             DECIMAL.fromComparableBytes(comparableBytes, version);
             // Expect null-signifying separator here.
-            assertEquals(ByteSource.NEXT_COMPONENT_NULL, comparableBytes.next());
+            assertEquals(ByteSource.NEXT_COMPONENT_EMPTY, comparableBytes.next());
             // No varint to read
             // Expect the last separator (i.e. the terminator) to be the one specified by the prefix kind.
             assertEquals(prefixKind.asByteComparableValue(version), comparableBytes.next());
@@ -503,7 +503,7 @@ public class ByteSourceSequenceTest
             assertEquals(ByteSource.NEXT_COMPONENT, comparableBytes.next());
             DECIMAL.fromComparableBytes(comparableBytes, version);
             // Expect reversed null-signifying separator here.
-            assertEquals(ByteSource.NEXT_COMPONENT_NULL_REVERSED, comparableBytes.next());
+            assertEquals(ByteSource.NEXT_COMPONENT_EMPTY_REVERSED, comparableBytes.next());
             // No varint to read
             // Expect the last separator (i.e. the terminator) to be the one specified by the prefix kind.
             assertEquals(prefixKind.asByteComparableValue(version), comparableBytes.next());

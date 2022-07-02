@@ -408,6 +408,11 @@ public interface Memtable extends Comparable<Memtable>
     void performSnapshot(String snapshotName);
 
     /**
+     * Removes deleted data from memtable
+     */
+    void performGarbageCollect();
+
+    /**
      * Special commit log position marker used in the upper bound marker setting process
      * (see {@link org.apache.cassandra.db.ColumnFamilyStore#setCommitLogUpperBound} and {@link AbstractMemtable#accepts})
      */

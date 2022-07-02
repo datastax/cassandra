@@ -112,6 +112,20 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
                                          keyComparableBytes(version));
     }
 
+    @Override
+    public ByteComparable asComparableBound(boolean before)
+    {
+        return version ->
+        {
+            assert (version != Version.LEGACY);
+
+            return ByteSource.withTerminator(
+                    before ? ByteSource.LT_NEXT_COMPONENT : ByteSource.GT_NEXT_COMPONENT,
+                    token.asComparableBytes(version),
+                    keyComparableBytes(version));
+        };
+    }
+
     protected ByteSource keyComparableBytes(Version version)
     {
         return ByteSource.of(getKey(), version);
@@ -171,19 +185,25 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
         Token token = partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable), version);
         // Decode the key bytes from the second component.
         byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
+        // Consume the terminator byte.
+        int terminator = peekable.next();
+        assert terminator == ByteSource.TERMINATOR;
         // Instantiate a decorated key from the decoded token and key bytes, using the provided factory method.
         return decoratedKeyFactory.apply(token, keyBytes);
     }
 
-    public static byte[] keyFromByteComparable(ByteComparable byteComparable,
-                                               Version version,
-                                               IPartitioner partitioner)
+    public static byte[] keyFromByteSource(ByteSource.Peekable peekableByteSource,
+                                           Version version,
+                                           IPartitioner partitioner)
     {
-        ByteSource.Peekable peekable = byteComparable.asPeekableBytes(version);
+        assert version != Version.LEGACY;   // reverse translation is not supported for LEGACY version.
         // Decode the token from the first component of the multi-component sequence representing the whole decorated key.
         // We won't use it, but the decoding also positions the byte source after it.
-        partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable), version);
+        partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekableByteSource), version);
         // Decode the key bytes from the second component.
-        return ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
+        byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekableByteSource));
+        int terminator = peekableByteSource.next();
+        assert terminator == ByteSource.TERMINATOR;
+        return keyBytes;
     }
 }

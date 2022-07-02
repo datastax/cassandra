@@ -26,6 +26,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.config.Config.DiskFailurePolicy;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -46,6 +47,7 @@ public class OutOfSpaceTest extends CQLTester
     @Test
     public void testFlushUnwriteableDie() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         makeTable();
 
         KillerForTests killerForTests = new KillerForTests();
@@ -68,6 +70,7 @@ public class OutOfSpaceTest extends CQLTester
     @Test
     public void testFlushUnwriteableStop() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         makeTable();
 
         DiskFailurePolicy oldPolicy = DatabaseDescriptor.getDiskFailurePolicy();
@@ -86,6 +89,7 @@ public class OutOfSpaceTest extends CQLTester
     @Test
     public void testFlushUnwriteableIgnore() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         makeTable();
 
         DiskFailurePolicy oldPolicy = DatabaseDescriptor.getDiskFailurePolicy();

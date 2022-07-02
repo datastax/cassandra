@@ -39,6 +39,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -770,6 +771,7 @@ public class SASIIndexTest
     @Test
     public void testColumnNamesWithSlashes()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testColumnNamesWithSlashes(false);
         cleanupData();
         testColumnNamesWithSlashes(true);
@@ -983,6 +985,7 @@ public class SASIIndexTest
     @Test
     public void testTruncate()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Map<String, Pair<String, Integer>> part1 = new HashMap<String, Pair<String, Integer>>()
         {{
                 put("key01", Pair.create("Ali", 33));
@@ -1068,6 +1071,7 @@ public class SASIIndexTest
     @Test
     public void testConcurrentMemtableReadsAndWrites() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         final ColumnFamilyStore store = Keyspace.open(KS_NAME).getColumnFamilyStore(CF_NAME);
 
         ExecutorService scheduler = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
@@ -1947,6 +1951,7 @@ public class SASIIndexTest
     @Test
     public void testTableRebuild() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         ColumnFamilyStore store = Keyspace.open(KS_NAME).getColumnFamilyStore(CLUSTERING_CF_NAME_1);
 
         executeCQL(CLUSTERING_CF_NAME_1, "INSERT INTO %s.%s (name, nickname, location, age, height, score) VALUES (?, ?, ?, ?, ?, ?)", "Pavel", "xedin", "US", 27, 183, 1.0);
@@ -2274,6 +2279,7 @@ public class SASIIndexTest
     @Test
     public void testConditionalsWithReversedType()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         final String TABLE_NAME = "reversed_clustering";
 
         QueryProcessor.executeOnceInternal(String.format("CREATE TABLE IF NOT EXISTS %s.%s (pk text, ck int, v int, PRIMARY KEY (pk, ck)) " +
@@ -2328,6 +2334,7 @@ public class SASIIndexTest
     @Test
     public void testIndexMemtableSwitching() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // write some data but don't flush
         ColumnFamilyStore store = loadData(new HashMap<String, Pair<String, Integer>>()
         {{
@@ -2419,6 +2426,7 @@ public class SASIIndexTest
     @Test
     public void testAnalyzerValidation()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         final String TABLE_NAME = "analyzer_validation";
         QueryProcessor.executeOnceInternal(String.format("CREATE TABLE %s.%s (" +
                                                          "  pk text PRIMARY KEY, " +

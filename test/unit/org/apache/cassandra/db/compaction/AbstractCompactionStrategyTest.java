@@ -34,6 +34,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -50,6 +51,7 @@ public class AbstractCompactionStrategyTest
     @BeforeClass
     public static void loadData() throws ConfigurationException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Map<String, String> stcsOptions = new HashMap<>();
         stcsOptions.put("tombstone_compaction_interval", "1");
 

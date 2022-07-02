@@ -46,6 +46,7 @@ import org.apache.cassandra.db.compaction.AntiCompactionTest;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -216,6 +217,7 @@ public class IndexSummaryManagerTest
     @Test
     public void testChangeMinIndexInterval() throws IOException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         String ksname = KEYSPACE1;
         String cfname = CF_STANDARDLOWiINTERVAL; // index interval of 8, no key caching
         Keyspace keyspace = Keyspace.open(ksname);
@@ -301,6 +303,7 @@ public class IndexSummaryManagerTest
     @Test
     public void testChangeMaxIndexInterval() throws IOException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         String ksname = KEYSPACE1;
         String cfname = CF_STANDARDLOWiINTERVAL; // index interval of 8, no key caching
         Keyspace keyspace = Keyspace.open(ksname);
@@ -350,6 +353,7 @@ public class IndexSummaryManagerTest
     @Test(timeout = 10000)
     public void testRedistributeSummaries() throws IOException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         String ksname = KEYSPACE1;
         String cfname = CF_STANDARDLOWiINTERVAL; // index interval of 8, no key caching
         Keyspace keyspace = Keyspace.open(ksname);
@@ -501,6 +505,7 @@ public class IndexSummaryManagerTest
     @Test
     public void testRebuildAtSamplingLevel() throws IOException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         String ksname = KEYSPACE1;
         String cfname = CF_STANDARDLOWiINTERVAL;
         Keyspace keyspace = Keyspace.open(ksname);
@@ -546,6 +551,7 @@ public class IndexSummaryManagerTest
     @Test
     public void testJMXFunctions() throws IOException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         IndexSummaryManager manager = IndexSummaryManager.instance;
 
         // resize interval
@@ -609,12 +615,14 @@ public class IndexSummaryManagerTest
     @Test
     public void testCancelIndex() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testCancelIndexHelper((cfs) -> CompactionManager.instance.stopCompaction("INDEX_SUMMARY"));
     }
 
     @Test
     public void testCancelIndexInterrupt() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testCancelIndexHelper((cfs) -> CompactionManager.instance.interruptCompactionFor(Collections.singleton(cfs.metadata()), (sstable) -> true, false));
     }
 
@@ -715,6 +723,7 @@ public class IndexSummaryManagerTest
     @Test
     public void testPauseIndexSummaryManager() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         String ksname = KEYSPACE1;
         String cfname = CF_STANDARDLOWiINTERVAL; // index interval of 8, no key caching
         Keyspace keyspace = Keyspace.open(ksname);

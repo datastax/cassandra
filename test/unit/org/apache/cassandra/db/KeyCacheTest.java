@@ -37,6 +37,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -79,6 +80,7 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadShallowIndexEntry() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(0);
         testKeyCacheLoad(COLUMN_FAMILY2);
     }
@@ -86,6 +88,7 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadIndexInfoOnHeap() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(8);
         testKeyCacheLoad(COLUMN_FAMILY5);
     }
@@ -179,6 +182,7 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadWithLostTableShallowIndexEntry() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(0);
         testKeyCacheLoadWithLostTable(COLUMN_FAMILY3);
     }
@@ -186,6 +190,7 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadWithLostTableIndexInfoOnHeap() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(8);
         testKeyCacheLoadWithLostTable(COLUMN_FAMILY6);
     }
@@ -242,6 +247,7 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheShallowIndexEntry() throws ExecutionException, InterruptedException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(0);
         testKeyCache(COLUMN_FAMILY1);
     }
@@ -249,6 +255,7 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheIndexInfoOnHeap() throws ExecutionException, InterruptedException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(8);
         testKeyCache(COLUMN_FAMILY4);
     }

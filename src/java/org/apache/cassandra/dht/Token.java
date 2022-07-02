@@ -243,6 +243,13 @@ public abstract class Token implements RingPosition<Token>, Serializable
             return ByteSource.withTerminator(terminator, token.asComparableBytes(version));
         }
 
+        @Override
+        public ByteComparable asComparableBound(boolean before)
+        {
+            // This class is already a bound thus nothing needs to be changed from its representation
+            return this;
+        }
+
         public IPartitioner getPartitioner()
         {
             return getToken().getPartitioner();

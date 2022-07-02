@@ -24,6 +24,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.Callable;
 
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -231,6 +232,7 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void test2iKeyCachePathsShallowIndexEntry() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(0);
         test2iKeyCachePaths();
     }
@@ -244,6 +246,7 @@ public class KeyCacheCqlTest extends CQLTester
 
     private void test2iKeyCachePaths() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         String table = createTable("CREATE TABLE %s ("
                                    + commonColumnsDef
                                    + "PRIMARY KEY ((part_key_a, part_key_b),clust_key_a,clust_key_b,clust_key_c))");
@@ -316,6 +319,7 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void test2iKeyCachePathsSaveKeysForDroppedTableShallowIndexEntry() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(0);
         test2iKeyCachePathsSaveKeysForDroppedTable();
     }
@@ -323,6 +327,7 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void test2iKeyCachePathsSaveKeysForDroppedTableIndexInfoOnHeap() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(8);
         test2iKeyCachePathsSaveKeysForDroppedTable();
     }
@@ -390,6 +395,7 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void testKeyCacheNonClusteredShallowIndexEntry() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(0);
         testKeyCacheNonClustered();
     }
@@ -397,6 +403,7 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void testKeyCacheNonClusteredIndexInfoOnHeap() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(8);
         testKeyCacheNonClustered();
     }
@@ -436,6 +443,7 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void testKeyCacheClusteredShallowIndexEntry() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(0);
         testKeyCacheClustered();
     }
@@ -443,6 +451,7 @@ public class KeyCacheCqlTest extends CQLTester
     @Test
     public void testKeyCacheClusteredIndexInfoOnHeap() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         DatabaseDescriptor.setColumnIndexCacheSize(8);
         testKeyCacheClustered();
     }

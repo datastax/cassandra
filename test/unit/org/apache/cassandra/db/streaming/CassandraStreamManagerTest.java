@@ -34,6 +34,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.junit.Assert;
 import org.junit.Before;
@@ -161,6 +162,7 @@ public class CassandraStreamManagerTest
     @Test
     public void incrementalSSTableSelection() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // CASSANDRA-15825 Make sure a compaction won't be triggered under our feet removing the sstables mid-flight
         cfs.disableAutoCompaction();
 
@@ -189,6 +191,7 @@ public class CassandraStreamManagerTest
     @Test
     public void testSSTableSectionsForRanges() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         cfs.truncateBlocking();
 
         createSSTable(() -> {

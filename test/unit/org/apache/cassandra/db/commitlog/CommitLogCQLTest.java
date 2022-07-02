@@ -25,12 +25,14 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 
 public class CommitLogCQLTest extends CQLTester
 {
     @Test
     public void testTruncateSegmentDiscard() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         String otherTable = createTable("CREATE TABLE %s (idx INT, data TEXT, PRIMARY KEY(idx));");
 
         createTable("CREATE TABLE %s (idx INT, data TEXT, PRIMARY KEY(idx));");

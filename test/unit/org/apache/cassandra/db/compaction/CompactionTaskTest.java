@@ -35,6 +35,7 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
@@ -68,6 +69,7 @@ public class CompactionTaskTest
     @Test
     public void compactionInterruption() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         cfs.getCompactionStrategyManager().disable();
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (1, 1);");
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (2, 2);");
@@ -109,6 +111,7 @@ public class CompactionTaskTest
     @Test
     public void mixedSSTableFailure() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         cfs.getCompactionStrategyManager().disable();
         QueryProcessor.executeInternal("INSERT INTO ks.tbl (k, v) VALUES (1, 1);");
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);

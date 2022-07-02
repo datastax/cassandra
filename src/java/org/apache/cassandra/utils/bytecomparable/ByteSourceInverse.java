@@ -438,7 +438,8 @@ public final class ByteSourceInverse
 
     public static boolean nextComponentNull(int separator)
     {
-        return separator == ByteSource.NEXT_COMPONENT_NULL || separator == ByteSource.NEXT_COMPONENT_NULL_REVERSED;
+        return separator == ByteSource.NEXT_COMPONENT_NULL || separator == ByteSource.NEXT_COMPONENT_EMPTY
+               || separator == ByteSource.NEXT_COMPONENT_EMPTY_REVERSED;
     }
 
     private static void assertValidByte(int data)

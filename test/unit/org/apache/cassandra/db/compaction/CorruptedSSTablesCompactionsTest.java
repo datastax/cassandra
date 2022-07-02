@@ -41,6 +41,7 @@ import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -118,12 +119,14 @@ public class CorruptedSSTablesCompactionsTest
     @Test
     public void testCorruptedSSTablesWithSizeTieredCompactionStrategy() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testCorruptedSSTables(STANDARD_STCS);
     }
 
     @Test
     public void testCorruptedSSTablesWithLeveledCompactionStrategy() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testCorruptedSSTables(STANDARD_LCS);
     }
 

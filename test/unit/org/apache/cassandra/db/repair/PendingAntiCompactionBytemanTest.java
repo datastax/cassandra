@@ -31,6 +31,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -54,6 +55,7 @@ public class PendingAntiCompactionBytemanTest extends AbstractPendingAntiCompact
     @Test
     public void testExceptionAnticompaction() throws InterruptedException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         cfs.disableAutoCompaction();
         cfs2.disableAutoCompaction();
         ExecutorService es = Executors.newFixedThreadPool(1);

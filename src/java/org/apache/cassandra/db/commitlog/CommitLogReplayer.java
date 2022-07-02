@@ -138,7 +138,14 @@ public class CommitLogReplayer implements CommitLogReadHandler
             else
             {
                 // everything is persisted and restored by the memtable itself
-                filter = new IntervalSet<>(CommitLogPosition.NONE, CommitLog.instance.getCurrentPosition());
+                // If data has been dropped from the memtable, will be restored from commitlog
+                if(cfs.getCurrentMemtable().getLiveDataSize()==0)
+                {
+                    IntervalSet.Builder<CommitLogPosition> builder = new IntervalSet.Builder<>();
+                    filter = builder.build();
+                }
+                else
+                    filter = new IntervalSet<>(CommitLogPosition.NONE, CommitLog.instance.getCurrentPosition());
             }
             cfPersisted.put(cfs.metadata.id, filter);
         }

@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.junit.Test;
 
 import org.junit.Assert;
@@ -42,12 +43,14 @@ public class CrcCheckChanceTest extends CQLTester
     @Test
     public void testChangingCrcCheckChanceNewFormat() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testChangingCrcCheckChance(true);
     }
 
     @Test
     public void testChangingCrcCheckChanceOldFormat() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testChangingCrcCheckChance(false);
     }
 
@@ -168,6 +171,7 @@ public class CrcCheckChanceTest extends CQLTester
     @Test
     public void testDropDuringCompaction() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         CompactionManager.instance.disableAutoCompaction();
 
         //Start with crc_check_chance of 99%

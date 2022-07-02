@@ -28,6 +28,7 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
@@ -39,6 +40,7 @@ public class SingleSSTableLCSTaskTest extends CQLTester
     @Test
     public void basicTest() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("create table %s (id int primary key, t text) with compaction = {'class':'LeveledCompactionStrategy','single_sstable_uplevel':true}");
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         execute("insert into %s (id, t) values (1, 'meep')");
@@ -70,12 +72,14 @@ public class SingleSSTableLCSTaskTest extends CQLTester
     @Test
     public void compactionTest() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         compactionTestHelper(true);
     }
 
     @Test
     public void uplevelDisabledTest() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         compactionTestHelper(false);
     }
 
@@ -120,6 +124,7 @@ public class SingleSSTableLCSTaskTest extends CQLTester
     @Test
     public void corruptMetadataTest() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         createTable("create table %s (id int primary key, t text) with compaction = {'class':'LeveledCompactionStrategy','single_sstable_uplevel':true}");
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         execute("insert into %s (id, t) values (1, 'meep')");

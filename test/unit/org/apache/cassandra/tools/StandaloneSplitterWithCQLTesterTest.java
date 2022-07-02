@@ -34,6 +34,7 @@ import org.junit.runner.RunWith;
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
 import org.assertj.core.api.Assertions;
@@ -58,6 +59,7 @@ public class StandaloneSplitterWithCQLTesterTest extends CQLTester
     @Test
     public void setupEnv() throws Throwable
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // Stop the server after setup as we're going to be changing things under it's feet
         setupTestSstables();
         tearDownClass();
@@ -167,6 +169,7 @@ public class StandaloneSplitterWithCQLTesterTest extends CQLTester
 
     private void restoreOrigSstables()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Arrays.asList(sstablesDir.listFiles()).stream().forEach(f -> {
             if (f.isFile())
                 f.delete();

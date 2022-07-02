@@ -24,6 +24,7 @@ import java.util.concurrent.CountDownLatch;
 
 import com.google.common.collect.ImmutableSet;
 
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 
@@ -1059,6 +1060,7 @@ public class SecondaryIndexTest extends CQLTester
     public void testReadOnlyIndex() throws Throwable
     {
         // On successful initialization both reads and writes go through
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         String tableName = createTable("CREATE TABLE %s (pk int, ck int, value int, PRIMARY KEY (pk, ck))");
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s (value) USING '" + ReadOnlyOnFailureIndex.class.getName() + "'");
         assertTrue(waitForIndex(keyspace(), tableName, indexName));
@@ -1098,6 +1100,7 @@ public class SecondaryIndexTest extends CQLTester
     public void testWriteOnlyIndex() throws Throwable
     {
         // On successful initialization both reads and writes go through
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         String tableName = createTable("CREATE TABLE %s (pk int, ck int, value int, PRIMARY KEY (pk, ck))");
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s (value) USING '" + WriteOnlyOnFailureIndex.class.getName() + "'");
         assertTrue(waitForIndex(keyspace(), tableName, indexName));

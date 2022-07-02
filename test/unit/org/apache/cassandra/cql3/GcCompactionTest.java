@@ -28,6 +28,8 @@ import java.util.Set;
 import java.util.function.ToIntFunction;
 
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.db.*;
@@ -45,6 +47,11 @@ public class GcCompactionTest extends CQLTester
     static final int CLUSTERING_COUNT = 20;
 
     // Test needs synchronous table drop to avoid flushes causing flaky failures
+
+    @BeforeClass
+    public static void setUp() {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
+    }
 
     @Override
     protected String createTable(String query)

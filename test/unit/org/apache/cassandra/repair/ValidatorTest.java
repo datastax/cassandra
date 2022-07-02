@@ -29,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.CompactionsTest;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.junit.After;
 import org.junit.Before;
@@ -160,12 +161,14 @@ public class ValidatorTest
     @Test
     public void simpleValidationTest128() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         simpleValidationTest(128);
     }
 
     @Test
     public void simpleValidationTest1500() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         simpleValidationTest(1500);
     }
 
@@ -231,6 +234,7 @@ public class ValidatorTest
     @Test
     public void testSizeLimiting() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Keyspace ks = Keyspace.open(keyspace);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(columnFamily);
         cfs.clearUnsafe();
@@ -290,6 +294,7 @@ public class ValidatorTest
     @Test
     public void testRangeSplittingTreeSizeLimit() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Keyspace ks = Keyspace.open(keyspace);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(columnFamily);
         cfs.clearUnsafe();

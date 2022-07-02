@@ -313,8 +313,9 @@ public class DynamicCompositeType extends AbstractCompositeType
             // Decode the type's fully qualified class name and parse the actual type from it.
             String fullClassName = ByteSourceInverse.getString(ByteSourceInverse.nextComponentSource(comparableBytes));
             assert fullClassName.endsWith(simpleClassName);
-            AbstractType<?> type = isReversed ? ReversedType.getInstance(TypeParser.parse(fullClassName))
-                                              : TypeParser.parse(fullClassName);
+            if (isReversed)
+                fullClassName = REVERSED_TYPE + '(' + fullClassName + ')';
+            AbstractType<?> type = TypeParser.parse(fullClassName);
             assert type != null;
             types.add(type);
 

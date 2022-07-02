@@ -26,6 +26,7 @@ import com.google.common.collect.Iterables;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
@@ -77,6 +78,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void sstableAdded()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         Assert.assertTrue(Iterables.isEmpty(csm.getPendingRepairsUnsafe().allStrategies()));
@@ -103,6 +105,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void sstableListChangedAddAndRemove()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
@@ -152,6 +155,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void sstableRepairStatusChanged()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
@@ -186,6 +190,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void sstableDeleted()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
@@ -209,6 +214,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void getStrategies()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
@@ -234,6 +240,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void cleanupCompactionFinalized()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
@@ -274,6 +281,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void cleanupCompactionFailed()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         SSTableReader sstable = makeSSTable(true);
@@ -309,6 +317,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void finalizedSessionTransientCleanup()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Assert.assertTrue(cfs.getLiveSSTables().isEmpty());
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -340,6 +349,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void failedSessionTransientCleanup()
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Assert.assertTrue(cfs.getLiveSSTables().isEmpty());
         UUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);

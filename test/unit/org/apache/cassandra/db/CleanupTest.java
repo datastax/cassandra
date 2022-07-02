@@ -33,6 +33,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Sets;
+import org.apache.cassandra.db.memtable.DefaultMemtableFactory;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -145,6 +146,7 @@ public class CleanupTest
     @Test
     public void testCleanupWithIndexes() throws IOException, ExecutionException, InterruptedException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_INDEXED1);
 
@@ -187,6 +189,7 @@ public class CleanupTest
     @Test
     public void testCleanupWithNewToken() throws ExecutionException, InterruptedException, UnknownHostException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         StorageService.instance.getTokenMetadata().clearUnsafe();
 
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
@@ -211,12 +214,14 @@ public class CleanupTest
     @Test
     public void testCleanupWithNoTokenRange() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testCleanupWithNoTokenRange(false);
     }
 
     @Test
     public void testUserDefinedCleanupWithNoTokenRange() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         testCleanupWithNoTokenRange(true);
     }
 
@@ -258,6 +263,7 @@ public class CleanupTest
     @Test
     public void testCleanupSkippingSSTables() throws UnknownHostException, ExecutionException, InterruptedException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         Keyspace keyspace = Keyspace.open(KEYSPACE3);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD3);
         cfs.disableAutoCompaction();
@@ -296,6 +302,7 @@ public class CleanupTest
     @Test
     public void testuserDefinedCleanupWithNewToken() throws ExecutionException, InterruptedException, UnknownHostException
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         StorageService.instance.getTokenMetadata().clearUnsafe();
 
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
@@ -322,6 +329,7 @@ public class CleanupTest
     @Test
     public void testNeedsCleanup() throws Exception
     {
+        org.junit.Assume.assumeFalse(DefaultMemtableFactory.INSTANCE.writesAreDurable());
         // setup
         StorageService.instance.getTokenMetadata().clearUnsafe();
         Keyspace keyspace = Keyspace.open(KEYSPACE1);

@@ -104,6 +104,8 @@ public abstract class AbstractMemtable implements Memtable
         return this.flushTransaction.getAndSet(flushTransaction);
     }
 
+    public void performGarbageCollect() { }
+
     protected static class ColumnsCollector
     {
         private final HashMap<ColumnMetadata, AtomicBoolean> predefined = new HashMap<>();

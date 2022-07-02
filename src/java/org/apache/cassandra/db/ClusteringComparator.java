@@ -37,8 +37,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static org.apache.cassandra.utils.bytecomparable.ByteSource.EXCLUDED;
 import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT;
+import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT_EMPTY;
+import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT_EMPTY_REVERSED;
 import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT_NULL;
-import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT_NULL_REVERSED;
 import static org.apache.cassandra.utils.bytecomparable.ByteSource.TERMINATOR;
 
 /**
@@ -309,9 +310,25 @@ public class ClusteringComparator implements Comparator<Clusterable>
                     if (srcnum == sz)
                         return src.kind().asByteComparableValue(version);
 
-                    current = subtype(srcnum).asComparableBytes(src.accessor(), src.get(srcnum), version);
+                    final V nextComponent = src.get(srcnum);
+                    // We can have a null as the clustering component (this is a relic of COMPACT STORAGE, but also
+                    // can appear in indexed partitions with no rows but static content),
+                    if (nextComponent == null)
+                    {
+                        if (version != Version.LEGACY)
+                            return NEXT_COMPONENT_NULL; // always sorts before non-nulls, including for reversed types
+                        else
+                        {
+                            // legacy version did not permit nulls in clustering keys and treated these as null values
+                            return subtype(srcnum).isReversed() ? NEXT_COMPONENT_EMPTY_REVERSED : NEXT_COMPONENT_EMPTY;
+                        }
+                    }
+
+                    current = subtype(srcnum).asComparableBytes(src.accessor(), nextComponent, version);
+                    // and also null values for some types (e.g. int, varint but not text) that are encoded as empty
+                    // buffers.
                     if (current == null)
-                        return subtype(srcnum).isReversed() ? NEXT_COMPONENT_NULL_REVERSED : NEXT_COMPONENT_NULL;
+                        return subtype(srcnum).isReversed() ? NEXT_COMPONENT_EMPTY_REVERSED : NEXT_COMPONENT_EMPTY;
 
                     return NEXT_COMPONENT;
                 }
@@ -363,8 +380,11 @@ public class ClusteringComparator implements Comparator<Clusterable>
             switch (sep)
             {
             case NEXT_COMPONENT_NULL:
-            case NEXT_COMPONENT_NULL_REVERSED:
-                components[cc] = accessor.empty();
+                components[cc] = null;
+                break;
+            case NEXT_COMPONENT_EMPTY:
+            case NEXT_COMPONENT_EMPTY_REVERSED:
+                components[cc] = subtype(cc).fromComparableBytes(accessor, null, version);
                 break;
             case NEXT_COMPONENT:
                 components[cc] = subtype(cc).fromComparableBytes(accessor, orderedBytes, version);
@@ -415,8 +435,11 @@ public class ClusteringComparator implements Comparator<Clusterable>
             switch (sep)
             {
             case NEXT_COMPONENT_NULL:
-            case NEXT_COMPONENT_NULL_REVERSED:
-                components[cc] = accessor.empty();
+                components[cc] = null;
+                break;
+            case NEXT_COMPONENT_EMPTY:
+            case NEXT_COMPONENT_EMPTY_REVERSED:
+                components[cc] = subtype(cc).fromComparableBytes(accessor, null, version);
                 break;
             case NEXT_COMPONENT:
                 components[cc] = subtype(cc).fromComparableBytes(accessor, orderedBytes, version);
@@ -469,8 +492,11 @@ public class ClusteringComparator implements Comparator<Clusterable>
             switch (sep)
             {
             case NEXT_COMPONENT_NULL:
-            case NEXT_COMPONENT_NULL_REVERSED:
-                components[cc] = accessor.empty();
+                components[cc] = null;
+                break;
+            case NEXT_COMPONENT_EMPTY:
+            case NEXT_COMPONENT_EMPTY_REVERSED:
+                components[cc] = subtype(cc).fromComparableBytes(accessor, null, version);
                 break;
             case NEXT_COMPONENT:
                 components[cc] = subtype(cc).fromComparableBytes(accessor, orderedBytes, version);

@@ -55,8 +55,11 @@ public interface ByteSource
 
     // Next component marker.
     int NEXT_COMPONENT = 0x40;
-    int NEXT_COMPONENT_NULL = 0x3F;
-    int NEXT_COMPONENT_NULL_REVERSED = 0x41;
+    // Marker used to present null values represented by empty buffers (e.g. by Int32Type)
+    int NEXT_COMPONENT_EMPTY = 0x3F;
+    int NEXT_COMPONENT_EMPTY_REVERSED = 0x41;
+    // Marker for null components in tuples, maps, sets and clustering keys.
+    int NEXT_COMPONENT_NULL = 0x3E;
     // Default terminator byte in sequences. Smaller than NEXT_COMPONENT_NULL, but larger than LT_NEXT_COMPONENT to
     // ensure lexicographic compares go in the correct direction
     int TERMINATOR = 0x38;
