@@ -37,9 +37,11 @@ import com.intel.pmem.llpl.TransactionalMemoryBlock;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringBound;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.MutableDeletionInfo;
 import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.RangeTombstoneList;
@@ -68,6 +70,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -236,14 +239,7 @@ public class PmemPartition implements Partition
                 RangeTombstone rt = ranges.next();
                 DeletionTime tombstoneDeletionTime = rt.deletionTime();
                 Slice slice = rt.deletedSlice();
-                try (UnfilteredRowIterator iter = new PmemRowMapDeletionIterator(tableMetadata, pmemRowMap.getRowMapTree(), heap, update.partitionKey(), tombstoneDeletionTime, slice))
-                {
-                    //Consume iterator to remove rows
-                    if (iter.hasNext())
-                    {
-                        iter.next();
-                    }
-                }
+                filterOutPmemRowMap(tombstoneDeletionTime, slice);
             }
         }
         block.setLong(ROW_MAP_OFFSET, rowMapAddress);
@@ -290,14 +286,7 @@ public class PmemPartition implements Partition
                 RangeTombstone rt = currentRtItr.next();
                 DeletionTime tombstoneDeletionTime = rt.deletionTime();
                 Slice slice = rt.deletedSlice();
-                try (UnfilteredRowIterator iter = new PmemRowMapDeletionIterator(tableMetadata, pmemRowMap.getRowMapTree(), heap, update.partitionKey(), tombstoneDeletionTime, slice))
-                {
-                    //Consume iterator to remove rows
-                    if (iter.hasNext())
-                    {
-                        iter.next();
-                    }
-                }
+                filterOutPmemRowMap(tombstoneDeletionTime, slice);
             }
         }
         deletePartition(update);
@@ -415,6 +404,7 @@ public class PmemPartition implements Partition
         }
         MemoryBlockDataOutputPlus partitionBlockOutputPlus = getPartitionDeleteInfoBuffer(deletedPartitionBlock, partitionDeleteSize);
         DeletionTime.serializer.serialize(partitionDeleteTime, partitionBlockOutputPlus);
+        filterOutPmemRowMap(partitionDeleteTime,Slice.ALL);
         block.setLong(STATIC_ROW_OFFSET, 0);
     }
 
@@ -581,7 +571,7 @@ public class PmemPartition implements Partition
 
         while (tombstoneMarker.hasNext())
         {
-            LongART.Entry nextEntry = (LongART.Entry) tombstoneMarker.next();
+            LongART.Entry nextEntry =  tombstoneMarker.next();
             TransactionalMemoryBlock rangeMemoryBlock = heap.memoryBlockFromHandle(nextEntry.getValue());
             DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(rangeMemoryBlock);
             try
@@ -624,6 +614,158 @@ public class PmemPartition implements Partition
         //Remove  Previously saved RTM from RangeTombstoneMarkerTree
         pmemRtmMap.getRangeTombstoneMarkerTree().clear(PmemRowMap::clearData);
         return ranges.iterator();
+    }
+
+    /**
+     * Removes Tombstones which are older than gcGraceSeconds
+     *
+     * @return Expired Tombstone count
+     */
+    public long vaccumTombstones()
+    {
+        long removedTombstones = 0;
+
+        if (block.getLong(DELETION_INFO_OFFSET) > 0)
+        {
+            TransactionalMemoryBlock deletedPartitionBlock = heap.memoryBlockFromHandle(block.getLong(DELETION_INFO_OFFSET));
+            DeletionTime deletionTime = getPartitionDeletionTime(deletedPartitionBlock);
+            int gcBefore = getGcBefore(metadata(), FBUtilities.nowInSeconds());
+            if (deletionTime != null && deletionTime.localDeletionTime() < gcBefore)
+            {
+                deletedPartitionBlock.free();
+                block.setLong(DELETION_INFO_OFFSET, 0);
+            }
+        }
+        removedTombstones += removeExpiredRangeTombstone();
+        removedTombstones += removeExpiredDeletedRows();
+        return removedTombstones;
+    }
+
+    //Removes Row Tombstones which are older then gcgraceseconds
+    private int removeExpiredDeletedRows()
+    {
+        Iterator<LongART.Entry> rowItr = pmemRowMap.getRowMapTree().getEntryIterator();
+        final ArrayList<byte[]> artEntryKeyArray = new ArrayList<>();
+        while (rowItr.hasNext())
+        {
+            LongART.Entry nextEntry = rowItr.next();
+            Unfiltered unfiltered = getUnfiltered(nextEntry, true);
+            if (unfiltered != null && isExpired(pmemTableInfo, unfiltered))
+            {
+                artEntryKeyArray.add(nextEntry.getKey());
+            }
+        }
+        if (!artEntryKeyArray.isEmpty())
+        {
+            for (byte[] artEntryKey : artEntryKeyArray)
+            {
+                pmemRowMap.getRowMapTree().remove(artEntryKey, (Long rowhandle) -> {
+                    TransactionalMemoryBlock rowMemoryBlock = heap.memoryBlockFromHandle(rowhandle);
+                    rowMemoryBlock.free();
+                });
+            }
+        }
+
+        return artEntryKeyArray.size();
+    }
+
+    //Removes RangeTombstones which are older then gcgraceseconds
+    private int removeExpiredRangeTombstone()
+    {
+        Iterator<LongART.Entry> tombstoneMarkerItr = pmemRtmMap.getRangeTombstoneMarkerTree().getEntryIterator();
+        final ArrayList<byte[]> artEntryKeyArray = new ArrayList<>();
+        while (tombstoneMarkerItr.hasNext())
+        {
+            LongART.Entry nextEntry = tombstoneMarkerItr.next();
+            Unfiltered unfiltered = getUnfiltered(nextEntry, false);
+            if (unfiltered != null && isExpired(pmemTableInfo, unfiltered))
+            {
+                artEntryKeyArray.add(nextEntry.getKey());
+            }
+        }
+        if (!artEntryKeyArray.isEmpty())
+        {
+            for (byte[] artEntryKey : artEntryKeyArray)
+            {
+                pmemRtmMap.getRangeTombstoneMarkerTree().remove(artEntryKey, (Long rowhandle) -> {
+                    TransactionalMemoryBlock rowMemoryBlock = heap.memoryBlockFromHandle(rowhandle);
+                    rowMemoryBlock.free();
+                });
+            }
+        }
+
+        return artEntryKeyArray.size();
+    }
+
+    private static int getGcBefore(TableMetadata metadata, int nowInSec)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.id);
+        return cfs.gcBefore(nowInSec);
+    }
+
+    // Returns RTM deletion time
+    private static DeletionTime rtmDeletionTime(RangeTombstoneMarker marker)
+    {
+        return marker.isOpen(false) ? marker.openDeletionTime(false) : marker.closeDeletionTime(false);
+    }
+
+    private Unfiltered getUnfiltered(LongART.Entry nextEntry , boolean isRow)
+    {
+        Row.Builder builder = BTreeRow.sortedBuilder();
+        ByteComparable clusteringByteComparable = ByteComparable.fixedLength(nextEntry.getKey());
+        if(isRow)
+        {
+            Clustering<?> clustering = tableMetadata.comparator.clusteringFromByteComparable(ByteArrayAccessor.instance, clusteringByteComparable);
+            builder.newRow(clustering);
+        }
+        TransactionalMemoryBlock rangeMemoryBlock = heap.memoryBlockFromHandle(nextEntry.getValue());
+        DataInputPlus memoryBlockDataInputPlus = new MemoryBlockDataInputPlus(rangeMemoryBlock);
+        try
+        {
+            int savedVersion = (int) memoryBlockDataInputPlus.readUnsignedVInt();
+            SerializationHeader serializationHeader = pmemTableInfo.getSerializationHeader(savedVersion);
+            DeserializationHelper helper = new DeserializationHelper(metadata(), -1, DeserializationHelper.Flag.LOCAL);
+            return PmemRowSerializer.serializer.deserializeTombstone(memoryBlockDataInputPlus, serializationHeader, helper, builder);
+        }
+        catch (IOException e)
+        {
+            closeCartIterator();
+            throw new IOError(e);
+        }
+    }
+
+    /**
+     * True if unfiltered is expired otherwise false
+     * @param pmemTableInfo
+     * @param unfiltered
+     * @return
+     */
+    public static boolean isExpired(PmemTableInfo pmemTableInfo, Unfiltered unfiltered)
+    {
+        int localDeletionTime;
+        int gcBefore = getGcBefore(pmemTableInfo.getMetadata(),FBUtilities.nowInSeconds());
+        if (unfiltered.isRow())
+        {
+            Row row = (Row) unfiltered;
+            localDeletionTime = row.primaryKeyLivenessInfo().isExpiring() ? row.primaryKeyLivenessInfo().localExpirationTime() : row.deletion().time().localDeletionTime();
+        }
+        else
+        {
+            localDeletionTime = rtmDeletionTime((RangeTombstoneMarker) unfiltered).localDeletionTime();
+        }
+        return localDeletionTime < gcBefore;
+    }
+
+    private void filterOutPmemRowMap(DeletionTime time,Slice slice)
+    {
+        try (UnfilteredRowIterator iter = new PmemRowMapDeletionIterator(tableMetadata, pmemRowMap.getRowMapTree(), heap, partitionKey(), time, slice))
+        {
+            //Consume iterator to remove rows
+            if (iter.hasNext())
+            {
+                iter.next();
+            }
+        }
     }
 
     private void closeCartIterator()
@@ -876,7 +1018,6 @@ public class PmemPartition implements Partition
             }
             else
             {
-
                 this.pmemRowTreeIterator = pmemRowMapTree.getEntryIterator();
             }
         }
@@ -929,7 +1070,7 @@ public class PmemPartition implements Partition
             final ArrayList<byte[]> artEntryKeyArray = new ArrayList<>();
             while (pmemRowTreeIterator.hasNext())
             {
-                LongART.Entry nextEntry = (LongART.Entry) pmemRowTreeIterator.next();
+                LongART.Entry nextEntry = pmemRowTreeIterator.next();
                 Unfiltered unfiltered = computeNextInternal(nextEntry);
                 if (unfiltered != null && (((Row) unfiltered).primaryKeyLivenessInfo().timestamp() <= deletionTime.markedForDeleteAt()))
                 {

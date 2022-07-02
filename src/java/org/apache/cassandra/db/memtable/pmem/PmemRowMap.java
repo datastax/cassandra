@@ -250,7 +250,8 @@ public class PmemRowMap {
         return rowMapTree.size();
     }
 
-    public void delete() {
+    public void deleteRowMapTree() {
         rowMapTree.clear(PmemRowMap::clearData);
+        rowMapTree.free();
     }
 }

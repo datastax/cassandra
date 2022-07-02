@@ -538,6 +538,65 @@ public class PmemRowSerializer extends UnfilteredSerializer {
         }
     }
 
+    /**
+     * Returns Tombstones which are created by DeletionTime and TTL
+     * @param in
+     * @param header
+     * @param helper
+     * @param builder
+     * @return
+     * @throws IOException
+     */
+    public Unfiltered deserializeTombstone(DataInputPlus in, SerializationHeader header, DeserializationHelper helper,Row.Builder builder)
+    throws IOException
+    {
+        int flags = in.readUnsignedByte();
+        if (isEndOfPartition(flags))
+            return null;
+
+        int extendedFlags = readExtendedFlags(in, flags);
+
+        if (kind(flags) == Unfiltered.Kind.RANGE_TOMBSTONE_MARKER)
+        {
+            ClusteringBoundOrBoundary<byte[]> bound = ClusteringBoundOrBoundary.serializer.deserialize(in, helper.version, header.clusteringTypes());
+            return deserializeMarkerBody(in, header, bound);
+        }
+        else
+        {
+            assert !isStatic(extendedFlags);
+
+            boolean hasTimestamp = (flags & HAS_TIMESTAMP) != 0;
+            boolean hasTTL = (flags & HAS_TTL) != 0;
+            boolean hasDeletion = (flags & HAS_DELETION) != 0;
+            boolean deletionIsShadowable = (extendedFlags & HAS_SHADOWABLE_DELETION) != 0;
+
+            if (hasDeletion)
+            {
+                if (hasTimestamp)
+                {
+                    header.readTimestamp(in);
+                    if (hasTTL)
+                    {
+                        header.readTTL(in);
+                        header.readLocalDeletionTime(in);
+                    }
+                }
+                Row.Deletion deletion = new Row.Deletion(header.readDeletionTime(in), deletionIsShadowable);
+                return BTreeRow.emptyDeletedRow(builder.clustering(), deletion);
+            }
+            else if (hasTTL && hasTimestamp)
+            {
+                long timestamp = header.readTimestamp(in);
+                int ttl = header.readTTL(in);
+                int localDeletionTime = header.readLocalDeletionTime(in);
+                LivenessInfo rowLiveness = LivenessInfo.withExpirationTime(timestamp, ttl, localDeletionTime);
+                builder.addPrimaryKeyLivenessInfo(rowLiveness);
+                return BTreeRow.noCellLiveRow(builder.clustering(), rowLiveness);
+            }
+            return null;
+        }
+    }
+
     private void readSimpleColumn(ColumnMetadata column, DataInputPlus in, SerializationHeader header, DeserializationHelper helper, Row.Builder builder, LivenessInfo rowLiveness)
             throws IOException {
         if (helper.includes(column)) {

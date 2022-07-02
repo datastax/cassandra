@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 import com.intel.pmem.llpl.util.AutoCloseableIterator;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.memtable.pmem.PmemIndexBuilder;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -379,7 +380,6 @@ public class PersistentMemoryMemtable extends AbstractMemtable
                 // Returning true asks the ColumnFamilyStore to replace this memtable object without flushing.
                 truncateTable();
                 return false;
-
             case MEMTABLE_LIMIT: // The memtable size limit is reached, and this table was selected for flushing.
                 // Also passed if we call owner.signalLimitReached()
             case COMMITLOG_DIRTY: // Commitlog thinks it needs to keep data from this table.
@@ -405,6 +405,31 @@ public class PersistentMemoryMemtable extends AbstractMemtable
     {
         // TODO: implement. Figure out how to restore snapshot (with external tools).
     }
+    @Override
+    public void performGarbageCollect()
+    {
+        logger.info("Starting {} from memtable for {}.{}.", OperationType.GARBAGE_COLLECT, metadata().keyspace, metadata().name);
+        ConcurrentLongART memtableCart = tablesMetadataMap.get(metadata().id).getMemtableCart();
+        long removedTombstones = 0;
+        try (AutoCloseableIterator<LongART.Entry> cartIterator = memtableCart.getEntryIterator())
+        {
+            long rowHandle;
+            while (cartIterator.hasNext())
+            {
+                rowHandle = cartIterator.next().getValue();
+                PmemPartition pMemPartition = new PmemPartition(heap, UpdateTransaction.NO_OP, pmemTableInfo);
+                pMemPartition.load(heap, rowHandle, statsCollector.get());
+                removedTombstones += pMemPartition.vaccumTombstones();
+            }
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
+
+        logger.info("Removed {} expired Tombstones from memtable for {}.{} successfully.", removedTombstones, metadata().keyspace, metadata().name);
+
+    }
 
     public void switchOut(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
     {
@@ -418,7 +443,7 @@ public class PersistentMemoryMemtable extends AbstractMemtable
         PmemPartition pmemPartition = new PmemPartition(heap, UpdateTransaction.NO_OP, pmemTableInfo);
         pmemPartition.load(heap, artHandle, statsCollector.get());
         PmemRowMap rm = PmemRowMap.loadFromAddress(heap, pmemPartition.getRowMapAddress(), UpdateTransaction.NO_OP, pmemTableInfo);
-        rm.delete();
+        rm.deleteRowMapTree();
     }
 
     //Frees the Persistent Memory which is associated with CFS
@@ -647,7 +672,6 @@ public class PersistentMemoryMemtable extends AbstractMemtable
         }
         return metadataRef;
     }
-
 
     // Returns true if the given index is built else  returns false
     private boolean isBuilt(ColumnFamilyStore baseCfs, String indexName)
