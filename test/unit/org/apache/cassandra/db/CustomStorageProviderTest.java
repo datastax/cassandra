@@ -19,7 +19,6 @@ package org.apache.cassandra.db;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 
 import javax.annotation.Nullable;
 
@@ -40,14 +39,17 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.DefaultFSErrorHandler;
 import org.assertj.core.api.Assertions;
 
-public class CustomStorageProviderTest {
-    static {
+public class CustomStorageProviderTest
+{
+    static
+    {
         System.setProperty("cassandra.custom_storage_provider",
                            CustomStorageProviderTest.TestCustomStorageProvider.class.getName());
     }
+
     private static final String KS = "ks";
     private static final String TABLE = "cf";
-    private static final String ASSERT_MESSAGE = "Should throw if exists";
+    private static final String ASSERT_MESSAGE = "Should throw if the directory exists";
     private static File tempDataDir;
 
     private TableMetadata tableMetadata;
@@ -81,14 +83,14 @@ public class CustomStorageProviderTest {
 
     private static Directories.DataDirectory[] toDataDirectories(File location)
     {
-        return new Directories.DataDirectory[] { new Directories.DataDirectory(location) };
+        return new Directories.DataDirectory[]{ new Directories.DataDirectory(location) };
     }
 
     @Test
     public void testCustomStorageProvider()
     {
         Assertions.assertThat(StorageProvider.instance).isInstanceOf(TestCustomStorageProvider.class);
-        ((TestCustomStorageProvider)StorageProvider.instance).createNew = true;
+        ((TestCustomStorageProvider) StorageProvider.instance).useCustomBehavior = true;
 
         File newDir = new File(tempDataDir, "testCustomStorageProvider");
         new Directories(tableMetadata, toDataDirectories(newDir));
@@ -99,7 +101,7 @@ public class CustomStorageProviderTest {
     public void testDirectoriesMock()
     {
         Assertions.assertThat(StorageProvider.instance).isInstanceOf(TestCustomStorageProvider.class);
-        ((TestCustomStorageProvider) StorageProvider.instance).createNew = true;
+        ((TestCustomStorageProvider) StorageProvider.instance).useCustomBehavior = true;
 
         File newDir = new File(tempDataDir, "testDirectoriesMock");
         new Directories(tableMetadata, toDataDirectories(newDir));
@@ -115,15 +117,21 @@ public class CustomStorageProviderTest {
 
     public static class TestCustomStorageProvider extends StorageProvider.DefaultProvider
     {
-        boolean createNew = false;
+        // Should be false during initialization, so the defaul behaviour is used
+        boolean useCustomBehavior = false;
 
+        /**
+         * This method is called from Directories constuctor by accessing StorageProvider.instance,
+         * which is expected to be set to this custom storage provider.
+         * The method is overriden with custom behavior that the same directory cannot be created twice.
+         */
         @Override
         public Directories.DataDirectory[] createDataDirectories(@Nullable KeyspaceMetadata ksMetadata,
                                                                  String keyspaceName,
                                                                  Directories.DataDirectory[] dirs)
         {
-            if (!createNew)
-                return dirs;
+            if (!useCustomBehavior)
+                return super.createDataDirectories(ksMetadata, keyspaceName, dirs);
 
             for (Directories.DataDirectory d : dirs)
             {
