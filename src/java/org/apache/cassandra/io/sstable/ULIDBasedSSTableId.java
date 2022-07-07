@@ -40,8 +40,8 @@ import org.apache.cassandra.utils.TimeUUID;
  */
 public final class ULIDBasedSSTableId implements SSTableId, Comparable<ULIDBasedSSTableId>
 {
-    public final static int STRING_LEN = 26;
-    public final static int BYTES_LEN = 16;
+    public static final int STRING_LEN = 26;
+    public static final int BYTES_LEN = 16;
 
     final ULID.Value ulid;
     final TimeUUID approximateTimeUUID;
@@ -149,8 +149,7 @@ public final class ULIDBasedSSTableId implements SSTableId, Comparable<ULIDBased
             if (!m.matches())
                 throw new IllegalArgumentException("String '" + s + "' is not a valid ULID based sstable identifier");
 
-            ULID.Value ulid = ULID.parseULID(s);
-            return new ULIDBasedSSTableId(ulid);
+            return new ULIDBasedSSTableId(ULID.parseULID(s));
         }
 
         @Override
@@ -160,8 +159,7 @@ public final class ULIDBasedSSTableId implements SSTableId, Comparable<ULIDBased
                                         "Buffer does not have a valid number of bytes remaining. Expecting: %s but was: %s",
                                         ULIDBasedSSTableId.BYTES_LEN, bytes.remaining());
 
-            ULID.Value ulid = ULID.fromBytes(ByteBufferUtil.getArray(bytes));
-            return new ULIDBasedSSTableId(ulid);
+            return new ULIDBasedSSTableId(ULID.fromBytes(ByteBufferUtil.getArray(bytes)));
         }
     }
 }

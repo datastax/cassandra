@@ -43,7 +43,7 @@ public class SSTableIdFactory
             throw new IllegalArgumentException("Unsupported value for property " + CassandraRelevantProperties.SSTABLE_UUID_IMPL.getKey() + ": " + impl);
     }
 
-    private Stream<SSTableId.Builder<?>> buildersStream()
+    private Stream<SSTableId.Builder<?>> makeIdBuildersStream()
     {
         return isULIDImpl()
                ? Stream.of(ULIDBasedSSTableId.Builder.instance, UUIDBasedSSTableId.Builder.instance, SequenceBasedSSTableId.Builder.instance)
@@ -59,10 +59,10 @@ public class SSTableIdFactory
      */
     public SSTableId fromString(String str) throws IllegalArgumentException
     {
-        return buildersStream().filter(b -> b.isUniqueIdentifier(str))
-                               .findFirst()
-                               .map(b -> b.fromString(str))
-                               .orElseThrow(() -> new IllegalArgumentException("String '" + str + "' does not match any SSTable identifier format"));
+        return makeIdBuildersStream().filter(b -> b.isUniqueIdentifier(str))
+                                     .findFirst()
+                                     .map(b -> b.fromString(str))
+                                     .orElseThrow(() -> new IllegalArgumentException("String '" + str + "' does not match any SSTable identifier format"));
     }
 
     /**
@@ -77,30 +77,29 @@ public class SSTableIdFactory
      */
     public SSTableId fromBytes(ByteBuffer bytes)
     {
-        return buildersStream().filter(b -> b.isUniqueIdentifier(bytes))
-                               .findFirst()
-                               .map(b -> b.fromBytes(bytes))
-                               .orElseThrow(() -> new IllegalArgumentException("Byte buffer of length " + bytes.remaining() + " does not match any SSTable identifier format"));
+        return makeIdBuildersStream().filter(b -> b.isUniqueIdentifier(bytes))
+                                     .findFirst()
+                                     .map(b -> b.fromBytes(bytes))
+                                     .orElseThrow(() -> new IllegalArgumentException("Byte buffer of length " + bytes.remaining() + " does not match any SSTable identifier format"));
     }
 
     /**
      * Returns default identifiers builder.
      */
-    @SuppressWarnings("unchecked")
-    public SSTableId.Builder<SSTableId> defaultBuilder()
+    public SSTableId.Builder<? extends SSTableId> defaultBuilder()
     {
-        SSTableId.Builder<? extends SSTableId> builder = DatabaseDescriptor.isUUIDSSTableIdentifiersEnabled()
-                                                         ? isULIDImpl()
-                                                           ? ULIDBasedSSTableId.Builder.instance
-                                                           : UUIDBasedSSTableId.Builder.instance
-                                                         : SequenceBasedSSTableId.Builder.instance;
-        return (SSTableId.Builder<SSTableId>) builder;
+        if (DatabaseDescriptor.isUUIDSSTableIdentifiersEnabled())
+            return isULIDImpl()
+                   ? ULIDBasedSSTableId.Builder.instance
+                   : UUIDBasedSSTableId.Builder.instance;
+        else
+            return SequenceBasedSSTableId.Builder.instance;
     }
 
     /**
      * Compare sstable identifiers so that UUID based identifier is always greater than sequence based identifier
      */
-    public final static Comparator<SSTableId> COMPARATOR = Comparator.nullsFirst(Comparator.comparing(SSTableIdFactory::asTimeUUID));
+    public static final Comparator<SSTableId> COMPARATOR = Comparator.nullsFirst(Comparator.comparing(SSTableIdFactory::asTimeUUID));
 
     private static Pair<TimeUUID, Integer> asTimeUUID(SSTableId id)
     {

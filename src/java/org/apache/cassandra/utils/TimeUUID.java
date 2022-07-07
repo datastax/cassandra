@@ -29,20 +29,6 @@ public class TimeUUID implements Comparable<TimeUUID>
     protected static final long TIMESTAMP_UUID_VERSION_IN_MSB = 0x1000L;
     protected static final long UUID_VERSION_BITS_IN_MSB = 0xf000L;
 
-    /*
-     * The min and max possible lsb for a UUID.
-     * Note that his is not 0 and all 1's because Cassandra TimeUUIDType
-     * compares the lsb parts as a signed byte array comparison. So the min
-     * value is 8 times -128 and the max is 8 times +127.
-     *
-     * Note that we ignore the uuid variant (namely, MIN_CLOCK_SEQ_AND_NODE
-     * have variant 2 as it should, but MAX_CLOCK_SEQ_AND_NODE have variant 0).
-     * I don't think that has any practical consequence and is more robust in
-     * case someone provides a UUID with a broken variant.
-     */
-    private static final long MIN_CLOCK_SEQ_AND_NODE = 0x8080808080808080L;
-    private static final long MAX_CLOCK_SEQ_AND_NODE = 0x7f7f7f7f7f7f7f7fL;
-
     final long uuidTimestamp, lsb;
 
     public TimeUUID(long uuidTimestamp, long lsb)
