@@ -319,6 +319,26 @@ public class Directories
     }
 
     /**
+     * A special constructor used to mock SSTables for CNDB tests.
+     *
+     * This constructor fixes the data path and path to whichever directory is passed in. No other manipulations
+     * to the data paths are performed, unlike in the other constructors. The directory should therefore already
+     * contain information related to the keyspace and table, whether it is local or remote.
+     */
+    @VisibleForTesting
+    public Directories(final TableMetadata metadata, Path directory)
+    {
+        ImmutableMap.Builder<Path, DataDirectory> canonicalPathsBuilder = ImmutableMap.builder();
+
+        this.metadata = metadata;
+        this.paths = new DataDirectory[] { new DataDirectory(directory) };
+        this.dataPaths = new File[] { paths[0].location };
+        
+        canonicalPathsBuilder.put(dataPaths[0].toCanonical().toPath(), paths[0]);
+        this.canonicalPathToDD = canonicalPathsBuilder.build();
+    }
+
+    /**
      * Returns SSTable location which is inside given data directory.
      *
      * @param dataDirectory
