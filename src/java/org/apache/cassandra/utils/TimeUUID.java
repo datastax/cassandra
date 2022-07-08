@@ -204,6 +204,14 @@ public class TimeUUID implements Serializable, Comparable<TimeUUID>
     }
 
     /**
+     * The Cassandra internal millis-resolution timestamp of the TimeUUID, as of unix epoch
+     */
+    public long unixMillis()
+    {
+        return (uuidTimestamp / 10_000L) + UUID_EPOCH_UNIX_MILLIS;
+    }
+
+    /**
      * The UUID-format timestamp, i.e. 10x micros-resolution, as of UUIDGen.UUID_EPOCH_UNIX_MILLIS
      * The tenths of a microsecond are used to store a flag value.
      */
@@ -263,6 +271,11 @@ public class TimeUUID implements Serializable, Comparable<TimeUUID>
     @Override
     public boolean equals(Object that)
     {
+        if (this == that)
+            return true;
+        if (that == null)
+            return false;
+
         return (that instanceof UUID && equals((UUID) that))
                || (that instanceof TimeUUID && equals((TimeUUID) that));
     }
