@@ -523,6 +523,11 @@ public enum CassandraRelevantProperties
     SSL_ENABLE("ssl.enable"),
     SSL_STORAGE_PORT("cassandra.ssl_storage_port"),
     SSTABLE_FORMAT_DEFAULT("cassandra.sstable.format.default"),
+
+    // in OSS, when UUID based SSTable generation identifiers are enabled, they use TimeUUID
+    // though, for CNDB we want to use ULID - this property allows for that
+    // valid values for this property are: uuid, ulid
+    SSTABLE_UUID_IMPL("cassandra.sstable.id.uuid_impl", "uuid"),
     START_GOSSIP("cassandra.start_gossip", "true"),
     START_NATIVE_TRANSPORT("cassandra.start_native_transport"),
     STORAGE_DIR("cassandra.storagedir"),
