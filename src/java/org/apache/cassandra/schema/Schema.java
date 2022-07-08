@@ -50,6 +50,9 @@ import org.apache.cassandra.exceptions.UnknownKeyspaceException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.LocalStrategy;
+import org.apache.cassandra.nodes.LocalInfo;
+import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.nodes.virtual.NodeConstants;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
@@ -86,7 +89,7 @@ public class Schema implements SchemaProvider
 
     private volatile Keyspaces distributedKeyspaces = Keyspaces.none();
 
-    private final Keyspaces localKeyspaces;
+    private final LocalKeyspaces localKeyspaces;
 
     private TableMetadataRefCache tableMetadataRefCache = TableMetadataRefCache.EMPTY;
 
@@ -113,19 +116,18 @@ public class Schema implements SchemaProvider
     private Schema()
     {
         this.online = isDaemonInitialized();
-        this.localKeyspaces = (FORCE_LOAD_LOCAL_KEYSPACES || isDaemonInitialized() || isToolInitialized())
-                              ? Keyspaces.of(SchemaKeyspace.metadata(), SystemKeyspace.metadata())
-                              : Keyspaces.none();
+        this.localKeyspaces = new LocalKeyspaces(this);
+        if (FORCE_LOAD_LOCAL_KEYSPACES || isDaemonInitialized() || isToolInitialized())
+            this.localKeyspaces.loadHardCodedDefinitions();
 
-        this.localKeyspaces.forEach(this::loadNew);
         this.updateHandler = SchemaUpdateHandlerFactoryProvider.instance.get().getSchemaUpdateHandler(online, this::mergeAndUpdateVersion);
     }
 
     @VisibleForTesting
-    public Schema(boolean online, Keyspaces localKeyspaces, SchemaUpdateHandler updateHandler)
+    public Schema(boolean online, SchemaUpdateHandler updateHandler)
     {
         this.online = online;
-        this.localKeyspaces = localKeyspaces;
+        this.localKeyspaces = new LocalKeyspaces(this);
         this.updateHandler = updateHandler;
     }
 
@@ -167,6 +169,16 @@ public class Schema implements SchemaProvider
             reload(previous, ksm);
 
         distributedKeyspaces = distributedKeyspaces.withAddedOrUpdated(ksm);
+    }
+
+    public LocalKeyspaces localKeyspaces()
+    {
+        return localKeyspaces;
+    }
+
+    protected void addNewRefs(KeyspaceMetadata ksm)
+    {
+        this.tableMetadataRefCache = tableMetadataRefCache.withNewRefs(ksm);
     }
 
     private synchronized void loadNew(KeyspaceMetadata ksm)
@@ -259,7 +271,7 @@ public class Schema implements SchemaProvider
 
     public Keyspaces distributedAndLocalKeyspaces()
     {
-        return Keyspaces.builder().add(localKeyspaces).add(distributedKeyspaces).build();
+        return Keyspaces.builder().add(localKeyspaces.localSystemKeyspaces()).add(distributedKeyspaces).build();
     }
 
     public Keyspaces distributedKeyspaces()
@@ -380,11 +392,6 @@ public class Schema implements SchemaProvider
         return distributedAndLocalKeyspaces().names();
     }
 
-    public Keyspaces getLocalKeyspaces()
-    {
-        return localKeyspaces;
-    }
-
     /* TableMetadata/Ref query/control methods */
 
     /**
@@ -455,6 +462,14 @@ public class Schema implements SchemaProvider
     {
         if (tableName.isEmpty())
             throw new InvalidRequestException("non-empty table is required");
+
+        if (NodeConstants.canBeMapped(keyspaceName, tableName))
+        {
+            KeyspaceMetadata systemViews = VirtualKeyspaceRegistry.instance.getKeyspaceMetadataNullable(SchemaConstants.SYSTEM_VIEWS_KEYSPACE_NAME);
+            if (systemViews == null)
+                throw new InvalidRequestException(String.format("The %s keyspace is not available", SchemaConstants.SYSTEM_VIEWS_KEYSPACE_NAME));
+            return systemViews.getTableOrViewNullable(NodeConstants.mapTableToView(tableName));
+        }
 
         KeyspaceMetadata keyspace = getKeyspaceMetadata(keyspaceName);
         if (keyspace == null)
@@ -616,7 +631,7 @@ public class Schema implements SchemaProvider
     public synchronized void mergeAndUpdateVersion(SchemaTransformationResult result, boolean dropData)
     {
         if (online)
-            SystemKeyspace.updateSchemaVersion(result.after.getVersion());
+            Nodes.local().update(result.after.getVersion(), LocalInfo::setSchemaVersion, false);
         result = localDiff(result);
         schemaChangeNotifier.notifyPreChanges(result);
         merge(result.diff, dropData);
