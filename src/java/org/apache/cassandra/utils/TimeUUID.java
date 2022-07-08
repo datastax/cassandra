@@ -43,6 +43,7 @@ import java.util.stream.Collectors;
 import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
 
+import de.huxhorn.sulky.ulid.ULID;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -141,6 +142,12 @@ public class TimeUUID implements Serializable, Comparable<TimeUUID>
         return new TimeUUID(msbToRawTimestamp(msb), lsb);
     }
 
+    public static TimeUUID approximateFromULID(ULID.Value ulid)
+    {
+        long rawTimestamp = unixMillisToRawTimestamp(ulid.timestamp(), (10_000L * (ulid.getMostSignificantBits() & 0xFFFF)) >> 16);
+        return new TimeUUID(rawTimestamp, ulid.getLeastSignificantBits());
+    }
+
     public static TimeUUID deserialize(ByteBuffer buffer)
     {
         return fromBytes(buffer.getLong(buffer.position()), buffer.getLong(buffer.position() + 8));
@@ -204,6 +211,14 @@ public class TimeUUID implements Serializable, Comparable<TimeUUID>
     }
 
     /**
+     * The Cassandra internal millis-resolution timestamp of the TimeUUID, as of unix epoch
+     */
+    public long unixMillis()
+    {
+        return (uuidTimestamp / 10_000L) + UUID_EPOCH_UNIX_MILLIS;
+    }
+
+    /**
      * The UUID-format timestamp, i.e. 10x micros-resolution, as of UUIDGen.UUID_EPOCH_UNIX_MILLIS
      * The tenths of a microsecond are used to store a flag value.
      */
@@ -263,6 +278,11 @@ public class TimeUUID implements Serializable, Comparable<TimeUUID>
     @Override
     public boolean equals(Object that)
     {
+        if (this == that)
+            return true;
+        if (that == null)
+            return false;
+
         return (that instanceof UUID && equals((UUID) that))
                || (that instanceof TimeUUID && equals((TimeUUID) that));
     }
