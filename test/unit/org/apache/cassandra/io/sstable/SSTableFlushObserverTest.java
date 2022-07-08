@@ -81,7 +81,7 @@ public class SSTableFlushObserverTest
     private TableMetadata cfm;
     private File directory;
     private SSTableFormat<?, ?> sstableFormat;
-    private static Supplier<SSTableId> idGen;
+    private static Supplier<? extends SSTableId> idGen;
 
     @BeforeClass
     public static void initDD()
