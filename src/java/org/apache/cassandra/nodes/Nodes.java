@@ -162,30 +162,22 @@ public class Nodes
     {
         syncToDisk();
 
-        // Synchronize to make sure that no saves happen during snapshot creation, which could
-        // make us miss a file or cause spurious errors.
-        synchronized (local)
+        Path snapshotPath = snapshotsDirectory.resolve(snapshotName);
+        File snapshotFile = new File(snapshotPath);
+        try
         {
-            synchronized (peers)
-            {
-                Path snapshotPath = snapshotsDirectory.resolve(snapshotName);
-                File snapshotFile = new File(snapshotPath);
-                try
-                {
-                    Files.createDirectories(snapshotPath);
-                    local.snapshot(snapshotPath);
-                    peers.snapshot(snapshotPath);
+            Files.createDirectories(snapshotPath);
+            local.snapshot(snapshotPath);
+            peers.snapshot(snapshotPath);
 
-                    SyncUtil.trySyncDir(snapshotFile);
+            SyncUtil.trySyncDir(snapshotFile);
 
-                    logger.info("Created snapshot for local+peers in {}", snapshotPath);
-                }
-                catch (IOException e)
-                {
-                    FileUtils.deleteRecursive(snapshotFile);
-                    throw e;
-                }
-            }
+            logger.info("Created snapshot for local+peers in {}", snapshotPath);
+        }
+        catch (IOException e)
+        {
+            FileUtils.deleteRecursive(snapshotFile);
+            throw e;
         }
     }
 
@@ -302,16 +294,13 @@ public class Nodes
 
     private void initializeDirectory(Path dir)
     {
-        if (!Files.isDirectory(dir))
+        try
         {
-            try
-            {
-                Files.createDirectories(dir);
-            }
-            catch (IOException e)
-            {
-                throw Throwables.unchecked(e);
-            }
+            Files.createDirectories(dir);
+        }
+        catch (IOException e)
+        {
+            throw Throwables.unchecked(e);
         }
     }
 
@@ -472,14 +461,18 @@ public class Nodes
             getOrInitializeLocalHostId();
         }
 
-        private void saveToDisk()
+        private synchronized void saveToDisk()
         {
             // called via updateExecutor
-            synchronized (this)
-            {
-                // This one takes about 80µs to serialize
-                transactionalWrite(localPath, localBackupPath, localTempPath, this::write, baseDirectory);
-            }
+            // This one takes about 80µs to serialize
+            transactionalWrite(localPath, localBackupPath, localTempPath, this::write, baseDirectory);
+        }
+
+        private synchronized void snapshot(Path snapshotPath) throws IOException
+        {
+            Path localSnapshot = snapshotPath.resolve(localPath.getFileName());
+            if (Files.exists(localPath) && !Files.exists(localSnapshot))
+                Files.createLink(localSnapshot, localPath);
         }
 
         private void write(OutputStream output) throws IOException
@@ -490,9 +483,6 @@ public class Nodes
 
         private void close()
         {
-            if (closed)
-                return;
-
             closed = true;
         }
 
@@ -500,13 +490,6 @@ public class Nodes
         {
             if (localInfo.isDirty())
                 saveToDisk();
-        }
-
-        private void snapshot(Path snapshotPath) throws IOException
-        {
-            Path localSnapshot = snapshotPath.resolve(localPath.getFileName());
-            if (Files.exists(localPath) && !Files.exists(localSnapshot))
-                Files.createLink(localSnapshot, localPath);
         }
 
         private void resetUnsafe()
@@ -686,13 +669,19 @@ public class Nodes
             peers = transactionalRead(peersPath, peersBackupPath, peersTempPath, this::read, ConcurrentHashMap::new);
         }
 
-        private void saveToDisk()
+        private synchronized void saveToDisk()
         {
             // called via updateExecutor
-            synchronized (this)
-            {
-                transactionalWrite(peersPath, peersBackupPath, peersTempPath, this::write, baseDirectory);
-            }
+            transactionalWrite(peersPath, peersBackupPath, peersTempPath, this::write, baseDirectory);
+        }
+
+        private synchronized void snapshot(Path snapshotPath) throws IOException
+        {
+            // Needs to be synchronized to avoid snapshotting in the middle of
+            // a write
+            Path peersSnapshot = snapshotPath.resolve(peersPath.getFileName());
+            if (Files.exists(peersPath) && !Files.exists(peersSnapshot))
+                Files.createLink(peersSnapshot, peersPath);
         }
 
         private void write(OutputStream output) throws IOException
@@ -703,9 +692,6 @@ public class Nodes
 
         private void close()
         {
-            if (closed)
-                return;
-
             closed = true;
         }
 
@@ -722,13 +708,6 @@ public class Nodes
             for (PeerInfo peer : collection)
                 map.put(peer.getPeer(), peer);
             return map;
-        }
-
-        private void snapshot(Path snapshotPath) throws IOException
-        {
-            Path peersSnapshot = snapshotPath.resolve(peersPath.getFileName());
-            if (Files.exists(peersPath) && !Files.exists(peersSnapshot))
-                Files.createLink(peersSnapshot, peersPath);
         }
 
         private void resetUnsafe()
