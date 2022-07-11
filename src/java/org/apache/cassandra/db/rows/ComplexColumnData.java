@@ -64,6 +64,10 @@ public class ComplexColumnData extends ColumnData implements Iterable<Cell<?>>
         this.complexDeletion = complexDeletion;
     }
 
+    public boolean hasCells() {
+        return !BTree.isEmpty(this.cells);
+    }
+
     public int cellsCount()
     {
         return BTree.size(cells);
