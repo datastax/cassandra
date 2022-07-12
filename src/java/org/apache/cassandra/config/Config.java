@@ -381,6 +381,8 @@ public class Config
 
     public String saved_caches_directory;
 
+    public String metadata_directory;
+
     // Commit Log
     public String commitlog_directory;
     @Replaces(oldName = "commitlog_total_space_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
