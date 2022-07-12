@@ -1,19 +1,19 @@
 <!--
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+# Copyright DataStax, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
 -->
 
 # Unified compaction strategy (UCS)
@@ -319,18 +319,35 @@ on the number of overlapping sources we compact; in that case we use the collect
 select at most limit-many in any included overlap set, making sure that if an sstable is included in this compaction,
 all older ones are also included to maintain time order.
 
-## Selecting the compaction to run
+## Selecting compactions to run
+
+Because of sharding, UCS can do more compactions in parallel. However, it will often not use all available compaction
+threads.
+
+The reason for this is that UCS splits the available compaction threads equally among the levels of the compaction
+hierarchy. For example, if there are 16 compaction threads and we have no other work to do but compact the highest
+level 5, we can only use up to $\lceil 16/6 \rceil = 3$ threads to do compactions on level 5. If we permit more, we
+risk starving the lower levels of resources, which can result in sstables accumulating on level 0 for as long as that
+compaction takes, which can be a very long time, and breaking our read amplification expectations.
+
+In theory, with a fixed compaction parameter each level requires an equal amount of processing resources: for tiered
+compaction, every piece of data that enters the system goes through one compaction for each level, and for leveled -
+through $f-1$. Because of this UCS reserves an equal number of compaction threads for each level, and assign tasks to
+the remainder of threads randomly.
+
+Make sure the number of compaction threads is greater than the number of expected levels to ensure compaction runs
+smoothly.
+
+## Prioritization of compactions
 
 Compaction strategies aim to minimize the read amplification of queries, which is defined by the number of sstables
-that overlap on any given key. In order to do this most efficiently in situations where compaction is late, we select
-a compaction bucket whose overlap is the highest among the possible choices. If there are multiple such choices, we 
-choose one uniformly randomly within each level, and between the levels we prefer the lowest level (as this is expected 
-to cover a larger fraction of the token space for the same amount of work).
+that overlap on any given key. In order to do this most efficiently in situations where compaction is late, we
+prioritize compaction buckets whose overlap is higher. If there are multiple choices with the same overlap, we randomize
+the selection among them.
 
-Under sustained load, this mechanism prevents the accumulation of sstables on some level that could sometimes happen 
-with legacy strategies (e.g. all resources consumed by L0 and sstables accumulating on L1) and can lead to a 
-steady state where compactions always use more sstables than the assigned threshold and fan factor and maintain a tiered
-hierarchy based on the lowest overlap they are able to maintain for the load.
+Under sustained load, this mechanism in combination with the above prevents the accumulation of sstables on some level
+and can lead to a steady state where compactions always use more sstables than the assigned threshold and fan factor and 
+maintain a tiered hierarchy based on the lowest overlap they are able to maintain for the load.
 
 ## Major compaction
 
@@ -401,53 +418,34 @@ UCS accepts these compaction strategy parameters:
 * **scaling_parameters**. A list of per-level scaling parameters, specified as L*f*, T*f*, N, or an integer value
   specifying $w$ directly. If more levels are present than the length of this list, the last value is used for all
   higher levels. Often this will be a single parameter, specifying the behaviour for all levels of the
-  hierarchy.  
-  Levelled compaction, specified as L*f*, is preferable for read-heavy workloads, especially if bloom filters are
+  hierarchy.
+  <br/>Levelled compaction, specified as L*f*, is preferable for read-heavy workloads, especially if bloom filters are
   not effective (e.g. with wide partitions); higher levelled fan factors improve read amplification (and hence latency,
-  as well as throughput for read-dominated workloads) at the expense of increased write costs.  
-  Tiered compaction, specified as T*f*, is preferable for write-heavy workloads, or ones where bloom filters or
+  as well as throughput for read-dominated workloads) at the expense of increased write costs.
+  <br/>Tiered compaction, specified as T*f*, is preferable for write-heavy workloads, or ones where bloom filters or
   time order can be exploited; higher tiered fan factors improve the cost of writes (and hence throughput) at the
-  expense of making reads more difficult.  
-  N is the middle ground that has the features of levelled (one sstable run per level) as well as tiered (one
-  compaction to be promoted to the next level) and a fan factor of 2. This can also be specified as T2 or L2.  
-  The default value is T4, matching the default STCS behaviour with threshold 4. To select an equivalent of LCS
+  expense of making reads more difficult.
+  <br/>N is the middle ground that has the features of levelled (one sstable run per level) as well as tiered (one
+  compaction to be promoted to the next level) and a fan factor of 2. This can also be specified as T2 or L2.
+  <br/>The default value is T4, matching the default STCS behaviour with threshold 4. To select an equivalent of LCS
   with its default fan factor 10, use L10.
 * **target_sstable_size**. The target sstable size $t$, specified as a human-friendly size in bytes (e.g. 100 MiB =
   $100\cdot 2^{20}$ B or (10 MB = 10,000,000 B)). The strategy will split data in shards that aim to produce sstables
-  of size between $t / \sqrt 2$ and $t \cdot \sqrt 2$.  
-  Smaller sstables improve streaming and repair, and make compactions shorter. On the other hand, each sstable
-  on disk has a non-trivial in-memory footprint that also affects garbage collection times.  
-  Increase this if the memory pressure from the number of sstables in the system becomes too high.  
-  The default value is 1 GiB.
+  of size between $t / \sqrt 2$ and $t \cdot \sqrt 2$.
+  <br/>Smaller sstables improve streaming and repair, and make compactions shorter. On the other hand, each sstable
+  on disk has a non-trivial in-memory footprint that also affects garbage collection times.
+  <br/>Increase this if the memory pressure from the number of sstables in the system becomes too high.
+  <br/>The default value is 1 GiB.
 * **base_shard_count**. The minimum number of shards $b$, used for levels with the smallest density. This gives the
   minimum compaction concurrency for the lowest levels. A low number would result in larger L0 sstables but may limit
-  the overall maximum write throughput (as every piece of data has to go through L0). The base shard count only applies after `min_sstable_size` is reached. 
-  The default value is 4 for all tables
-* **sstable_growth** The sstable growth component $\lambda$, applied as a factor in the shard exponent calculation.
-  This is a number between 0 and 1 that controls what part of the density growth should apply to individual sstable
-  size and what part should increase the number of shards. Using a value of 1 has the effect of fixing the shard
-  count to the base value. Using 0.5 makes the shard count and sstable size grow with the square root of the density
-  growth.
-  This is useful to decrease the sheer number of sstables that will be created for very large data sets. For
-  example, without growth correction a data set of 10TiB with 1GiB target size would result in over 10k sstables,
-  which may present as too much overhead both as on-heap memory used by per-sstable structures as well as time to look
-  for intersecting sstables and tracking overlapping sets during compaction. Applying $\lambda=0.5$
-  in this scenario (with base count 4) will reduce the potential number of sstables to ~160 of ~64GiB, which is still
-  manageable both as memory overhead and individual compaction duration and space overhead. The balance between the
-  two can be further tweaked by increasing $\lambda$ to get fewer but bigger sstables on the top level, and decreasing
-  it to favour a higher count of smaller sstables. The default value is 0.333 meaning the sstable size
-  grows with the square root of the growth of the shard count.
-* **min_sstable_size** The minimum sstable size $m$, applicable when the base shard count will result is sstables
-  that are considered too small. If set, the strategy will split the space into fewer than the base count shards, to
-  make the estimated sstables size at least as large as this value. A value of 0 disables this feature.
-  The default value is 100MiB.
-* **expired_sstable_check_frequency_seconds**. Determines how often to check for expired SSTables.  
-  The default value is 10 minutes.
+  the overall maximum write throughput (as every piece of data has to go through L0).
+  <br/>The default value is 4 (1 for system tables, or when multiple data locations are defined).
+* **expired_sstable_check_frequency_seconds**. Determines how often to check for expired SSTables.
+  <br/>The default value is 10 minutes.
 
 In **cassandra.yaml**:
 
-* **concurrent_compactors**. The number of compaction threads available. Higher values increase compaction performance
-  but may increase read and write latencies.
+* **concurrent_compactors**. The number of compaction threads available. Set this to a large number, at minimum the number of expected levels of the compaction hierarchy to make sure that each level is given a dedicated compaction thread. This will avoid latency spikes caused by lower levels of the compaction hierarchy not getting a chance to run.
 
 [^1]: Note: in addition to TRANSITIVE, "overlap inclusion methods" of NONE and SINGLE are also implemented for
     experimentation, but they are not recommended for the UCS sharding scheme.

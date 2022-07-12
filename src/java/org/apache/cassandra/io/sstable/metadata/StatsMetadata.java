@@ -96,6 +96,7 @@ public class StatsMetadata extends MetadataComponent
      * deletions in this sstable. Obviously, this is pretty imprecise: a single partition deletion in the sstable
      * means we have to assume _any_ key may have a partition deletion. This is still likely useful as workloads that
      * does not use partition level deletions, or only very rarely, are probably not that rare.
+     *
      * TODO we could replace this by a small bloom-filter instead; the only downside being that we'd have to care about
      *  the size of this bloom filters not getting out of hands, and it's a tiny bit unclear if it's worth the added
      *  complexity.
