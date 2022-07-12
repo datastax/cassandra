@@ -37,6 +37,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.primitives.Ints;
 import org.junit.Assert;
 import org.junit.Assume;
@@ -271,6 +272,15 @@ public class FBUtilitiesTest
         }
         if (error != null)
             throw error;
+    }
+
+    @Test
+    public void testPrettyPrintMemoryNoModifier()
+    {
+        for (long v : ImmutableList.of(0, 1, 8, 15, 60, 125, 980, 1000, 1023, -1, -15, -1023))
+        {
+            assertEquals(v + "B", FBUtilities.prettyPrintMemory(v));
+        }
     }
 
     @Test
