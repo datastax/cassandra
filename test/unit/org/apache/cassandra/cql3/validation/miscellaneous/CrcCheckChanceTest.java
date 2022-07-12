@@ -70,6 +70,8 @@ public class CrcCheckChanceTest extends CQLTester
 
         ColumnFamilyStore cfs = Keyspace.open(CQLTester.KEYSPACE).getColumnFamilyStore(currentTable());
         ColumnFamilyStore indexCfs = cfs.indexManager.getAllIndexColumnFamilyStores().iterator().next();
+        cfs.disableAutoCompaction();
+        indexCfs.disableAutoCompaction();
         Util.flush(cfs);
 
         Assert.assertEquals(0.99, cfs.getCrcCheckChance(), 0.0);

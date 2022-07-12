@@ -874,6 +874,7 @@ public class FBUtilities
     public static String prettyPrintMemory(long size, String separator)
     {
         int prefixIndex = (63 - Long.numberOfLeadingZeros(Math.abs(size))) / 10;
+        // Note: if size is 0 we get prefixIndex=0 because the division truncates towards 0 (i.e. -1/10 = 0).
         if (prefixIndex == 0)
             return String.format("%d%sB", size, separator);
         else
@@ -912,9 +913,9 @@ public class FBUtilities
 
     /**
      * Convert the given value to a human-readable string using decimal (i.e. 10^3-based) modifiers.
-     * If the number is outside the modifier range (i.e. < 1 qi or > 1 Qi), it will be printed as vEe where e is a
+     * If the number is outside the modifier range (i.e. < 1 q or > 1 Q), it will be printed as vEe where e is a
      * multiple of 3 with sign.
-     * For example, 1.000km, 2.100 ms, 10E+45, NaN.
+     * For example, 1.000km, 215.100 ms, 10.000E+45, NaN.
      * @param value     Number to convert.
      * @param separator Separator between the number and the (modified) unit.
      */

@@ -39,6 +39,7 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
@@ -235,9 +236,9 @@ public class TTLExpiryTest
             .build()
             .applyUnsafe();
         Util.flush(cfs);
-        String noTTLKey = "nottl";
-        new RowUpdateBuilder(cfs.metadata(), timestamp, noTTLKey)
-            .add("col311", ByteBufferUtil.EMPTY_BYTE_BUFFER)
+        final String noTTLColumn = "col311";
+        new RowUpdateBuilder(cfs.metadata(), timestamp, key)
+            .add(noTTLColumn, ByteBufferUtil.EMPTY_BYTE_BUFFER)
             .build()
             .applyUnsafe();
         // also write to other key to ensure overlap for UCS
@@ -259,7 +260,9 @@ public class TTLExpiryTest
         while(scanner.hasNext())
         {
             UnfilteredRowIterator iter = scanner.next();
-            assertEquals(Util.dk(noTTLKey), iter.partitionKey());
+            assertEquals(Util.dk(key), iter.partitionKey());
+            Row row = (Row) iter.next();
+            assertEquals(noTTLColumn, row.cells().iterator().next().column().toString());
         }
         scanner.close();
     }
