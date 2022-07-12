@@ -24,18 +24,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.compaction.CompactionRealm;
+import org.apache.cassandra.db.compaction.ShardTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
-import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
@@ -64,11 +65,8 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     private final SerializationHeader header;
     private final Collection<Index.Group> indexGroups;
     private final LifecycleNewTracker lifecycleNewTracker;
-    private final long minSstableSizeInBytes;
-    private final List<PartitionPosition> boundaries;
-    private final SSTableMultiWriter[] writers;
-    private final int estimatedSSTables;
-    private int currentBoundary;
+    private final ShardTracker boundaries;
+    private final SSTableWriter[] writers;
     private int currentWriter;
 
     public ShardedMultiWriter(CompactionRealm realm,
@@ -81,8 +79,7 @@ public class ShardedMultiWriter implements SSTableMultiWriter
                               SerializationHeader header,
                               Collection<Index.Group> indexGroups,
                               LifecycleNewTracker lifecycleNewTracker,
-                              long minSstableSizeInBytes,
-                              List<PartitionPosition> boundaries)
+                              ShardTracker boundaries)
     {
         this.realm = realm;
         this.descriptor = descriptor;
@@ -94,36 +91,33 @@ public class ShardedMultiWriter implements SSTableMultiWriter
         this.header = header;
         this.indexGroups = indexGroups;
         this.lifecycleNewTracker = lifecycleNewTracker;
-        this.minSstableSizeInBytes = minSstableSizeInBytes;
         this.boundaries = boundaries;
-        this.writers = new SSTableMultiWriter[boundaries.size()];
-        this.estimatedSSTables = (int) Math.max(1, Math.ceil(realm.metrics().flushSizeOnDisk().get() / minSstableSizeInBytes));
+        this.writers = new SSTableWriter[this.boundaries.count()]; // at least one
 
-        this.currentBoundary = 0;
         this.currentWriter = 0;
         this.writers[currentWriter] = createWriter(descriptor);
     }
 
-    private SSTableMultiWriter createWriter()
+    private SSTableWriter createWriter()
     {
         Descriptor newDesc = realm.newSSTableDescriptor(descriptor.directory);
         return createWriter(newDesc);
     }
 
-    private SSTableMultiWriter createWriter(Descriptor desc)
+    private SSTableWriter createWriter(Descriptor desc)
     {
-        return SimpleSSTableMultiWriter.create(desc,
-                                               forSplittingKeysBy(estimatedSSTables),
-                                               repairedAt,
-                                               pendingRepair,
-                                               isTransient,
-                                               realm.metadataRef(),
-                                               commitLogPositions,
-                                               0,
-                                               header,
-                                               indexGroups,
-                                               lifecycleNewTracker,
-                                               realm);
+        SSTableWriter.Builder<?, ?> builder = desc.getFormat().getWriterFactory().builder(desc);
+        return builder
+               .setKeyCount(forSplittingKeysBy(boundaries.count()))
+               .setRepairedAt(repairedAt)
+               .setPendingRepair(pendingRepair)
+               .setTransientSSTable(isTransient)
+               .setTableMetadataRef(realm.metadataRef())
+               .setMetadataCollector(new MetadataCollector(realm.metadata().comparator).commitLogIntervals(commitLogPositions))
+               .setSerializationHeader(header)
+               .addDefaultComponents(indexGroups)
+               .setSecondaryIndexGroups(indexGroups)
+               .build(lifecycleNewTracker, realm);
     }
 
     private long forSplittingKeysBy(long splits) {
@@ -135,23 +129,13 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     {
         DecoratedKey key = partition.partitionKey();
 
-        boolean boundaryCrossed = false;
-        /*
-        The comparison to detect a boundary is costly, but if we only do this when the size is above the threshold,
-        we may detect a boundary change in the middle of a shard and split sstables at the wrong place.
-         */
-        while (currentBoundary < boundaries.size() && key.compareTo(boundaries.get(currentBoundary)) >= 0)
+        // If we have written anything and cross a shard boundary, switch to a new writer.
+        final long currentUncompressedSize = writers[currentWriter].getFilePointer();
+        if (boundaries.advanceTo(key.getToken()) && currentUncompressedSize > 0)
         {
-            currentBoundary++;
-            if (!boundaryCrossed)
-                boundaryCrossed = true;
-        }
-
-        if (boundaryCrossed && writers[currentWriter].getOnDiskBytesWritten() >= minSstableSizeInBytes)
-        {
-            logger.debug("Switching writer at boundary {}/{} index {}/{}, with size {} for {}.{}",
-                         key.getToken(), boundaries.get(currentBoundary-1), currentBoundary-1, currentWriter,
-                         FBUtilities.prettyPrintMemory(writers[currentWriter].getBytesWritten()),
+            logger.debug("Switching writer at boundary {}/{} index {}, with uncompressed size {} for {}.{}",
+                         key.getToken(), boundaries.shardStart(), currentWriter,
+                         FBUtilities.prettyPrintMemory(currentUncompressedSize),
                          realm.getKeyspaceName(), realm.getTableName());
 
             writers[++currentWriter] = createWriter();
@@ -164,9 +148,12 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     public Collection<SSTableReader> finish(boolean openResult)
     {
         List<SSTableReader> sstables = new ArrayList<>(writers.length);
-        for (SSTableMultiWriter writer : writers)
+        for (SSTableWriter writer : writers)
             if (writer != null)
-                sstables.addAll(writer.finish(openResult));
+            {
+                boundaries.applyTokenSpaceCoverage(writer);
+                sstables.add(writer.finish(openResult));
+            }
         return sstables;
     }
 
@@ -174,16 +161,16 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     public Collection<SSTableReader> finished()
     {
         List<SSTableReader> sstables = new ArrayList<>(writers.length);
-        for (SSTableMultiWriter writer : writers)
+        for (SSTableWriter writer : writers)
             if (writer != null)
-                sstables.addAll(writer.finished());
+                sstables.add(writer.finished());
         return sstables;
     }
 
     @Override
     public SSTableMultiWriter setOpenResult(boolean openResult)
     {
-        for (SSTableMultiWriter writer : writers)
+        for (SSTableWriter writer : writers)
             if (writer != null)
                 writer.setOpenResult(openResult);
         return this;
@@ -192,7 +179,7 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     @Override
     public String getFilename()
     {
-        for (SSTableMultiWriter writer : writers)
+        for (SSTableWriter writer : writers)
             if (writer != null)
                 return writer.getFilename();
         return "";
@@ -202,8 +189,11 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     public long getBytesWritten()
     {
         long bytesWritten = 0;
-        for (int i = 0; i <= currentWriter; ++i)
-            bytesWritten += writers[i].getBytesWritten();
+        for (int i = 0; i <= currentWriter; ++i) 
+        {
+            if (writers[i] != null)
+                bytesWritten += writers[i].getFilePointer();
+        }
         return bytesWritten;
     }
 
@@ -212,7 +202,10 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     {
         long bytesWritten = 0;
         for (int i = 0; i <= currentWriter; ++i)
-            bytesWritten += writers[i].getOnDiskBytesWritten();
+        {
+            if (writers[i] != null)
+                bytesWritten += writers[i].getEstimatedOnDiskBytesWritten();
+        }
         return bytesWritten;
     }
 
@@ -231,7 +224,7 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     public Throwable commit(Throwable accumulate)
     {
         Throwable t = accumulate;
-        for (SSTableMultiWriter writer : writers)
+        for (SSTableWriter writer : writers)
             if (writer != null)
                 t = writer.commit(t);
         return t;
@@ -241,24 +234,30 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     public Throwable abort(Throwable accumulate)
     {
         Throwable t = accumulate;
-        for (SSTableMultiWriter writer : writers)
+        for (SSTableWriter writer : writers)
             if (writer != null)
+            {
+                lifecycleNewTracker.untrackNew(writer);
                 t = writer.abort(t);
+            }
         return t;
     }
 
     @Override
     public void prepareToCommit()
     {
-        for (SSTableMultiWriter writer : writers)
+        for (SSTableWriter writer : writers)
             if (writer != null)
+            {
+                boundaries.applyTokenSpaceCoverage(writer);
                 writer.prepareToCommit();
+            }
     }
 
     @Override
     public void close()
     {
-        for (SSTableMultiWriter writer : writers)
+        for (SSTableWriter writer : writers)
             if (writer != null)
                 writer.close();
     }

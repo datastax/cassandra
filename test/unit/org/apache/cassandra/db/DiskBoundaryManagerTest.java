@@ -126,11 +126,11 @@ public class DiskBoundaryManagerTest extends CQLTester
     @Test
     public void testGetDisksInBounds()
     {
-        List<PartitionPosition> pps = new ArrayList<>();
+        List<Token> pps = new ArrayList<>();
 
-        pps.add(pp(100));
-        pps.add(pp(200));
-        pps.add(pp(Long.MAX_VALUE)); // last position is always the max token
+        pps.add(t(100));
+        pps.add(t(200));
+        pps.add(t(Long.MAX_VALUE)); // last position is always the max token
 
         DiskBoundaries diskBoundaries = new DiskBoundaries(mock, dirs.getWriteableLocations(), pps, null, 0);
 

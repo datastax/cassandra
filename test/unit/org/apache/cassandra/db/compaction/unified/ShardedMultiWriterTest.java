@@ -24,6 +24,7 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.StorageService;
 
 import static org.junit.Assert.assertEquals;
@@ -40,42 +41,42 @@ public class ShardedMultiWriterTest extends CQLTester
     }
 
     @Test
-    public void testShardedCompactionWriter_fiveToFiveShards() throws Throwable
+    public void testShardedCompactionWriter_fiveShards() throws Throwable
     {
         int numShards = 5;
         int minSSTableSizeMB = 2;
         long totSizeBytes = ((minSSTableSizeMB << 20) * numShards) * 2;
 
         // We have double the data required for 5 shards so we should get 5 shards
-        testShardedCompactionWriter(numShards, minSSTableSizeMB, totSizeBytes, numShards);
+        testShardedCompactionWriter(numShards, totSizeBytes, numShards);
     }
 
     @Test
-    public void testShardedCompactionWriter_fiveToOneShard() throws Throwable
+    public void testShardedCompactionWriter_oneShard() throws Throwable
     {
-        int numShards = 5;
+        int numShards = 1;
         int minSSTableSizeMB = 2;
         long totSizeBytes = (minSSTableSizeMB << 20);
 
         // there should be only 1 shard if there is <= minSSTableSize
-        testShardedCompactionWriter(numShards, minSSTableSizeMB, totSizeBytes, 1);
+        testShardedCompactionWriter(numShards, totSizeBytes, 1);
     }
 
     @Test
-    public void testShardedCompactionWriter_fiveToThreeShard() throws Throwable
+    public void testShardedCompactionWriter_threeShard() throws Throwable
     {
-        int numShards = 5;
+        int numShards = 3;
         int minSSTableSizeMB = 2;
         long totSizeBytes = (minSSTableSizeMB << 20) * 3;
 
         // there should be only 3 shards if there is minSSTableSize * 3 data
-        testShardedCompactionWriter(numShards, minSSTableSizeMB, totSizeBytes, 3);
+        testShardedCompactionWriter(numShards, totSizeBytes, 3);
     }
 
-    private void testShardedCompactionWriter(int numShards, int minSSTableSizeMB, long totSizeBytes, int numOutputSSTables) throws Throwable
+    private void testShardedCompactionWriter(int numShards, long totSizeBytes, int numOutputSSTables) throws Throwable
     {
         createTable(String.format("CREATE TABLE %%s (k int, t int, v blob, PRIMARY KEY (k, t)) with compaction = " +
-                                  "{'class':'UnifiedCompactionStrategy', 'num_shards' : '%d', 'min_sstable_size_in_mb' : '%d'} ", numShards, minSSTableSizeMB));
+                                  "{'class':'UnifiedCompactionStrategy', 'base_shard_count' : '%d'} ", numShards));
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         cfs.disableAutoCompaction();
@@ -85,6 +86,10 @@ public class ShardedMultiWriterTest extends CQLTester
         cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
 
         assertEquals(numOutputSSTables, cfs.getLiveSSTables().size());
+        for (SSTableReader rdr : cfs.getLiveSSTables())
+        {
+            assertEquals(1.0 / numOutputSSTables, rdr.tokenSpaceCoverage(), 0.05);
+        }
 
         validateData(rowCount);
         cfs.truncateBlocking();
