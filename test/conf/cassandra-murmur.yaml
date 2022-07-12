@@ -41,3 +41,7 @@ user_defined_functions_enabled: true
 scripted_user_defined_functions_enabled: false
 sasi_indexes_enabled: true
 materialized_views_enabled: true
+default_compaction:
+    class_name: UnifiedCompactionStrategy
+    parameters:
+        base_shard_count: 1

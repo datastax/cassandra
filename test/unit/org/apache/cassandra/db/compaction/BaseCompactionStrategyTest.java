@@ -19,12 +19,12 @@ package org.apache.cassandra.db.compaction;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import com.google.common.collect.ImmutableList;
 import org.apache.commons.math3.random.JDKRandomGenerator;
 import org.junit.Ignore;
 
@@ -32,13 +32,11 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DiskBoundaries;
-import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SortedLocalRanges;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
@@ -78,13 +76,15 @@ public class BaseCompactionStrategyTest
     @Mock
     CompactionStrategyFactory strategyFactory;
 
-    @Mock
+    @Mock(stubOnly = true)
     DiskBoundaries diskBoundaries;
 
     // Returned by diskBoundaries.getPositions() and modified by UnifiedCompactionStrategyTest
-    protected List<PartitionPosition> diskBoundaryPositions = null;
+    protected List<Token> diskBoundaryPositions = null;
 
     int diskIndexes = 0;
+
+    Map<SSTableReader, Integer> diskIndexMap = new HashMap<>();
 
     SortedLocalRanges localRanges;
 
@@ -128,14 +128,15 @@ public class BaseCompactionStrategyTest
         if (numShards > 1)
             assertNotNull("Splitter is required with multiple compaction shards", splitter);
 
-        localRanges = SortedLocalRanges.forTesting(realm, ImmutableList.of(new Splitter.WeightedRange(1.0, new Range<>(partitioner.getMinimumToken(), partitioner.getMaximumToken()))));
+        when(realm.getPartitioner()).thenReturn(partitioner);
+        localRanges = SortedLocalRanges.forTestingFull(realm);
 
         when(realm.metadata()).thenReturn(metadata);
         when(realm.getKeyspaceName()).thenReturn(keyspace);
         when(realm.getTableName()).thenReturn(table);
         when(realm.getDiskBoundaries()).thenReturn(diskBoundaries);
         when(diskBoundaries.getLocalRanges()).thenReturn(localRanges);
-        when(realm.getPartitioner()).thenReturn(partitioner);
+        when(diskBoundaries.isOutOfDate()).thenReturn(false);
         when(realm.getLiveSSTables()).thenAnswer(request -> dataTracker.getLiveSSTables());
         when(realm.getCompactingSSTables()).thenAnswer(request -> dataTracker.getCompacting());
         when(realm.getSSTables(any())).thenAnswer(request -> dataTracker.getView().select(request.getArgument(0)));
@@ -159,6 +160,9 @@ public class BaseCompactionStrategyTest
 
         when(diskBoundaries.getNumBoundaries()).thenAnswer(invocation -> diskIndexes);
         when(diskBoundaries.getPositions()).thenAnswer(invocationOnMock -> diskBoundaryPositions);
+        when(diskBoundaries.getDiskIndexFromKey(any())).thenAnswer(
+            request -> diskIndexMap.get(request.getArgument(0)).intValue()
+        );
     }
 
     /**
@@ -250,7 +254,7 @@ public class BaseCompactionStrategyTest
         when(ret.getMinTTL()).thenReturn(ttl);
         when(ret.getMaxTTL()).thenReturn(ttl);
 
-        when(diskBoundaries.getDiskIndexFromKey(ret)).thenReturn(diskIndex);
+        diskIndexMap.put(ret, diskIndex);
         if (diskIndex >= diskIndexes)
             diskIndexes = diskIndex + 1;
         return ret;
@@ -282,28 +286,25 @@ public class BaseCompactionStrategyTest
         if (!partitioner.splitter().isPresent())
             throw new IllegalStateException(String.format("Cannot split ranges with current partitioner %s", partitioner));
 
-        Range<Token> range = new Range<>(partitioner.getMinimumToken(), partitioner.getMaximumToken());
-        Splitter.WeightedRange weightedRange = new Splitter.WeightedRange(1.0, range);
-        Splitter splitter = partitioner.splitter().get();
-        List<Token> boundaries = splitter.splitOwnedRanges(numSSTables,
-                                                           ImmutableList.of(weightedRange),
-                                                           Splitter.SplitType.ALWAYS_SPLIT)
-                                 .boundaries;
-        boundaries.add(0, partitioner.getMinimumToken());
         ByteBuffer emptyBuffer = ByteBuffer.allocate(0);
 
         long timestamp = System.currentTimeMillis();
         List<SSTableReader> sstables = new ArrayList<>(numSSTables);
         for (int i = 0; i < numSSTables; i++)
         {
-            DecoratedKey first = new BufferDecoratedKey(boundaries.get(i).nextValidToken(), emptyBuffer);
-            DecoratedKey last =  new BufferDecoratedKey(boundaries.get(i+1), emptyBuffer);
+            DecoratedKey first = new BufferDecoratedKey(boundary(numSSTables, i).nextValidToken(), emptyBuffer);
+            DecoratedKey last =  new BufferDecoratedKey(boundary(numSSTables, i+1), emptyBuffer);
             sstables.add(mockSSTable(level, bytesOnDisk, timestamp, 0., first, last));
 
             timestamp+=10;
         }
 
         return sstables;
+    }
+
+    private Token boundary(int numSSTables, int i)
+    {
+        return partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), i * 1.0 / numSSTables);
     }
 
     CompactionProgress mockCompletedCompactionProgress(Set<SSTableReader> compacting, TimeUUID id)
