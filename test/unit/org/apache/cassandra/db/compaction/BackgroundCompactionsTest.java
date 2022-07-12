@@ -42,7 +42,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.mock;
@@ -143,7 +142,7 @@ public class BackgroundCompactionsTest
             if (prev != null)
             {
                 CompactionAggregate combinedAggregate = mockAggregate(1, i + 1, 0);
-                when(prev.withAdditionalCompactions(anyCollection())).thenReturn(combinedAggregate);
+                when(prev.mergeWith(any())).thenReturn(combinedAggregate);
             }
 
 

@@ -59,6 +59,7 @@ import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
+import org.apache.cassandra.dht.*;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -83,6 +84,7 @@ import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.compaction.AbstractCompactionTask;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.CompactionTasks;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -107,10 +109,7 @@ import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.view.TableViews;
-import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
-import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
@@ -336,6 +335,39 @@ public class Util
             for (AbstractCompactionTask task : tasks)
                 task.execute();
         }
+    }
+
+    /**
+     * Checks that the provided SSTable set does not overlap. The result of a major compaction should satisfy this.
+     */
+    public static void assertNoOverlap(Collection<? extends CompactionSSTable> liveSet)
+    {
+        for (CompactionSSTable rdr1 : liveSet)
+        {
+            for (CompactionSSTable rdr2 : liveSet)
+            {
+                if (rdr1 == rdr2)
+                    continue;
+
+                Range<Token> rdr2Range = new Range<>(rdr2.getFirst().getToken(), rdr2.getLast().getToken());
+                assertFalse(rdr1.getBounds().intersects(Collections.singletonList(rdr2Range)));
+            }
+        }
+    }
+
+    /**
+     * Perform full compaction, everything in the given CFS to one file. Unlike major compaction, this must also compact
+     * non-overlapping files, and should try to not split output.
+     */
+    public static void forceFullCompaction(ColumnFamilyStore cfs, int timeoutInSeconds)
+    {
+        Future<?> future = CompactionManager.instance.submitUserDefined(cfs,
+                cfs.getLiveSSTables()
+                        .stream()
+                        .map(s -> s.getDescriptor())
+                        .collect(Collectors.toList()),
+                FBUtilities.nowInSeconds());
+        FBUtilities.waitOnFutures(Collections.singletonList(future), timeoutInSeconds, TimeUnit.SECONDS);
     }
 
     public static void expectEOF(Callable<?> callable)

@@ -1004,8 +1004,7 @@ public class TableMetrics
 
         formatSpecificGauges = createFormatSpecificGauges(cfs);
     }
-    
-    @VisibleForTesting
+
     public MovingAverage flushSizeOnDisk()
     {
         return flushSizeOnDisk;
