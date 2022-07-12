@@ -205,6 +205,7 @@ public class DatabaseDescriptor
     private static File hintsDirectory;
     private static File savedCachesDirectory;
     private static File cdcRawDirectory;
+    private static File metadataDirectory;
 
     private static long keyCacheSizeInMiB;
     private static long paxosCacheSizeInMiB;
@@ -711,6 +712,11 @@ public class DatabaseDescriptor
             conf.hints_directory = storagedirFor("hints");
         }
 
+        if (conf.metadata_directory == null)
+        {
+            conf.metadata_directory = storagedirFor("metadata");
+        }
+
         if (conf.native_transport_max_request_data_in_flight == null)
         {
             conf.native_transport_max_request_data_in_flight = new DataStorageSpec.LongBytesBound(Runtime.getRuntime().maxMemory() / 10);
@@ -785,6 +791,8 @@ public class DatabaseDescriptor
                 throw new ConfigurationException("hints_directory must not be the same as any data_file_directories", false);
             if (datadir.equals(conf.saved_caches_directory))
                 throw new ConfigurationException("saved_caches_directory must not be the same as any data_file_directories", false);
+            if (datadir.equals(conf.metadata_directory))
+                throw new ConfigurationException("metadata_directory must not be the same as any data_file_directories", false);
 
             dataFreeBytes = saturatedSum(dataFreeBytes, tryGetSpace(datadir, FileStore::getUnallocatedSpace));
         }
@@ -1993,6 +2001,10 @@ public class DatabaseDescriptor
             if (conf.saved_caches_directory == null)
                 throw new ConfigurationException("saved_caches_directory must be specified", false);
             savedCachesDirectory = StorageProvider.instance.createDirectory(conf.saved_caches_directory, StorageProvider.DirectoryType.SAVED_CACHES);
+
+            if (conf.metadata_directory == null)
+                throw new ConfigurationException("metadata_directory must be specified", false);
+            metadataDirectory = StorageProvider.instance.createDirectory(conf.metadata_directory, StorageProvider.DirectoryType.METADATA);
 
             if (conf.cdc_raw_directory == null && conf.cdc_enabled) {
                 throw new ConfigurationException("cdc_raw_directory must be specified", false);
@@ -3547,6 +3559,11 @@ public class DatabaseDescriptor
     public static boolean hintWindowPersistentEnabled()
     {
         return conf.hint_window_persistent_enabled;
+    }
+
+    public static File getMetadataDirectory()
+    {
+        return metadataDirectory;
     }
 
     public static File getSerializedCachePath(CacheType cacheType, String version, String extension)

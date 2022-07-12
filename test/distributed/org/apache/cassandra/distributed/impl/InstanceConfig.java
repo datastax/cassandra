@@ -82,6 +82,7 @@ public class InstanceConfig implements IInstanceConfig
                            String commitlog_directory,
                            String hints_directory,
                            String cdc_raw_directory,
+                           String metadata_directory,
                            Collection<String> initial_token,
                            int storage_port,
                            int native_transport_port,
@@ -102,6 +103,7 @@ public class InstanceConfig implements IInstanceConfig
                 .set("commitlog_directory", commitlog_directory)
                 .set("hints_directory", hints_directory)
                 .set("cdc_raw_directory", cdc_raw_directory)
+                .set("metadata_directory", metadata_directory)
                 .set("partitioner", "org.apache.cassandra.dht.Murmur3Partitioner")
                 .set("start_native_transport", true)
                 .set("concurrent_writes", 2)
@@ -326,6 +328,7 @@ public class InstanceConfig implements IInstanceConfig
                                   String.format("%s/node%d/commitlog", root, nodeNum),
                                   String.format("%s/node%d/hints", root, nodeNum),
                                   String.format("%s/node%d/cdc", root, nodeNum),
+                                  String.format("%s/node%d/metadata", root, nodeNum),
                                   tokens,
                                   provisionStrategy.storagePort(nodeNum),
                                   provisionStrategy.nativeTransportPort(nodeNum),
