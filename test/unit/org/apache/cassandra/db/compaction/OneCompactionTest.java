@@ -76,7 +76,7 @@ public class OneCompactionTest
             assertEquals(inserted.size(), Util.getAll(Util.cmd(store).build()).size());
         }
         FBUtilities.waitOnFuture(Util.compactAll(store, FBUtilities.nowInSeconds()));
-        assertEquals(1, store.getLiveSSTables().size());
+        Util.assertNoOverlap(store.getLiveSSTables());
     }
 
     @Test
