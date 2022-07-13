@@ -30,7 +30,6 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
@@ -94,7 +93,7 @@ public class SchemaTest
         Keyspace.unsetInitialized();
 
         SchemaUpdateHandler updateHandler = mock(SchemaUpdateHandler.class);
-        Schema schemaManager = new Schema(false, Keyspaces.of(SchemaKeyspace.metadata(), SystemKeyspace.metadata()), updateHandler);
+        Schema schemaManager = new Schema(false, updateHandler);
         assertThat(schemaManager.getKeyspaceMetadata("ks")).isNull();
 
         KeyspaceMetadata newKs = KeyspaceMetadata.create("ks", KeyspaceParams.simple(1));
