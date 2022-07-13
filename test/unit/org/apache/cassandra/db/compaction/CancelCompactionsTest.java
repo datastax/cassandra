@@ -473,7 +473,7 @@ public class CancelCompactionsTest extends CQLTester
         createTable("create table %s (id int primary key, something int)");
         getCurrentColumnFamilyStore().disableAutoCompaction();
 
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < 15; i++)
         {
             for (int j = 0; j < 3; ++j) // write more than once to ensure overlap for UCS
                 execute("insert into %s (id, something) values (?,?)", i * (j+1), i + j);
