@@ -244,6 +244,25 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         logger.debug("Creating stream session to {} as {}", template, isFollower ? "follower" : "initiator");
     }
 
+    public StreamSession(StreamOperation streamOperation,
+                         InetAddressAndPort peer, InetAddressAndPort preferred,
+                         StreamConnectionFactory factory,
+                         boolean isFollower, int index, UUID pendingRepair, PreviewKind previewKind)
+    {
+        this.streamOperation = streamOperation;
+        this.peer = peer;
+        this.template = new OutboundConnectionSettings(peer, preferred);
+        this.isFollower = isFollower;
+        this.index = index;
+
+        this.messageSender = new NettyStreamingMessageSender(this, template, factory, current_version, previewKind.isPreview());
+        this.metrics = StreamingMetrics.get(peer);
+        this.pendingRepair = pendingRepair;
+        this.previewKind = previewKind;
+
+        logger.debug("Creating stream session to {} as {}", template, isFollower ? "follower" : "initiator");
+    }
+
     public boolean isFollower()
     {
         return isFollower;
