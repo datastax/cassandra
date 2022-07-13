@@ -72,6 +72,14 @@ public class ArenaSelector implements Comparator<CompactionSSTable>
         classSplitters = ret.toArray(new EquivClassSplitter[0]);
     }
 
+    public ArenaSelector nonShardingSelector()
+    {
+        return new ArenaSelector(controller,
+                                 diskBoundaries,
+                                 diskBoundaries.getPositions() == null ? Collections.EMPTY_LIST
+                                                                       : diskBoundaries.getPositions());
+    }
+
     @Override
     public int compare(CompactionSSTable o1, CompactionSSTable o2)
     {
