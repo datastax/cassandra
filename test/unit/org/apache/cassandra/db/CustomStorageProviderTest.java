@@ -39,12 +39,13 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.DefaultFSErrorHandler;
 import org.assertj.core.api.Assertions;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_STORAGE_PROVIDER;
+
 public class CustomStorageProviderTest
 {
     static
     {
-        System.setProperty("cassandra.custom_storage_provider",
-                           CustomStorageProviderTest.TestCustomStorageProvider.class.getName());
+        CUSTOM_STORAGE_PROVIDER.setString(CustomStorageProviderTest.TestCustomStorageProvider.class.getName());
     }
 
     private static final String KS = "ks";
