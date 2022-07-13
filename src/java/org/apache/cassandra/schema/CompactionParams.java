@@ -18,6 +18,7 @@
 package org.apache.cassandra.schema;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -86,8 +87,8 @@ public final class CompactionParams
         ParameterizedClass defaultCompaction = DatabaseDescriptor.getDefaultCompaction();
         if (defaultCompaction == null)
         {
-            DEFAULT = new CompactionParams(SizeTieredCompactionStrategy.class,
-                                           DEFAULT_THRESHOLDS,
+            DEFAULT = new CompactionParams(UnifiedCompactionStrategy.class,
+                                           Collections.emptyMap(),
                                            DEFAULT_ENABLED,
                                            DEFAULT_PROVIDE_OVERLAPPING_TOMBSTONES_PROPERTY_VALUE);
         }
