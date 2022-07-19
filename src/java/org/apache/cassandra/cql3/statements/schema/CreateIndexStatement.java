@@ -147,6 +147,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             return schema;
         }
 
+        attrs.maybeApplyDefaultIndex();
         attrs.validate();
 
         Guardrails.createSecondaryIndexesEnabled.ensureEnabled("Creating secondary indexes", state);
