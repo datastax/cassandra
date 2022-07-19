@@ -361,7 +361,14 @@ public abstract class AbstractCommitLogSegmentManager
     void forceRecycleAll(Collection<TableId> droppedTables)
     {
         List<CommitLogSegment> segmentsToRecycle = new ArrayList<>(activeSegments);
-        CommitLogSegment last = segmentsToRecycle.isEmpty() ? null : segmentsToRecycle.get(segmentsToRecycle.size() - 1);
+
+        if (segmentsToRecycle.isEmpty())
+        {
+            logger.debug("No segments to recycle");
+            return;
+        }
+
+        CommitLogSegment last = segmentsToRecycle.get(segmentsToRecycle.size() - 1);
         advanceAllocatingFrom(last);
 
         // wait for the commit log modifications
