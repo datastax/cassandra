@@ -556,7 +556,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             sstables = storageHandler.loadInitialSSTables();
 
         // compaction strategy should be created after the CFS has been prepared
-        this.strategyFactory = new CompactionStrategyFactory(this);
+        this.strategyFactory = new CompactionStrategyFactory(CompactionRealm.make(this));
         this.strategyContainer = strategyFactory.reload(null,
                                                         metadata.get().params.compaction,
                                                         CompactionStrategyContainer.ReloadReason.FULL,

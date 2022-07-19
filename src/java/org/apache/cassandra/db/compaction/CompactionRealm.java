@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.compaction;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.util.Collection;
 import java.util.Set;
 import java.util.UUID;
@@ -27,6 +28,8 @@ import java.util.concurrent.Callable;
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.DiskBoundaries;
@@ -40,8 +43,10 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.CompactionParams;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * An interface for supplying the CFS data relevant to compaction. This is implemented by {@link ColumnFamilyStore} and
@@ -55,6 +60,13 @@ import org.apache.cassandra.schema.TableMetadataRef;
  */
 public interface CompactionRealm
 {
+
+    /**
+     * This can be set to change the realm class implementaion that determines the input data (sstables) used by compaction.
+     * This is used by https://github.com/riptano/cndb/issues since https://github.com/riptano/cndb/issues/1856.
+     */
+    String remoteRealmClass = CassandraRelevantProperties.COMPACTION_REALM_IMPL.getString();
+
     /**
      * @return the schema metadata of this table.
      */
@@ -290,4 +302,31 @@ public interface CompactionRealm
      * Run an operation with concurrent compactions being stopped.
      */
     <V> V runWithCompactionsDisabled(Callable<V> callable, boolean interruptValidation, boolean interruptViews);
+
+    /**
+     * This is a static factory method that creates a concrete {@link CompactionRealm}.
+     *
+     * It always creates a {@link CompactionRealm} unless a different supplier has been specified
+     * via the static property {@link CompactionRealm#remoteRealmClass}. This property can be used
+     * to override inputs into compaction, and it is currently used by https://github.com/riptano/cndb,
+     * see https://github.com/riptano/cndb/issues/1856.
+     */
+    static CompactionRealm make(ColumnFamilyStore cfs)
+    {
+        // local keyspaces are always local so don't use the remote supplier even if it has been configured
+        if (remoteRealmClass == null || SchemaConstants.isLocalSystemKeyspace(cfs.getKeyspaceName()))
+            return cfs;
+
+        Class<CompactionRealm> factoryClass = FBUtilities.classForName(remoteRealmClass, "Compaction Realm class impl");
+
+        try
+        {
+            return factoryClass.getConstructor(ColumnFamilyStore.class).newInstance(cfs);
+        }
+        catch (NoSuchMethodException | IllegalAccessException | InstantiationException | InvocationTargetException e)
+        {
+            throw new RuntimeException("Unable to find correct constructor for " + remoteRealmClass, e);
+        }
+    }
+
 }

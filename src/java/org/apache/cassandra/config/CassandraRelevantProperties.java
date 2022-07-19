@@ -283,7 +283,10 @@ public enum CassandraRelevantProperties
     // in OSS, when UUID based SSTable generation identifiers are enabled, they use TimeUUID
     // though, for CNDB we want to use ULID - this property allows for that
     // valid values for this property are: uuid, ulid
-    SSTABLE_UUID_IMPL("cassandra.sstable.id.uuid_impl", "uuid");
+    SSTABLE_UUID_IMPL("cassandra.sstable.id.uuid_impl", "uuid"),
+
+    //
+    COMPACTION_REALM_IMPL("cassandra.compaction.realm_impl");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
