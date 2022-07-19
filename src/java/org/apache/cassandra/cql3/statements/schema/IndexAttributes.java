@@ -24,6 +24,8 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.DEFAULT_INDEX_CLASS;
+
 public class IndexAttributes extends PropertyDefinitions
 {
     private static final String KW_OPTIONS = "options";
@@ -37,6 +39,19 @@ public class IndexAttributes extends PropertyDefinitions
     static
     {
         keywords.add(KW_OPTIONS);
+    }
+
+    public void maybeApplyDefaultIndex()
+    {
+        String defaultIndexClass = DEFAULT_INDEX_CLASS.getString();
+        if (defaultIndexClass == null)
+            return;
+
+        if (!isCustom && customClass == null)
+        {
+            isCustom = true;
+            customClass = defaultIndexClass;
+        }
     }
 
     public void validate() throws RequestValidationException
