@@ -99,7 +99,7 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
 
             doTruncateBlocking();
         }
-        catch (UnavailableException | TimeoutException e)
+        catch (UnavailableException | TimeoutException | InvalidRequestException e)
         {
             throw new TruncateException(e);
         }
