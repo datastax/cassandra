@@ -22,6 +22,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -100,6 +102,7 @@ public class Descriptor
     private final String prefix;
     private final File baseFile;
     private final String baseFileURI;
+    private final ConcurrentMap<Component, File> componentFileMap;
 
     /**
      * A descriptor that assumes CURRENT_VERSION.
@@ -149,6 +152,8 @@ public class Descriptor
         if (!locationURI.endsWith(java.io.File.separator))
             locationURI = locationURI + java.io.File.separatorChar;
         baseFileURI = locationURI + prefix;
+
+        componentFileMap = new ConcurrentHashMap<>();
     }
 
     public File tmpFileFor(Component component)
@@ -179,7 +184,7 @@ public class Descriptor
 
     public File fileFor(Component component)
     {
-        return component.getFile(baseFileUri());
+        return componentFileMap.computeIfAbsent(component, c -> component.getFile(baseFileUri()));
     }
 
     public File baseFile()
