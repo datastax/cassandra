@@ -102,7 +102,7 @@ public class RecoveryManagerTruncateTest
             .clustering("cc")
             .add("val", "val1")
             .build()
-            .applyUnsafe();
+            .apply();
 
         // Make sure data was written
         assertTrue(Util.getAll(Util.cmd(cfs).build()).size() > 0);
