@@ -94,6 +94,9 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
         try
         {
             TableMetadata metaData = Schema.instance.getTableMetadata(keyspace(), name());
+            if (metaData == null)
+                throw new InvalidRequestException(String.format("Unknown keyspace/table %s.%s", keyspace(), name()));
+
             if (metaData.isView())
                 throw new InvalidRequestException("Cannot TRUNCATE materialized view directly; must truncate base table instead");
 
@@ -103,10 +106,10 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
             }
             else
             {
-                StorageProxy.instance.truncateBlocking(keyspace(), name());
+                doTruncateBlocking();
             }
         }
-        catch (UnavailableException | TimeoutException e)
+        catch (UnavailableException | TimeoutException | InvalidRequestException e)
         {
             throw new TruncateException(e);
         }
@@ -118,6 +121,9 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
         try
         {
             TableMetadata metaData = Schema.instance.getTableMetadata(keyspace(), name());
+            if (metaData == null)
+                throw new InvalidRequestException(String.format("Unknown keyspace/table %s.%s", keyspace(), name()));
+            
             if (metaData.isView())
                 throw new InvalidRequestException("Cannot TRUNCATE materialized view directly; must truncate base table instead");
 
@@ -127,7 +133,8 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
             }
             else
             {
-                doTruncateBlocking();
+                ColumnFamilyStore cfs = Keyspace.open(keyspace()).getColumnFamilyStore(name());
+                cfs.truncateBlocking();
             }
         }
         catch (Exception e)
@@ -142,10 +149,9 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
         VirtualKeyspaceRegistry.instance.getTableNullable(id).truncate();
     }
 
-    protected void doTruncateBlocking()
+    protected void doTruncateBlocking() throws TimeoutException
     {
-        ColumnFamilyStore cfs = Keyspace.open(keyspace()).getColumnFamilyStore(name());
-        cfs.truncateBlocking();
+        StorageProxy.instance.truncateBlocking(keyspace(), name());
     }
 
     @Override
