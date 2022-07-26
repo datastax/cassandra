@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ScheduledFuture;
+import java.util.Collection;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiPredicate;
@@ -32,6 +33,8 @@ import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
@@ -244,6 +247,18 @@ public class AuthCache<K, V> implements AuthCacheMBean, Shutdownable
     {
         if (cache != null)
             cache.invalidate(k);
+    }
+
+    public void maybeInvalidateByFilter(Predicate<? super K> filter)
+    {
+        if (cache != null)
+        {
+            Collection<K> iterable = cache.asMap().keySet()
+                                          .stream()
+                                          .filter(filter)
+                                          .collect(Collectors.toSet());
+            cache.invalidateAll(iterable);
+        }
     }
 
     /**
