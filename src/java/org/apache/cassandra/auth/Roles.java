@@ -44,6 +44,14 @@ public class Roles
         AuthCacheService.instance.register(cache);
     }
 
+    /**
+     * Clears the given {@link RoleResource} from the roles cache.
+     * 
+     * Used by CNDB RoleManager to clear cache entries after grant, alter
+     * or drop operatons on a role.
+     * 
+     * @param roleResource the {@link RoleResource} to clear from the cache
+     */
     @VisibleForTesting
     public static void clearCache(RoleResource roleResource)
     {
