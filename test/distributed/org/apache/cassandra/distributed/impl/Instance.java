@@ -75,6 +75,9 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionLogger;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
+import org.apache.cassandra.db.virtual.SystemViewsKeyspace;
+import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
+import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.Constants;
 import org.apache.cassandra.distributed.action.GossipHelper;
@@ -639,6 +642,9 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 // This should be the first write to SystemKeyspace (CASSANDRA-11742)
                 SystemKeyspace.persistLocalMetadata(config::hostId);
                 SystemKeyspaceMigrator41.migrate();
+
+                VirtualKeyspaceRegistry.instance.register(VirtualSchemaKeyspace.instance);
+                VirtualKeyspaceRegistry.instance.register(SystemViewsKeyspace.instance);
 
                 // Same order to populate tokenMetadata for the first time,
                 // see org.apache.cassandra.service.CassandraDaemon.setup
