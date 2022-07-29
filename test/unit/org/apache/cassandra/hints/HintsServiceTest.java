@@ -21,12 +21,14 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.annotation.Nullable;
 
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -62,15 +64,23 @@ public class HintsServiceTest
     private static final String TABLE = "table";
 
     private final MockFailureDetector failureDetector = new MockFailureDetector();
+    private final AtomicBoolean isAlive = new AtomicBoolean(true);
 
     @BeforeClass
     public static void defineSchema()
     {
+        System.setProperty("cassandra.hinted_handoff.skip_rewriting_hints_on_host_left", "true");
         SchemaLoader.prepareServer();
         StorageService.instance.initServer();
         SchemaLoader.createKeyspace(KEYSPACE,
                 KeyspaceParams.simple(1),
                 SchemaLoader.standardCFMD(KEYSPACE, TABLE));
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
+        System.clearProperty("cassandra.hinted_handoff.skip_rewriting_hints_on_host_left");
     }
 
     @After
@@ -92,6 +102,7 @@ public class HintsServiceTest
         }
 
         failureDetector.isAlive = true;
+        isAlive.set(true);
 
         HintsService.instance = new HintsService(failureDetector);
 

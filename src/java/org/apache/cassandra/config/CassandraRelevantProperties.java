@@ -288,7 +288,10 @@ public enum CassandraRelevantProperties
     /**
      * Name of a custom implementation of {@link org.apache.cassandra.service.Mutator}.
      */
-    CUSTOM_MUTATOR_CLASS("cassandra.custom_mutator_class");
+    CUSTOM_MUTATOR_CLASS("cassandra.custom_mutator_class"),
+    
+    /** Whether to skip rewriting hints when original host id left the cluster */
+    SKIP_REWRITING_HINTS_ON_HOST_LEFT("cassandra.hinted_handoff.skip_rewriting_hints_on_host_left");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

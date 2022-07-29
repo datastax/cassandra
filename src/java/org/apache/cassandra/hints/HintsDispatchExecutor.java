@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.util.File;
@@ -260,7 +261,14 @@ final class HintsDispatchExecutor
                 return deliver(descriptor, address);
 
             // address == null means the target no longer exist; find new home for each hint entry.
-            convert(descriptor);
+            if (CassandraRelevantProperties.SKIP_REWRITING_HINTS_ON_HOST_LEFT.getBoolean())
+            {
+                logger.debug("Host {} is no longer a member of cluster, dropping hints", hostId);
+                store.cleanUp(descriptor);
+                store.delete(descriptor);
+            }
+            else
+                convert(descriptor);
             return true;
         }
 
