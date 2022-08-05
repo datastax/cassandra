@@ -22,13 +22,18 @@ import com.google.common.base.Objects;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.marshal.UserType;
 
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.function.UnaryOperator;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class ColumnSpecification
 {
+    private static final Logger logger = LoggerFactory.getLogger(ColumnSpecification.class);
     public final String ksName;
     public final String cfName;
     public final ColumnIdentifier name;
@@ -83,7 +88,11 @@ public class ColumnSpecification
             return this;
 
         String newKeyspaceName = keyspaceMapper.apply(ksName);
-        return ksName.equals(newKeyspaceName) ? this : new ColumnSpecification(newKeyspaceName, cfName, name, type);
+
+        if (ksName.equals(newKeyspaceName))
+            return this;
+
+        return new ColumnSpecification(newKeyspaceName, cfName, name, type.overrideKeyspace(keyspaceMapper));
     }
 
     @Override
