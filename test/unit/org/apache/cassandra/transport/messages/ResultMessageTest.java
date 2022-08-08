@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.transport.messages;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -27,8 +28,15 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.cql3.ResultSet;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.marshal.TupleType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.transport.Envelope;
 import org.apache.cassandra.transport.Event;
 import org.apache.cassandra.transport.messages.ResultMessage.Rows;
@@ -36,11 +44,21 @@ import org.apache.cassandra.transport.messages.ResultMessage.SchemaChange;
 import org.apache.cassandra.transport.messages.ResultMessage.SetKeyspace;
 import org.apache.cassandra.utils.MD5Digest;
 
+import static java.util.Arrays.asList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 public class ResultMessageTest
 {
+    private static ByteBuffer bb(String str)
+    {
+        return UTF8Type.instance.decompose(str);
+    }
+
+    private static FieldIdentifier field(String field)
+    {
+        return FieldIdentifier.forQuoted(field);
+    }
     @Test
     public void testSchemaChange()
     {
@@ -75,13 +93,24 @@ public class ResultMessageTest
     @Test
     public void testRows()
     {
+        FieldIdentifier f1 = field("f1");  // has field position 0
+        FieldIdentifier f2 = field("f2");  // has field position 1
+        UserType udt = new UserType("ks1",
+                                    bb("myType"),
+                                    asList(f1, f2),
+                                    asList(Int32Type.instance, UTF8Type.instance),
+                                    false);
+
         ColumnSpecification cs1 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("a", true), Int32Type.instance);
-        ColumnSpecification cs2 = new ColumnSpecification("ks2", "cf2", new ColumnIdentifier("b", true), Int32Type.instance);
-        ResultSet.ResultMetadata resultMetadata = new ResultSet.ResultMetadata(Arrays.asList(cs1, cs2));
+        ColumnSpecification cs2 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("b", true), Int32Type.instance);
+        ColumnSpecification cs3 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("c", true), udt);
+        ColumnSpecification cs4 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("d", true), new TupleType(asList(Int32Type.instance, udt)));
+
+        ResultSet.ResultMetadata resultMetadata = new ResultSet.ResultMetadata(Arrays.asList(cs1, cs2, cs3, cs4));
         ResultSet rs = new ResultSet(resultMetadata, mock(List.class));
         Rows r1 = new Rows(rs);
         Rows r2 = overrideKeyspace(r1);
-        assertThat(r2.result.metadata.names.stream().map(cs -> cs.ksName)).containsExactly("ks1_123", "ks2_123");
+        assertThat(r2.result.metadata.names.stream().map(cs -> cs.ksName)).allMatch(k -> k.equals("ks1_123"));
     }
 
     private <T extends ResultMessage<T>> T overrideKeyspace(ResultMessage<T> rm)
@@ -90,7 +119,6 @@ public class ResultMessageTest
         assertThat(rm2).isSameAs(rm);
         T rm3 = rm2.withOverriddenKeyspace(ks -> ks);
         assertThat(rm3).isSameAs(rm);
-
         rm.setWarnings(mock(List.class));
         rm.setCustomPayload(mock(Map.class));
         rm.setSource(mock(Envelope.class));
@@ -101,6 +129,47 @@ public class ResultMessageTest
         assertThat(rm4.getCustomPayload()).isSameAs(rm.getCustomPayload());
         assertThat(rm4.getSource()).isSameAs(rm.getSource());
         assertThat(rm4.getStreamId()).isSameAs(rm.getStreamId());
+
+        if (rm4 instanceof ResultMessage.Rows)
+            checkRows((ResultMessage.Rows) rm4);
+
         return rm4;
+    }
+
+    void checkRows(ResultMessage.Rows r)
+    {
+        String ksName = r.result.metadata.names.get(0).ksName;
+        for (ColumnSpecification cf : r.result.metadata.names)
+            checkType(cf.type, ksName);
+    }
+
+    void checkType(AbstractType<?> type, String keyspaceName)
+    {
+        if (type.isUDT())
+        {
+            UserType ut = (UserType) type;
+            assertThat(ut.keyspace).isEqualTo(keyspaceName);
+
+            for (int i = 0; i < ut.size(); i++)
+                checkType(ut.type(i), keyspaceName);
+        }
+        else if (type.isTuple())
+        {
+            TupleType tt = (TupleType) type;
+
+            for (int i = 0; i < tt.size(); i++)
+                checkType(tt.type(i), keyspaceName);
+        }
+        else if (type.isReversed())
+        {
+            ReversedType<?> rt = (ReversedType<?>) type;
+            checkType(rt.baseType, keyspaceName);
+        }
+        else if (type.isCollection())
+        {
+            CollectionType<?> ct = (CollectionType<?>) type;
+            checkType(ct.nameComparator(), keyspaceName);
+            checkType(ct.valueComparator(), keyspaceName);
+        }
     }
 }
