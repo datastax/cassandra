@@ -22,14 +22,10 @@ import com.google.common.base.Objects;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ReversedType;
-import org.apache.cassandra.db.marshal.UserType;
 
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.function.UnaryOperator;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class ColumnSpecification
 {

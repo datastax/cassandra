@@ -121,7 +121,9 @@ public class ResultMessageTest
         ResultSet.ResultMetadata resultMetadata = new ResultSet.ResultMetadata(Arrays.asList(cs1, cs2, cs3, cs4, cs5, cs6, cs7, cs8, cs9, cs10));
         ResultSet rs = new ResultSet(resultMetadata, mock(List.class));
         Rows r1 = new Rows(rs);
+        checkRows(r1);
         Rows r2 = overrideKeyspace(r1);
+        checkRows(r2);
         assertThat(r2.result.metadata.names.stream().map(cs -> cs.ksName)).allMatch(k -> k.equals("ks1_123"));
         assertThat(r2.result.metadata.getResultMetadataId()).isNotSameAs(r1.result.metadata.getResultMetadataId());
     }
@@ -142,9 +144,6 @@ public class ResultMessageTest
         assertThat(rm4.getCustomPayload()).isSameAs(rm.getCustomPayload());
         assertThat(rm4.getSource()).isSameAs(rm.getSource());
         assertThat(rm4.getStreamId()).isSameAs(rm.getStreamId());
-
-        if (rm4 instanceof ResultMessage.Rows)
-            checkRows((ResultMessage.Rows) rm4);
 
         return rm4;
     }
