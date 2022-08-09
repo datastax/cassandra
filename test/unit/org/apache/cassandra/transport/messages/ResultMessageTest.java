@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+import com.google.common.collect.ImmutableMap;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -32,8 +33,13 @@ import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.DynamicCompositeType;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UserType;
@@ -105,8 +111,14 @@ public class ResultMessageTest
         ColumnSpecification cs2 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("b", true), Int32Type.instance);
         ColumnSpecification cs3 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("c", true), udt);
         ColumnSpecification cs4 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("d", true), new TupleType(asList(Int32Type.instance, udt)));
+        ColumnSpecification cs5 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("e", true), ReversedType.getInstance(Int32Type.instance));
+        ColumnSpecification cs6 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("f", true), MapType.getInstance(Int32Type.instance, Int32Type.instance, false));
+        ColumnSpecification cs7 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("g", true), ListType.getInstance(Int32Type.instance, false));
+        ColumnSpecification cs8 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("h", true), SetType.getInstance(Int32Type.instance, false));
+        ColumnSpecification cs9 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("i", true), CompositeType.getInstance(Int32Type.instance, UTF8Type.instance));
+        ColumnSpecification cs10 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("j", true), DynamicCompositeType.getInstance(ImmutableMap.of((byte)8, Int32Type.instance)));
 
-        ResultSet.ResultMetadata resultMetadata = new ResultSet.ResultMetadata(Arrays.asList(cs1, cs2, cs3, cs4));
+        ResultSet.ResultMetadata resultMetadata = new ResultSet.ResultMetadata(Arrays.asList(cs1, cs2, cs3, cs4, cs5, cs6, cs7, cs8, cs9, cs10));
         ResultSet rs = new ResultSet(resultMetadata, mock(List.class));
         Rows r1 = new Rows(rs);
         Rows r2 = overrideKeyspace(r1);
