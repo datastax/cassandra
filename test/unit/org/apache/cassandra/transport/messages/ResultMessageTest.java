@@ -112,9 +112,9 @@ public class ResultMessageTest
         ColumnSpecification cs3 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("c", true), udt);
         ColumnSpecification cs4 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("d", true), new TupleType(asList(Int32Type.instance, udt)));
         ColumnSpecification cs5 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("e", true), ReversedType.getInstance(Int32Type.instance));
-        ColumnSpecification cs6 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("f", true), MapType.getInstance(Int32Type.instance, Int32Type.instance, false));
-        ColumnSpecification cs7 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("g", true), ListType.getInstance(Int32Type.instance, false));
-        ColumnSpecification cs8 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("h", true), SetType.getInstance(Int32Type.instance, false));
+        ColumnSpecification cs6 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("f", true), MapType.getInstance(Int32Type.instance, udt, false));
+        ColumnSpecification cs7 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("g", true), ListType.getInstance(udt, false));
+        ColumnSpecification cs8 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("h", true), SetType.getInstance(udt, false));
         ColumnSpecification cs9 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("i", true), CompositeType.getInstance(Int32Type.instance, UTF8Type.instance));
         ColumnSpecification cs10 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("j", true), DynamicCompositeType.getInstance(ImmutableMap.of((byte)8, Int32Type.instance)));
 
