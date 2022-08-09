@@ -35,7 +35,7 @@ import org.openjdk.jmh.annotations.*;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @Warmup(iterations = 25, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 5, time = 2, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 5, time = 50, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 1)
 @Threads(1)
 @State(Scope.Benchmark)

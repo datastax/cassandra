@@ -85,6 +85,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     protected final MetadataCollector metadataCollector;
     protected final SerializationHeader header;
     protected final Collection<SSTableFlushObserver> observers;
+    private static boolean isInternalKeyspace;
 
     protected abstract AbstractTransactional txnProxy();
 
@@ -107,6 +108,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         this.metadataCollector = metadataCollector;
         this.header = header;
         this.observers = observers == null ? Collections.emptySet() : observers;
+        isInternalKeyspace = SchemaConstants.isInternalKeyspace(metadata.keyspace);
     }
 
     private static Set<Component> indexComponents(Collection<Index.Group> indexGroups)
@@ -439,7 +441,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional
 
     public static void guardCollectionSize(TableMetadata metadata, DecoratedKey partitionKey, Unfiltered unfiltered)
     {
-        if (!unfiltered.isRow() || SchemaConstants.isInternalKeyspace(metadata.keyspace))
+//        if (!unfiltered.isRow() || SchemaConstants.isInternalKeyspace(metadata.keyspace))
+        if (!unfiltered.isRow() || isInternalKeyspace)
             return;
 
         if (!Guardrails.collectionSize.enabled(null) && !Guardrails.itemsPerCollection.enabled(null))
@@ -496,7 +499,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional
 
     protected void maybeLogLargePartitionWarning(DecoratedKey key, long rowSize)
     {
-        if (SchemaConstants.isInternalKeyspace(metadata().keyspace))
+//        if (SchemaConstants.isInternalKeyspace(metadata().keyspace))
+        if (isInternalKeyspace)
             return;
 
         if (Guardrails.partitionSize.triggersOn(rowSize, null))
