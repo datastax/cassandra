@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 
 public class ColumnSpecification
 {
-    private static final Logger logger = LoggerFactory.getLogger(ColumnSpecification.class);
     public final String ksName;
     public final String cfName;
     public final ColumnIdentifier name;

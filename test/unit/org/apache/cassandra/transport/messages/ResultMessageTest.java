@@ -123,6 +123,7 @@ public class ResultMessageTest
         Rows r1 = new Rows(rs);
         Rows r2 = overrideKeyspace(r1);
         assertThat(r2.result.metadata.names.stream().map(cs -> cs.ksName)).allMatch(k -> k.equals("ks1_123"));
+        assertThat(r2.result.metadata.getResultMetadataId()).isNotSameAs(r1.result.metadata.getResultMetadataId());
     }
 
     private <T extends ResultMessage<T>> T overrideKeyspace(ResultMessage<T> rm)
