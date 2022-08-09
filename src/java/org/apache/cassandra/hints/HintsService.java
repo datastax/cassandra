@@ -179,8 +179,8 @@ public final class HintsService implements HintsServiceMBean
      */
     void writeForAllReplicas(Hint hint)
     {
-        String keyspaceName = hint.mutation.getKeyspaceName();
-        Token token = hint.mutation.key().getToken();
+        String keyspaceName = hint.mutation().getKeyspaceName();
+        Token token = hint.mutation().key().getToken();
 
         EndpointsForToken replicas = ReplicaLayout.forTokenWriteLiveAndDown(Keyspace.open(keyspaceName), token).all();
 

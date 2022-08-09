@@ -45,6 +45,7 @@ public final class HintVerbHandler implements IVerbHandler<HintMessage>
 
     private static final Logger logger = LoggerFactory.getLogger(HintVerbHandler.class);
 
+    @Override
     public void doVerb(Message<HintMessage> message)
     {
         UUID hostId = message.payload.hostId;
