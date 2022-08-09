@@ -379,7 +379,7 @@ public class Server implements CassandraDaemon.Server
             this.connectionTracker = connectionTracker;
         }
 
-        private InetAddressAndPort getNativeAddress(InetAddressAndPort endpoint)
+        protected InetAddressAndPort getNativeAddress(InetAddressAndPort endpoint)
         {
             return StorageService.instance.getNativeAddressAndPort(endpoint);
         }
