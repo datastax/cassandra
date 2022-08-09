@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.hints;
 
+import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -35,14 +36,11 @@ import org.junit.Test;
 
 import com.datastax.driver.core.utils.MoreFutures;
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.gms.IFailureDetectionEventListener;
-import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -50,12 +48,15 @@ import org.apache.cassandra.net.MockMessagingService;
 import org.apache.cassandra.net.MockMessagingSpy;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
+import org.awaitility.Awaitility;
+import org.awaitility.core.ConditionFactory;
 
 import static org.apache.cassandra.Util.dk;
 import static org.apache.cassandra.net.Verb.HINT_REQ;
 import static org.apache.cassandra.net.Verb.HINT_RSP;
 import static org.apache.cassandra.net.MockMessagingService.verb;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class HintsServiceTest
@@ -63,7 +64,6 @@ public class HintsServiceTest
     private static final String KEYSPACE = "hints_service_test";
     private static final String TABLE = "table";
 
-    private final MockFailureDetector failureDetector = new MockFailureDetector();
     private final AtomicBoolean isAlive = new AtomicBoolean(true);
 
     @BeforeClass
@@ -101,12 +101,47 @@ public class HintsServiceTest
             HintsService.instance.deleteAllHints();
         }
 
-        failureDetector.isAlive = true;
         isAlive.set(true);
 
-        HintsService.instance = new HintsService(failureDetector);
+        HintsService.instance = new HintsService(e -> isAlive.get());
 
         HintsService.instance.startDispatch();
+    }
+
+    @Test
+    public void testHintsDroppedForUnknownHost()
+    {
+        // pause the scheduled dispatch before writing hints
+        HintsService.instance.pauseDispatch();
+
+        long totalHints = StorageMetrics.totalHints.getCount();
+
+        // write 100 hints on disk for host that is not part of cluster
+        UUID randomHost = UUID.randomUUID();
+        int numHints = 100;
+
+        writeHints(randomHost, numHints);
+        HintsService.instance.flushAndFsyncBlockingly(Collections.singleton(randomHost));
+
+        // close the write so hints are available for dispatching
+        HintsStore store = HintsService.instance.getCatalog().get(randomHost);
+        store.closeWriter();
+        assertTrue(store.hasFiles());
+
+        // metrics should have been updated with number of create hints
+        assertEquals(totalHints + numHints, StorageMetrics.totalHints.getCount());
+
+        // re-enable dispatching
+        HintsService.instance.resumeDispatch();
+
+        // trigger a manual dispatching on host that is not part of cluster: hints should be dropped
+        HintsService.instance.dispatcherExecutor().dispatch(store);
+        ConditionFactory hints_dropped = Awaitility.await("Hints dropped");
+        hints_dropped.atMost(30, TimeUnit.SECONDS);
+        hints_dropped.untilAsserted(() ->
+                                    assertEquals(totalHints + numHints,
+                                                 StorageMetrics.totalHints.getCount())
+        );
     }
 
     @Test
@@ -167,7 +202,7 @@ public class HintsServiceTest
         ).get();
 
         // marking the destination node as dead should stop sending hints
-        failureDetector.isAlive = false;
+        isAlive.set(false);
         spy.interceptNoMsg(20, TimeUnit.SECONDS).get();
     }
 
@@ -208,58 +243,21 @@ public class HintsServiceTest
             spy = MockMessagingService.when(verb(HINT_REQ)).respond(message);
         }
 
-        // create and write noOfHints using service
-        UUID hostId = StorageService.instance.getLocalHostUUID();
-        for (int i = 0; i < noOfHints; i++)
-        {
-            long now = System.currentTimeMillis();
-            DecoratedKey dkey = dk(String.valueOf(i));
-            TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
-            PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, dkey).timestamp(now);
-            builder.row("column0").add("val", "value0");
-            Hint hint = Hint.create(builder.buildAsMutation(), now);
-            HintsService.instance.write(hostId, hint);
-        }
+        writeHints(StorageService.instance.getLocalHostUUID(), noOfHints);
         return spy;
     }
-
-    private static class MockFailureDetector implements IFailureDetector
-    {
-        private boolean isAlive = true;
-
-        public boolean isAlive(InetAddressAndPort ep)
+        private void writeHints(UUID hostId, int noOfHints)
         {
-            return isAlive;
+            // create and write noOfHints using service
+            for (int i = 0; i < noOfHints; i++)
+            {
+                long now = System.currentTimeMillis();
+                DecoratedKey dkey = dk(String.valueOf(i));
+                TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+                PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, dkey).timestamp(now);
+                builder.row("column0").add("val", "value0");
+                Hint hint = Hint.create(builder.buildAsMutation(), now);
+                HintsService.instance.write(hostId, hint);
+            }
         }
-
-        public void interpret(InetAddressAndPort ep)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public void report(InetAddressAndPort ep)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public void registerFailureDetectionEventListener(IFailureDetectionEventListener listener)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public void unregisterFailureDetectionEventListener(IFailureDetectionEventListener listener)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public void remove(InetAddressAndPort ep)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        public void forceConviction(InetAddressAndPort ep)
-        {
-            throw new UnsupportedOperationException();
-        }
-    }
 }

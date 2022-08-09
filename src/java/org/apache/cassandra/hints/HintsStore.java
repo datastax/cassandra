@@ -28,11 +28,8 @@ import com.google.common.collect.ImmutableMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.SyncUtil;
 
 /**
@@ -84,15 +81,9 @@ final class HintsStore
         return dispatchDequeue.size();
     }
 
-    InetAddressAndPort address()
-    {
-        return StorageService.instance.getEndpointForHostId(hostId);
-    }
-
     boolean isLive()
     {
-        InetAddressAndPort address = address();
-        return address != null && IFailureDetector.instance.isAlive(address);
+        return HintsEndpointProvider.instance.isAlive(hostId);
     }
 
     HintsDescriptor poll()

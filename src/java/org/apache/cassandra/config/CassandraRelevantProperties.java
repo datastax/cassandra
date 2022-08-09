@@ -291,7 +291,9 @@ public enum CassandraRelevantProperties
     CUSTOM_MUTATOR_CLASS("cassandra.custom_mutator_class"),
     
     /** Whether to skip rewriting hints when original host id left the cluster */
-    SKIP_REWRITING_HINTS_ON_HOST_LEFT("cassandra.hinted_handoff.skip_rewriting_hints_on_host_left");
+    SKIP_REWRITING_HINTS_ON_HOST_LEFT("cassandra.hinted_handoff.skip_rewriting_hints_on_host_left"),
+
+    CUSTOM_HINTS_ENDPOINT_PROVIDER("cassandra.custom_hints_endpoint_provider");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

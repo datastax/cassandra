@@ -49,7 +49,7 @@ public final class HintVerbHandler implements IVerbHandler<HintMessage>
     {
         UUID hostId = message.payload.hostId;
         Hint hint = message.payload.hint;
-        InetAddressAndPort address = StorageService.instance.getEndpointForHostId(hostId);
+        InetAddressAndPort address = HintsEndpointProvider.instance.endpointForHost(hostId);
 
         // If we see an unknown table id, it means the table, or one of the tables in the mutation, had been dropped.
         // In that case there is nothing we can really do, or should do, other than log it go on.
