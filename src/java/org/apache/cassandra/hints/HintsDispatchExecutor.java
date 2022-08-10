@@ -255,7 +255,7 @@ final class HintsDispatchExecutor
          */
         private boolean dispatch(HintsDescriptor descriptor)
         {
-            logger.trace("Dispatching hints file {}", descriptor.fileName());
+            logger.debug("Dispatching hints file {}", descriptor.fileName());
 
             InetAddressAndPort address = HintsEndpointProvider.instance.endpointForHost(hostId);
             if (address != null)

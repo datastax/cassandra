@@ -22,9 +22,11 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -134,6 +136,12 @@ final class HintsStore
         return !dispatchDequeue.isEmpty();
     }
 
+    @VisibleForTesting
+    Stream<HintsDescriptor> descriptors()
+    {
+        return dispatchDequeue.stream();
+    }
+
     InputPosition getDispatchOffset(HintsDescriptor descriptor)
     {
         return dispatchPositions.get(descriptor);
@@ -142,6 +150,17 @@ final class HintsStore
     void markDispatchOffset(HintsDescriptor descriptor, InputPosition inputPosition)
     {
         dispatchPositions.put(descriptor, inputPosition);
+    }
+
+    /**
+     * @return the total size of all files belonging to the hints store, in bytes.
+     */
+    long getTotalFileSize()
+    {
+        long total = 0;
+        for (HintsDescriptor descriptor : Iterables.concat(dispatchDequeue, corruptedFiles))
+            total += descriptor.getDataSize();
+        return total;
     }
 
     void cleanUp(HintsDescriptor descriptor)

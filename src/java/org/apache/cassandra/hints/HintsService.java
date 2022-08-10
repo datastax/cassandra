@@ -387,6 +387,25 @@ public final class HintsService implements HintsServiceMBean
         return dispatchExecutor.transfer(catalog, hostIdSupplier);
     }
 
+    /**
+     * Get the total size in bytes of all the hints files on disk.
+     * @return total file size, in bytes
+     */
+    public long getTotalHintsSize()
+    {
+        return catalog.stores().mapToLong(HintsStore::getTotalFileSize).sum();
+    }
+
+    /**
+     * Checks hints files total size on disk exceeds the total maximum.
+     * @return true if the max is exceeded
+     */
+    public boolean exceedsMaxHintsSize()
+    {
+        long maxTotalHintsSize = DatabaseDescriptor.getMaxTotalHintsSize();
+        return maxTotalHintsSize > 0 && getTotalHintsSize() > maxTotalHintsSize;
+    }
+
     HintsCatalog getCatalog()
     {
         return catalog;
