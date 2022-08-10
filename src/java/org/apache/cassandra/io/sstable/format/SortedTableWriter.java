@@ -239,11 +239,6 @@ public abstract class SortedTableWriter extends SSTableWriter
 
     protected void addUnfilteredMetadata(Unfiltered unfiltered)
     {
-//        Object obj = Class.forName("org.apache.cassandra.io.sstable.format.SSTableWriter").newInstance();
-//        Method m = SSTableWriter.class.getDeclaredMethod("guardCollectionSize", TableMetadata.class, DecoratedKey.class, Unfiltered.class);
-//        m.setAccessible(true);
-//        m.invoke(obj);
-
         guardCollectionSize(metadata(), currentKey, unfiltered);
 
 
