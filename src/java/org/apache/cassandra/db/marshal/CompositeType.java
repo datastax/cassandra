@@ -24,6 +24,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
@@ -117,6 +119,12 @@ public class CompositeType extends AbstractCompositeType
     public static CompositeType getInstance(AbstractType... types)
     {
         return getInstance(Arrays.asList(types));
+    }
+
+    @Override
+    public CompositeType overrideKeyspace(Function<String, String> overrideKeyspace)
+    {
+        return getInstance(types.stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(Collectors.toList()));
     }
 
     protected static int startingOffsetInternal(boolean isStatic)
