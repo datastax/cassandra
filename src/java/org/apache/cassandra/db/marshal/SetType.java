@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import org.apache.cassandra.cql3.Sets;
 import org.apache.cassandra.cql3.Term;
@@ -60,6 +61,16 @@ public class SetType<T> extends CollectionType<Set<T>>
         return null == t
              ? internMap.computeIfAbsent(elements, k -> new SetType<>(k, isMultiCell))
              : t;
+    }
+
+    @Override
+    public SetType<T> overrideKeyspace(Function<String, String> overrideKeyspace)
+    {
+        AbstractType<T> newType = elements.overrideKeyspace(overrideKeyspace);
+        if (newType == elements)
+            return this;
+
+        return getInstance(newType, isMultiCell());
     }
 
     public SetType(AbstractType<T> elements, boolean isMultiCell)
