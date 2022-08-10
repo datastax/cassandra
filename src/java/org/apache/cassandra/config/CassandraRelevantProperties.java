@@ -293,6 +293,7 @@ public enum CassandraRelevantProperties
     /** Whether to skip rewriting hints when original host id left the cluster */
     SKIP_REWRITING_HINTS_ON_HOST_LEFT("cassandra.hinted_handoff.skip_rewriting_hints_on_host_left"),
 
+    CUSTOM_HINTS_HANDLER("cassandra.custom_hints_handler"),
     CUSTOM_HINTS_ENDPOINT_PROVIDER("cassandra.custom_hints_endpoint_provider");
 
     CassandraRelevantProperties(String key, String defaultVal)

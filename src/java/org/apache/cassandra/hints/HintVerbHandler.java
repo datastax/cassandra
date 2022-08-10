@@ -32,6 +32,8 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_HINTS_HANDLER;
+
 /**
  * Verb handler used both for hint dispatch and streaming.
  *
@@ -41,7 +43,9 @@ import org.apache.cassandra.service.StorageService;
  */
 public final class HintVerbHandler implements IVerbHandler<HintMessage>
 {
-    public static final HintVerbHandler instance = new HintVerbHandler();
+    public static final IVerbHandler<HintMessage> instance = CUSTOM_HINTS_HANDLER.isPresent()
+                                                             ? make(CUSTOM_HINTS_HANDLER.getString())
+                                                             : new HintVerbHandler();
 
     private static final Logger logger = LoggerFactory.getLogger(HintVerbHandler.class);
 
@@ -102,5 +106,17 @@ public final class HintVerbHandler implements IVerbHandler<HintMessage>
     private static void respond(Message<HintMessage> respondTo)
     {
         MessagingService.instance().send(respondTo.emptyResponse(), respondTo.from());
+    }
+
+    static IVerbHandler<HintMessage> make(String customImpl)
+    {
+        try
+        {
+            return (IVerbHandler<HintMessage>) Class.forName(customImpl).newInstance();
+        }
+        catch (Throwable ex)
+        {
+            throw new IllegalStateException("Unknown Custom Hint Verb Handler: " + customImpl);
+        }
     }
 }
