@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import org.apache.cassandra.cql3.Maps;
 import org.apache.cassandra.cql3.Term;
@@ -72,6 +73,18 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
         return null == t
              ? internMap.computeIfAbsent(p, k -> new MapType<>(k.left, k.right, isMultiCell))
              : t;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public MapType<K,V> overrideKeyspace(Function<String, String> overrideKeyspace)
+    {
+        AbstractType<K> newKeyType = keys.overrideKeyspace(overrideKeyspace);
+        AbstractType<V> newValueType = values.overrideKeyspace(overrideKeyspace);
+        if (newKeyType == keys && newValueType == values)
+            return this;
+
+        return getInstance(newKeyType, newValueType, isMultiCell());
     }
 
     private MapType(AbstractType<K> keys, AbstractType<V> values, boolean isMultiCell)
