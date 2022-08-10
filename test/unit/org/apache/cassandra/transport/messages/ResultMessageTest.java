@@ -19,9 +19,11 @@
 package org.apache.cassandra.transport.messages;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableMap;
 import org.junit.Test;
@@ -101,22 +103,40 @@ public class ResultMessageTest
     {
         FieldIdentifier f1 = field("f1");  // has field position 0
         FieldIdentifier f2 = field("f2");  // has field position 1
+
+        List<AbstractType<?>> allTypes = new ArrayList<>();
         UserType udt = new UserType("ks1",
                                     bb("myType"),
                                     asList(f1, f2),
                                     asList(Int32Type.instance, UTF8Type.instance),
                                     false);
+        allTypes.add(udt);
+        ListType lt = ListType.getInstance(udt, false);
+        allTypes.add(lt);
+        MapType mt = MapType.getInstance(Int32Type.instance, udt, false);
+        allTypes.add(mt);
+        SetType st = SetType.getInstance(udt, false);
+        allTypes.add(st);
+        CompositeType ct = CompositeType.getInstance(Int32Type.instance, UTF8Type.instance);
+        allTypes.add(ct);
+        DynamicCompositeType dct = DynamicCompositeType.getInstance(ImmutableMap.of((byte)8, Int32Type.instance));
+        allTypes.add(dct);
+        TupleType tt = new TupleType(asList(Int32Type.instance, udt));
+        allTypes.add(tt);
+        allTypes.add(Int32Type.instance);
+        ReversedType rt = ReversedType.getInstance(udt);
+        allTypes.add(rt);
 
         ColumnSpecification cs1 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("a", true), Int32Type.instance);
         ColumnSpecification cs2 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("b", true), Int32Type.instance);
         ColumnSpecification cs3 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("c", true), udt);
-        ColumnSpecification cs4 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("d", true), new TupleType(asList(Int32Type.instance, udt)));
-        ColumnSpecification cs5 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("e", true), ReversedType.getInstance(Int32Type.instance));
-        ColumnSpecification cs6 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("f", true), MapType.getInstance(Int32Type.instance, udt, false));
-        ColumnSpecification cs7 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("g", true), ListType.getInstance(udt, false));
-        ColumnSpecification cs8 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("h", true), SetType.getInstance(udt, false));
-        ColumnSpecification cs9 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("i", true), CompositeType.getInstance(Int32Type.instance, UTF8Type.instance));
-        ColumnSpecification cs10 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("j", true), DynamicCompositeType.getInstance(ImmutableMap.of((byte)8, Int32Type.instance)));
+        ColumnSpecification cs4 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("d", true), tt);
+        ColumnSpecification cs5 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("e", true), rt);
+        ColumnSpecification cs6 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("f", true), lt);
+        ColumnSpecification cs7 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("g", true), mt);
+        ColumnSpecification cs8 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("h", true), st);
+        ColumnSpecification cs9 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("i", true), ct);
+        ColumnSpecification cs10 = new ColumnSpecification("ks1", "cf1", new ColumnIdentifier("j", true), dct);
 
         ResultSet.ResultMetadata resultMetadata = new ResultSet.ResultMetadata(Arrays.asList(cs1, cs2, cs3, cs4, cs5, cs6, cs7, cs8, cs9, cs10));
         ResultSet rs = new ResultSet(resultMetadata, mock(List.class));
@@ -126,6 +146,10 @@ public class ResultMessageTest
         checkRows(r2);
         assertThat(r2.result.metadata.names.stream().map(cs -> cs.ksName)).allMatch(k -> k.equals("ks1_123"));
         assertThat(r2.result.metadata.getResultMetadataId()).isNotSameAs(r1.result.metadata.getResultMetadataId());
+
+        //Also Test no change path
+        List<AbstractType<?>> newTypes = allTypes.stream().map(t -> t.overrideKeyspace(s -> s)).collect(Collectors.toList());
+        assertThat(allTypes).isEqualTo(newTypes);
     }
 
     private <T extends ResultMessage<T>> T overrideKeyspace(ResultMessage<T> rm)
