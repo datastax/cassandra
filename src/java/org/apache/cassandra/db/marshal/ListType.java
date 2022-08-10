@@ -24,6 +24,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import org.apache.cassandra.cql3.Lists;
 import org.apache.cassandra.cql3.Term;
@@ -64,6 +65,16 @@ public class ListType<T> extends CollectionType<List<T>>
         return null == t
              ? internMap.computeIfAbsent(elements, k -> new ListType<>(k, isMultiCell))
              : t;
+    }
+
+    @Override
+    public ListType<T> overrideKeyspace(Function<String, String> overrideKeyspace)
+    {
+        AbstractType<T> newType = elements.overrideKeyspace(overrideKeyspace);
+        if (newType == elements)
+            return this;
+
+        return getInstance(newType, isMultiCell());
     }
 
     private ListType(AbstractType<T> elements, boolean isMultiCell)
