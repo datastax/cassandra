@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
@@ -122,6 +124,12 @@ public class DynamicCompositeType extends AbstractCompositeType
         return null == dct
              ? instances.computeIfAbsent(aliases, DynamicCompositeType::new)
              : dct;
+    }
+
+    @Override
+    public DynamicCompositeType overrideKeyspace(Function<String, String> overrideKeyspace)
+    {
+        return getInstance(aliases.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().overrideKeyspace(overrideKeyspace))));
     }
 
     private DynamicCompositeType(Map<Byte, AbstractType<?>> aliases)
