@@ -20,6 +20,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import javax.annotation.Nonnull;
@@ -27,6 +28,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableList;
 
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -67,8 +69,14 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
 
         factory.getCompactionLogger().strategyCreated(this.strategy);
 
-        if (this.strategy.getOptions().isLogAll())
+        if (this.strategy.getOptions().isLogAll()){
             factory.getCompactionLogger().enable();
+            ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(()-> factory.getCompactionLogger().statistics(strategy, "periodic", strategy.backgroundCompactions.getStatistics(strategy)),
+                                                                  1,
+                                                                  1,
+                                                                  TimeUnit.MINUTES);
+
+        }
         else
             factory.getCompactionLogger().disable();
 
