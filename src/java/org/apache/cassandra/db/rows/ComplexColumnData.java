@@ -64,6 +64,7 @@ public class ComplexColumnData extends ColumnData implements Iterable<Cell<?>>
         this.complexDeletion = complexDeletion;
     }
 
+    // Used by CNDB
     public boolean hasCells() {
         return !BTree.isEmpty(this.cells);
     }

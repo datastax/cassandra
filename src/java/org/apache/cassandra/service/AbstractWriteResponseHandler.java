@@ -322,8 +322,7 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
                 for (ColumnFamilyStore cf : cfs)
                     cf.metric.additionalWrites.inc();
 
-                writePerformer.apply(mutation,
-                                     replicaPlan.withContact(uncontacted),
+                writePerformer.apply(mutation, replicaPlan.withContact(uncontacted),
                                      (AbstractWriteResponseHandler<IMutation>) this,
                                      localDC);
             }

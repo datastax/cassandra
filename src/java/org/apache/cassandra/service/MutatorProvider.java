@@ -18,8 +18,11 @@
 
 package org.apache.cassandra.service;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.utils.FBUtilities;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_MUTATOR_CLASS;
 
 /**
  * Provides an instance of {@link Mutator} that facilitates mutation writes for standard mutations, unlogged batches,
@@ -30,25 +33,15 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public abstract class MutatorProvider
 {
-    static Mutator instance = getCustomOrDefault();
+    static final Mutator instance = getCustomOrDefault();
 
-    private static Mutator getCustomOrDefault()
+    @VisibleForTesting
+    static Mutator getCustomOrDefault()
     {
-        if (CassandraRelevantProperties.CUSTOM_MUTATOR_CLASS.isPresent())
+        if (CUSTOM_MUTATOR_CLASS.isPresent())
         {
-            String providerClassName = CassandraRelevantProperties.CUSTOM_MUTATOR_CLASS.getString();
-            Class<Mutator> providerClass = FBUtilities.classForName(providerClassName,
-                                                                    "Custom implementation of a mutation performer");
-            try
-            {
-                return providerClass.newInstance();
-            }
-            catch (InstantiationException | IllegalAccessException ex)
-            {
-                throw new IllegalArgumentException(String.format("Failed to initialize mutator instance of %s " +
-                                                                 "defined in %s system property.", providerClassName,
-                                                                 CassandraRelevantProperties.CUSTOM_MUTATOR_CLASS), ex);
-            }
+            return FBUtilities.construct(CUSTOM_MUTATOR_CLASS.getString(),
+                                         "custom mutator class (set with " + CUSTOM_MUTATOR_CLASS.getKey() + ")");
         }
         else
         {

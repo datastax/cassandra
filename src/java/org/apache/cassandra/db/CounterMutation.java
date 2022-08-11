@@ -194,7 +194,7 @@ public class CounterMutation implements IMutation
      * Applies the counter mutation with the provided time and {@link CounterId}. As opposed to
      * {@link #applyCounterMutation()} this method doesn't acquire cell-level locks.
      * <p/>
-     * This method is used in CDC counter write path.
+     * This method is used in CDC counter write path (CNDB).
      * <p/>
      * The time and counter values are evaluated and propagated to all replicas by CDC Service. The replicas
      * use this method to apply the mutation locally without locks. The locks are not needed in the CDC
