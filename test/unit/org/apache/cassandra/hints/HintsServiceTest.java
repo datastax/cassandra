@@ -52,11 +52,11 @@ import org.awaitility.Awaitility;
 import org.awaitility.core.ConditionFactory;
 
 import static org.apache.cassandra.Util.dk;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SKIP_REWRITING_HINTS_ON_HOST_LEFT;
 import static org.apache.cassandra.net.Verb.HINT_REQ;
 import static org.apache.cassandra.net.Verb.HINT_RSP;
 import static org.apache.cassandra.net.MockMessagingService.verb;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class HintsServiceTest
@@ -69,7 +69,7 @@ public class HintsServiceTest
     @BeforeClass
     public static void defineSchema()
     {
-        System.setProperty("cassandra.hinted_handoff.skip_rewriting_hints_on_host_left", "true");
+        SKIP_REWRITING_HINTS_ON_HOST_LEFT.setBoolean(true);
         SchemaLoader.prepareServer();
         StorageService.instance.initServer();
         SchemaLoader.createKeyspace(KEYSPACE,

@@ -338,7 +338,7 @@ public class StorageProxy implements StorageProxyMBean
                                                                                 metadata,
                                                                                 key,
                                                                                 consistencyForPaxos,
-                                                                                consistencyForCommit);;
+                                                                                consistencyForCommit);
         try
         {
             consistencyForPaxos.validateForCas(keyspaceName, state);
@@ -2342,8 +2342,8 @@ public class StorageProxy implements StorageProxyMBean
         }
         if (HintsService.instance.exceedsMaxHintsSize())
         {
-            Tracing.trace("Not hinting {} which has reached the max hints size of {} bytes on disk. " +
-                          "The current hints size on disk is {} bytes",
+            Tracing.trace("Not hinting {} which has reached the max hints size of {} bytes on disk. "
+                          + "The current hints size on disk is {} bytes",
                           replica.endpoint(),
                           DatabaseDescriptor.getMaxTotalHintsSize(),
                           HintsService.instance.getTotalHintsSize());

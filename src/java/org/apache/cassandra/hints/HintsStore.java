@@ -157,10 +157,8 @@ final class HintsStore
      */
     long getTotalFileSize()
     {
-        long total = 0;
-        for (HintsDescriptor descriptor : Iterables.concat(dispatchDequeue, corruptedFiles))
-            total += descriptor.getDataSize();
-        return total;
+        return Stream.concat(dispatchDequeue.stream(), corruptedFiles.stream())
+                     .mapToLong(HintsDescriptor::getDataSize).sum();
     }
 
     void cleanUp(HintsDescriptor descriptor)
