@@ -69,9 +69,12 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
 
         factory.getCompactionLogger().strategyCreated(this.strategy);
 
-        if (this.strategy.getOptions().isLogAll()){
+        if (this.strategy.getOptions().isLogAll())
+        {
             factory.getCompactionLogger().enable();
-            ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(()-> factory.getCompactionLogger().statistics(strategy, "periodic", strategy.backgroundCompactions.getStatistics(strategy)),
+            ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(()-> factory.getCompactionLogger().statistics(strategy,
+                                                                                                                "periodic",
+                                                                                                                strategy.backgroundCompactions.getStatistics(strategy)),
                                                                   1,
                                                                   1,
                                                                   TimeUnit.MINUTES);
