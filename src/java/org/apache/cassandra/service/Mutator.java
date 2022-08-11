@@ -28,7 +28,7 @@ import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.service.paxos.Commit;
 
 /**
- * Facilites mutations for counters, simple inserts, unlogged batches and LWTs.
+ * Facilitates mutations for counters, simple inserts, unlogged batches and LWTs.
  * Used on the coordinator.
  * <br/>
  * The implementations may choose how and where to send the mutations.

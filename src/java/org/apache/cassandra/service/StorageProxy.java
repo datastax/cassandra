@@ -1374,7 +1374,7 @@ public class StorageProxy implements StorageProxyMBean
      * @param callback an optional callback to be run if and when the write is
      * @param queryStartNanoTime the value of System.nanoTime() when the query started to be processed
      */
-    private static AbstractWriteResponseHandler<IMutation> performWrite(IMutation mutation,
+    public static AbstractWriteResponseHandler<IMutation> performWrite(IMutation mutation,
                                                                        ConsistencyLevel consistencyLevel,
                                                                        String localDataCenter,
                                                                        WritePerformer performer,
