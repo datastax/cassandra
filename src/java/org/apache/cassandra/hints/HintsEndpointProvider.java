@@ -25,6 +25,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.ConstructCustomInstance;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_HINTS_ENDPOINT_PROVIDER;
 
@@ -34,7 +35,9 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_HIN
 public interface HintsEndpointProvider
 {
     HintsEndpointProvider instance = CUSTOM_HINTS_ENDPOINT_PROVIDER.isPresent()
-                                     ? make(CUSTOM_HINTS_ENDPOINT_PROVIDER.getString())
+                                     ? (new ConstructCustomInstance<HintsEndpointProvider>())
+                                     .makeInstance(CUSTOM_HINTS_ENDPOINT_PROVIDER.getString(),
+                                                   "Hinted Handoff Endpoint Provider")
                                      : new DefaultHintsEndpointProvider();
 
     boolean isSameSchemaVersion(UUID hostId);
@@ -79,18 +82,6 @@ public interface HintsEndpointProvider
         {
             InetAddressAndPort address = this.endpointForHost(hostId);
             return address != null && IFailureDetector.instance.isAlive(address);
-        }
-    }
-
-    static HintsEndpointProvider make(String customImpl)
-    {
-        try
-        {
-            return (HintsEndpointProvider) Class.forName(customImpl).newInstance();
-        }
-        catch (Throwable ex)
-        {
-            throw new IllegalStateException("Unknown Hinted Handoff Endpoint Provider: " + customImpl);
         }
     }
 }

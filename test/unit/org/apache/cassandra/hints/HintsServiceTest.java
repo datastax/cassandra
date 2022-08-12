@@ -84,7 +84,7 @@ public class HintsServiceTest
     @AfterClass
     public static void tearDown()
     {
-        System.clearProperty("cassandra.hinted_handoff.skip_rewriting_hints_on_host_left");
+        System.clearProperty(SKIP_REWRITING_HINTS_ON_HOST_LEFT.getKey());
     }
 
     @After
