@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.hints;
 
+import java.net.UnknownHostException;
 import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
@@ -36,6 +37,8 @@ import org.junit.Test;
 
 import com.datastax.driver.core.utils.MoreFutures;
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -57,6 +60,7 @@ import static org.apache.cassandra.net.Verb.HINT_REQ;
 import static org.apache.cassandra.net.Verb.HINT_RSP;
 import static org.apache.cassandra.net.MockMessagingService.verb;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class HintsServiceTest
@@ -73,8 +77,8 @@ public class HintsServiceTest
         SchemaLoader.prepareServer();
         StorageService.instance.initServer();
         SchemaLoader.createKeyspace(KEYSPACE,
-                KeyspaceParams.simple(1),
-                SchemaLoader.standardCFMD(KEYSPACE, TABLE));
+                                    KeyspaceParams.simple(1),
+                                    SchemaLoader.standardCFMD(KEYSPACE, TABLE));
     }
 
     @AfterClass
@@ -120,12 +124,7 @@ public class HintsServiceTest
         UUID randomHost = UUID.randomUUID();
         int numHints = 100;
 
-        writeHints(randomHost, numHints);
-        HintsService.instance.flushAndFsyncBlockingly(Collections.singleton(randomHost));
-
-        // close the write so hints are available for dispatching
-        HintsStore store = HintsService.instance.getCatalog().get(randomHost);
-        store.closeWriter();
+        HintsStore store = writeAndFlushHints(randomHost, numHints);
         assertTrue(store.hasFiles());
 
         // metrics should have been updated with number of create hints
@@ -228,6 +227,33 @@ public class HintsServiceTest
         assertTrue(((ChecksummedDataInput.Position) dispatchOffset).sourcePosition > 0);
     }
 
+    @Test
+    public void testDeleteHintsForEndpoint() throws UnknownHostException
+    {
+        int numHints = 10;
+        TokenMetadata tokenMeta = StorageService.instance.getTokenMetadata();
+        InetAddressAndPort endpointToDeleteHints = InetAddressAndPort.getByName("1.1.1.1");
+        UUID hostIdToDeleteHints = UUID.randomUUID();
+        tokenMeta.updateHostId(hostIdToDeleteHints, endpointToDeleteHints);
+        InetAddressAndPort anotherEndpoint = InetAddressAndPort.getByName("1.1.1.2");
+        UUID anotherHostId = UUID.randomUUID();
+        tokenMeta.updateHostId(anotherHostId, anotherEndpoint);
+
+        HintsStore storeToDeleteHints = writeAndFlushHints(hostIdToDeleteHints, numHints);
+        assertTrue(storeToDeleteHints.hasFiles());
+        HintsStore anotherStore = writeAndFlushHints(anotherHostId, numHints);
+        assertTrue(anotherStore.hasFiles());
+
+        HintsService.instance.deleteAllHintsForEndpoint(endpointToDeleteHints);
+        assertFalse(storeToDeleteHints.hasFiles());
+        assertTrue(anotherStore.hasFiles());
+        assertTrue(HintsService.instance.getCatalog().hasFiles());
+
+        HintsService.instance.deleteAllHints();
+        assertEquals(0, HintsService.instance.getTotalHintsSize());
+        assertFalse(anotherStore.hasFiles());
+    }
+
     private MockMessagingSpy sendHintsAndResponses(int noOfHints, int noOfResponses)
     {
         // create spy for hint messages, but only create responses for noOfResponses hints
@@ -246,18 +272,31 @@ public class HintsServiceTest
         writeHints(StorageService.instance.getLocalHostUUID(), noOfHints);
         return spy;
     }
-        private void writeHints(UUID hostId, int noOfHints)
+
+    private HintsStore writeAndFlushHints(UUID hostId, int noOfHints)
+    {
+        writeHints(hostId, noOfHints);
+        HintsService.instance.flushAndFsyncBlockingly(Collections.singleton(hostId));
+
+        // close the write so hints are available for dispatching
+        HintsStore store = HintsService.instance.getCatalog().get(hostId);
+        store.closeWriter();
+
+        return store;
+    }
+
+    private void writeHints(UUID hostId, int noOfHints)
+    {
+        // create and write noOfHints using service
+        for (int i = 0; i < noOfHints; i++)
         {
-            // create and write noOfHints using service
-            for (int i = 0; i < noOfHints; i++)
-            {
-                long now = System.currentTimeMillis();
-                DecoratedKey dkey = dk(String.valueOf(i));
-                TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
-                PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, dkey).timestamp(now);
-                builder.row("column0").add("val", "value0");
-                Hint hint = Hint.create(builder.buildAsMutation(), now);
-                HintsService.instance.write(hostId, hint);
-            }
+            long now = System.currentTimeMillis();
+            DecoratedKey dkey = dk(String.valueOf(i));
+            TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+            PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, dkey).timestamp(now);
+            builder.row("column0").add("val", "value0");
+            Hint hint = Hint.create(builder.buildAsMutation(), now);
+            HintsService.instance.write(hostId, hint);
         }
+    }
 }
