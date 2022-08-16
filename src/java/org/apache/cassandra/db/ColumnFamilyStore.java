@@ -403,11 +403,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         indexManager.reload();
 
         memtableFactory = metadata().params.memtable.factory;
-        Memtable currentMemtable = data.getView().getCurrentMemtable();
-        if (currentMemtable.shouldSwitch(FlushReason.SCHEMA_CHANGE))
-            switchMemtableIfCurrent(currentMemtable, FlushReason.SCHEMA_CHANGE);
-        else
-            currentMemtable.metadataUpdated();
+        if (!data.getView().liveMemtables.isEmpty())
+        {
+            Memtable currentMemtable = data.getView().getCurrentMemtable();
+            if (currentMemtable.shouldSwitch(FlushReason.SCHEMA_CHANGE))
+                switchMemtableIfCurrent(currentMemtable, FlushReason.SCHEMA_CHANGE);
+            else
+                currentMemtable.metadataUpdated();
+        }
     }
 
     /**
