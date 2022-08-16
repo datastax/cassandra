@@ -31,7 +31,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.ConstructCustomInstance;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_HINTS_HANDLER;
 
@@ -45,9 +45,8 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_HIN
 public final class HintVerbHandler implements IVerbHandler<HintMessage>
 {
     public static final IVerbHandler<HintMessage> instance = CUSTOM_HINTS_HANDLER.isPresent()
-                                                             ? (new ConstructCustomInstance<IVerbHandler<HintMessage>>())
-                                                             .makeInstance(CUSTOM_HINTS_HANDLER.getString(),
-                                                                           "Custom Hint Verb Handler")
+                                                             ? FBUtilities.construct(CUSTOM_HINTS_HANDLER.getString(),
+                                                                                     "Unknown Custom Hint Verb Handler")
                                                              : new HintVerbHandler();
 
     private static final Logger logger = LoggerFactory.getLogger(HintVerbHandler.class);
