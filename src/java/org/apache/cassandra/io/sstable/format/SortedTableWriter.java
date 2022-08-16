@@ -197,7 +197,7 @@ public abstract class SortedTableWriter extends SSTableWriter
         return true;
     }
 
-    private void guardCollectionSize(TableMetadata metadata, DecoratedKey partitionKey, Unfiltered unfiltered)
+    private void guardCollectionSize(DecoratedKey partitionKey, Unfiltered unfiltered)
     {
         if (isInternalKeyspace || !unfiltered.isRow())
             return;
@@ -227,7 +227,7 @@ public abstract class SortedTableWriter extends SSTableWriter
                 continue;
 
             ByteBuffer key = partitionKey.getKey();
-            String keyString = metadata.primaryKeyAsCQLLiteral(key, row.clustering());
+            String keyString = metadata().primaryKeyAsCQLLiteral(key, row.clustering());
             String msg = String.format("%s in row %s in table %s",
                                        column.name.toString(),
                                        keyString,
@@ -239,7 +239,7 @@ public abstract class SortedTableWriter extends SSTableWriter
 
     protected void addUnfilteredMetadata(Unfiltered unfiltered)
     {
-        guardCollectionSize(metadata(), currentKey, unfiltered);
+        guardCollectionSize(currentKey, unfiltered);
 
 
 
