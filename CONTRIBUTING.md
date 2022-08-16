@@ -36,3 +36,4 @@ Use [Cassandra JIRA](https://issues.apache.org/jira/browse/CASSANDRA/) to create
 - Cassandra Cluster Manager - [CCM](https://github.com/pcmanus/ccm) and a guide [blog post](http://www.datastax.com/dev/blog/ccm-a-development-tool-for-creating-local-cassandra-clusters)
 - Cassandra Distributed Tests aka [dtests](https://github.com/apache/cassandra-dtest)
 - Cassandra Testing Guidelines - see TESTING.md
+
