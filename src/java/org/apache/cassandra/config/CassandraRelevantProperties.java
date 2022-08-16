@@ -193,6 +193,10 @@ public enum CassandraRelevantProperties
     CUSTOM_FAILURE_DETECTOR_PROPERTY("cassandra.custom_failure_detector_class"),
     CUSTOM_GUARDRAILS_CONFIG_PROVIDER_CLASS("cassandra.custom_guardrails_config_provider_class"),
     /**
+     * Name of a custom implementation of {@link org.apache.cassandra.service.Mutator}.
+     */
+    CUSTOM_MUTATOR_CLASS("cassandra.custom_mutator_class"),
+    /**
      * custom native library for os access
      */
     CUSTOM_NATIVE_LIBRARY("cassandra.custom_native_library"),
