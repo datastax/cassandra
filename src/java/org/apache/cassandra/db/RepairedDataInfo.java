@@ -39,7 +39,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 @NotThreadSafe
-class RepairedDataInfo
+public class RepairedDataInfo
 {
     public static final RepairedDataInfo NO_OP_REPAIRED_DATA_INFO = new RepairedDataInfo(null)
     {
