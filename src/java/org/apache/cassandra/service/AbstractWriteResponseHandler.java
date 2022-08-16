@@ -149,7 +149,7 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
         throw new WriteTimeoutException(writeType, replicaPlan.consistencyLevel(), acks, blockedFor);
     }
 
-    public final long currentTimeoutNanos()
+    public long currentTimeoutNanos()
     {
         long now = nanoTime();
         long requestTimeout = writeType == COUNTER
