@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 
@@ -61,6 +62,7 @@ import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.Daemon.NON_DA
 import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.Interrupts.SYNCHRONIZED;
 import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.SimulatorSafe.SAFE;
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 import static org.apache.cassandra.utils.concurrent.WaitQueue.newWaitQueue;
 
 /**
@@ -72,8 +74,14 @@ public abstract class AbstractCommitLogSegmentManager
     static final Logger logger = LoggerFactory.getLogger(AbstractCommitLogSegmentManager.class);
 
     /**
+     * The latest id to replay, which is also the base for the next id: kept separate for clarity.
+     */
+    private volatile long replayLimitId = 0;
+    private volatile long idBase = 0;
+
+    /**
      * Segment that is ready to be used. The management thread fills this and blocks until consumed.
-     *
+     * <p>
      * A single management thread produces this, and consumers are already synchronizing to make sure other work is
      * performed atomically with consuming this. Volatile to make sure writes by the management thread become
      * visible (ordered/lazySet would suffice). Consumers (advanceAllocatingFrom and discardAvailableSegment) must
@@ -83,12 +91,14 @@ public abstract class AbstractCommitLogSegmentManager
 
     private final WaitQueue segmentPrepared = newWaitQueue();
 
-    /** Active segments, containing unflushed data. The tail of this queue is the one we allocate writes to */
+    /**
+     * Active segments, containing unflushed data. The tail of this queue is the one we allocate writes to
+     */
     private final ConcurrentLinkedQueue<CommitLogSegment> activeSegments = new ConcurrentLinkedQueue<>();
 
     /**
      * The segment we are currently allocating commit log records to.
-     *
+     * <p>
      * Written by advanceAllocatingFrom which synchronizes on 'this'. Volatile to ensure reads get current value.
      */
     private volatile CommitLogSegment allocatingFrom = null;
@@ -111,12 +121,47 @@ public abstract class AbstractCommitLogSegmentManager
 
     private volatile SimpleCachedBufferPool bufferPool;
 
+    private final static AtomicInteger nextId = new AtomicInteger(1);
+
     AbstractCommitLogSegmentManager(final CommitLog commitLog, File storageDirectory)
     {
         this.commitLog = commitLog;
         this.storageDirectory = storageDirectory;
+        init();
     }
 
+    private void init()
+    {
+        AtomicLong id = new AtomicLong();
+        FileUtils.listPaths(storageDirectory.toPath()).forEach(file -> {
+            long maxId = Long.MIN_VALUE;
+            String fileName = file.getFileName().toString();
+            if (CommitLogDescriptor.isValid(fileName))
+                maxId = Math.max(CommitLogDescriptor.fromFileName(fileName).id, maxId);
+
+            id.set(maxId);
+        });
+        replayLimitId = idBase = Math.max(currentTimeMillis(), id.get() + 1);
+    }
+
+    long getNextId()
+    {
+        return idBase + nextId.getAndIncrement();
+    }
+
+    boolean shouldReplay(String name)
+    {
+        return CommitLogDescriptor.fromFileName(name).id < replayLimitId;
+    }
+
+    /**
+     * FOR TESTING PURPOSES.
+     */
+    void resetReplayLimit()
+    {
+        replayLimitId = getNextId();
+    }
+    
     void start()
     {
         // For encrypted segments we want to keep the compression buffers on-heap as we need those bytes for encryption,
