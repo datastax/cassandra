@@ -35,6 +35,7 @@ import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.utils.Throwables;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.DEFAULT_COMPACTION_LOGS;
 
 /**
  * This class contains all compaction options that are shared by all strategies.
@@ -55,7 +56,7 @@ public class CompactionStrategyOptions
     // minimum interval needed to perform tombstone removal compaction in seconds, default 86400 or 1 day.
     public static final String DEFAULT_TOMBSTONE_COMPACTION_INTERVAL = "86400";
     public static final String DEFAULT_UNCHECKED_TOMBSTONE_COMPACTION_OPTION = "false";
-    public static final String DEFAULT_LOG_ALL_OPTION = "false";
+    public static final String DEFAULT_LOG_ALL_OPTION = DEFAULT_COMPACTION_LOGS.getString("false");
 
     public static final String TOMBSTONE_THRESHOLD_OPTION = "tombstone_threshold";
     public static final String TOMBSTONE_COMPACTION_INTERVAL_OPTION = "tombstone_compaction_interval";
