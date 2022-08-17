@@ -43,6 +43,8 @@ import org.apache.cassandra.utils.concurrent.Future;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SKIP_REWRITING_HINTS_ON_HOST_LEFT;
+
 /**
  * A multi-threaded (by default) executor for dispatching hints.
  *
@@ -55,10 +57,10 @@ final class HintsDispatchExecutor
     private final File hintsDirectory;
     private final ExecutorPlus executor;
     private final AtomicBoolean isPaused;
-    private final Predicate<InetAddressAndPort> isAlive;
+    private final Predicate<UUID> isAlive;
     private final Map<UUID, Future> scheduledDispatches;
 
-    HintsDispatchExecutor(File hintsDirectory, int maxThreads, AtomicBoolean isPaused, Predicate<InetAddressAndPort> isAlive)
+    HintsDispatchExecutor(File hintsDirectory, int maxThreads, AtomicBoolean isPaused, Predicate<UUID> isAlive)
     {
         this.hintsDirectory = hintsDirectory;
         this.isPaused = isPaused;
@@ -164,7 +166,7 @@ final class HintsDispatchExecutor
         public void run()
         {
             UUID hostId = hostIdSupplier.get();
-            InetAddressAndPort address = StorageService.instance.getEndpointForHostId(hostId);
+            InetAddressAndPort address = HintsEndpointProvider.instance.endpointForHost(hostId);
             logger.info("Transferring all hints to {}: {}", address, hostId);
             if (transfer(hostId))
                 return;
@@ -269,14 +271,21 @@ final class HintsDispatchExecutor
          */
         private boolean dispatch(HintsDescriptor descriptor)
         {
-            logger.trace("Dispatching hints file {}", descriptor.fileName());
+            logger.debug("Dispatching hints file {}", descriptor.fileName());
 
-            InetAddressAndPort address = StorageService.instance.getEndpointForHostId(hostId);
+            InetAddressAndPort address = HintsEndpointProvider.instance.endpointForHost(hostId);
             if (address != null)
                 return deliver(descriptor, address);
 
             // address == null means the target no longer exist; find new home for each hint entry.
-            convert(descriptor);
+            if (SKIP_REWRITING_HINTS_ON_HOST_LEFT.getBoolean())
+            {
+                logger.debug("Host {} is no longer a member of cluster, dropping hints", hostId);
+                store.cleanUp(descriptor);
+                store.delete(descriptor);
+            }
+            else
+                convert(descriptor);
             return true;
         }
 
@@ -285,7 +294,7 @@ final class HintsDispatchExecutor
             File file = descriptor.file(hintsDirectory);
             InputPosition offset = store.getDispatchOffset(descriptor);
 
-            BooleanSupplier shouldAbort = () -> !isAlive.test(address) || isPaused.get();
+            BooleanSupplier shouldAbort = () -> !isAlive.test(descriptor.hostId) || isPaused.get();
             try (HintsDispatcher dispatcher = HintsDispatcher.create(file, rateLimiter, address, descriptor.hostId, shouldAbort))
             {
                 if (offset != null)
