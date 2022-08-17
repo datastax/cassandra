@@ -86,7 +86,7 @@ public class HintServiceBytemanTest
 
         failureDetector.isAlive = true;
 
-        HintsService.instance = new HintsService(failureDetector);
+        HintsService.instance = new HintsService(e -> failureDetector.isAlive);
 
         HintsService.instance.startDispatch();
     }
