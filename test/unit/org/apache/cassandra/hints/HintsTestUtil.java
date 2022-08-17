@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.hints;
 
+import java.util.Collections;
 import java.util.UUID;
 
 import com.google.common.collect.Iterators;
@@ -78,8 +79,25 @@ final class HintsTestUtil
             spy = MockMessagingService.when(verb(HINT_REQ)).respond(message);
         }
 
+        writeHints(metadata, StorageService.instance.getLocalHostUUID(), noOfHints);
+        return spy;
+    }
+
+    static HintsStore writeAndFlushHints(TableMetadata metadata, UUID hostId, int noOfHints)
+    {
+        writeHints(metadata, hostId, noOfHints);
+        HintsService.instance.flushAndFsyncBlockingly(Collections.singleton(hostId));
+
+        // close the write so hints are available for dispatching
+        HintsStore store = HintsService.instance.getCatalog().get(hostId);
+        store.closeWriter();
+
+        return store;
+    }
+
+    static void writeHints(TableMetadata metadata, UUID hostId, int noOfHints)
+    {
         // create and write noOfHints using service
-        UUID hostId = StorageService.instance.getLocalHostUUID();
         for (int i = 0; i < noOfHints; i++)
         {
             long now = Clock.Global.currentTimeMillis();
@@ -89,7 +107,6 @@ final class HintsTestUtil
             Hint hint = Hint.create(builder.buildAsMutation(), now);
             HintsService.instance.write(hostId, hint);
         }
-        return spy;
     }
 
     static class MockFailureDetector implements IFailureDetector
