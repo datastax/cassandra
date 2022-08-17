@@ -54,7 +54,6 @@ import org.apache.cassandra.utils.IntegerInterval;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
-import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 import static org.apache.cassandra.utils.concurrent.WaitQueue.newWaitQueue;
 
@@ -65,8 +64,6 @@ import static org.apache.cassandra.utils.concurrent.WaitQueue.newWaitQueue;
  */
 public abstract class CommitLogSegment
 {
-    private final static long idBase;
-
     private CDCState cdcState = CDCState.PERMITTED;
     public enum CDCState
     {
@@ -77,7 +74,6 @@ public abstract class CommitLogSegment
     final Object cdcStateLock = new Object();
 
     private final static AtomicInteger nextId = new AtomicInteger(1);
-    private static long replayLimitId;
     static
     {
         long maxId = Long.MIN_VALUE;
@@ -86,7 +82,6 @@ public abstract class CommitLogSegment
             if (CommitLogDescriptor.isValid(file.name()))
                 maxId = Math.max(CommitLogDescriptor.fromFileName(file.name()).id, maxId);
         }
-        replayLimitId = idBase = Math.max(currentTimeMillis(), maxId + 1);
     }
 
     // The commit log entry overhead in bytes (int: length + int: head checksum + int: tail checksum)
@@ -138,11 +133,6 @@ public abstract class CommitLogSegment
 
     public final CommitLogDescriptor descriptor;
 
-    static long getNextId()
-    {
-        return idBase + nextId.getAndIncrement();
-    }
-
     /**
      * Constructs a new segment file.
      */
@@ -150,7 +140,7 @@ public abstract class CommitLogSegment
     {
         this.manager = manager;
 
-        id = getNextId();
+        id = manager.getNextId();
         descriptor = new CommitLogDescriptor(id,
                                              manager.getConfiguration().getCompressorClass(),
                                              manager.getConfiguration().getEncryptionContext());
@@ -220,19 +210,6 @@ public abstract class CommitLogSegment
             opGroup.close();
             throw t;
         }
-    }
-
-    static boolean shouldReplay(String name)
-    {
-        return CommitLogDescriptor.fromFileName(name).id < replayLimitId;
-    }
-
-    /**
-     * FOR TESTING PURPOSES.
-     */
-    static void resetReplayLimit()
-    {
-        replayLimitId = getNextId();
     }
 
     // allocate bytes in the segment, or return -1 if not enough space
