@@ -148,6 +148,8 @@ public class Config
 
     @Replaces(oldName = "write_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
     public volatile DurationSpec.LongMillisecondsBound write_request_timeout = new DurationSpec.LongMillisecondsBound("2000ms");
+    
+    public volatile DurationSpec.LongMillisecondsBound hints_request_timeout = new DurationSpec.LongMillisecondsBound("2000ms");
 
     @Replaces(oldName = "counter_write_request_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
     public volatile DurationSpec.LongMillisecondsBound counter_write_request_timeout = new DurationSpec.LongMillisecondsBound("5000ms");

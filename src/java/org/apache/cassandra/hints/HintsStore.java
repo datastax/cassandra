@@ -25,6 +25,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Predicate;
 
 import javax.annotation.Nullable;
+import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
@@ -33,7 +34,6 @@ import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.Schema;
@@ -126,8 +126,7 @@ final class HintsStore
 
     boolean isLive()
     {
-        InetAddressAndPort address = address();
-        return address != null && IFailureDetector.instance.isAlive(address);
+        return HintsEndpointProvider.instance.isAlive(hostId);
     }
 
     HintsDescriptor poll()
@@ -225,6 +224,12 @@ final class HintsStore
         return !dispatchDequeue.isEmpty();
     }
 
+    @VisibleForTesting
+    Stream<HintsDescriptor> descriptors()
+    {
+        return dispatchDequeue.stream();
+    }
+
     InputPosition getDispatchOffset(HintsDescriptor descriptor)
     {
         return dispatchPositions.get(descriptor);
@@ -242,11 +247,15 @@ final class HintsStore
     {
         long total = 0;
         for (HintsDescriptor descriptor : Iterables.concat(dispatchDequeue, corruptedFiles))
-            total += descriptor.hintsFileSize(hintsDirectory);
+            // FIXME STAR-1525: Possible conflict with CASSANDRA-19477 
+            //   was: total += descriptor.hintsFileSize(hintsDirectory);
+            total += descriptor.getDataSize();
 
         HintsWriter currentWriter = getWriter();
         if (null != currentWriter)
-            total += currentWriter.descriptor().hintsFileSize(hintsDirectory);
+            // FIXME STAR-1525: Possible conflict with CASSANDRA-19477 
+            //   was: total += currentWriter.descriptor().hintsFileSize(hintsDirectory);
+            total += currentWriter.descriptor().getDataSize();
 
         return total;
     }
