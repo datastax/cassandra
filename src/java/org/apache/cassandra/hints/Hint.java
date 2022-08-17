@@ -96,7 +96,7 @@ public final class Hint
     /**
      * Applies the contained mutation unless it's expired, filtering out any updates for truncated tables
      */
-    Future<?> applyFuture()
+    public Future<?> applyFuture()
     {
         if (isLive())
         {
@@ -124,6 +124,14 @@ public final class Hint
             Throwables.throwIfUnchecked(e.getCause());
             throw new RuntimeException(e.getCause());
         }
+    }
+
+    /**
+     * @return the mutation stored in the hint
+     */
+    public Mutation mutation()
+    {
+        return mutation;
     }
 
     /**
