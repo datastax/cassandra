@@ -83,9 +83,9 @@ public class CommitLog implements CommitLogMBean
 
     public static final CommitLog instance = CommitLog.construct();
 
-    private static final BiPredicate<File, String> unmanagedFilesFilter = (dir, name) -> CommitLogDescriptor.isValid(name) && CommitLogSegment.shouldReplay(name);
-
     private volatile AbstractCommitLogSegmentManager segmentManager;
+
+    private final BiPredicate<File, String> unmanagedFilesFilter = (dir, name) -> CommitLogDescriptor.isValid(name) && segmentManager.shouldReplay(name);
 
     public final CommitLogArchiver archiver;
     public final CommitLogMetrics metrics;
@@ -597,7 +597,7 @@ public class CommitLog implements CommitLogMBean
             throw new UncheckedInterruptedException(e);
         }
         segmentManager.stopUnsafe(deleteSegments);
-        CommitLogSegment.resetReplayLimit();
+        segmentManager.resetReplayLimit();
         if (DatabaseDescriptor.isCDCEnabled() && deleteSegments)
             for (File f : DatabaseDescriptor.getCDCLogLocation().tryList())
                 f.delete();
