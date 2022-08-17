@@ -28,6 +28,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -44,14 +45,12 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
-import org.apache.cassandra.gms.IFailureDetector;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.HintedHandoffMetrics;
 import org.apache.cassandra.metrics.StorageMetrics;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.StorageProxy;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
@@ -95,11 +94,11 @@ public final class HintsService implements HintsServiceMBean
 
     private HintsService()
     {
-        this(IFailureDetector.instance);
+        this(HintsEndpointProvider.instance::isAlive);
     }
 
     @VisibleForTesting
-    HintsService(IFailureDetector failureDetector)
+    HintsService(Predicate<UUID> isAlive)
     {
         File hintsDirectory = DatabaseDescriptor.getHintsDirectory();
         int maxDeliveryThreads = DatabaseDescriptor.getMaxHintsDeliveryThreads();
@@ -111,7 +110,7 @@ public final class HintsService implements HintsServiceMBean
         bufferPool = new HintsBufferPool(bufferSize, writeExecutor::flushBuffer);
 
         isDispatchPaused = new AtomicBoolean(true);
-        dispatchExecutor = new HintsDispatchExecutor(hintsDirectory, maxDeliveryThreads, isDispatchPaused, failureDetector::isAlive);
+        dispatchExecutor = new HintsDispatchExecutor(hintsDirectory, maxDeliveryThreads, isDispatchPaused, isAlive);
 
         // periodically empty the current content of the buffers
         int flushPeriod = DatabaseDescriptor.getHintsFlushPeriodInMS();
@@ -163,6 +162,9 @@ public final class HintsService implements HintsServiceMBean
         if (isShutDown)
             throw new IllegalStateException("HintsService is shut down and can't accept new hints");
 
+        if (hostIds.isEmpty())
+            return;
+
         // we have to make sure that the HintsStore instances get properly initialized - otherwise dispatch will not trigger
         catalog.maybeLoadStores(hostIds);
 
@@ -187,8 +189,8 @@ public final class HintsService implements HintsServiceMBean
      */
     void writeForAllReplicas(Hint hint)
     {
-        String keyspaceName = hint.mutation.getKeyspaceName();
-        Token token = hint.mutation.key().getToken();
+        String keyspaceName = hint.mutation().getKeyspaceName();
+        Token token = hint.mutation().key().getToken();
 
         EndpointsForToken replicas = ReplicaLayout.forTokenWriteLiveAndDown(Keyspace.open(keyspaceName), token).all();
 
@@ -196,7 +198,7 @@ public final class HintsService implements HintsServiceMBean
         // than performing filters / translations 2x extra via Iterables.filter/transform
         List<UUID> hostIds = replicas.stream()
                 .filter(replica -> StorageProxy.shouldHint(replica, false))
-                .map(replica -> StorageService.instance.getHostIdForEndpoint(replica.endpoint()))
+                .map(replica -> HintsEndpointProvider.instance.hostForEndpoint(replica.endpoint()))
                 .collect(Collectors.toList());
 
         write(hostIds, hint);
@@ -347,7 +349,7 @@ public final class HintsService implements HintsServiceMBean
      */
     public void deleteAllHintsForEndpoint(InetAddressAndPort target)
     {
-        UUID hostId = StorageService.instance.getHostIdForEndpoint(target);
+        UUID hostId = HintsEndpointProvider.instance.hostForEndpoint(target);
         if (hostId == null)
             throw new IllegalArgumentException("Can't delete hints for unknown address " + target);
         catalog.deleteAllHints(hostId);
@@ -456,6 +458,25 @@ public final class HintsService implements HintsServiceMBean
         long timestamp = desc == null ? Clock.Global.currentTimeMillis() : desc.timestamp;
         return Math.min(timestamp, bufferPool.getEarliestHintForHost(hostId));
     }
+    
+    /**
+     * Get the total size in bytes of all the hints files on disk.
+     * @return total file size, in bytes
+     */
+    public long getTotalHintsSize()
+    {
+        return catalog.stores().mapToLong(HintsStore::getTotalFileSize).sum();
+    }
+
+    /**
+     * Checks hints files total size on disk exceeds the total maximum.
+     * @return true if the max is exceeded
+     */
+    public boolean exceedsMaxHintsSize()
+    {
+        long maxTotalHintsSize = DatabaseDescriptor.getMaxHintsSizePerHost();
+        return maxTotalHintsSize > 0 && getTotalHintsSize() > maxTotalHintsSize;
+    }
 
     HintsCatalog getCatalog()
     {
@@ -474,5 +495,11 @@ public final class HintsService implements HintsServiceMBean
     public boolean isDispatchPaused()
     {
         return isDispatchPaused.get();
+    }
+
+    @VisibleForTesting
+    public HintsDispatchExecutor dispatcherExecutor()
+    {
+        return dispatchExecutor;
     }
 }
