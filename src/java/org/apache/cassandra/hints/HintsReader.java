@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.FSReadError;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.AbstractIterator;
 
 import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
@@ -79,6 +78,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
         try
         {
             HintsDescriptor descriptor = HintsDescriptor.deserialize(reader);
+            descriptor.setDataSize(file.length());
             if (descriptor.isCompressed())
             {
                 // since the hints descriptor is always uncompressed, it needs to be read with the normal ChecksummedDataInput.
@@ -244,7 +244,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
             catch (UnknownTableException e)
             {
                 logger.warn("Failed to read a hint for {}: {} - table with id {} is unknown in file {}",
-                            StorageService.instance.getEndpointForHostId(descriptor.hostId),
+                            HintsEndpointProvider.instance.endpointForHost(descriptor.hostId),
                             descriptor.hostId,
                             e.id,
                             descriptor.fileName());
@@ -258,7 +258,7 @@ class HintsReader implements AutoCloseable, Iterable<HintsReader.Page>
 
             // log a warning and skip the corrupted entry
             logger.warn("Failed to read a hint for {}: {} - digest mismatch for hint at position {} in file {}",
-                        StorageService.instance.getEndpointForHostId(descriptor.hostId),
+                        HintsEndpointProvider.instance.endpointForHost(descriptor.hostId),
                         descriptor.hostId,
                         input.getPosition() - size - 4,
                         descriptor.fileName());
