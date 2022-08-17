@@ -34,6 +34,7 @@ import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class TableMetadataTest
 {
@@ -136,5 +137,24 @@ public class TableMetadataTest
                      metadata.primaryKeyAsCQLLiteral(composite.decompose(1, true), Clustering.EMPTY));
         assertEquals("(2, true)",
                      metadata.primaryKeyAsCQLLiteral(composite.decompose(2, true), Clustering.STATIC_CLUSTERING));
+    }
+
+    @Test
+    public void testCdcParamsChangeAffectsPreparedStatements()
+    {
+        String keyspaceName = "ks1";
+        String tableName = "tbl1";
+        TableParams noCdcParams = TableParams.builder().cdc(false).build();
+        TableParams cdcParams = TableParams.builder().cdc(true).build();
+
+        TableMetadata metadata = TableMetadata.builder(keyspaceName, tableName)
+                                              .addPartitionKeyColumn("key", UTF8Type.instance)
+                                              .params(noCdcParams)
+                                              .build();
+        TableMetadata updated = TableMetadata.builder(keyspaceName, tableName)
+                                             .addPartitionKeyColumn("key", UTF8Type.instance)
+                                             .params(cdcParams)
+                                             .build();
+        assertTrue(metadata.changeAffectsPreparedStatements(updated));
     }
 }
