@@ -19,9 +19,6 @@ package org.apache.cassandra.hints;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.apache.cassandra.nodes.Nodes;
-import org.apache.cassandra.schema.Schema;
-
 /**
  * A simple dispatch trigger that's being run every 10 seconds.
  *
@@ -62,7 +59,7 @@ final class HintsDispatchTrigger implements Runnable
                .filter(store -> !isScheduled(store))
                .filter(HintsStore::isLive)
                .filter(store -> store.isWriting() || store.hasFiles())
-               .filter(store -> Schema.instance.isSameVersion(Nodes.getSchemaVersion(store.address(), null)))
+               .filter(store -> HintsEndpointProvider.instance.isSameSchemaVersion(store.hostId))
                .forEach(this::schedule);
     }
 

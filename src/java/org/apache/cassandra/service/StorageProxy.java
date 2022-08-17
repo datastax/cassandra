@@ -395,7 +395,7 @@ public class StorageProxy implements StorageProxyMBean
                                                                                 metadata,
                                                                                 key,
                                                                                 consistencyForPaxos,
-                                                                                consistencyForCommit);;
+                                                                                consistencyForCommit);
         try
         {
             consistencyForPaxos.validateForCas(keyspaceName, clientState);
