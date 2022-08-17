@@ -335,7 +335,7 @@ public abstract class CommitLogTest
     public void testRecoveryWithTruncatedFileAndTruncationToleration() throws Exception
     {
         CommitLogDescriptor desc = new CommitLogDescriptor(CommitLogDescriptor.current_version,
-                                                           CommitLogSegment.getNextId(),
+                                                           CommitLog.instance.getSegmentManager().getNextId(),
                                                            DatabaseDescriptor.getCommitLogCompression(),
                                                            DatabaseDescriptor.getEncryptionContext());
 
@@ -635,7 +635,7 @@ public abstract class CommitLogTest
     {
         EncryptionContext encryptionContext = DatabaseDescriptor.getEncryptionContext();
         CommitLogDescriptor desc = new CommitLogDescriptor(CommitLogDescriptor.current_version,
-                                                           CommitLogSegment.getNextId(),
+                                                           CommitLog.instance.getSegmentManager().getNextId(),
                                                            DatabaseDescriptor.getCommitLogCompression(),
                                                            encryptionContext);
 
