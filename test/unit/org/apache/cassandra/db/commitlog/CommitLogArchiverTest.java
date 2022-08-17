@@ -140,7 +140,7 @@ public class CommitLogArchiverTest extends CQLTester
 
         // replay log
         CommitLog.instance.archiver.maybeRestoreArchive();
-        CommitLogSegment.resetReplayLimit();
+        CommitLog.instance.getSegmentManager().resetReplayLimit();
         // restore archived files
         CommitLog.instance.recoverFiles(UNIT_TESTS, CommitLog.instance.getUnmanagedFiles());
         // restore poin time is rpiTime in microseconds , so row(4, 0, 0) and row(4, 1, 1) is skipped
@@ -167,7 +167,7 @@ public class CommitLogArchiverTest extends CQLTester
         assertRowCount(execute("SELECT * FROM %s"), 0);
         // replay log
         CommitLog.instance.archiver.maybeRestoreArchive();
-        CommitLogSegment.resetReplayLimit();
+        CommitLog.instance.getSegmentManager().resetReplayLimit();
         CommitLog.instance.recoverFiles(UNIT_TESTS, CommitLog.instance.getUnmanagedFiles());
         // restore poin time is rpiTime in millseconds, so row(2, 0, 0) and row(2, 1, 1) is skipped
         assertRows(execute("SELECT * FROM %s"), row(1, 0, 0), row(1, 1, 1));
