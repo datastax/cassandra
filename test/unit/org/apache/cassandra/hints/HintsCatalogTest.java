@@ -94,6 +94,11 @@ public class HintsCatalogTest
         HintsCatalog catalog = HintsCatalog.load(directory, ImmutableMap.of());
         assertEquals(2, catalog.stores().count());
 
+        // verify hint data size is set for descriptors created from local hint files
+        catalog.stores()
+               .flatMap(HintsStore::descriptors)
+               .forEach(desc -> assertTrue(desc.getDataSize() > 0));
+
         HintsStore store1 = catalog.get(hostId1);
         assertNotNull(store1);
         assertEquals(descriptor1, store1.poll());
@@ -105,6 +110,38 @@ public class HintsCatalogTest
         assertEquals(descriptor3, store2.poll());
         assertEquals(descriptor2, store2.poll());
         assertNull(store2.poll());
+    }
+
+    @Test
+    public void multipleHostsHintsTotalSizeTest() throws IOException
+    {
+        File directory = new File(testFolder.newFolder());
+        HintsCatalog catalog = HintsCatalog.load(directory, ImmutableMap.of());
+
+        long totalSize = 0;
+        int hosts = 10;
+        int filePerHost = 5;
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < hosts; i++)
+        {
+            long sizePerHost = 0;
+            UUID hostId = UUID.randomUUID();
+            HintsStore store = catalog.get(hostId);
+            assertEquals(sizePerHost, store.getTotalFileSize());
+            for (int f = 0; f < filePerHost; f++)
+            {
+                HintsDescriptor descriptor = new HintsDescriptor(hostId, now + f);
+                writeDescriptor(directory, descriptor);
+                store.offerLast(descriptor);
+
+                assertTrue(descriptor.getDataSize() > 0);
+                sizePerHost += descriptor.getDataSize();
+            }
+            totalSize += sizePerHost;
+            assertEquals(sizePerHost, store.getTotalFileSize());
+        }
+
+        assertEquals(totalSize, catalog.stores().mapToLong(HintsStore::getTotalFileSize).sum());
     }
 
     @Test
