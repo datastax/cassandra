@@ -192,6 +192,8 @@ public enum CassandraRelevantProperties
     /** Which class to use for failure detection */
     CUSTOM_FAILURE_DETECTOR_PROPERTY("cassandra.custom_failure_detector_class"),
     CUSTOM_GUARDRAILS_CONFIG_PROVIDER_CLASS("cassandra.custom_guardrails_config_provider_class"),
+    CUSTOM_HINTS_ENDPOINT_PROVIDER("cassandra.custom_hints_endpoint_provider"),
+    CUSTOM_HINTS_HANDLER("cassandra.custom_hints_handler"),
     /**
      * Name of a custom implementation of {@link org.apache.cassandra.service.Mutator}.
      */
@@ -519,6 +521,8 @@ public enum CassandraRelevantProperties
     SKIP_PAXOS_REPAIR_ON_TOPOLOGY_CHANGE_KEYSPACES("cassandra.skip_paxos_repair_on_topology_change_keyspaces"),
     SKIP_PAXOS_REPAIR_VERSION_VALIDATION("cassandra.skip_paxos_repair_version_validation"),
     SKIP_PAXOS_STATE_REBUILD("cassandra.skip_paxos_state_rebuild"),
+    /** Whether to skip rewriting hints when original host id left the cluster */
+    SKIP_REWRITING_HINTS_ON_HOST_LEFT("cassandra.hinted_handoff.skip_rewriting_hints_on_host_left"),
     /** snapshots ttl cleanup initial delay in seconds */
     SNAPSHOT_CLEANUP_INITIAL_DELAY_SECONDS("cassandra.snapshot.ttl_cleanup_initial_delay_seconds", "5"),
     /** snapshots ttl cleanup period in seconds */

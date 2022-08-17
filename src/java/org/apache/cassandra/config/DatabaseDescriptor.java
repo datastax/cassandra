@@ -2175,6 +2175,11 @@ public class DatabaseDescriptor
         return conf.write_request_timeout.to(unit);
     }
 
+    public static long getHintsRpcTimeout(TimeUnit unit)
+    {
+        return conf.hints_request_timeout.to(unit);
+    }
+
     public static void setWriteRpcTimeout(long timeOutInMillis)
     {
         conf.write_request_timeout = new DurationSpec.LongMillisecondsBound(timeOutInMillis);

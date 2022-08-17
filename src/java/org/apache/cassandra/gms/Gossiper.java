@@ -2346,6 +2346,13 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         return results;
     }
 
+    @Nullable
+    public UUID getSchemaVersion(InetAddressAndPort ep)
+    {
+        EndpointState state = getEndpointStateForEndpoint(ep);
+        return state != null ? state.getSchemaVersion() : null;
+    }
+
     public static void waitToSettle()
     {
         int forceAfter = GOSSIPER_SKIP_WAITING_TO_SETTLE.getInt();

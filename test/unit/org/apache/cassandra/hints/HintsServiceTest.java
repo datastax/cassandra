@@ -17,17 +17,20 @@
  */
 package org.apache.cassandra.hints;
 
+import java.net.UnknownHostException;
 import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.annotation.Nullable;
 
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -36,6 +39,10 @@ import org.junit.runner.RunWith;
 import com.datastax.driver.core.utils.MoreFutures;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.metrics.StorageMetrics;
@@ -43,16 +50,18 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.MockMessagingService;
 import org.apache.cassandra.net.MockMessagingSpy;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
-import static org.apache.cassandra.hints.HintsTestUtil.MockFailureDetector;
-import static org.apache.cassandra.hints.HintsTestUtil.sendHintsAndResponses;
+import static org.apache.cassandra.hints.HintsTestUtil.*;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
+import org.awaitility.Awaitility;
+import org.awaitility.core.ConditionFactory;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.SKIP_REWRITING_HINTS_ON_HOST_LEFT;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(BMUnitRunner.class)
@@ -63,16 +72,24 @@ public class HintsServiceTest
 
     private final MockFailureDetector failureDetector = new MockFailureDetector();
     private static TableMetadata metadata;
+    private final AtomicBoolean isAlive = new AtomicBoolean(true);
 
     @BeforeClass
     public static void defineSchema()
     {
+        SKIP_REWRITING_HINTS_ON_HOST_LEFT.setBoolean(true);
         SchemaLoader.prepareServer();
         StorageService.instance.initServer();
         SchemaLoader.createKeyspace(KEYSPACE,
                 KeyspaceParams.simple(1),
                 SchemaLoader.standardCFMD(KEYSPACE, TABLE));
         metadata = Schema.instance.getTableMetadata(KEYSPACE, TABLE);
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
+        System.clearProperty(SKIP_REWRITING_HINTS_ON_HOST_LEFT.getKey());
     }
 
     @After
@@ -93,11 +110,42 @@ public class HintsServiceTest
             HintsService.instance.deleteAllHints();
         }
 
-        failureDetector.isAlive = true;
+        isAlive.set(true);
 
-        HintsService.instance = new HintsService(failureDetector);
+        HintsService.instance = new HintsService(e -> isAlive.get());
 
         HintsService.instance.startDispatch();
+    }
+
+    @Test
+    public void testHintsDroppedForUnknownHost()
+    {
+        // pause the scheduled dispatch before writing hints
+        HintsService.instance.pauseDispatch();
+
+        long totalHints = StorageMetrics.totalHints.getCount();
+
+        // write 100 hints on disk for host that is not part of cluster
+        UUID randomHost = UUID.randomUUID();
+        int numHints = 100;
+
+        HintsStore store = writeAndFlushHints(metadata, randomHost, numHints);
+        assertTrue(store.hasFiles());
+
+        // metrics should have been updated with number of create hints
+        assertEquals(totalHints + numHints, StorageMetrics.totalHints.getCount());
+
+        // re-enable dispatching
+        HintsService.instance.resumeDispatch();
+
+        // trigger a manual dispatching on host that is not part of cluster: hints should be dropped
+        HintsService.instance.dispatcherExecutor().dispatch(store);
+        ConditionFactory hints_dropped = Awaitility.await("Hints dropped");
+        hints_dropped.atMost(30, TimeUnit.SECONDS);
+        hints_dropped.untilAsserted(() ->
+                                    assertEquals(totalHints + numHints,
+                                                 StorageMetrics.totalHints.getCount())
+        );
     }
 
     @Test
@@ -158,7 +206,7 @@ public class HintsServiceTest
         ).get();
 
         // marking the destination node as dead should stop sending hints
-        failureDetector.isAlive = false;
+        isAlive.set(false);
         spy.interceptNoMsg(20, TimeUnit.SECONDS).get();
     }
 
@@ -221,4 +269,30 @@ public class HintsServiceTest
         assertNotEquals(oldestHintTime, timestampForHint);
     }
 
+    @Test
+    public void testDeleteHintsForEndpoint() throws UnknownHostException
+    {
+        int numHints = 10;
+        TokenMetadata tokenMeta = StorageService.instance.getTokenMetadata();
+        InetAddressAndPort endpointToDeleteHints = InetAddressAndPort.getByName("1.1.1.1");
+        UUID hostIdToDeleteHints = UUID.randomUUID();
+        tokenMeta.updateHostId(hostIdToDeleteHints, endpointToDeleteHints);
+        InetAddressAndPort anotherEndpoint = InetAddressAndPort.getByName("1.1.1.2");
+        UUID anotherHostId = UUID.randomUUID();
+        tokenMeta.updateHostId(anotherHostId, anotherEndpoint);
+
+        HintsStore storeToDeleteHints = writeAndFlushHints(metadata, hostIdToDeleteHints, numHints);
+        assertTrue(storeToDeleteHints.hasFiles());
+        HintsStore anotherStore = writeAndFlushHints(metadata, anotherHostId, numHints);
+        assertTrue(anotherStore.hasFiles());
+
+        HintsService.instance.deleteAllHintsForEndpoint(endpointToDeleteHints);
+        assertFalse(storeToDeleteHints.hasFiles());
+        assertTrue(anotherStore.hasFiles());
+        assertTrue(HintsService.instance.getCatalog().hasFiles());
+
+        HintsService.instance.deleteAllHints();
+        assertEquals(0, HintsService.instance.getTotalHintsSize());
+        assertFalse(anotherStore.hasFiles());
+    }
 }
