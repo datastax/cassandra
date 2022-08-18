@@ -27,7 +27,8 @@ import org.apache.cassandra.utils.FBUtilities;
 public interface ParentRepairSessionListener
 {
     ParentRepairSessionListener instance = CassandraRelevantProperties.REPAIR_PARENT_SESSION_LISTENER.isPresent()
-                                      ? FBUtilities.construct(CassandraRelevantProperties.REPAIR_PARENT_SESSION_LISTENER.getString(), "")
+                                      ? FBUtilities.construct(CassandraRelevantProperties.REPAIR_PARENT_SESSION_LISTENER.getString(),
+                                                              "Parent Repair Session Listener")
                                       : new NoopParentRepairSessionListener();
 
     /**

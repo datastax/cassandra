@@ -28,7 +28,8 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_TMD
 public interface TokenMetadataProvider
 {
     TokenMetadataProvider instance = CUSTOM_TMD_PROVIDER_PROPERTY.isPresent()
-                                     ? FBUtilities.construct(CUSTOM_TMD_PROVIDER_PROPERTY.getString(), "")
+                                     ? FBUtilities.construct(CUSTOM_TMD_PROVIDER_PROPERTY.getString(),
+                                                             "Token Metadata Provider")
                                      : new DefaultTokenMetadataProvider();
 
     TokenMetadata getTokenMetadata();

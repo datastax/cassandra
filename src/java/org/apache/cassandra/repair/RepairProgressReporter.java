@@ -32,7 +32,8 @@ import org.apache.cassandra.utils.FBUtilities;
 public interface RepairProgressReporter
 {
     RepairProgressReporter instance = CassandraRelevantProperties.REPAIR_PROGRESS_REPORTER.isPresent()
-                                      ? FBUtilities.construct(CassandraRelevantProperties.REPAIR_PROGRESS_REPORTER.getString(), "")
+                                      ? FBUtilities.construct(CassandraRelevantProperties.REPAIR_PROGRESS_REPORTER.getString(),
+                                                              "Repair Progress Reporter")
                                       : new DefaultRepairProgressReporter();
 
     void onParentRepairStarted(UUID parentSession, String keyspaceName, String[] cfnames, RepairOption options);

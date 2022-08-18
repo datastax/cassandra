@@ -30,7 +30,8 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_CLI
 public interface ClientRequestsMetricsProvider
 {
     ClientRequestsMetricsProvider instance = CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY.isPresent()
-                                             ? FBUtilities.construct(CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY.getString(), "")
+                                             ? FBUtilities.construct(CUSTOM_CLIENT_REQUEST_METRICS_PROVIDER_PROPERTY.getString(),
+                                                                     "Client Request Metrics Provider")
                                              : new DefaultClientRequestsMetricsProvider();
 
     ClientRequestsMetrics metrics(String keyspace);

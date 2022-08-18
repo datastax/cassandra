@@ -41,7 +41,8 @@ public abstract class Guardrails
     private static final GuardrailsConfig config = DatabaseDescriptor.getGuardrailsConfig();
 
     public static final GuardrailsFactory factory = CUSTOM_GUARDRAILS_FACTORY_PROPERTY.isPresent()
-                                                    ? FBUtilities.construct(CUSTOM_GUARDRAILS_FACTORY_PROPERTY.getString(), "")
+                                                    ? FBUtilities.construct(CUSTOM_GUARDRAILS_FACTORY_PROPERTY.getString(),
+                                                                            "Guardrails Factory")
                                                     : new DefaultGuardrailsFactory();
 
     public static final Threshold tablesLimit =

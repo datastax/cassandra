@@ -32,7 +32,8 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.DYNAMIC_SN
 public interface DynamicSnitchSeverityProvider
 {
     DynamicSnitchSeverityProvider instance = DYNAMIC_SNITCH_SEVERITY_PROVIDER.isPresent()
-                                             ? FBUtilities.construct(DYNAMIC_SNITCH_SEVERITY_PROVIDER.getString(), "")
+                                             ? FBUtilities.construct(DYNAMIC_SNITCH_SEVERITY_PROVIDER.getString(),
+                                                                     "Dynamic Snitch Severity Provider")
                                              : new DefaultProvider();
 
     /**

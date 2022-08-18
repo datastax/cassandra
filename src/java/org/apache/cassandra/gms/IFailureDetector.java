@@ -35,7 +35,8 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_FAI
 public interface IFailureDetector
 {
     IFailureDetector instance = CUSTOM_FAILURE_DETECTOR_PROPERTY.isPresent()
-                                ? FBUtilities.construct(CUSTOM_FAILURE_DETECTOR_PROPERTY.getString(), "")
+                                ? FBUtilities.construct(CUSTOM_FAILURE_DETECTOR_PROPERTY.getString(),
+                                                        "Failure Detector")
                                 : new FailureDetector();
 
     public static final Predicate<InetAddressAndPort> isEndpointAlive = instance::isAlive;
