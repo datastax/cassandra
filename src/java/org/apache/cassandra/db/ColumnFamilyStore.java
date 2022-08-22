@@ -742,6 +742,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public void invalidate(boolean expectMBean, boolean dropData)
     {
+        logger.debug("Invalidating CFS {}, status: {}, expectMBean: {}, dropData: {}",
+                     metadata.name, status, expectMBean, dropData);
+
         // disable and cancel in-progress compactions before invalidating
         status = dropData ? STATUS.INVALID_DROPPED : STATUS.INVALID_UNLOADED;
 
@@ -787,6 +790,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         });
 
         invalidateCaches();
+        logger.debug("CFS {} invalidated", metadata.name);
     }
 
     /**
@@ -3322,8 +3326,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     void onTableDropped()
     {
         indexManager.markAllIndexesRemoved();
+        logger.debug("CFS is being dropped: indexes removed");
 
         CompactionManager.instance.interruptCompactionForCFs(concatWithIndexes(), (sstable) -> true, true);
+        logger.debug("CFS is being dropped: compactions stopped");
 
         if (DatabaseDescriptor.isAutoSnapshot())
             snapshot(Keyspace.getTimestampedSnapshotNameWithPrefix(name, ColumnFamilyStore.SNAPSHOT_DROP_PREFIX));
@@ -3340,9 +3346,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             CommitLog.instance.forceRecycleAllSegments(Collections.singleton(metadata.id));
         }
 
+        logger.debug("Dropping CFS {}: shutting down compaction strategy", name);
         strategyContainer.shutdown();
 
         // wait for any outstanding reads/writes that might affect the CFS
+        logger.debug("Dropping CFS {}: waiting for read and write barriers", name);
         Keyspace.writeOrder.awaitNewBarrier();
         readOrdering.awaitNewBarrier();
     }

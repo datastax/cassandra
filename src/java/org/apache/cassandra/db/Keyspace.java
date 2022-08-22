@@ -391,7 +391,10 @@ public class Keyspace
     {
         ColumnFamilyStore cfs = columnFamilyStores.remove(tableId);
         if (cfs == null)
+        {
+            logger.debug("No CFS found when trying to drop table {}", tableId);
             return;
+        }
 
         cfs.onTableDropped();
 
@@ -399,7 +402,9 @@ public class Keyspace
         writeOrder.awaitNewBarrier();
         cfs.readOrdering.awaitNewBarrier();
 
+        logger.debug("Dropping CFS {}: unloading CFS", cfs.name);
         unloadCf(cfs, dropData);
+        logger.debug("Dropping CFS {}: completed", cfs.name);
     }
 
     /**
