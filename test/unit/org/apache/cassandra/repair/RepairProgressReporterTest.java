@@ -44,13 +44,11 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
-import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.schema.SchemaConstants.DISTRIBUTED_KEYSPACE_NAME;
 import static org.apache.cassandra.schema.SystemDistributedKeyspace.PARENT_REPAIR_HISTORY;
 import static org.apache.cassandra.schema.SystemDistributedKeyspace.REPAIR_HISTORY;
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class RepairProgressReporterTest extends CQLTester
 {
@@ -161,15 +159,6 @@ public class RepairProgressReporterTest extends CQLTester
 
         RepairProgressReporter.instance.onRepairFailed(sessionId, keyspace, cfs[0], new RuntimeException("Mock Error"));
         assertRows(repairHistoryWithError(), row(keyspace, cfs[0], sessionId, parentRepairSession, "FAILED", RANGE1.left.toString(), RANGE1.right.toString(), "Mock Error"));
-    }
-
-    @Test
-    public void testCustomInstance()
-    {
-        RepairProgressReporter reporter = RepairProgressReporter.make(MockReporter.class.getName());
-        Assertions.assertThat(reporter).isInstanceOf(MockReporter.class);
-
-        assertThatThrownBy(() -> RepairProgressReporter.make("unknown")).hasMessageContaining("Unknown repair progress report");
     }
 
     private UntypedResultSet repairHistory()
