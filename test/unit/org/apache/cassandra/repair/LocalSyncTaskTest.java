@@ -58,9 +58,7 @@ import org.apache.cassandra.utils.TimeUUID;
 import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
 
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
-import org.assertj.core.api.Assertions;
 
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -251,15 +249,6 @@ public class LocalSyncTaskTest extends AbstractRepairTest
                                                desc.parentSessionId, false, true, PreviewKind.NONE);
         StreamPlan plan = task.createStreamPlan();
         assertNumInOut(plan, 0, 1);
-    }
-
-    @Test
-    public void testCustomParentRepairSessionListener()
-    {
-        ParentRepairSessionListener listener = ParentRepairSessionListener.make(MockParentRepairSessionListener.class.getName());
-        Assertions.assertThat(listener).isInstanceOf(MockParentRepairSessionListener.class);
-
-        assertThatThrownBy(() -> ParentRepairSessionListener.make("unknown")).hasMessageContaining("Unknown parent repair session listener");
     }
 
     private MerkleTrees createInitialTree(RepairJobDesc desc, IPartitioner partitioner)
