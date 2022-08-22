@@ -21,12 +21,38 @@ package org.apache.cassandra.locator;
 import org.junit.Test;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_TMD_PROVIDER_PROPERTY;
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 
 public class CustomTokenMetadataProviderTest
 {
+    static String oldValueCustomProvider = null;
+
+    @BeforeClass
+    public static void setProperty()
+    {
+        oldValueCustomProvider = CUSTOM_TMD_PROVIDER_PROPERTY.getString();
+        CUSTOM_TMD_PROVIDER_PROPERTY.setString(TestTokenMetadataProvider.class.getName());
+    }
+
+    @AfterClass
+    public static void resetProperty()
+    {
+        if (oldValueCustomProvider != null)
+            CUSTOM_TMD_PROVIDER_PROPERTY.setString(oldValueCustomProvider);
+        else
+            System.clearProperty(CUSTOM_TMD_PROVIDER_PROPERTY.getKey());
+    }
+
+    @Test
+    public void testCustomTokenMetadataProperty()
+    {
+        assertTrue("TokenMetadataProvider has unexpected instance class",
+                   TokenMetadataProvider.instance instanceof TestTokenMetadataProvider);
+    }
+
     public static class TestTokenMetadataProvider implements TokenMetadataProvider
     {
         @Override
@@ -46,49 +72,6 @@ public class CustomTokenMetadataProviderTest
         @Deprecated(forRemoval = true, since = "CC 4.0") // since we can select TMDP implementation via config, this method is no longer needed
         public void replaceTokenMetadata(TokenMetadata newTokenMetadata)
         {
-        }
-    }
-
-    @Test
-    public void testMake()
-    {
-        final String customImpl = TestTokenMetadataProvider.class.getName();
-        CustomTokenMetadataProvider.make(customImpl);
-    }
-
-    @Test
-    public void testInvalidTokenMetadataClassThrows()
-    {
-        final String invalidClassName = "invalidClass";
-        try
-        {
-            CustomTokenMetadataProvider.make(invalidClassName);
-            fail();
-        }
-        catch (IllegalStateException ex)
-        {
-            assertEquals(ex.getMessage(), "Unknown token metadata provider: " + invalidClassName);
-        }
-    }
-
-    @Test
-    public void testCustomTokenMetadataProperty() throws ClassNotFoundException
-    {
-        String oldValue = CUSTOM_TMD_PROVIDER_PROPERTY.getString();
-        CUSTOM_TMD_PROVIDER_PROPERTY.setString(TestTokenMetadataProvider.class.getName());
-        ClassLoader classLoader = CustomTokenMetadataProvider.class.getClassLoader();
-        try
-        {
-            classLoader.loadClass("org.apache.cassandra.locator.TokenMetadataProvider");
-            boolean instanceIsExpectedClass = TokenMetadataProvider.instance instanceof TestTokenMetadataProvider;
-            assertTrue("TokenMetadataProvider has unexpected instance class", instanceIsExpectedClass);
-        }
-        finally
-        {
-            if (oldValue != null)
-            {
-                CUSTOM_TMD_PROVIDER_PROPERTY.setString(oldValue);
-            }
         }
     }
 }
