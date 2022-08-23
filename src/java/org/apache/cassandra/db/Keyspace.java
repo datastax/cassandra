@@ -389,10 +389,6 @@ public class Keyspace
 
         cfs.onTableDropped();
 
-        // wait for any outstanding reads/writes that might affect the CFS
-        writeOrder.awaitNewBarrier();
-        cfs.readOrdering.awaitNewBarrier();
-
         unloadCf(cfs, dropData);
     }
 
