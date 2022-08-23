@@ -398,10 +398,6 @@ public class Keyspace
 
         cfs.onTableDropped();
 
-        // wait for any outstanding reads/writes that might affect the CFS
-        writeOrder.awaitNewBarrier();
-        cfs.readOrdering.awaitNewBarrier();
-
         logger.trace("Dropping CFS {}: unloading CFS", cfs.name);
         unloadCf(cfs, dropData);
         logger.trace("Dropping CFS {}: completed", cfs.name);
