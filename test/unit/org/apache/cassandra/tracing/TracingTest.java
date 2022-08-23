@@ -181,7 +181,7 @@ public final class TracingTest
 
         assert keyspace.equals(((TracingClientState)tracing.get().clientState).tracedKeyspace());
         assert keyspace.equals(((TracingClientState)tracing.get(sessionId).clientState).tracedKeyspace());
-        assert keyspace.equals(tracing.getKeyspace());
+        assert keyspace.equals(tracing.get().tracedKeyspace());
 
         Map<ParamType, Object> headers = tracing.addTraceHeaders(new HashMap<>());
         assert keyspace.equals(headers.get(ParamType.TRACE_KEYSPACE));

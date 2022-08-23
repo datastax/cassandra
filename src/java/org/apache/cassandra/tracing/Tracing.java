@@ -155,17 +155,6 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
         return state.get().ttl;
     }
 
-    @Nullable
-    public String getKeyspace()
-    {
-        assert isTracing();
-
-        if (state.get().clientState instanceof TracingClientState)
-            return ((TracingClientState) state.get().clientState).tracedKeyspace();
-
-        return null;
-    }
-
     /**
      * set traced keyspace into trace state which is later used to for billing to track source tenant at replicas.
      */
