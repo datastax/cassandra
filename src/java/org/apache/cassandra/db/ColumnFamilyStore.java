@@ -742,7 +742,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public void invalidate(boolean expectMBean, boolean dropData)
     {
-        logger.debug("Invalidating CFS {}, status: {}, expectMBean: {}, dropData: {}",
+        logger.trace("Invalidating CFS {}, status: {}, expectMBean: {}, dropData: {}",
                      metadata.name, status, expectMBean, dropData);
 
         // disable and cancel in-progress compactions before invalidating
@@ -790,7 +790,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         });
 
         invalidateCaches();
-        logger.debug("CFS {} invalidated", metadata.name);
+        logger.trace("CFS {} invalidated", metadata.name);
     }
 
     /**
@@ -1423,7 +1423,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             }
             reclaim(memtable);
             cfs.strategyFactory.getCompactionLogger().flush(sstables);
-            logger.debug("Flushed to {} ({} sstables, {}), biggest {}, smallest {}",
+            logger.trace("Flushed to {} ({} sstables, {}), biggest {}, smallest {}",
                          sstables,
                          sstables.size(),
                          FBUtilities.prettyPrintMemory(totalBytesOnDisk),
@@ -3326,10 +3326,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     void onTableDropped()
     {
         indexManager.markAllIndexesRemoved();
-        logger.debug("CFS {} is being dropped: indexes removed", name);
+        logger.trace("CFS {} is being dropped: indexes removed", name);
 
         CompactionManager.instance.interruptCompactionForCFs(concatWithIndexes(), (sstable) -> true, true);
-        logger.debug("CFS {} is being dropped: compactions stopped", name);
+        logger.trace("CFS {} is being dropped: compactions stopped", name);
 
         if (DatabaseDescriptor.isAutoSnapshot())
             snapshot(Keyspace.getTimestampedSnapshotNameWithPrefix(name, ColumnFamilyStore.SNAPSHOT_DROP_PREFIX));
@@ -3342,15 +3342,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
         else
         {
-            logger.debug("Recycling CL segments for dropping {}", metadata);
+            logger.trace("Recycling CL segments for dropping {}", metadata);
             CommitLog.instance.forceRecycleAllSegments(Collections.singleton(metadata.id));
         }
 
-        logger.debug("Dropping CFS {}: shutting down compaction strategy", name);
+        logger.trace("Dropping CFS {}: shutting down compaction strategy", name);
         strategyContainer.shutdown();
 
         // wait for any outstanding reads/writes that might affect the CFS
-        logger.debug("Dropping CFS {}: waiting for read and write barriers", name);
+        logger.trace("Dropping CFS {}: waiting for read and write barriers", name);
         Keyspace.writeOrder.awaitNewBarrier();
         readOrdering.awaitNewBarrier();
     }

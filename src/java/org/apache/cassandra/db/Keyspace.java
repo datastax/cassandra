@@ -402,9 +402,9 @@ public class Keyspace
         writeOrder.awaitNewBarrier();
         cfs.readOrdering.awaitNewBarrier();
 
-        logger.debug("Dropping CFS {}: unloading CFS", cfs.name);
+        logger.trace("Dropping CFS {}: unloading CFS", cfs.name);
         unloadCf(cfs, dropData);
-        logger.debug("Dropping CFS {}: completed", cfs.name);
+        logger.trace("Dropping CFS {}: completed", cfs.name);
     }
 
     /**
