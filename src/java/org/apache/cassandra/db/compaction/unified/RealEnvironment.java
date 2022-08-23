@@ -44,6 +44,7 @@ class RealEnvironment implements Environment
 
     RealEnvironment(CompactionRealm realm)
     {
+        assert realm != null;
         this.realm = realm;
     }
 

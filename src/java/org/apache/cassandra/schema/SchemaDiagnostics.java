@@ -20,11 +20,15 @@ package org.apache.cassandra.schema;
 
 import com.google.common.collect.MapDifference;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.diag.DiagnosticEventService;
 import org.apache.cassandra.schema.SchemaEvent.SchemaEventType;
 
 final class SchemaDiagnostics
 {
+    private static final Logger logger = LoggerFactory.getLogger(SchemaDiagnostics.class);
     private static final DiagnosticEventService service = DiagnosticEventService.instance();
 
     private SchemaDiagnostics()
@@ -74,6 +78,7 @@ final class SchemaDiagnostics
 
     static void keyspaceAltering(Schema schema, KeyspaceMetadata.KeyspaceDiff delta)
     {
+        logger.debug("Altering keyspace {}", delta.before.name);
         if (isEnabled(SchemaEventType.KS_ALTERING))
             service.publish(new SchemaEvent(SchemaEventType.KS_ALTERING, schema, delta.after,
                                             delta.before, delta, null, null, null, null));
@@ -81,6 +86,7 @@ final class SchemaDiagnostics
 
     static void keyspaceAltered(Schema schema, KeyspaceMetadata.KeyspaceDiff delta)
     {
+        logger.debug("Keyspace {} altered", delta.before.name);
         if (isEnabled(SchemaEventType.KS_ALTERED))
             service.publish(new SchemaEvent(SchemaEventType.KS_ALTERED, schema, delta.after,
                                             delta.before, delta, null, null, null, null));
@@ -95,6 +101,7 @@ final class SchemaDiagnostics
 
     static void keyspaceDropped(Schema schema, KeyspaceMetadata keyspace)
     {
+        logger.debug("Keyspace {} dropped", keyspace.name);
         if (isEnabled(SchemaEventType.KS_DROPPED))
             service.publish(new SchemaEvent(SchemaEventType.KS_DROPPED, schema, keyspace,
                                             null, null, null, null, null, null));
@@ -158,6 +165,7 @@ final class SchemaDiagnostics
 
     static void tableDropping(Schema schema, TableMetadata table)
     {
+        logger.debug("Dropping table {}", table);
         if (isEnabled(SchemaEventType.TABLE_DROPPING))
             service.publish(new SchemaEvent(SchemaEventType.TABLE_DROPPING, schema, null,
                                             null, null, table, null, null, null));

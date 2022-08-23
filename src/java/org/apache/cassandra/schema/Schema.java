@@ -680,7 +680,6 @@ public class Schema implements SchemaProvider
             assert delta.before.name.equals(delta.after.name);
 
             // drop tables and views
-            logger.debug("Altering keyspace {}", delta.before.name);
             delta.views.dropped.forEach(v -> dropView(keyspace, v, dropData));
             delta.tables.dropped.forEach(t -> dropTable(keyspace, t, dropData));
         }
@@ -699,7 +698,6 @@ public class Schema implements SchemaProvider
 
             // deal with all added, and altered views
             Keyspace.open(delta.after.name, this, true).viewManager.reload(true);
-            logger.debug("Keyspace {} altered", delta.before.name);
         }
 
         schemaChangeNotifier.notifyKeyspaceAltered(delta, dropData);
@@ -752,7 +750,6 @@ public class Schema implements SchemaProvider
         {
             logger.debug("Awaiting on write barrier before dropping keyspace {}", keyspace.name);
             Keyspace.writeOrder.awaitNewBarrier();
-            logger.debug("Keyspace {} dropped", keyspace.name);
         }
 
         schemaChangeNotifier.notifyKeyspaceDropped(keyspace, dropData);
@@ -767,7 +764,6 @@ public class Schema implements SchemaProvider
 
     private void dropTable(Keyspace keyspace, TableMetadata metadata, boolean dropData)
     {
-        logger.debug("Dropping table {}", metadata);
         SchemaDiagnostics.tableDropping(this, metadata);
         keyspace.dropCf(metadata.id, dropData);
         SchemaDiagnostics.tableDropped(this, metadata);

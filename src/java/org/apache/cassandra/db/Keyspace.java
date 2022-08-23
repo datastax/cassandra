@@ -392,7 +392,7 @@ public class Keyspace
         ColumnFamilyStore cfs = columnFamilyStores.remove(tableId);
         if (cfs == null)
         {
-            logger.debug("No CFS found when trying to drop table {}", tableId);
+            logger.debug("No CFS found when trying to drop table {}, {}", tableId, schema.getTableMetadata(tableId).name);
             return;
         }
 

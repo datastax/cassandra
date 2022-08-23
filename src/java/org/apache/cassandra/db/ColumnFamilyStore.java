@@ -3326,10 +3326,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     void onTableDropped()
     {
         indexManager.markAllIndexesRemoved();
-        logger.debug("CFS is being dropped: indexes removed");
+        logger.debug("CFS {} is being dropped: indexes removed", name);
 
         CompactionManager.instance.interruptCompactionForCFs(concatWithIndexes(), (sstable) -> true, true);
-        logger.debug("CFS is being dropped: compactions stopped");
+        logger.debug("CFS {} is being dropped: compactions stopped", name);
 
         if (DatabaseDescriptor.isAutoSnapshot())
             snapshot(Keyspace.getTimestampedSnapshotNameWithPrefix(name, ColumnFamilyStore.SNAPSHOT_DROP_PREFIX));
