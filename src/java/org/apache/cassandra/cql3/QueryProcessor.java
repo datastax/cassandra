@@ -269,6 +269,8 @@ public class QueryProcessor implements QueryHandler
         statement.authorize(clientState);
         statement.validate(queryState);
 
+        Tracing.setupTracedKeyspace(statement);
+
         for (QueryInterceptor interceptor: interceptors)
         {
             ResultMessage result = interceptor.interceptStatement(statement, queryState, options, queryStartNanoTime);
