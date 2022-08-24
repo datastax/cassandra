@@ -352,7 +352,8 @@ public class ReplicaPlans
         assert liveAndDown.replicationStrategy() == live.replicationStrategy()
                : "ReplicaLayout liveAndDown and live should be derived from the same replication strategy.";
         AbstractReplicationStrategy replicationStrategy = liveAndDown.replicationStrategy();
-        EndpointsForToken contacts = selector.select(consistencyLevel, liveAndDown, live);
+        IEndpointSnitch endpointSnitch = DatabaseDescriptor.getEndpointSnitch();
+        EndpointsForToken contacts = selector.select(consistencyLevel, liveAndDown, live).filter(endpointSnitch.filterByAffinity(keyspace.getName()));
         assureSufficientLiveReplicasForWrite(replicationStrategy, consistencyLevel, live.all(), liveAndDown.pending());
         return new ReplicaPlan.ForTokenWrite(keyspace, replicationStrategy, consistencyLevel, liveAndDown.pending(), liveAndDown.all(), live.all(), contacts);
     }
