@@ -211,6 +211,26 @@ public class ScrubTest
     }
 
     @Test
+    public void testScrubOneBrokenPartition() throws ExecutionException, InterruptedException, IOException
+    {
+        CompactionManager.instance.disableAutoCompaction();
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
+
+        // insert data and verify we get it back w/ range query
+        fillCF(cfs, 1);
+        assertOrderedAll(cfs, 1);
+
+        Set<SSTableReader> liveSSTables = cfs.getLiveSSTables();
+        assertThat(liveSSTables).hasSize(1);
+        Files.write(liveSSTables.iterator().next().getDataFile().toPath(), new byte[10], StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+
+        performScrub(cfs, true, true, false, 2);
+
+        // check data is still there
+        assertOrderedAll(cfs, 0);
+    }
+
+    @Test
     public void testScrubCorruptedCounterPartition() throws IOException, WriteTimeoutException
     {
         // When compression is enabled, for testing corrupted chunks we need enough partitions to cover
