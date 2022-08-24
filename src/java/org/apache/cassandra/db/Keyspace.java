@@ -398,9 +398,11 @@ public class Keyspace
 
         cfs.onTableDropped();
 
-        logger.trace("Dropping CFS {}: unloading CFS", cfs.name);
+        if (logger.isTraceEnabled())
+            logger.trace("Dropping CFS {}: unloading CFS", cfs.name);
         unloadCf(cfs, dropData);
-        logger.trace("Dropping CFS {}: completed", cfs.name);
+        if (logger.isTraceEnabled())
+            logger.trace("Dropping CFS {}: completed", cfs.name);
     }
 
     /**
