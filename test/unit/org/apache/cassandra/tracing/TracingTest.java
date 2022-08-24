@@ -33,6 +33,9 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.ParamType;
@@ -262,6 +265,19 @@ public final class TracingTest
         assert tracing.states.size() == 1;
         assert tracing.states.peek() instanceof TracingClientState;
         assert ((TracingClientState) tracing.states.peek()).tracedKeyspace() == null;
+    }
+
+    @Test
+    public void test_tracing_setting_traced_keyspace()
+    {
+        Tracing tracing = Tracing.instance;
+        UUID sessionId = tracing.newSession(ClientState.forInternalCalls(), Tracing.TraceType.QUERY);
+
+        String newKeyspace = "some_new_keyspace";
+        CQLStatement stmt = QueryProcessor.getStatement("USE " + newKeyspace, ClientState.forInternalCalls());
+        Tracing.setupTracedKeyspace(stmt);
+        assert newKeyspace.equals(tracing.get().tracedKeyspace());
+        tracing.stopSession();
     }
 
     private static final class ClientStateAccumulatingTracing extends Tracing
