@@ -29,13 +29,19 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.UUID;
 
+import com.google.common.collect.ImmutableList;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.Attributes;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.VariableSpecifications;
+import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.cql3.statements.ModificationStatement;
+import org.apache.cassandra.cql3.statements.UseStatement;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.ParamType;
@@ -43,13 +49,16 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.TracingClientState;
 import org.apache.cassandra.utils.progress.ProgressEvent;
-import org.apache.commons.lang3.StringUtils;
 
-public final class TracingTest
+import static java.lang.String.format;
+
+public final class TracingTest extends CQLTester
 {
     @BeforeClass
     public static void setupDD()
     {
+        prepareServer();
+        requireNetwork();
         DatabaseDescriptor.daemonInitialization();
     }
 
@@ -271,12 +280,28 @@ public final class TracingTest
     public void test_tracing_setting_traced_keyspace()
     {
         Tracing tracing = Tracing.instance;
-        UUID sessionId = tracing.newSession(ClientState.forInternalCalls(), Tracing.TraceType.QUERY);
+        ClientState cs = ClientState.forInternalCalls();
+        tracing.newSession(cs, Tracing.TraceType.QUERY);
 
-        String newKeyspace = "some_new_keyspace";
-        CQLStatement stmt = QueryProcessor.getStatement("USE " + newKeyspace, ClientState.forInternalCalls());
+        String keyspace = "keyspace1";
+        UseStatement stmt = new UseStatement(keyspace);
         Tracing.setupTracedKeyspace(stmt);
-        assert newKeyspace.equals(tracing.get().tracedKeyspace());
+        assert keyspace.equals(tracing.get().tracedKeyspace());
+
+        String batchKeyspace = createKeyspace("CREATE KEYSPACE %s WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
+        String tbl = createTable(batchKeyspace, "CREATE TABLE %s (id int primary key, val int)");
+        List<String> queries = ImmutableList.of(
+            format("INSERT INTO %s.%s (id, val) VALUES (0, 0) USING TTL %d;", batchKeyspace, tbl, 1),
+            format("INSERT INTO %s.%s (id, val) VALUES (1, 1) USING TTL %d;", batchKeyspace, tbl, 1)
+        );
+
+        List<ModificationStatement> statements = new ArrayList<>(queries.size());
+        for (String query : queries)
+            statements.add((ModificationStatement) QueryProcessor.parseStatement(query, cs));
+
+        BatchStatement batchStmt = new BatchStatement(null, BatchStatement.Type.UNLOGGED, VariableSpecifications.empty(), statements, Attributes.none());
+        Tracing.setupTracedKeyspace(batchStmt);
+        assert batchKeyspace.equals(tracing.get().tracedKeyspace());
         tracing.stopSession();
     }
 
