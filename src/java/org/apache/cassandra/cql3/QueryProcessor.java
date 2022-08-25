@@ -791,6 +791,7 @@ public class QueryProcessor implements QueryHandler
     throws RequestExecutionException, RequestValidationException
     {
         ClientState clientState = queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace());
+        Tracing.setupTracedKeyspace(batch);
         batch.authorize(clientState);
         batch.validate();
         batch.validate(queryState);
