@@ -23,17 +23,19 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-
-import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -149,15 +151,28 @@ public abstract class Tracing extends ExecutorLocals.Impl
         return get().ttl;
     }
 
-    @Nullable
-    public String getKeyspace()
+    /**
+     * set traced keyspace into trace state which is later used to for billing to track source tenant at replicas.
+     */
+    public static void setupTracedKeyspace(CQLStatement statement)
     {
-        assert isTracing();
+        if (!Tracing.isTracing())
+            return;
 
-        if (get().clientState instanceof TracingClientState)
-            return ((TracingClientState) get().clientState).tracedKeyspace();
+        String keyspace = null;
+        if (statement instanceof CQLStatement.SingleKeyspaceCqlStatement)
+        {
+            keyspace = ((CQLStatement.SingleKeyspaceCqlStatement) statement).keyspace();
+        }
 
-        return null;
+        if (keyspace == null && statement instanceof BatchStatement)
+        {
+            // for batch statement, just pick any keyspace, as it's only used to extract tenant id in BillingQueryInfoTracker
+            List<ModificationStatement> batches = ((BatchStatement) statement).getStatements();
+            if (batches.size() > 0)
+                keyspace = batches.get(0).keyspace();
+        }
+        Tracing.instance.get().tracedKeyspace(keyspace);
     }
 
     /**
@@ -329,7 +344,7 @@ public abstract class Tracing extends ExecutorLocals.Impl
 
         addToMutable.put(ParamType.TRACE_SESSION, Tracing.instance.getSessionId());
         addToMutable.put(ParamType.TRACE_TYPE, Tracing.instance.getTraceType());
-        String keyspace = Tracing.instance.getKeyspace();
+        String keyspace = Tracing.instance.get().tracedKeyspace();
         if (keyspace != null)
         {
             addToMutable.put(ParamType.TRACE_KEYSPACE, keyspace);
