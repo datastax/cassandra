@@ -16,19 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.guardrails;
+package org.apache.cassandra.dht.tokenallocator;
 
-interface CustomGuardrailsFactory
+import java.net.UnknownHostException;
+
+import org.junit.BeforeClass;
+import org.junit.Test;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
+
+public class TokenAllocationOverrideTest extends TokenAllocationTest
 {
-    public static GuardrailsFactory make(String customImpl)
+    @BeforeClass
+    public static void init()
     {
-        try
-        {
-            return (GuardrailsFactory) Class.forName(customImpl).getDeclaredConstructor().newInstance();
-        }
-        catch (Throwable ex)
-        {
-            throw new IllegalStateException("Unknown guardrails factory: " + customImpl);
-        }
+        System.setProperty(CassandraRelevantProperties.USE_RANDOM_ALLOCATION_IF_NOT_SUPPORTED.getKey(), Boolean.TRUE.toString());
+    }
+
+    //With the random allocation flag enabled we can now support two racks with RF=3
+    @Override
+    @Test
+    public void testAllocateTokensNetworkStrategyTwoRacks() throws UnknownHostException
+    {
+        testAllocateTokensNetworkStrategy(2, 3);
     }
 }

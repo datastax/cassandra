@@ -67,6 +67,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Throwables;
 
 public abstract class SortedTableWriter extends SSTableWriter
 {
@@ -337,6 +338,7 @@ public abstract class SortedTableWriter extends SSTableWriter
 
     public SSTableReader finished()
     {
+        txnProxy().finalReaderAccessed = true;
         return txnProxy().finalReader;
     }
 
@@ -349,6 +351,7 @@ public abstract class SortedTableWriter extends SSTableWriter
     {
         // should be set during doPrepare()
         private SSTableReader finalReader;
+        protected boolean finalReaderAccessed;
         private boolean openResult;
 
         // finalise our state on disk, including renaming
@@ -362,7 +365,10 @@ public abstract class SortedTableWriter extends SSTableWriter
             SSTable.appendTOC(descriptor, components);
 
             if (openResult)
+            {
                 finalReader = openFinal(SSTableReader.OpenReason.NORMAL);
+                finalReaderAccessed = false;
+            }
         }
 
         protected Throwable doCommit(Throwable accumulate)
@@ -381,6 +387,14 @@ public abstract class SortedTableWriter extends SSTableWriter
         protected Throwable doAbort(Throwable accumulate)
         {
             accumulate = dataFile.abort(accumulate);
+
+            if (!finalReaderAccessed && finalReader != null)
+            {
+                accumulate = Throwables.perform(accumulate, () -> finalReader.selfRef().release());
+                finalReader = null;
+                finalReaderAccessed = false;
+            }
+
             return accumulate;
         }
     }

@@ -391,15 +391,18 @@ public class Keyspace
     {
         ColumnFamilyStore cfs = columnFamilyStores.remove(tableId);
         if (cfs == null)
+        {
+            logger.debug("No CFS found when trying to drop table {}, {}", tableId, schema.getTableMetadata(tableId).name);
             return;
+        }
 
         cfs.onTableDropped();
 
-        // wait for any outstanding reads/writes that might affect the CFS
-        writeOrder.awaitNewBarrier();
-        cfs.readOrdering.awaitNewBarrier();
-
+        if (logger.isTraceEnabled())
+            logger.trace("Dropping CFS {}: unloading CFS", cfs.name);
         unloadCf(cfs, dropData);
+        if (logger.isTraceEnabled())
+            logger.trace("Dropping CFS {}: completed", cfs.name);
     }
 
     /**
@@ -415,7 +418,10 @@ public class Keyspace
     // disassociate a cfs from this keyspace instance.
     private void unloadCf(ColumnFamilyStore cfs, boolean dropData)
     {
-        cfs.unloadCf();
+        // offline services (e.g. standalone compactor) don't have Memtables or CommitLog. An attempt to flush would
+        // throw an exception
+        if (!cfs.getTracker().isDummy())
+            cfs.unloadCf();
         cfs.invalidate(true, dropData);
     }
 

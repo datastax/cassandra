@@ -283,7 +283,20 @@ public enum CassandraRelevantProperties
     // in OSS, when UUID based SSTable generation identifiers are enabled, they use TimeUUID
     // though, for CNDB we want to use ULID - this property allows for that
     // valid values for this property are: uuid, ulid
-    SSTABLE_UUID_IMPL("cassandra.sstable.id.uuid_impl", "uuid");
+    SSTABLE_UUID_IMPL("cassandra.sstable.id.uuid_impl", "uuid"),
+
+    /**
+     * Name of a custom implementation of {@link org.apache.cassandra.service.Mutator}.
+     */
+    CUSTOM_MUTATOR_CLASS("cassandra.custom_mutator_class"),
+    
+    /** Whether to skip rewriting hints when original host id left the cluster */
+    SKIP_REWRITING_HINTS_ON_HOST_LEFT("cassandra.hinted_handoff.skip_rewriting_hints_on_host_left"),
+
+    CUSTOM_HINTS_HANDLER("cassandra.custom_hints_handler"),
+    CUSTOM_HINTS_ENDPOINT_PROVIDER("cassandra.custom_hints_endpoint_provider"),
+
+    USE_RANDOM_ALLOCATION_IF_NOT_SUPPORTED("cassandra.token_allocation.use_random_if_not_supported");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
