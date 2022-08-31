@@ -66,6 +66,9 @@ public class CompactionTask extends AbstractCompactionTask
 {
     protected static final Logger logger = LoggerFactory.getLogger(CompactionTask.class);
 
+    private static final boolean COMPACTION_HISTORY_ENABLED = 
+        Boolean.parseBoolean(System.getProperty("cassandra.compaction_history_enabled", "true"));
+
     // Allows one to turn off cursors in compaction.
     private static final boolean CURSORS_ENABLED =
         Boolean.parseBoolean(System.getProperty("cassandra.allow_cursor_compaction", "true"));
@@ -394,7 +397,10 @@ public class CompactionTask extends AbstractCompactionTask
 
             if (completed)
             {
-                updateCompactionHistory(taskId, realm.getKeyspaceName(), realm.getTableName(), this);
+                if (COMPACTION_HISTORY_ENABLED)
+                {
+                    updateCompactionHistory(taskId, realm.getKeyspaceName(), realm.getTableName(), this);
+                }
                 CompactionManager.instance.incrementRemovedExpiredSSTables(fullyExpiredSSTablesCount);
                 if (transaction.originals().size() > 0 && actuallyCompact.size() == 0)
                     // this CompactionOperation only deleted fully expired SSTables without compacting anything
