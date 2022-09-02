@@ -585,7 +585,8 @@ public class Verb
         for (Verb v : verbs)
         {
             IVerbHandler<?> handler = v.handler();
-            v.handler = () -> decoratorFn.apply(handler);
+            final IVerbHandler<?> decoratedHandler = decoratorFn.apply(handler);
+            v.handler = () -> decoratedHandler;
         }
     }
 }
