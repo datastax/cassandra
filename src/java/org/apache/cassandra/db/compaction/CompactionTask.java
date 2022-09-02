@@ -41,7 +41,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SystemKeyspace;
@@ -64,6 +63,8 @@ import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.apache.cassandra.db.compaction.CompactionHistoryTabularData.COMPACTION_TYPE_PROPERTY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.COMPACTION_HISTORY_ENABLED;
+import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_CURSOR_COMPACTION;
 import static org.apache.cassandra.db.compaction.CompactionManager.compactionRateLimiterAcquire;
 import static org.apache.cassandra.utils.FBUtilities.now;
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
@@ -72,9 +73,6 @@ import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemoryPerSecond;
 public class CompactionTask extends AbstractCompactionTask
 {
     protected static final Logger logger = LoggerFactory.getLogger(CompactionTask.class);
-
-    // Allows one to turn off cursors in compaction.
-    private static final boolean CURSORS_ENABLED = CassandraRelevantProperties.ALLOW_CURSOR_COMPACTION.getBoolean();
 
     protected final long gcBefore;
     protected final boolean keepOriginals;
@@ -225,7 +223,7 @@ public class CompactionTask extends AbstractCompactionTask
         Set<SSTableReader> actuallyCompact = Sets.difference(transaction.originals(), fullyExpiredSSTables);
 
         // Cursors currently don't support:
-        boolean compactByIterators = !CURSORS_ENABLED
+        boolean compactByIterators = !ALLOW_CURSOR_COMPACTION.getBoolean()
                                      || strategy != null && !strategy.supportsCursorCompaction()  // strategy does not support it
                                      || controller.shouldProvideTombstoneSources()  // garbagecollect
                                      || realm.getIndexManager().hasIndexes()
@@ -234,7 +232,7 @@ public class CompactionTask extends AbstractCompactionTask
         logger.debug("Compacting in {} by {}: {} {} {} {} {}",
                      realm.toString(),
                      compactByIterators ? "iterators" : "cursors",
-                     CURSORS_ENABLED ? "" : "cursors disabled",
+                     ALLOW_CURSOR_COMPACTION.getBoolean() ? "" : "cursors disabled",
                      strategy == null ? "no table compaction strategy"
                                       : !strategy.supportsCursorCompaction() ? "no cursor support"
                                                                              : "",
@@ -406,7 +404,10 @@ public class CompactionTask extends AbstractCompactionTask
 
             if (completed)
             {
-                updateCompactionHistory(taskId, realm.getKeyspaceName(), realm.getTableName(), this, ImmutableMap.of(COMPACTION_TYPE_PROPERTY, compactionType.type));
+                if (COMPACTION_HISTORY_ENABLED.getBoolean())
+                {
+                    updateCompactionHistory(taskId, realm.getKeyspaceName(), realm.getTableName(), this, ImmutableMap.of(COMPACTION_TYPE_PROPERTY, compactionType.type));
+                }
                 CompactionManager.instance.incrementRemovedExpiredSSTables(fullyExpiredSSTablesCount);
                 if (transaction.originals().size() > 0 && actuallyCompact.size() == 0)
                     // this CompactionOperation only deleted fully expired SSTables without compacting anything
