@@ -58,6 +58,8 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Refs;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.COMPACTION_HISTORY_ENABLED;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CURSORS_ENABLED;
 import static org.apache.cassandra.db.compaction.CompactionManager.compactionRateLimiterAcquire;
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemoryPerSecond;
@@ -65,13 +67,6 @@ import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemoryPerSecond;
 public class CompactionTask extends AbstractCompactionTask
 {
     protected static final Logger logger = LoggerFactory.getLogger(CompactionTask.class);
-
-    private static final boolean COMPACTION_HISTORY_ENABLED = 
-        Boolean.parseBoolean(System.getProperty("cassandra.compaction_history_enabled", "true"));
-
-    // Allows one to turn off cursors in compaction.
-    private static final boolean CURSORS_ENABLED =
-        Boolean.parseBoolean(System.getProperty("cassandra.allow_cursor_compaction", "true"));
 
     protected final int gcBefore;
     protected final boolean keepOriginals;
@@ -216,7 +211,7 @@ public class CompactionTask extends AbstractCompactionTask
         Set<SSTableReader> actuallyCompact = Sets.difference(transaction.originals(), fullyExpiredSSTables);
 
         // Cursors currently don't support:
-        boolean compactByIterators = !CURSORS_ENABLED
+        boolean compactByIterators = !CURSORS_ENABLED.getBoolean()
                                      ||strategy != null && !strategy.supportsCursorCompaction()  // strategy does not support it
                                      || controller.shouldProvideTombstoneSources()  // garbagecollect
                                      || realm.getIndexManager().hasIndexes()
@@ -225,7 +220,7 @@ public class CompactionTask extends AbstractCompactionTask
         logger.debug("Compacting in {} by {}: {} {} {} {} {}",
                      realm.toString(),
                      compactByIterators ? "iterators" : "cursors",
-                     CURSORS_ENABLED ? "" : "cursors disabled",
+                     CURSORS_ENABLED.getBoolean() ? "" : "cursors disabled",
                      strategy == null ? "no table compaction strategy"
                                       : !strategy.supportsCursorCompaction() ? "no cursor support"
                                                                              : "",
@@ -397,7 +392,7 @@ public class CompactionTask extends AbstractCompactionTask
 
             if (completed)
             {
-                if (COMPACTION_HISTORY_ENABLED)
+                if (COMPACTION_HISTORY_ENABLED.getBoolean())
                 {
                     updateCompactionHistory(taskId, realm.getKeyspaceName(), realm.getTableName(), this);
                 }
