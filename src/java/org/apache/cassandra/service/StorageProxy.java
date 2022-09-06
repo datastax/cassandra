@@ -226,6 +226,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             assert mutation instanceof Mutation;
             sendToHintedReplicas((Mutation) mutation, targets, responseHandler, localDataCenter, Stage.MUTATION);
+            mutator.onAppliedMutation(mutation);
         };
 
         /*
@@ -238,7 +239,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             EndpointsForToken selected = targets.contacts().withoutSelf();
             Replicas.temporaryAssertFull(selected); // TODO CASSANDRA-14548
-            counterWriteTask(mutation, targets.withContact(selected), responseHandler, localDataCenter).run();
+            counterWriteTask(mutation, targets.withContact(selected), responseHandler,  localDataCenter).run();
         };
 
         counterWriteOnCoordinatorPerformer = (mutation, targets, responseHandler, localDataCenter) ->
@@ -842,7 +843,7 @@ public class StorageProxy implements StorageProxyMBean
             {
                 try
                 {
-                    PaxosState.commit(message.payload);
+                    PaxosState.commit(message.payload, p -> mutator.onAppliedProposal(p));
                     if (responseHandler != null)
                         responseHandler.onResponse(null);
                 }
@@ -1795,6 +1796,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 Mutation result = ((CounterMutation) mutation).applyCounterMutation();
                 responseHandler.onResponse(null);
+                mutator.onAppliedCounter(result);
                 sendToHintedReplicas(result, replicaPlan, responseHandler, localDataCenter, Stage.COUNTER_MUTATION);
             }
         };
