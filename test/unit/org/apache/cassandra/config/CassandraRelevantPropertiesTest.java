@@ -23,7 +23,9 @@ import org.junit.Test;
 
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.assertj.core.api.Assertions;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_CASSANDRA_RELEVANT_PROPERTIES;
 import static org.junit.Assert.assertEquals;
@@ -43,7 +45,7 @@ public class CassandraRelevantPropertiesTest
     public void testSystemPropertyisSet() {
         try (WithProperties properties = new WithProperties().set(TEST_CASSANDRA_RELEVANT_PROPERTIES, "test"))
         {
-            Assertions.assertThat(System.getProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey())).isEqualTo("test"); // checkstyle: suppress nearby 'blockSystemPropertyUsage'
+            assertThat(System.getProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey())).isEqualTo("test"); // checkstyle: suppress nearby 'blockSystemPropertyUsage'
         }
     }
 
@@ -52,38 +54,49 @@ public class CassandraRelevantPropertiesTest
     {
         try (WithProperties properties = new WithProperties().set(TEST_CASSANDRA_RELEVANT_PROPERTIES, "some-string"))
         {
-            Assertions.assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getString()).isEqualTo("some-string");
+            assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getString()).isEqualTo("some-string");
         }
+    }
+
+    @Test
+    public void testString_null()
+    {
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getString()).isNull();
+    }
+
+    @Test
+    public void testString_override_default()
+    {
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getString("other-string")).isEqualTo("other-string");
+        TEST_CASSANDRA_RELEVANT_PROPERTIES.setString("this-string");
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getString("other-string")).isEqualTo("this-string");
     }
 
     @Test
     public void testBoolean()
     {
-        try
-        {
-            System.setProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey(), "true");
-            Assertions.assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean()).isEqualTo(true);
-            System.setProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey(), "false");
-            Assertions.assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean()).isEqualTo(false);
-            System.setProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey(), "junk");
-            Assertions.assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean()).isEqualTo(false);
-            System.setProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey(), "");
-            Assertions.assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean()).isEqualTo(false);
-        }
-        finally
-        {
-            System.clearProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey());
-        }
+        System.setProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey(), "true");
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean()).isTrue();
+        System.setProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey(), "false");
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean()).isFalse();
+        System.setProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey(), "junk");
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean()).isFalse();
+        System.setProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey(), "");
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean()).isFalse();
     }
 
     @Test
     public void testBoolean_null()
     {
-        try (WithProperties properties = new WithProperties())
-        {
-            TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean();
-            Assertions.assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean()).isFalse();
-        }
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean()).isFalse();
+    }
+
+    @Test
+    public void testBoolean_override_default()
+    {
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean(true)).isTrue();
+        TEST_CASSANDRA_RELEVANT_PROPERTIES.setBoolean(false);
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getBoolean(true)).isFalse();
     }
 
     @Test
@@ -91,7 +104,7 @@ public class CassandraRelevantPropertiesTest
     {
         try (WithProperties properties = new WithProperties().set(TEST_CASSANDRA_RELEVANT_PROPERTIES, "123456789"))
         {
-            Assertions.assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getInt()).isEqualTo(123456789);
+            assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getInt()).isEqualTo(123456789);
         }
     }
 
@@ -100,7 +113,7 @@ public class CassandraRelevantPropertiesTest
     {
         try (WithProperties properties = new WithProperties().set(TEST_CASSANDRA_RELEVANT_PROPERTIES, "0x1234567a"))
         {
-            Assertions.assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getInt()).isEqualTo(305419898);
+            assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getInt()).isEqualTo(305419898);
         }
     }
 
@@ -109,7 +122,7 @@ public class CassandraRelevantPropertiesTest
     {
         try (WithProperties properties = new WithProperties().set(TEST_CASSANDRA_RELEVANT_PROPERTIES, "01234567"))
         {
-            Assertions.assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getInt()).isEqualTo(342391);
+            assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getInt()).isEqualTo(342391);
         }
     }
 
@@ -118,7 +131,7 @@ public class CassandraRelevantPropertiesTest
     {
         try (WithProperties properties = new WithProperties().set(TEST_CASSANDRA_RELEVANT_PROPERTIES, ""))
         {
-            Assertions.assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getInt()).isEqualTo(342391);
+            assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getInt()).isEqualTo(342391);
         }
     }
 
@@ -129,6 +142,74 @@ public class CassandraRelevantPropertiesTest
         {
             TEST_CASSANDRA_RELEVANT_PROPERTIES.getInt();
         }
+    }
+
+    @Test
+    public void testInteger_override_default()
+    {
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getInt(2345)).isEqualTo(2345);
+        TEST_CASSANDRA_RELEVANT_PROPERTIES.setInt(1234);
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getInt(2345)).isEqualTo(1234);
+    }
+
+    @Test
+    public void testLong()
+    {
+        System.setProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey(), "1234");
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getLong()).isEqualTo(1234);
+    }
+
+    @Test(expected = ConfigurationException.class)
+    public void testLong_empty()
+    {
+        System.setProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey(), "");
+        TEST_CASSANDRA_RELEVANT_PROPERTIES.getLong();
+        fail("Expected ConfigurationException");
+    }
+
+    @Test(expected = ConfigurationException.class)
+    public void testLong_null()
+    {
+        TEST_CASSANDRA_RELEVANT_PROPERTIES.getLong();
+        fail("Expected NullPointerException");
+    }
+
+    @Test
+    public void testLong_override_default()
+    {
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getLong(2345)).isEqualTo(2345);
+        TEST_CASSANDRA_RELEVANT_PROPERTIES.setLong(1234);
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getLong(2345)).isEqualTo(1234);
+    }
+
+    @Test
+    public void testDouble()
+    {
+        System.setProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey(), "1.567");
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getDouble()).isEqualTo(1.567);
+    }
+
+    @Test(expected = ConfigurationException.class)
+    public void testDouble_empty()
+    {
+        System.setProperty(TEST_CASSANDRA_RELEVANT_PROPERTIES.getKey(), "");
+        TEST_CASSANDRA_RELEVANT_PROPERTIES.getDouble();
+        fail("Expected ConfigurationException");
+    }
+
+    @Test(expected = ConfigurationException.class)
+    public void testDouble_null()
+    {
+        TEST_CASSANDRA_RELEVANT_PROPERTIES.getDouble();
+        fail("Expected NullPointerException");
+    }
+
+    @Test
+    public void testDouble_override_default()
+    {
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getDouble(2.345)).isEqualTo(2.345);
+        TEST_CASSANDRA_RELEVANT_PROPERTIES.setDouble(1.234);
+        assertThat(TEST_CASSANDRA_RELEVANT_PROPERTIES.getDouble(2.345)).isEqualTo(1.234);
     }
 
     @Test
