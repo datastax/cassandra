@@ -557,6 +557,7 @@ public enum CassandraRelevantProperties
     SUN_STDERR_ENCODING("sun.stderr.encoding"),
     SUN_STDOUT_ENCODING("sun.stdout.encoding"),
     SUPERUSER_SETUP_DELAY_MS("cassandra.superuser_setup_delay_ms", "10000"),
+    SYNC_LAG_FACTOR("cassandra.commitlog_sync_block_lag_factor", "1.5"),
     SYSTEM_AUTH_DEFAULT_RF("cassandra.system_auth.default_rf", "1"),
     SYSTEM_DISTRIBUTED_DEFAULT_RF("cassandra.system_distributed.default_rf", "3"),
     SYSTEM_DISTRIBUTED_NTS_DC_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_dc_names"),
@@ -886,6 +887,15 @@ public enum CassandraRelevantProperties
             return overrideDefaultValue;
 
         return DOUBLE_CONVERTER.convert(value);
+    }
+
+    /**
+     * Sets the value into system properties.
+     * @param value to set
+     */
+    public void setDouble(double value)
+    {
+        System.setProperty(key, Double.toString(value));
     }
 
     /**
