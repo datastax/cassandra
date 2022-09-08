@@ -34,7 +34,7 @@ import java.io.IOException;
 
 import static org.junit.Assert.assertSame;
 
-public class BatchTests extends  CQLTester
+public class BatchTest extends  CQLTester
 {
     private static EmbeddedCassandraService cassandra;
 
