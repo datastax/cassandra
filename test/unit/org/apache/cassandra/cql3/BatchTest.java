@@ -28,6 +28,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.EmbeddedCassandraService;
 
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -152,6 +153,7 @@ public class BatchTest extends  CQLTester
         sendBatch(BatchStatement.Type.LOGGED, true, false, false);
     }
 
+    @Ignore
     @Test(expected = InvalidQueryException.class)
     public void testOversizedBatch()
     {
