@@ -167,4 +167,13 @@ public class PropertyDefinitions
             throw new SyntaxException(format("Invalid double value %s for '%s'", value, key));
         }
     }
+    
+    public Object getProperty(String name)
+    {
+        Object ret = properties.get(name);
+        if (ret == null)
+            throw new SyntaxException(String.format("Invalid value for property '%s'. It should not be null.", name));
+
+        return ret;
+    }
 }
