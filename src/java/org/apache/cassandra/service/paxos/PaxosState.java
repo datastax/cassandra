@@ -28,6 +28,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -678,14 +679,19 @@ public class PaxosState implements PaxosOperationLock
 
     public void commit(Agreed commit)
     {
-        applyCommit(commit, this, (apply, to) ->
+        applyCommit(commit, this, c -> {}, (apply, to) ->
             currentUpdater.accumulateAndGet(to, new UnsafeSnapshot(apply), Snapshot::merge)
         );
     }
 
     public static void commitDirect(Commit commit)
     {
-        applyCommit(commit, null, (apply, ignore) -> {
+        commitDirect(commit, c -> {});
+    }
+    
+    public static void commitDirect(Commit commit, Consumer<Commit> callback)
+    {
+        applyCommit(commit, null, callback, (apply, ignore) -> {
             try (PaxosState state = tryGetUnsafe(apply.update.partitionKey(), apply.update.metadata()))
             {
                 if (state != null)
@@ -694,7 +700,7 @@ public class PaxosState implements PaxosOperationLock
         });
     }
 
-    private static void applyCommit(Commit commit, PaxosState state, BiConsumer<Commit, PaxosState> postCommit)
+    private static void applyCommit(Commit commit, PaxosState state, Consumer<Commit> callback, BiConsumer<Commit, PaxosState> postCommit)
     {
         if (paxosStatePurging() == legacy && !(commit instanceof CommittedWithTTL))
             commit = CommittedWithTTL.withDefaultTTL(commit);
@@ -710,6 +716,7 @@ public class PaxosState implements PaxosOperationLock
                 Tracing.trace("Committing proposal {}", commit);
                 Mutation mutation = commit.makeMutation();
                 Keyspace.open(mutation.getKeyspaceName()).apply(mutation, WriteOptions.FOR_PAXOS_COMMIT);
+                callback.accept(commit);
             }
             else
             {
