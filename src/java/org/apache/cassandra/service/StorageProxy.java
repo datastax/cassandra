@@ -262,6 +262,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             assert mutation instanceof Mutation;
             sendToHintedReplicas((Mutation) mutation, targets, responseHandler, localDataCenter, Stage.MUTATION, requestTime);
+            mutator.onAppliedMutation(mutation);
         };
 
         /*
@@ -921,7 +922,7 @@ public class StorageProxy implements StorageProxyMBean
             {
                 try
                 {
-                    PaxosState.commitDirect(message.payload);
+                    PaxosState.commitDirect(message.payload, p -> mutator.onAppliedProposal(p));
                     if (responseHandler != null)
                         responseHandler.onResponse(null);
                 }
@@ -1959,6 +1960,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 Mutation result = ((CounterMutation) mutation).applyCounterMutation();
                 responseHandler.onResponse(null);
+                mutator.onAppliedCounter(result);
                 sendToHintedReplicas(result, replicaPlan, responseHandler, localDataCenter, Stage.COUNTER_MUTATION, requestTime);
             }
         };
