@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.service;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_MUTATOR_CLASS;
@@ -35,8 +33,7 @@ public abstract class MutatorProvider
 {
     static final Mutator instance = getCustomOrDefault();
 
-    @VisibleForTesting
-    static Mutator getCustomOrDefault()
+    public static Mutator getCustomOrDefault()
     {
         if (CUSTOM_MUTATOR_CLASS.isPresent())
         {
