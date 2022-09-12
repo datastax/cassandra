@@ -80,6 +80,7 @@ import static java.util.Objects.requireNonNull;
 public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I extends SortedTableWriter.AbstractIndexWriter> extends SSTableWriter implements SSTableDataSink
 {
     private final static Logger logger = LoggerFactory.getLogger(SortedTableWriter.class);
+    private final boolean isInternalKeyspace;
 
     // TODO dataWriter is not needed to be directly accessible - we can access everything we need for the dataWriter
     //   from a partition writer
@@ -114,6 +115,7 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
             this.dataWriter = dataWriter;
             this.indexWriter = indexWriter;
             this.partitionWriter = partitionWriter;
+            this.isInternalKeyspace = SchemaConstants.isInternalKeyspace(metadata.keyspace);
         }
         catch (RuntimeException | Error ex)
         {
@@ -449,6 +451,9 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
 
     private void guardPartitionThreshold(Threshold guardrail, DecoratedKey key, long size)
     {
+        if (isInternalKeyspace)
+            return;
+
         if (guardrail.triggersOn(size, null))
         {
             String message = String.format("%s.%s:%s on sstable %s",
@@ -462,6 +467,9 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
 
     private void guardCollectionSize(DecoratedKey partitionKey, Row row)
     {
+        if (isInternalKeyspace)
+            return;
+        
         if (!Guardrails.collectionSize.enabled() && !Guardrails.itemsPerCollection.enabled())
             return;
 
