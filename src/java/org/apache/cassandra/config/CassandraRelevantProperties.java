@@ -474,7 +474,7 @@ public enum CassandraRelevantProperties
     /**
      * Repair progress reporter, default using system distributed keyspace
      */
-    REPAIR_PROGRESS_REPORTER("cassandra.repair_progress_reporter_class"),
+    REPAIR_PROGRESS_REPORTER("cassandra.custom_repair_progress_reporter_class"),
     REPAIR_STATUS_CHECK_TIMEOUT_SECONDS("cassandra.repair_status_check_timeout_seconds", convertToString(Ints.checkedCast(TimeUnit.HOURS.toSeconds(1)))),
     /**
      * When doing a host replacement its possible that the gossip state is "empty" meaning that the endpoint is known
