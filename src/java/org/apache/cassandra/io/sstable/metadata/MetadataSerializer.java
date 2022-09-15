@@ -280,13 +280,13 @@ public class MetadataSerializer implements IMetadataSerializer
             Throwables.throwIfInstanceOf(e, FileNotFoundException.class);
             throw new FSWriteError(e, filePath);
         }
-        File localPath = StorageProvider.instance.getLocalPath(descriptor.fileFor(Component.STATS));
+        File toLocalFile = StorageProvider.instance.getLocalPath(descriptor.fileFor(Component.STATS));
         // we cant move a file on top of another file in windows:
         if (FBUtilities.isWindows)
         {
-            localPath.tryDelete();
+            toLocalFile.tryDelete();
         }
-        filePath.move(localPath);
+        filePath.move(toLocalFile);
     }
 
     public void updateSSTableMetadata(Descriptor descriptor, Map<MetadataType, MetadataComponent> updatedComponents) throws IOException
