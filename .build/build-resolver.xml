@@ -58,6 +58,7 @@
         <resolver:remoterepos id="all">
             <remoterepo id="resolver-central" url="${artifact.remoteRepository.central}" checksums="fail" />
             <remoterepo id="resolver-apache" url="${artifact.remoteRepository.apache}" checksums="fail" />
+            <remoterepo id="resolver-datastax" url="${artifact.remoteRepository.datastax}" checksums="fail" />
             <!-- Snapshot artifacts must not exist in nor be downloaded by any Cassandra release artifact.
                  Please validate that all artifacts included in parent-pom-template.xml are release
                  artifacts before committing.
