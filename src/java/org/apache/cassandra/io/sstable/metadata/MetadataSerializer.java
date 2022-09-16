@@ -38,7 +38,6 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.Version;
-import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -46,7 +45,6 @@ import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -280,13 +278,10 @@ public class MetadataSerializer implements IMetadataSerializer
             Throwables.throwIfInstanceOf(e, FileNotFoundException.class);
             throw new FSWriteError(e, filePath);
         }
-        File toLocalFile = StorageProvider.instance.getLocalPath(descriptor.fileFor(Component.STATS));
         // we cant move a file on top of another file in windows:
         if (FBUtilities.isWindows)
-        {
-            toLocalFile.tryDelete();
-        }
-        filePath.move(toLocalFile);
+            descriptor.fileFor(Component.STATS).tryDelete();
+        filePath.move(descriptor.fileFor(Component.STATS));
     }
 
     public void updateSSTableMetadata(Descriptor descriptor, Map<MetadataType, MetadataComponent> updatedComponents) throws IOException
