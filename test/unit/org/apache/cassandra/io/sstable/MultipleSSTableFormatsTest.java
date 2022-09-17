@@ -151,7 +151,6 @@ public class MultipleSSTableFormatsTest extends CQLTester
     {
         Map<Integer, Integer> content = createSSTables();
         DatabaseDescriptor.setSelectedSSTableFormat(format);
-        enableCompaction();
         compact();
         List<SSTableFormat<?, ?>> createdFormats = createdFormats();
         Assertions.assertThat(createdFormats).hasSize(1);
