@@ -32,6 +32,8 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.INativeLibrary;
 
+import java.nio.file.Path;
+
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_STORAGE_PROVIDER;
 
 /**
@@ -80,6 +82,11 @@ public interface StorageProvider
     File getLocalPath(File path);
 
     /**
+     * @return local path if given path is remote path, otherwise returns itself
+     */
+    Path getLocalPath(Path path);
+
+    /**
      * update the given path with open options for the sstable components
      */
     File withOpenOptions(File ret, Component component);
@@ -114,6 +121,12 @@ public interface StorageProvider
     {
         @Override
         public File getLocalPath(File path)
+        {
+            return path;
+        }
+
+        @Override
+        public Path getLocalPath(Path path)
         {
             return path;
         }
