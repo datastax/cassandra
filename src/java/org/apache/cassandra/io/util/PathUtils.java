@@ -67,6 +67,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.nio.file.StandardOpenOption.APPEND;
@@ -522,7 +523,7 @@ public final class PathUtils
         logger.trace("Renaming {} to {}", from, to);
         try
         {
-            atomicMoveWithFallback(from, to);
+            atomicMoveWithFallback(StorageProvider.instance.getLocalPath(from), StorageProvider.instance.getLocalPath(to));
             return true;
         }
         catch (IOException e)
@@ -537,7 +538,7 @@ public final class PathUtils
         logger.trace("Renaming {} to {}", from, to);
         try
         {
-            atomicMoveWithFallback(from, to);
+            atomicMoveWithFallback(StorageProvider.instance.getLocalPath(from), StorageProvider.instance.getLocalPath(to));
         }
         catch (IOException e)
         {
