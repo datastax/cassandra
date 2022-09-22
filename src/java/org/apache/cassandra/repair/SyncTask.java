@@ -77,6 +77,9 @@ public abstract class SyncTask extends AsyncFuture<SyncStat> implements Runnable
      */
     public final void run()
     {
+        if (logger.isTraceEnabled())
+            logger.trace("{} Starting sync {} <-> {}", previewKind.logPrefix(desc.sessionId), nodePair.coordinator, nodePair.peer);
+
         startTime = ctx.clock().currentTimeMillis();
 
         // choose a repair method based on the significance of the difference
