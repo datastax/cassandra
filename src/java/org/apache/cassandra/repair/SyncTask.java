@@ -70,6 +70,9 @@ public abstract class SyncTask extends AbstractFuture<SyncStat> implements Runna
      */
     public final void run()
     {
+        if (Tracing.isTracing())
+            logger.trace("{} Starting sync {} <-> {}", previewKind.logPrefix(desc.sessionId), nodePair.coordinator, nodePair.peer);
+
         startTime = System.currentTimeMillis();
 
 
