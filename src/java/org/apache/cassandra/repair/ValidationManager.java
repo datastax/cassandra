@@ -31,6 +31,8 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
+import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -41,6 +43,7 @@ import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MerkleTree;
 import org.apache.cassandra.utils.MerkleTrees;
+import org.apache.cassandra.utils.NonThrowingCloseable;
 
 public class ValidationManager implements IValidationManager
 {
@@ -125,20 +128,24 @@ public class ValidationManager implements IValidationManager
         {
             state.phase.start(vi.estimatedPartitions(), vi.getEstimatedBytes());
             MerkleTrees trees = createMerkleTrees(vi, validator.desc.ranges, cfs);
-            // validate the CF as we iterate over it
-            validator.prepare(cfs, trees, topPartitionCollector);
-            while (vi.hasNext())
+            TableOperation op = vi.getCompactionIterator().getOperation();
+            try (NonThrowingCloseable cls = CompactionManager.instance.active.onOperationStart(op))
             {
-                try (UnfilteredRowIterator partition = vi.next())
+                // validate the CF as we iterate over it
+                validator.prepare(cfs, trees, topPartitionCollector);
+                while (vi.hasNext())
                 {
-                    validator.add(partition);
-                    state.partitionsProcessed++;
-                    state.bytesRead = vi.getBytesRead();
-                    if (state.partitionsProcessed % 1024 == 0) // update every so often
-                        state.updated();
+                    try (UnfilteredRowIterator partition = vi.next())
+                    {
+                        validator.add(partition);
+                        state.partitionsProcessed++;
+                        state.bytesRead = vi.getBytesRead();
+                        if (state.partitionsProcessed % 1024 == 0) // update every so often
+                            state.updated();
+                    }
                 }
+                validator.complete();
             }
-            validator.complete();
         }
         finally
         {
