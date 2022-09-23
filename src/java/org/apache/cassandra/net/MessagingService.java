@@ -219,7 +219,17 @@ public class MessagingService extends MessagingServiceMBeanImpl
     static AcceptVersions accept_messaging = new AcceptVersions(minimum_version, current_version);
     static AcceptVersions accept_streaming = new AcceptVersions(current_version, current_version);
 
-    static Map<Integer, Version> versionMap = Arrays.stream(Version.values()).collect(Collectors.toMap(version -> version.value, version -> version));
+    static Map<Integer, Integer> versionIndexMap = new HashMap<>();
+
+    static
+    {
+        versionIndexMap.put(VERSION_30, 0);
+        versionIndexMap.put(VERSION_3014, 1);
+        versionIndexMap.put(VERSION_40, 2);
+        versionIndexMap.put(VERSION_41, 3);
+        versionIndexMap.put(VERSION_SG_10, 4);
+        versionIndexMap.put(VERSION_DSE_68, 5);
+    }
 
     /**
      * This is an optimisation to speed up the translation of the serialization
@@ -228,10 +238,10 @@ public class MessagingService extends MessagingServiceMBeanImpl
      * @param version the serialization version
      * @return a {@link Version}
      */
-    public static Version getVersion(int version)
+    public static int getVersionIndex(int version)
     {
-        if (versionMap.containsKey(version))
-            return versionMap.get(version);
+        if (versionIndexMap.containsKey(version))
+            return versionIndexMap.get(version);
         throw new IllegalStateException("Unkown serialization version: " + version);
     }
 
@@ -243,8 +253,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
         VERSION_3014(MessagingService.VERSION_3014),
         VERSION_40(MessagingService.VERSION_40),
         VERSION_41(MessagingService.VERSION_41),
-        STARGAZER_10(MessagingService.VERSION_SG_10),
-        DSE_68(MessagingService.VERSION_DSE_68);
+        STARGAZER_10(MessagingService.VERSION_SG_10);
 
         public final int value;
 

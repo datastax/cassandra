@@ -403,7 +403,7 @@ public class Mutation implements IMutation
         @SuppressWarnings("JavadocReference")
         private Serialization serialization(Mutation mutation, int version)
         {
-            int versionIndex = MessagingService.getVersion(version).ordinal();
+            int versionIndex = MessagingService.getVersionIndex(version);
             // Retrieves the cached version, or build+cache it if it's not cached already.
             Serialization serialization = mutation.serializations[versionIndex];
             if (serialization == null)
