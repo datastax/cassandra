@@ -175,6 +175,7 @@ public class TableMetrics
     public final Gauge<Long> compressionMetadataOffHeapMemoryUsed;
     /** Tombstones scanned in queries on this CF */
     public final TableHistogram tombstoneScannedHistogram;
+    public final Counter tombstoneScannedCounter;
     /** Live rows scanned in queries on this CF */
     public final TableHistogram liveScannedHistogram;
     /** Column update time delta on this CF */
@@ -836,6 +837,7 @@ public class TableMetrics
         additionalWriteLatencyNanos = createTableGauge("AdditionalWriteLatencyNanos", () -> MICROSECONDS.toNanos(cfs.additionalWriteLatencyMicros));
 
         tombstoneScannedHistogram = createTableHistogram("TombstoneScannedHistogram", cfs.getKeyspaceMetrics().tombstoneScannedHistogram, false);
+        tombstoneScannedCounter = createTableCounter("TombstoneScannedCounter");
         liveScannedHistogram = createTableHistogram("LiveScannedHistogram", cfs.getKeyspaceMetrics().liveScannedHistogram, false);
         colUpdateTimeDeltaHistogram = createTableHistogram("ColUpdateTimeDeltaHistogram", cfs.getKeyspaceMetrics().colUpdateTimeDeltaHistogram, false);
         coordinatorReadLatency = createTableTimer("CoordinatorReadLatency");
@@ -939,6 +941,15 @@ public class TableMetrics
         for (ColumnFamilyStore indexCfs : cfs.indexManager.getAllIndexColumnFamilyStores())
             indexCfs.getTracker().getView().getCurrentMemtable().addMemoryUsageTo(usage);
         return usage;
+    }
+
+    public void incTombstones(long tombstones, boolean triggerWarning)
+    {
+        tombstoneScannedHistogram.update(tombstones);
+        tombstoneScannedCounter.inc(tombstones);
+
+        if (triggerWarning)
+            tombstoneWarnings.inc();
     }
 
     public void incBytesFlushed(long inputSize, long outputSize, long elapsedNanos)
