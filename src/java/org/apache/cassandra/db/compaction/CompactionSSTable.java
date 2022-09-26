@@ -34,6 +34,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.TimeUUID;
 
 /**
@@ -204,6 +205,7 @@ public interface CompactionSSTable
     boolean mayContainAssumingKeyIsInRange(DecoratedKey key);
 
     Descriptor getDescriptor();
+    File getFile();
     default String getColumnFamilyName()
     {
         return getDescriptor().cfname;
