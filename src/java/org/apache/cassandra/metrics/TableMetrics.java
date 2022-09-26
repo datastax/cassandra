@@ -175,6 +175,7 @@ public class TableMetrics
     public final Gauge<Long> compressionMetadataOffHeapMemoryUsed;
     /** Tombstones scanned in queries on this CF */
     public final TableHistogram tombstoneScannedHistogram;
+    public final Counter tombstoneScannedCounter;
     /** Live rows scanned in queries on this CF */
     public final TableHistogram liveScannedHistogram;
     /** Column update time delta on this CF */
@@ -845,6 +846,7 @@ public class TableMetrics
         additionalWriteLatencyNanos = createTableGauge("AdditionalWriteLatencyNanos", () -> MICROSECONDS.toNanos(cfs.additionalWriteLatencyMicros));
 
         tombstoneScannedHistogram = createTableHistogram("TombstoneScannedHistogram", cfs.getKeyspaceMetrics().tombstoneScannedHistogram, false);
+        tombstoneScannedCounter = createTableCounter("TombstoneScannedCounter");
         liveScannedHistogram = createTableHistogram("LiveScannedHistogram", cfs.getKeyspaceMetrics().liveScannedHistogram, false);
         colUpdateTimeDeltaHistogram = createTableHistogram("ColUpdateTimeDeltaHistogram", cfs.getKeyspaceMetrics().colUpdateTimeDeltaHistogram, false);
         coordinatorReadLatency = createTableTimer("CoordinatorReadLatency");
@@ -940,3 +942,502 @@ public class TableMetrics
 
         formatSpecificGauges = createFormatSpecificGauges(cfs);
     }
+
+    @VisibleForTesting
+    public MovingAverage flushSizeOnDisk()
+    {
+        return flushSizeOnDisk;
+    }
+
+    private Memtable.MemoryUsage getMemoryUsageWithIndexes(ColumnFamilyStore cfs)
+    {
+        Memtable.MemoryUsage usage = Memtable.newMemoryUsage();
+        cfs.getTracker().getView().getCurrentMemtable().addMemoryUsageTo(usage);
+        for (ColumnFamilyStore indexCfs : cfs.indexManager.getAllIndexColumnFamilyStores())
+            indexCfs.getTracker().getView().getCurrentMemtable().addMemoryUsageTo(usage);
+        return usage;
+    }
+
+    public void incTombstones(long tombstones, boolean triggerWarning)
+    {
+        tombstoneScannedHistogram.update(tombstones);
+        tombstoneScannedCounter.inc(tombstones);
+
+        if (triggerWarning)
+            tombstoneWarnings.inc();
+    }
+
+    public void incBytesFlushed(long inputSize, long outputSize, long elapsedNanos)
+    {
+        bytesFlushed.inc(outputSize);
+        flushSize.update(outputSize);
+        // this assumes that at least 1 Kb was flushed, which should always be the case, then rounds down
+        flushTimePerKb.update(elapsedNanos / (double) Math.max(1, inputSize / 1024L));
+    }
+
+    public void incBytesCompacted(long inputDiskSize, long outputDiskSize, long elapsedNanos)
+    {
+        compactionBytesRead.inc(inputDiskSize);
+        compactionBytesWritten.inc(outputDiskSize);
+        // this assumes that at least 1 Kb was compacted, which should always be the case, then rounds down
+        compactionTimePerKb.update(elapsedNanos / (double) Math.max(1, inputDiskSize / 1024L));
+    }
+
+    public void updateSSTableIterated(int count, long elapsedNanos)
+    {
+        sstablesPerReadHistogram.update(count);
+
+        if (count > 0)
+            sstablePartitionReadLatency.update(elapsedNanos / (double) count);
+    }
+
+    public void updateSSTableIteratedInRangeRead(int count)
+    {
+        sstablesPerRangeReadHistogram.update(count);
+    }
+
+    /**
+     * Release all associated metrics.
+     */
+    public void release()
+    {
+        for (ReleasableMetric entry : all)
+        {
+            entry.release();
+        }
+    }
+
+    private ImmutableMap<SSTableFormat<?, ?>, ImmutableMap<String, Gauge<? extends Number>>> createFormatSpecificGauges(ColumnFamilyStore cfs)
+    {
+        ImmutableMap.Builder<SSTableFormat<?, ?>, ImmutableMap<String, Gauge<? extends Number>>> builder = ImmutableMap.builder();
+        for (SSTableFormat<?, ?> format : DatabaseDescriptor.getSSTableFormats().values())
+        {
+            ImmutableMap.Builder<String, Gauge<? extends Number>> gauges = ImmutableMap.builder();
+            for (GaugeProvider<?> gaugeProvider : format.getFormatSpecificMetricsProviders().getGaugeProviders())
+            {
+                Gauge<? extends Number> gauge = createTableGauge(gaugeProvider.name, gaugeProvider.getTableGauge(cfs), gaugeProvider.getGlobalGauge());
+                gauges.put(gaugeProvider.name, gauge);
+            }
+            builder.put(format, gauges.build());
+        }
+        return builder.build();
+    }
+
+    /**
+     * Create a gauge that will be part of a merged version of all column families.  The global gauge
+     * will merge each CF gauge by adding their values
+     */
+    protected <T extends Number> Gauge<T> createTableGauge(final String name, Gauge<T> gauge)
+    {
+        return createTableGauge(name, gauge, new GlobalTableGauge(name));
+    }
+
+    /**
+     * Create a gauge that will be part of a merged version of all column families.  The global gauge
+     * is defined as the globalGauge parameter
+     */
+    protected <G,T> Gauge<T> createTableGauge(String name, Gauge<T> gauge, Gauge<G> globalGauge)
+    {
+        return createTableGauge(name, name, gauge, globalGauge);
+    }
+
+    protected <G,T> Gauge<T> createTableGauge(String name, String alias, Gauge<T> gauge, Gauge<G> globalGauge)
+    {
+        Gauge<T> cfGauge = Metrics.register(factory.createMetricName(name), aliasFactory.createMetricName(alias), gauge);
+        if (register(name, alias, cfGauge) && globalGauge != null)
+        {
+            Metrics.register(GLOBAL_FACTORY.createMetricName(name), GLOBAL_ALIAS_FACTORY.createMetricName(alias), globalGauge);
+        }
+        return cfGauge;
+    }
+
+    /**
+     * Same as {@link #createTableGauge(String, Gauge, Gauge)} but accepts a deprecated
+     * name for a table {@code Gauge}. Prefer that method when deprecation is not necessary.
+     *
+     * @param name the name of the metric registered with the "Table" type
+     * @param deprecated the deprecated name for the metric registered with the "Table" type
+     */
+    protected <G,T> Gauge<T> createTableGaugeWithDeprecation(String name, String deprecated, Gauge<T> gauge, Gauge<G> globalGauge)
+    {
+        assert deprecated != null : "no deprecated metric name provided";
+        assert globalGauge != null : "no global Gauge metric provided";
+        
+        Gauge<T> cfGauge = Metrics.register(factory.createMetricName(name), 
+                                            gauge,
+                                            aliasFactory.createMetricName(name),
+                                            factory.createMetricName(deprecated),
+                                            aliasFactory.createMetricName(deprecated));
+        
+        if (register(name, name, deprecated, cfGauge))
+        {
+            Metrics.register(GLOBAL_FACTORY.createMetricName(name),
+                             globalGauge,
+                             GLOBAL_ALIAS_FACTORY.createMetricName(name),
+                             GLOBAL_FACTORY.createMetricName(deprecated),
+                             GLOBAL_ALIAS_FACTORY.createMetricName(deprecated));
+        }
+        return cfGauge;
+    }
+
+    /**
+     * Creates a counter that will also have a global counter thats the sum of all counters across
+     * different column families
+     */
+    protected Counter createTableCounter(final String name)
+    {
+        return createTableCounter(name, name);
+    }
+
+    protected Counter createTableCounter(final String name, final String alias)
+    {
+        Counter cfCounter = Metrics.counter(factory.createMetricName(name), aliasFactory.createMetricName(alias));
+        if (register(name, alias, cfCounter))
+        {
+            Metrics.register(GLOBAL_FACTORY.createMetricName(name),
+                             GLOBAL_ALIAS_FACTORY.createMetricName(alias),
+                             new Gauge<Long>()
+                             {
+                                 public Long getValue()
+                                 {
+                                     long total = 0;
+                                     for (Metric cfGauge : ALL_TABLE_METRICS.get(name))
+                                     {
+                                         total += ((Counter) cfGauge).getCount();
+                                     }
+                                     return total;
+                                 }
+                             });
+        }
+        return cfCounter;
+    }
+
+    private Meter createTableMeter(final String name)
+    {
+        return createTableMeter(name, name);
+    }
+
+    private Meter createTableMeter(final String name, final String alias)
+    {
+        Meter tableMeter = Metrics.meter(factory.createMetricName(name), aliasFactory.createMetricName(alias));
+        register(name, alias, tableMeter);
+        return tableMeter;
+    }
+    
+    private Histogram createHistogram(String name, boolean considerZeroes)
+    {
+        Histogram histogram = Metrics.histogram(factory.createMetricName(name), aliasFactory.createMetricName(name), considerZeroes);
+        register(name, name, histogram);
+        return histogram;
+    }
+
+    /**
+     * Computes the compression ratio for the specified SSTables
+     *
+     * @param sstables the SSTables
+     * @return the compression ratio for the specified SSTables
+     */
+    private static Double computeCompressionRatio(Iterable<SSTableReader> sstables)
+    {
+        double compressedLengthSum = 0;
+        double dataLengthSum = 0;
+        for (SSTableReader sstable : sstables)
+        {
+            if (sstable.compression)
+            {
+                // We should not have any sstable which are in an open early mode as the sstable were selected
+                // using SSTableSet.CANONICAL.
+                assert sstable.openReason != SSTableReader.OpenReason.EARLY;
+
+                CompressionMetadata compressionMetadata = sstable.getCompressionMetadata();
+                compressedLengthSum += compressionMetadata.compressedFileLength;
+                dataLengthSum += compressionMetadata.dataLength;
+            }
+        }
+        return dataLengthSum != 0 ? compressedLengthSum / dataLengthSum : MetadataCollector.NO_COMPRESSION_RATIO;
+    }
+
+    /**
+     * Create a histogram-like interface that will register both a CF, keyspace and global level
+     * histogram and forward any updates to both
+     */
+    protected TableHistogram createTableHistogram(String name, Histogram keyspaceHistogram, boolean considerZeroes)
+    {
+        return createTableHistogram(name, name, keyspaceHistogram, considerZeroes);
+    }
+
+    protected TableHistogram createTableHistogram(String name, String alias, Histogram keyspaceHistogram, boolean considerZeroes)
+    {
+        Histogram cfHistogram = Metrics.histogram(factory.createMetricName(name), aliasFactory.createMetricName(alias), considerZeroes);
+        register(name, alias, cfHistogram);
+        return new TableHistogram(cfHistogram,
+                                  keyspaceHistogram,
+                                  Metrics.histogram(GLOBAL_FACTORY.createMetricName(name),
+                                                    GLOBAL_ALIAS_FACTORY.createMetricName(alias),
+                                                    considerZeroes));
+    }
+
+    protected Histogram createTableHistogram(String name, boolean considerZeroes)
+    {
+        return createTableHistogram(name, name, considerZeroes);
+    }
+
+    protected Histogram createTableHistogram(String name, String alias, boolean considerZeroes)
+    {
+        Histogram tableHistogram = Metrics.histogram(factory.createMetricName(name), aliasFactory.createMetricName(alias), considerZeroes);
+        register(name, alias, tableHistogram);
+        return tableHistogram;
+    }
+
+    protected TableTimer createTableTimer(String name, Timer keyspaceTimer)
+    {
+        Timer cfTimer = Metrics.timer(factory.createMetricName(name), aliasFactory.createMetricName(name));
+        register(name, name, keyspaceTimer);
+        Timer global = Metrics.timer(GLOBAL_FACTORY.createMetricName(name), GLOBAL_ALIAS_FACTORY.createMetricName(name));
+
+        return new TableTimer(cfTimer, keyspaceTimer, global);
+    }
+
+    protected SnapshottingTimer createTableTimer(String name)
+    {
+        SnapshottingTimer tableTimer = Metrics.timer(factory.createMetricName(name), aliasFactory.createMetricName(name));
+        register(name, name, tableTimer);
+        return tableTimer;
+    }
+
+    protected TableMeter createTableMeter(String name, Meter keyspaceMeter)
+    {
+        return createTableMeter(name, name, keyspaceMeter);
+    }
+
+    protected TableMeter createTableMeter(String name, String alias, Meter keyspaceMeter)
+    {
+        Meter meter = Metrics.meter(factory.createMetricName(name), aliasFactory.createMetricName(alias));
+        register(name, alias, meter);
+        return new TableMeter(meter,
+                              keyspaceMeter,
+                              Metrics.meter(GLOBAL_FACTORY.createMetricName(name),
+                                            GLOBAL_ALIAS_FACTORY.createMetricName(alias)));
+    }
+
+    private LatencyMetrics createLatencyMetrics(String namePrefix, LatencyMetrics ... parents)
+    {
+        LatencyMetrics metric = new LatencyMetrics(factory, namePrefix, parents);
+        all.add(metric::release);
+        return metric;
+    }
+
+    /**
+     * Registers a metric to be removed when unloading CF.
+     * @return true if first time metric with that name has been registered
+     */
+    private boolean register(String name, String alias, Metric metric)
+    {
+        return register(name, alias, null, metric);
+    }
+
+    /**
+     * Registers a metric to be removed when unloading CF.
+     * 
+     * @param name the name of the metric registered with the "Table" type
+     * @param alias the name of the metric registered with the legacy "ColumnFamily" type
+     * @param deprecated an optionally null deprecated name for the metric registered with the "Table"
+     * 
+     * @return true if first time metric with that name has been registered
+     */
+    private boolean register(String name, String alias, String deprecated, Metric metric)
+    {
+        boolean ret = ALL_TABLE_METRICS.putIfAbsent(name, ConcurrentHashMap.newKeySet()) == null;
+        ALL_TABLE_METRICS.get(name).add(metric);
+        all.add(() -> releaseMetric(name, alias, deprecated));
+        return ret;
+    }
+
+    private void releaseMetric(String tableMetricName, String cfMetricName, String tableMetricAlias)
+    {
+        CassandraMetricsRegistry.MetricName name = factory.createMetricName(tableMetricName);
+
+        final Metric metric = Metrics.getMetrics().get(name.getMetricName());
+        if (metric != null)
+        {
+            // Metric will be null if we are releasing a view metric.  Views have null for ViewLockAcquireTime and ViewLockReadTime
+            ALL_TABLE_METRICS.get(tableMetricName).remove(metric);
+            CassandraMetricsRegistry.MetricName cfAlias = aliasFactory.createMetricName(cfMetricName);
+            
+            if (tableMetricAlias != null)
+            {
+                Metrics.remove(name, cfAlias, factory.createMetricName(tableMetricAlias), aliasFactory.createMetricName(tableMetricAlias));
+            }
+            else
+            {
+                Metrics.remove(name, cfAlias);
+            }
+        }
+    }
+
+    public static class TableMeter
+    {
+        public final Meter[] all;
+        public final Meter table;
+        public final Meter global;
+
+        private TableMeter(Meter table, Meter keyspace, Meter global)
+        {
+            this.table = table;
+            this.global = global;
+            this.all = new Meter[]{table, keyspace, global};
+        }
+
+        public void mark()
+        {
+            for (Meter meter : all)
+            {
+                meter.mark();
+            }
+        }
+    }
+
+    public static class TableHistogram
+    {
+        public final Histogram[] all;
+        public final Histogram cf;
+        public final Histogram global;
+
+        private TableHistogram(Histogram cf, Histogram keyspace, Histogram global)
+        {
+            this.cf = cf;
+            this.global = global;
+            this.all = new Histogram[]{cf, keyspace, global};
+        }
+
+        public void update(long i)
+        {
+            for(Histogram histo : all)
+            {
+                histo.update(i);
+            }
+        }
+    }
+
+    public static class TableTimer
+    {
+        public final Timer[] all;
+        public final Timer cf;
+        public final Timer global;
+
+        private TableTimer(Timer cf, Timer keyspace, Timer global)
+        {
+            this.cf = cf;
+            this.global = global;
+            this.all = new Timer[]{cf, keyspace, global};
+        }
+
+        public void update(long i, TimeUnit unit)
+        {
+            for(Timer timer : all)
+            {
+                timer.update(i, unit);
+            }
+        }
+
+        public Context time()
+        {
+            return new Context(all);
+        }
+
+        public static class Context implements AutoCloseable
+        {
+            private final long start;
+            private final Timer [] all;
+
+            private Context(Timer [] all)
+            {
+                this.all = all;
+                start = nanoTime();
+            }
+
+            public void close()
+            {
+                long duration = nanoTime() - start;
+                for (Timer t : all)
+                    t.update(duration, TimeUnit.NANOSECONDS);
+            }
+        }
+    }
+
+    static class TableMetricNameFactory implements MetricNameFactory
+    {
+        private final String keyspaceName;
+        private final String tableName;
+        private final boolean isIndex;
+        private final String type;
+
+        TableMetricNameFactory(ColumnFamilyStore cfs, String type)
+        {
+            this.keyspaceName = cfs.getKeyspaceName();
+            this.tableName = cfs.getTableName();
+            this.isIndex = cfs.isIndex();
+            this.type = type;
+        }
+
+        public CassandraMetricsRegistry.MetricName createMetricName(String metricName)
+        {
+            String groupName = TableMetrics.class.getPackage().getName();
+            String type = isIndex ? "Index" + this.type : this.type;
+
+            StringBuilder mbeanName = new StringBuilder();
+            mbeanName.append(groupName).append(":");
+            mbeanName.append("type=").append(type);
+            mbeanName.append(",keyspace=").append(keyspaceName);
+            mbeanName.append(",scope=").append(tableName);
+            mbeanName.append(",name=").append(metricName);
+
+            return new CassandraMetricsRegistry.MetricName(groupName, type, metricName, keyspaceName + "." + tableName, mbeanName.toString());
+        }
+    }
+
+    static class AllTableMetricNameFactory implements MetricNameFactory
+    {
+        private final String type;
+        public AllTableMetricNameFactory(String type)
+        {
+            this.type = type;
+        }
+
+        public CassandraMetricsRegistry.MetricName createMetricName(String metricName)
+        {
+            String groupName = TableMetrics.class.getPackage().getName();
+            StringBuilder mbeanName = new StringBuilder();
+            mbeanName.append(groupName).append(":");
+            mbeanName.append("type=").append(type);
+            mbeanName.append(",name=").append(metricName);
+            return new CassandraMetricsRegistry.MetricName(groupName, type, metricName, "all", mbeanName.toString());
+        }
+    }
+
+    @FunctionalInterface
+    public interface ReleasableMetric
+    {
+        void release();
+    }
+
+    private static class GlobalTableGauge implements Gauge<Long>
+    {
+        private final String name;
+
+        public GlobalTableGauge(String name)
+        {
+            this.name = name;
+        }
+
+        public Long getValue()
+        {
+            long total = 0;
+            for (Metric cfGauge : ALL_TABLE_METRICS.get(name))
+            {
+                total = total + ((Gauge<? extends Number>) cfGauge).getValue().longValue();
+            }
+            return total;
+        }
+    }
+}
