@@ -558,6 +558,12 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     }
 
     @Override
+    public File getFile()
+    {
+        return dfile.file();
+    }
+
+    @Override
     public Descriptor getDescriptor()
     {
         return descriptor;
