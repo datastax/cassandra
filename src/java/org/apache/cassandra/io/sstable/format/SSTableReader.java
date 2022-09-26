@@ -811,7 +811,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     @Override
     public Path getFile()
     {
-        return descriptor.getDirectory();
+        return descriptor.getDirectory().resolve(getFilename());
     }
 
     public void setupOnline()
