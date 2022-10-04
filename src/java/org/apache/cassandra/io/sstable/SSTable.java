@@ -36,6 +36,7 @@ import com.google.common.collect.Sets;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
@@ -149,9 +150,9 @@ public abstract class SSTable
                   .forEach(c -> FileUtils.createHardLinkWithoutConfirm(tmpdesc.fileFor(c), newdesc.fileFor(c)));
     }
 
-    public abstract DecoratedKey getFirst();
+    public abstract PartitionPosition getFirst();
 
-    public abstract DecoratedKey getLast();
+    public abstract PartitionPosition getLast();
 
     public abstract AbstractBounds<Token> getBounds();
 
