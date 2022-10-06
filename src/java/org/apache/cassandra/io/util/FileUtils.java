@@ -86,6 +86,7 @@ public final class FileUtils
 
     private static final Class clsDirectBuffer;
     private static final MethodHandle mhDirectBufferCleaner;
+    private static final MethodHandle mhDirectBufferAttachment;
     private static final MethodHandle mhCleanerClean;
 
     static
@@ -95,6 +96,8 @@ public final class FileUtils
             clsDirectBuffer = Class.forName("sun.nio.ch.DirectBuffer");
             Method mDirectBufferCleaner = clsDirectBuffer.getMethod("cleaner");
             mhDirectBufferCleaner = MethodHandles.lookup().unreflect(mDirectBufferCleaner);
+            Method mDirectBufferAttachment = clsDirectBuffer.getMethod("attachment");
+            mhDirectBufferAttachment = MethodHandles.lookup().unreflect(mDirectBufferAttachment);
             Method mCleanerClean = mDirectBufferCleaner.getReturnType().getMethod("clean");
             mhCleanerClean = MethodHandles.lookup().unreflect(mCleanerClean);
 
@@ -311,15 +314,15 @@ public final class FileUtils
         }
     }
 
-    public static void close(Closeable... cs) throws IOException
+    public static void close(AutoCloseable... cs) throws IOException
     {
         close(Arrays.asList(cs));
     }
 
-    public static void close(Iterable<? extends Closeable> cs) throws IOException
+    public static void close(Iterable<? extends AutoCloseable> cs) throws IOException
     {
         Throwable e = null;
-        for (Closeable c : cs)
+        for (AutoCloseable c : cs)
         {
             try
             {
@@ -379,7 +382,7 @@ public final class FileUtils
         return folder.isAncestorOf(file);
     }
 
-    public static void clean(ByteBuffer buffer)
+    public static void clean(ByteBuffer buffer, boolean withAttachment)
     {
         if (buffer == null || !buffer.isDirect())
             return;
@@ -390,10 +393,18 @@ public final class FileUtils
 
         try
         {
-            Object cleaner = mhDirectBufferCleaner.bindTo(buffer).invoke();
+            Object buf = buffer;
+            if (withAttachment)
+            {
+                while (mhDirectBufferCleaner.bindTo(buf).invoke() == null && mhDirectBufferAttachment.bindTo(buf).invoke() != null && mhDirectBufferAttachment.bindTo(buf).invoke().getClass().isInstance(clsDirectBuffer))
+                {
+                    buf = mhDirectBufferAttachment.bindTo(buf).invoke();
+                }
+            }
+
+            Object cleaner = mhDirectBufferCleaner.bindTo(buf).invoke();
             if (cleaner != null)
             {
-                // ((DirectBuffer) buf).cleaner().clean();
                 mhCleanerClean.bindTo(cleaner).invoke();
             }
         }
@@ -405,6 +416,16 @@ public final class FileUtils
         {
             throw new RuntimeException(e);
         }
+    }
+
+    public static void clean(ByteBuffer buffer)
+    {
+        clean(buffer, false);
+    }
+
+    public static void cleanWithAttachment(ByteBuffer buffer)
+    {
+        clean(buffer, true);
     }
 
     public static long parseFileSize(String value)
