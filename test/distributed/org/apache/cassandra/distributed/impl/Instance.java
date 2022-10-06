@@ -116,8 +116,8 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.nodes.Nodes;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.MigrationCoordinator;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -976,6 +976,11 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
             {
                 super.shutdown();
                 startedAt.set(0L);
+
+                // when the instance is eventually stopped, we need to release buffer pools manually
+                // they are assumed to gone along with JVM, but this is not the case in dtests
+                BufferPools.forNetworking().unsafeReset();
+                BufferPools.forChunkCache().unsafeReset();
             }
         });
     }
