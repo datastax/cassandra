@@ -1110,12 +1110,27 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 selected = pending.remove(index);
             }
 
-            boolean hasExpiredSSTables = !expiredSet.isEmpty();
-            if (hasExpiredSSTables && selected.equals(CompactionPick.EMPTY))
-                // overrides default CompactionPick.EMPTY with parent equal to -1
-                selected = CompactionPick.create(index, expiredSet, expiredSet);
-            else if (hasExpiredSSTables)
-                selected = selected.withExpiredSSTables(expiredSet);
+            if (!expiredSet.isEmpty())
+            {
+                // Add the expired sstables but only up to the max enforced by the controller. Even though the expired
+                // sstables produce no output, they still use memory and CPU cycles in the compaction, also for CNDB
+                // they increase the size of the tasks published to etcd, so they cannot be unbounded. The max will
+                // be the value set in the controller, minus any non-expired sstables that were already selected.
+                // Only compact expired sstables if the allowance left is > 0, it could be zero or even neg.ve
+                // if F > controller.maxSSTablesToCompact()
+                int maxSSTablesLeft = controller.maxSSTablesToCompact() - selected.sstables().size();
+                if (maxSSTablesLeft > 0)
+                {
+                    List<CompactionSSTable> expiredCapped = expiredSet.size() <= maxSSTablesLeft
+                                                              ? expiredSet
+                                                              : expiredSet.subList(0, maxSSTablesLeft);
+                    if (selected.equals(CompactionPick.EMPTY))
+                        // overrides default CompactionPick.EMPTY with parent equal to -1
+                        selected = CompactionPick.create(index, expiredCapped, expiredCapped);
+                    else
+                        selected = selected.withExpiredSSTables(expiredCapped);
+                }
+            }
 
             if (logger.isTraceEnabled())
                 logger.trace("Returning compaction aggregate with selected compaction {}, and pending {}, for shard {}",

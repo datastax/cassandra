@@ -1150,7 +1150,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         IPartitioner partitioner = realm.getPartitioner();
 
-        List<SSTableReader> sstables = createSStables(partitioner);
+        List<SSTableReader> sstables = createSStables(partitioner, 4);
 
         dataTracker.addInitialSSTables(sstables);
 
@@ -1202,7 +1202,12 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
     private List<SSTableReader> createSStables(IPartitioner partitioner)
     {
-        return createSStables(partitioner, mapFromPair(Pair.create(4 * ONE_MB, 4)), 10000, UUID.randomUUID());
+        return createSStables(partitioner, 4);
+    }
+
+    private List<SSTableReader> createSStables(IPartitioner partitioner, int numSSTables)
+    {
+        return createSStables(partitioner, mapFromPair(Pair.create(numSSTables * ONE_MB, numSSTables)), 10000, UUID.randomUUID());
     }
 
     private List<SSTableReader> createSStables(IPartitioner partitioner, int ttl, UUID pendingRepair)
@@ -1281,17 +1286,23 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     @Test
     public void testDropExpiredSSTables1Shard()
     {
-        testDropExpiredFromBucket(1);
+        testDropExpiredFromBucket(1, 4, 256);
         testDropExpiredAndCompactNonExpired();
     }
 
     @Test
     public void testDropExpiredSSTables3Shards()
     {
-        testDropExpiredFromBucket(3);
+        testDropExpiredFromBucket(3, 4, 256);
     }
 
-    private void testDropExpiredFromBucket(int numShards)
+    @Test
+    public void testDropExpiredSSTablesWithLimits()
+    {
+        testDropExpiredFromBucket(1, 4, 1);
+    }
+
+    private void testDropExpiredFromBucket(int numShards, int numSSTables, int maxSSTablesToCompact)
     {
         Controller controller = Mockito.mock(Controller.class);
         long minimalSizeBytes = 2 << 20;
@@ -1307,7 +1318,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
         when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
-        when(controller.maxSSTablesToCompact()).thenReturn(1000);
+        when(controller.maxSSTablesToCompact()).thenReturn(maxSSTablesToCompact);
         when(controller.maybeSort(anyList())).thenAnswer(answ -> answ.getArgument(0));
         when(controller.maybeRandomize(any(IntArrayList.class))).thenAnswer(answ -> answ.getArgument(0));
         when(controller.getIgnoreOverlapsInExpirationCheck()).thenReturn(false);
@@ -1315,8 +1326,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         strategy.startup();
 
-        List<SSTableReader> sstables = createSStables(realm.getPartitioner());
-        // Tracker#addSSTables also tries to backup SSTables, so we use addInitialSSTables and notify explicitly
+        List<SSTableReader> sstables = createSStables(realm.getPartitioner(), numSSTables);
         dataTracker.addInitialSSTables(sstables);
 
         try
@@ -1331,9 +1341,11 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             Collection<CompactionPick> picks = strategy.backgroundCompactions.getCompactionsInProgress();
             for (CompactionPick pick : picks)
             {
+                assertEquals(Math.min(numSSTables, maxSSTablesToCompact), pick.sstables().size());
+                assertEquals(pick.sstables().size(), pick.expired().size());
+
                 // expired SSTables don't contribute to total size
                 assertTrue(pick.hasExpiredOnly());
-                assertEquals(sstables.size() / 3, pick.expired().size());
                 assertEquals(0L, pick.totSizeInBytes());
                 assertEquals(0L, pick.avgSizeInBytes());
                 assertEquals(0, pick.parent());
@@ -1341,8 +1353,10 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         }
         finally
         {
+            // normally we'd dataTracker.dropSSTables() here, but it's art for
+            // art's sake to make sstable mocks droppable (the mocked class has public
+            // final fields which we'd need to initialize properly etc. etc.
             strategy.shutdown();
-            dataTracker.dropSSTables();
         }
     }
 
