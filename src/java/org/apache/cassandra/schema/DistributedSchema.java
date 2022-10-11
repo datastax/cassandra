@@ -30,7 +30,7 @@ public class DistributedSchema
 {
     public static final DistributedSchema EMPTY = new DistributedSchema(Keyspaces.none(), SchemaConstants.emptyVersion);
 
-    protected final Keyspaces keyspaces;
+    private final Keyspaces keyspaces;
     private final UUID version;
 
     public DistributedSchema(Keyspaces keyspaces, UUID version)
