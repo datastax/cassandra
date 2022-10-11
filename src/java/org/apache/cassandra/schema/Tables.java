@@ -184,22 +184,12 @@ public final class Tables implements Iterable<TableMetadata>
     public Tables withNewKeyspace(String newName, Types udts)
     {
         Map<String, TableMetadata> updated = new HashMap<>();
-        for (TableMetadata table : getTablesOrderedByDependencies())
+        for (TableMetadata table : this)
         {
             updated.put(table.name, table.withNewKeyspace(newName, udts, tables));
         }
 
         return builder().add(updated.values()).build();
-    }
-
-    private Set<TableMetadata> getTablesOrderedByDependencies()
-    {
-        Set<TableMetadata> orderedTablesByDependencies = new LinkedHashSet<>();
-        for (TableMetadata table : this)
-        {
-            orderedTablesByDependencies.add(table);
-        }
-        return orderedTablesByDependencies;
     }
 
     MapDifference<String, TableMetadata> indexesDiff(Tables other)
