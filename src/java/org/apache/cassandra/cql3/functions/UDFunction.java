@@ -27,8 +27,8 @@ import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture; // checkstyle: permit this import
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture; // checkstyle: permit this import
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -50,7 +50,9 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.FunctionExecutionException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.schema.*;
+import org.apache.cassandra.schema.Difference;
+import org.apache.cassandra.schema.Types;
+import org.apache.cassandra.schema.UserFunctions;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -99,6 +101,8 @@ public abstract class UDFunction extends UserFunction implements ScalarFunction
     "com/google/common/reflect/TypeToken",
     "java/io/IOException.class",
     "java/io/Serializable.class",
+    "java/io/ObjectOutputStream.class",
+    "java/io/ObjectInputStream.class",
     "java/lang/",
     "java/math/",
     "java/net/InetAddress.class",
@@ -620,6 +624,17 @@ public abstract class UDFunction extends UserFunction implements ScalarFunction
                          argNames,
                          Lists.newArrayList(transform(argTypes, t -> t.withUpdatedUserType(udt))),
                          returnType.withUpdatedUserType(udt),
+                         calledOnNullInput,
+                         language,
+                         body);
+    }
+
+    public UDFunction withNewKeyspace(String newKeyspace, Types types)
+    {
+        return tryCreate(new FunctionName(newKeyspace, name.name),
+                         argNames,
+                         Lists.newArrayList(transform(argTypes, t -> t.withUpdatedUserTypes(types))),
+                         returnType.withUpdatedUserTypes(types),
                          calledOnNullInput,
                          language,
                          body);
