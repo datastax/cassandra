@@ -25,10 +25,14 @@ import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
-
 import javax.annotation.Nullable;
 
-import com.google.common.collect.*;
+import com.google.common.collect.ImmutableCollection;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.MapDifference;
+import com.google.common.collect.Maps;
 
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.index.internal.CassandraIndex;
@@ -177,6 +181,17 @@ public final class Tables implements Iterable<TableMetadata>
         return any(this, t -> t.referencesUserType(udt.name))
              ? builder().add(transform(this, t -> t.withUpdatedUserType(udt))).build()
              : this;
+    }
+
+    public Tables withNewKeyspace(String newName, Types udts)
+    {
+        Map<String, TableMetadata> updated = new HashMap<>();
+        for (TableMetadata table : this)
+        {
+            updated.put(table.name, table.withNewKeyspace(newName, udts, tables));
+        }
+
+        return builder().add(updated.values()).build();
     }
 
     MapDifference<String, TableMetadata> indexesDiff(Tables other)
