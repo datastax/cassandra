@@ -18,17 +18,29 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.cql3.FieldIdentifier;
+import org.apache.cassandra.cql3.SchemaElement;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.UserTypes;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.schema.Difference;
@@ -421,10 +433,10 @@ public class UserType extends TupleType implements SchemaElement
         {
             return isMultiCell == udt.isMultiCell
                  ? udt
-                 : new UserType(keyspace, name, udt.fieldNames(), udt.fieldTypes(), isMultiCell);
+                 : new UserType(udt.keyspace, name, udt.fieldNames(), udt.fieldTypes(), isMultiCell);
         }
 
-        return new UserType(keyspace,
+        return new UserType(udt.keyspace,
                             name,
                             fieldNames,
                             Lists.newArrayList(transform(fieldTypes(), t -> t.withUpdatedUserType(udt))),
