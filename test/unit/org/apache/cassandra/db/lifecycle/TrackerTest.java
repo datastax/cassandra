@@ -46,6 +46,7 @@ import org.apache.cassandra.notifications.*;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.mockito.Mockito;
 
 import static com.google.common.collect.ImmutableSet.copyOf;
 import static java.util.Collections.singleton;
@@ -264,6 +265,30 @@ public class TrackerTest
             for (SSTableReader reader : readers)
                 Assert.assertTrue(reader.isMarkedCompacted());
         }
+    }
+
+    @Test
+    public void testDropSSTablesWithTxnCommitFailure()
+    {
+        ColumnFamilyStore cfs = MockSchema.newCFS();
+        Tracker tracker = Mockito.spy(cfs.getTracker());
+        Mockito.doThrow(new RuntimeException("Test throw")).when(tracker).notifySSTablesChanged(
+                Mockito.any(), Mockito.any(),  Mockito.any() , Mockito.any(), Mockito.any());
+
+        MockListener listener = new MockListener(false);
+        tracker.subscribe(listener);
+        final List<SSTableReader> readers = ImmutableList.of(MockSchema.sstable(0, 9, true, cfs),
+                                                             MockSchema.sstable(1, 15, true, cfs),
+                                                             MockSchema.sstable(2, 71, true, cfs));
+        tracker.addInitialSSTables(copyOf(readers));
+
+        try (LifecycleTransaction txn = tracker.tryModify(readers.get(0), OperationType.COMPACTION))
+        {
+               Assert.assertThrows(RuntimeException.class, () -> tracker.dropSSTables());
+        }
+
+        // Make sure that all SSTables are still live after the commit failed.
+        Assert.assertEquals(readers.size(), tracker.getLiveSSTables().size());
     }
 
     @Test
