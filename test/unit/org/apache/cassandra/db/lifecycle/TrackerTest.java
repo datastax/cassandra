@@ -268,12 +268,27 @@ public class TrackerTest
     }
 
     @Test
+    public void testDropSSTablesWithTxnCommitFailureLiveSSTables()
+    {
+        dropSSTablesWithTxnCommitFailure(true);
+    }
+
+    @Test
     public void testDropSSTablesWithTxnCommitFailure()
+    {
+        dropSSTablesWithTxnCommitFailure(false);
+    }
+
+    private void dropSSTablesWithTxnCommitFailure(boolean liveSSTables)
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         Tracker tracker = Mockito.spy(cfs.getTracker());
+
         Mockito.doThrow(new RuntimeException("Test throw")).when(tracker).notifySSTablesChanged(
-                Mockito.any(), Mockito.any(),  Mockito.any() , Mockito.any(), Mockito.any());
+                Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any());
+
+        if (!liveSSTables)
+            cfs.invalidate(false, false);
 
         MockListener listener = new MockListener(false);
         tracker.subscribe(listener);
@@ -284,11 +299,18 @@ public class TrackerTest
 
         try (LifecycleTransaction txn = tracker.tryModify(readers.get(0), OperationType.COMPACTION))
         {
-               Assert.assertThrows(RuntimeException.class, () -> tracker.dropSSTables());
+            Assert.assertThrows(RuntimeException.class, () -> tracker.dropSSTables());
         }
 
-        // Make sure that all SSTables are still live after the commit failed.
-        Assert.assertEquals(readers.size(), tracker.getLiveSSTables().size());
+        if (liveSSTables)
+        {
+            // Make sure that all SSTables are still live after the commit failed.
+            Assert.assertEquals(readers.size(), tracker.getLiveSSTables().size());
+        }
+        else
+        {
+            Assert.assertTrue(tracker.getLiveSSTables().isEmpty());
+        }
     }
 
     @Test
