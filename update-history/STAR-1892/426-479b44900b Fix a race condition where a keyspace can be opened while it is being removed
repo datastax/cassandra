@@ -1,0 +1,188 @@
+--- a/test/long/org/apache/cassandra/cql3/CorruptionTest.java
++++ b/test/long/org/apache/cassandra/cql3/CorruptionTest.java
+@@ -26,12 +26,9 @@
+ import java.util.concurrent.Executors;
+ import java.util.concurrent.TimeUnit;
+ 
+-<<<<<<<
+-=======
+ import org.apache.cassandra.ServerTestUtils;
+ import org.apache.cassandra.io.util.File;
+ 
+->>>>>>>
+ import org.junit.AfterClass;
+ import org.junit.BeforeClass;
+ import org.junit.Test;
+@@ -40,13 +37,8 @@
+ import com.datastax.driver.core.policies.LoggingRetryPolicy;
+ import com.datastax.driver.core.policies.Policies;
+ import com.datastax.driver.core.utils.Bytes;
+-<<<<<<<
+-import org.apache.cassandra.ServerTestUtils;
+-import org.apache.cassandra.config.DatabaseDescriptor;
+-=======
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.io.util.FileWriter;
+->>>>>>>
+ import org.apache.cassandra.exceptions.ConfigurationException;
+ import org.apache.cassandra.service.EmbeddedCassandraService;
+ 
+--- a/test/unit/org/apache/cassandra/audit/AuditLoggerAuthTest.java
++++ b/test/unit/org/apache/cassandra/audit/AuditLoggerAuthTest.java
+@@ -76,11 +76,7 @@
+             config.audit_logging_options.logger = new ParameterizedClass("InMemoryAuditLogger", null);
+         });
+ 
+-<<<<<<<
+         SUPERUSER_SETUP_DELAY_MS.setLong(0);
+-=======
+-        System.setProperty("cassandra.superuser_setup_delay_ms", "0");
+->>>>>>>
+         embedded = ServerTestUtils.startEmbeddedCassandraService();
+ 
+         executeWithCredentials(
+--- a/test/unit/org/apache/cassandra/cql3/CQLTester.java
++++ b/test/unit/org/apache/cassandra/cql3/CQLTester.java
+@@ -517,11 +517,7 @@
+ 
+     public static List<String> buildNodetoolArgs(List<String> args)
+     {
+-<<<<<<<
+         int port = jmxPort == 0 ? CASSANDRA_JMX_LOCAL_PORT.getInt(7199) : jmxPort;
+-=======
+-        int port = jmxPort == 0 ? Integer.getInteger("cassandra.jmx.local.port", 7199) : jmxPort;
+->>>>>>>
+         String host = jmxHost == null ? "127.0.0.1" : jmxHost;
+         List<String> allArgs = new ArrayList<>();
+         allArgs.add("bin/nodetool");
+--- a/test/unit/org/apache/cassandra/cql3/PagingTest.java
++++ b/test/unit/org/apache/cassandra/cql3/PagingTest.java
+@@ -31,10 +31,7 @@
+ import com.datastax.driver.core.Statement;
+ import org.apache.cassandra.ServerTestUtils;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+-<<<<<<<
+-=======
+ 
+->>>>>>>
+ import org.apache.cassandra.dht.Murmur3Partitioner.LongToken;
+ import org.apache.cassandra.locator.*;
+ import org.apache.cassandra.service.EmbeddedCassandraService;
+@@ -61,11 +58,7 @@
+     @BeforeClass
+     public static void setup() throws Exception
+     {
+-<<<<<<<
+         CASSANDRA_CONFIG.setString("cassandra-murmur.yaml");
+-=======
+-        System.setProperty("cassandra.config", "cassandra-murmur.yaml");
+->>>>>>>
+ 
+         cassandra = ServerTestUtils.startEmbeddedCassandraService();
+ 
+--- a/test/unit/org/apache/cassandra/metrics/BatchMetricsTest.java
++++ b/test/unit/org/apache/cassandra/metrics/BatchMetricsTest.java
+@@ -35,10 +35,7 @@
+ import org.apache.cassandra.service.EmbeddedCassandraService;
+ 
+ import static org.apache.cassandra.cql3.statements.BatchStatement.metrics;
+-<<<<<<<
+-=======
+ import static org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir.EstimatedHistogramReservoirSnapshot;
+->>>>>>>
+ import static org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir.Range;
+ import static org.junit.Assert.assertEquals;
+ import static org.quicktheories.QuickTheory.qt;
+--- a/test/unit/org/apache/cassandra/metrics/CQLMetricsTest.java
++++ b/test/unit/org/apache/cassandra/metrics/CQLMetricsTest.java
+@@ -21,20 +21,14 @@
+ import java.io.IOException;
+ 
+ import org.junit.AfterClass;
+-<<<<<<<
+-=======
+ import org.junit.Assert;
+->>>>>>>
+ import org.junit.BeforeClass;
+ import org.junit.Test;
+ 
+ import com.datastax.driver.core.Cluster;
+ import com.datastax.driver.core.PreparedStatement;
+ import com.datastax.driver.core.Session;
+-<<<<<<<
+-=======
+ import com.datastax.driver.core.exceptions.InvalidQueryException;
+->>>>>>>
+ import org.apache.cassandra.ServerTestUtils;
+ import org.apache.cassandra.config.DatabaseDescriptor;
+ import org.apache.cassandra.cql3.QueryProcessor;
+@@ -72,8 +66,6 @@
+             cassandra.stop();
+     }
+ 
+-<<<<<<<
+-=======
+     @Test
+     public void testConnectionWithUseDisabled()
+     {
+@@ -95,7 +87,6 @@
+         }
+     }
+ 
+->>>>>>>
+     @Test
+     public void testPreparedStatementsCount()
+     {
+--- a/test/unit/org/apache/cassandra/transport/CQLUserAuditTest.java
++++ b/test/unit/org/apache/cassandra/transport/CQLUserAuditTest.java
+@@ -71,11 +71,7 @@
+             config.audit_logging_options.logger = new ParameterizedClass("DiagnosticEventAuditLogger", null);
+         });
+ 
+-<<<<<<<
+         SUPERUSER_SETUP_DELAY_MS.setLong(0);
+-=======
+-        System.setProperty("cassandra.superuser_setup_delay_ms", "0");
+->>>>>>>
+ 
+         embedded = ServerTestUtils.startEmbeddedCassandraService();
+ 
+diff --git a/.build/build-rat.xml b/.build/build-rat.xml
+index 2aaf9ad35c..0856a08c14 100644
+--- a/.build/build-rat.xml
++++ b/.build/build-rat.xml
+@@ -91,6 +91,7 @@
+                  <exclude NAME="debian/control"/>
+                  <exclude NAME="debian/dirs"/>
+                  <exclude NAME="debian/patches/series"/>
++                 <exclude NAME="update-history/**"/>
+             </fileset>
+         </rat:report>
+         <exec executable="grep" outputproperty="rat.failed.files" failifexecutionfails="false">
+diff --git a/test/unit/org/apache/cassandra/cql3/BatchTest.java b/test/unit/org/apache/cassandra/cql3/BatchTest.java
+index d0edc40d1b..330271e982 100644
+--- a/test/unit/org/apache/cassandra/cql3/BatchTest.java
++++ b/test/unit/org/apache/cassandra/cql3/BatchTest.java
+@@ -33,7 +33,7 @@ import org.junit.Test;
+ 
+ import java.io.IOException;
+ 
+-public class BatchTests extends CQLTester
++public class BatchTest extends CQLTester
+ {
+     private static EmbeddedCassandraService cassandra;
+ 
+diff --git a/test/unit/org/apache/cassandra/metrics/TableMetricsTest.java b/test/unit/org/apache/cassandra/metrics/TableMetricsTest.java
+index e39cbe300b..bbcced43db 100644
+--- a/test/unit/org/apache/cassandra/metrics/TableMetricsTest.java
++++ b/test/unit/org/apache/cassandra/metrics/TableMetricsTest.java
+@@ -55,9 +55,6 @@ public class TableMetricsTest
+     private static EmbeddedCassandraService cassandra;
+     private static Cluster cluster;
+ 
+-    private static EmbeddedCassandraService cassandra;
+-    private static Cluster cluster;
+-
+     @BeforeClass
+     public static void setup() throws ConfigurationException, IOException
+     {
