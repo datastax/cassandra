@@ -70,6 +70,7 @@ import org.apache.cassandra.service.snapshot.TableSnapshot;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -409,14 +410,31 @@ public class Keyspace
         metric.release();
     }
 
-    // disassociate a cfs from this keyspace instance.
+    /**
+     * Unload the column family. For online services, it will also flush beforehand.
+     *
+     * Because this method is called by schema operations, it will not throw in case
+     * of failures, but just log an error.
+     *
+     * @param cfs the table to unload
+     * @param dropData true when data should also be dropped
+     */
     private void unloadCf(ColumnFamilyStore cfs, boolean dropData)
     {
+        Throwable err = null;
+
         // offline services (e.g. standalone compactor) don't have Memtables or CommitLog. An attempt to flush would
         // throw an exception
         if (!cfs.getTracker().isDummy())
-            cfs.unloadCf();
-        cfs.invalidate(true, dropData);
+            err = Throwables.perform(err, () -> cfs.unloadCf());
+
+        err = Throwables.perform(err, () -> cfs.invalidate(true, dropData));
+
+        if (err != null)
+        {
+            logger.error("Failed to unload {}:", cfs.metadata(), err);
+            JVMStabilityInspector.inspectThrowable(err);
+        }
     }
 
     /**
