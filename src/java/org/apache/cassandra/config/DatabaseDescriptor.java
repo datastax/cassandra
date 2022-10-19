@@ -3703,6 +3703,12 @@ public class DatabaseDescriptor
         return conf.file_cache_size.toMebibytes();
     }
 
+    public static void enableChunkCache(int sizeInMB)
+    {
+        conf.file_cache_enabled = true;
+        conf.file_cache_size = new DataStorageSpec.IntMebibytesBound(sizeInMB);
+    }
+
     public static int getNetworkingCacheSizeInMiB()
     {
         if (conf.networking_cache_size == null)
