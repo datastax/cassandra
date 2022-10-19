@@ -17,6 +17,12 @@
  */
 package org.apache.cassandra.cql3;
 
+import java.io.IOException;
+
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
+import org.junit.Test;
+
 import com.datastax.driver.core.BatchStatement;
 import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.PreparedStatement;
@@ -28,14 +34,7 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.EmbeddedCassandraService;
 
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Ignore;
-import org.junit.Test;
-
 import static org.junit.Assert.assertSame;
-
-import java.io.IOException;
 
 public class BatchTest extends CQLTester
 {
@@ -51,6 +50,10 @@ public class BatchTest extends CQLTester
     @BeforeClass()
     public static void setup() throws ConfigurationException, IOException
     {
+        // Set batch sizes for guardrails to the same values as in Apache
+        // Needed for testOversizedBatch()
+        DatabaseDescriptor.setBatchSizeWarnThresholdInKiB(5);
+        DatabaseDescriptor.setBatchSizeFailThresholdInKiB(50);
         cassandra = ServerTestUtils.startEmbeddedCassandraService();
 
         cluster = Cluster.builder().addContactPoint("127.0.0.1").withPort(DatabaseDescriptor.getNativeTransportPort()).build();
@@ -163,7 +166,6 @@ public class BatchTest extends CQLTester
         sendBatch(BatchStatement.Type.LOGGED, true, false, false);
     }
 
-    @Ignore
     @Test(expected = InvalidQueryException.class)
     public void testOversizedBatch()
     {
