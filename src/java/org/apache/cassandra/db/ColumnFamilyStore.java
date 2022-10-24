@@ -142,6 +142,7 @@ import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
+import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.metrics.KeyspaceMetrics;
 import org.apache.cassandra.metrics.Sampler;
 import org.apache.cassandra.metrics.Sampler.Sample;
@@ -743,9 +744,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     }
 
     @Override
-    public int getKeyspaceReplicationFactor()
+    public AbstractReplicationStrategy getKeyspaceReplicationStrategy()
     {
-        return keyspace.getReplicationStrategy().getReplicationFactor().allReplicas;
+        return keyspace.getReplicationStrategy();
     }
 
     @Override
