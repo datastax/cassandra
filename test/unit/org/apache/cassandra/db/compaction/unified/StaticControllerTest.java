@@ -27,6 +27,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.locator.ReplicationFactor;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_SHARED_STORAGE;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -72,7 +73,7 @@ public class StaticControllerTest extends ControllerTest
         try (WithProperties ignore = new WithProperties().set(UCS_SHARED_STORAGE, true))
         {
             final int rf = 3;
-            when(cfs.getKeyspaceReplicationFactor()).thenReturn(rf);
+            when(replicationStrategy.getReplicationFactor()).thenReturn(ReplicationFactor.fullOnly(rf));
 
             Controller controller = Controller.fromOptions(cfs,  new HashMap<>());
             assertNotNull(controller);
