@@ -39,6 +39,7 @@ import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.TableMetadata;
@@ -82,10 +83,7 @@ public interface CompactionRealm extends SSTableReader.Owner
         return metadata().keyspace;
     }
 
-    /**
-     * @return the replication factor for keyspace that this table belongs to.
-     */
-    int getKeyspaceReplicationFactor();
+    AbstractReplicationStrategy getKeyspaceReplicationStrategy();
 
     /**
      * @return the partitioner used by this table.
