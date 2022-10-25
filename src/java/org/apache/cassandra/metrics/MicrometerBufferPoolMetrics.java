@@ -52,7 +52,7 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
         this.bufferPool = bufferPool;
         MetricNameFactory factory = new DefaultNameFactory("BufferPool", scope);
         this.hits = Metrics.meter(factory.createMetricName("Hits"));
-        this.misses =  Metrics.meter(factory.createMetricName("Misses"));
+        this.misses = Metrics.meter(factory.createMetricName("Misses"));
     }
 
     @Override
@@ -110,5 +110,6 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
     @Override
     public void register3xAlias()
     {
+        // Not implemented
     }
 }

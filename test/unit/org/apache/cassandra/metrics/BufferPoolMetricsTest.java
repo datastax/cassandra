@@ -42,16 +42,16 @@ public class BufferPoolMetricsTest
 {
     private BufferPool bufferPool;
     private BufferPoolMetrics metrics;
-    
-    // Test with both MicrometerBufferPoolMetrics and CodehaleBufferPoolMetrics
-    @Parameterized.Parameters(name = "useMicroMeterMetrics {0}")
+
+    // Test with both MicrometerBufferPoolMetrics and CodahaleBufferPoolMetrics
+    @Parameterized.Parameters(name = "useMicrometerMetrics {0}")
     public static Iterable<Object[]> params()
     {
-        return Arrays.asList(new Object[][] { { false}, { true} });
+        return Arrays.asList(new Object[][]{ { false }, { true } });
     }
 
     @Parameterized.Parameter
-    public boolean useMicroMeterMetrics = false;
+    public boolean useMicrometerMetrics = false;
 
     @BeforeClass()
     public static void setup() throws ConfigurationException
@@ -63,7 +63,7 @@ public class BufferPoolMetricsTest
     public void setUp()
     {
         // The USE_MICROMETER value is used when the BufferPool constructor creates BufferPoolMetrics
-        USE_MICROMETER.setBoolean(useMicroMeterMetrics);
+        USE_MICROMETER.setBoolean(useMicrometerMetrics);
         this.bufferPool = new BufferPool("test_" + System.currentTimeMillis(), 16 * 1024L * 1024L, true);
         this.metrics = bufferPool.metrics();
     }
@@ -73,7 +73,7 @@ public class BufferPoolMetricsTest
     {
         // basically want to test changes in the metric being reported as the buffer pool grows - starts at zero
         assertThat(metrics.size()).isEqualTo(bufferPool.sizeInBytes())
-                                           .isEqualTo(0);
+                                  .isEqualTo(0);
 
         // the idea is to test changes in the sizeOfBufferPool metric which starts at zero. it will bump up
         // after the first request for a ByteBuffer and the idea from there will be to keep requesting them
@@ -97,8 +97,8 @@ public class BufferPoolMetricsTest
             bufferPool.get(nextSizeToRequest, BufferType.OFF_HEAP);
 
             assertThat(metrics.size()).as(assertionMessage)
-                                               .isEqualTo(bufferPool.sizeInBytes())
-                                               .isGreaterThanOrEqualTo(totalBytesRequestedFromPool);
+                                      .isEqualTo(bufferPool.sizeInBytes())
+                                      .isGreaterThanOrEqualTo(totalBytesRequestedFromPool);
 
             if (initialSizeInBytesAfterZero == 0)
             {
@@ -216,13 +216,13 @@ public class BufferPoolMetricsTest
     {
         assertEquals(0, metrics.misses());
         assertThat(metrics.size()).isEqualTo(bufferPool.sizeInBytes())
-                                           .isEqualTo(0);
+                                  .isEqualTo(0);
 
         bufferPool.get(0, BufferType.OFF_HEAP);
 
         assertEquals(0, metrics.misses());
         assertThat(metrics.size()).isEqualTo(bufferPool.sizeInBytes())
-                                           .isEqualTo(0);
+                                  .isEqualTo(0);
 
         bufferPool.get(65536, BufferType.OFF_HEAP);
         bufferPool.get(0, BufferType.OFF_HEAP);
@@ -232,7 +232,7 @@ public class BufferPoolMetricsTest
 
         assertEquals(0, metrics.misses());
         assertThat(metrics.size()).isEqualTo(bufferPool.sizeInBytes())
-                                           .isGreaterThanOrEqualTo(65536);
+                                  .isGreaterThanOrEqualTo(65536);
     }
 
     @Test
@@ -240,13 +240,13 @@ public class BufferPoolMetricsTest
     {
         assertEquals(0, metrics.misses());
         assertThat(metrics.size()).isEqualTo(bufferPool.sizeInBytes())
-                                           .isEqualTo(0);
+                                  .isEqualTo(0);
 
         tryRequestNegativeBufferSize();
 
         assertEquals(0, metrics.misses());
         assertThat(metrics.size()).isEqualTo(bufferPool.sizeInBytes())
-                                           .isEqualTo(0);
+                                  .isEqualTo(0);
 
         bufferPool.get(65536, BufferType.OFF_HEAP);
         tryRequestNegativeBufferSize();
@@ -256,7 +256,7 @@ public class BufferPoolMetricsTest
 
         assertEquals(0, metrics.misses());
         assertThat(metrics.size()).isEqualTo(bufferPool.sizeInBytes())
-                                           .isGreaterThanOrEqualTo(65536);
+                                  .isGreaterThanOrEqualTo(65536);
     }
 
     private void tryRequestNegativeBufferSize()

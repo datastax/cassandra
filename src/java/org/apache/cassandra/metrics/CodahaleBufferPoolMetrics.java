@@ -24,7 +24,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
-class CodehaleBufferPoolMetrics implements BufferPoolMetrics
+class CodahaleBufferPoolMetrics implements BufferPoolMetrics
 {
     /** Total number of hits */
     private final Meter hits;
@@ -45,7 +45,7 @@ class CodehaleBufferPoolMetrics implements BufferPoolMetrics
      */
     public final Gauge<Long> overflowSize;
 
-    public CodehaleBufferPoolMetrics(String scope, BufferPool bufferPool)
+    public CodahaleBufferPoolMetrics(String scope, BufferPool bufferPool)
     {
         MetricNameFactory factory = new DefaultNameFactory("BufferPool", scope);
 

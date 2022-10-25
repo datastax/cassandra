@@ -26,7 +26,7 @@ public interface BufferPoolMetrics
     {
         return CassandraRelevantProperties.USE_MICROMETER.getBoolean()
                ? new MicrometerBufferPoolMetrics(name, bufferPool)
-               : new CodehaleBufferPoolMetrics(name, bufferPool);
+               : new CodahaleBufferPoolMetrics(name, bufferPool);
     }
 
     void markHit();
@@ -34,11 +34,11 @@ public interface BufferPoolMetrics
     long hits();
 
     void markMissed();
-    
+
     long misses();
-    
+
     long overflowSize();
-    
+
     long usedSize();
 
     long size();
