@@ -23,8 +23,6 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import org.apache.cassandra.utils.memory.BufferPool;
 
-import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
-
 public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements BufferPoolMetrics
 {
     private static final String METRICS_PREFIX = "buffer_pool";
@@ -33,6 +31,7 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
     public static final String USED_SIZE_BYTES = METRICS_PREFIX + "_used_size_bytes";
     public static final String OVERFLOW_SIZE_BYTES = METRICS_PREFIX + "_overflow_size_bytes";
     public static final String OVERFLOW_ALLOCATIONS = METRICS_PREFIX + "_overflow_allocations";
+    public static final String POOL_ALLOCATIONS = METRICS_PREFIX + "_pool_allocations";
     public static final String NAME_TAG = "pool_name";
 
     private final String scope;
@@ -50,9 +49,8 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
 
         this.scope = scope;
         this.bufferPool = bufferPool;
-        MetricNameFactory factory = new DefaultNameFactory("BufferPool", scope);
-        this.hits = Metrics.meter(factory.createMetricName("Hits"));
-        this.misses = Metrics.meter(factory.createMetricName("Misses"));
+        this.hits = new Meter();
+        this.misses = new Meter();
     }
 
     @Override
@@ -64,6 +62,7 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
         gauge(USED_SIZE_BYTES, bufferPool, BufferPool::usedSizeInBytes);
         gauge(OVERFLOW_SIZE_BYTES, bufferPool, BufferPool::overflowMemoryInBytes);
         gauge(OVERFLOW_ALLOCATIONS, misses, Meter::getMeanRate);
+        gauge(POOL_ALLOCATIONS, hits, Meter::getMeanRate);
     }
 
     @Override
