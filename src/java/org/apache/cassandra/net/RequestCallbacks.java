@@ -67,6 +67,8 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     private final ScheduledExecutorService executor = new DebuggableScheduledThreadPoolExecutor("Callback-Map-Reaper");
     private final ConcurrentMap<CallbackKey, CallbackInfo> callbacks = new ConcurrentHashMap<>();
 
+    private volatile boolean shutdown;
+
     RequestCallbacks(MessagingService messagingService)
     {
         this.messagingService = messagingService;
@@ -100,6 +102,11 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     {
         // mutations need to call the overload with a ConsistencyLevel
         assert message.verb() != Verb.MUTATION_REQ && message.verb() != Verb.COUNTER_MUTATION_REQ && message.verb() != Verb.PAXOS_COMMIT_REQ;
+        if (shutdown)
+        {
+            logger.debug("Received request after messaging service shutdown so ignoring it");
+            return;
+        }
         CallbackInfo previous = callbacks.put(key(message.id(), to), new CallbackInfo(message, to, cb));
         assert previous == null : format("Callback already exists for id %d/%s! (%s)", message.id(), to, previous);
     }
@@ -112,6 +119,11 @@ public class RequestCallbacks implements OutboundMessageCallbacks
                                   boolean allowHints)
     {
         assert message.verb() == Verb.MUTATION_REQ || message.verb() == Verb.COUNTER_MUTATION_REQ || message.verb() == Verb.PAXOS_COMMIT_REQ;
+        if (shutdown)
+        {
+            logger.debug("Received request after messaging service shutdown so ignoring it");
+            return;
+        }
         CallbackInfo previous = callbacks.put(key(message.id(), to.endpoint()), new WriteCallbackInfo(message, to, cb, consistencyLevel, allowHints));
         assert previous == null : format("Callback already exists for id %d/%s! (%s)", message.id(), to.endpoint(), previous);
     }
@@ -181,6 +193,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
 
     void shutdownNow(boolean expireCallbacks)
     {
+        shutdown = true;
         executor.shutdownNow();
         if (expireCallbacks)
             forceExpire();
@@ -188,6 +201,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
 
     void shutdownGracefully()
     {
+        shutdown = true;
         expire();
         if (!callbacks.isEmpty())
             executor.schedule(this::shutdownGracefully, 100L, MILLISECONDS);
