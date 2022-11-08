@@ -104,7 +104,8 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         assert message.verb() != Verb.MUTATION_REQ && message.verb() != Verb.COUNTER_MUTATION_REQ && message.verb() != Verb.PAXOS_COMMIT_REQ;
         if (shutdown)
         {
-            logger.debug("Received request after messaging service shutdown so ignoring it");
+            if (logger.isTraceEnabled())
+                logger.trace("Received request after messaging service shutdown so ignoring it");
             return;
         }
         CallbackInfo previous = callbacks.put(key(message.id(), to), new CallbackInfo(message, to, cb));
@@ -121,7 +122,8 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         assert message.verb() == Verb.MUTATION_REQ || message.verb() == Verb.COUNTER_MUTATION_REQ || message.verb() == Verb.PAXOS_COMMIT_REQ;
         if (shutdown)
         {
-            logger.debug("Received request after messaging service shutdown so ignoring it");
+            if (logger.isTraceEnabled())
+                logger.trace("Received request after messaging service shutdown so ignoring it");
             return;
         }
         CallbackInfo previous = callbacks.put(key(message.id(), to.endpoint()), new WriteCallbackInfo(message, to, cb, consistencyLevel, allowHints));
