@@ -42,7 +42,7 @@ public class AdaptiveControllerTest extends ControllerTest
 
     private final int minW = -10;
     private final int maxW = 64;
-    private final int W = 0;
+    private final int[] Ws = {0};
     private final int interval = 60;
     private final int minCost = 5;
     private final double baseCost = minCost * 5;
@@ -64,7 +64,7 @@ public class AdaptiveControllerTest extends ControllerTest
     {
         return new AdaptiveController(clock,
                                       env,
-                                      W,
+                                      Ws,
                                       Controller.DEFAULT_SURVIVAL_FACTORS,
                                       dataSizeGB << 10,
                                       numShards,
@@ -185,7 +185,7 @@ public class AdaptiveControllerTest extends ControllerTest
 
         // no update, not enough time elapsed
         controller.onStrategyBackgroundTaskRequest();
-        assertEquals(W, controller.getScalingParameter(0));
+        assertEquals(Ws[0], controller.getScalingParameter(0));
     }
 
     @Test
@@ -201,7 +201,7 @@ public class AdaptiveControllerTest extends ControllerTest
 
         clock.setNowInNanos(clock.now() + TimeUnit.SECONDS.toNanos(interval + 1));
         controller.onStrategyBackgroundTaskRequest();
-        assertEquals(W, controller.getScalingParameter(0));
+        assertEquals(Ws[0], controller.getScalingParameter(0));
     }
 
     @Test

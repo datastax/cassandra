@@ -380,7 +380,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
 
         Controller controller = adaptive
                                 ? new AdaptiveController(MonotonicClock.preciseTime,
-                                                         new SimulatedEnvironment(counters, valueSize), Ws[0],
+                                                         new SimulatedEnvironment(counters, valueSize), Ws,
                                                          new double[] { o },
                                                          datasetSizeGB << 10,  // MB
                                                          numShards,

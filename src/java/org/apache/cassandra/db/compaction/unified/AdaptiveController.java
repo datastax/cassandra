@@ -78,13 +78,13 @@ public class AdaptiveController extends Controller
     private final double threshold;
     private final int minCost;
 
-    private volatile int W;
+    private volatile int[] Ws;
     private volatile long lastChecked;
 
     @VisibleForTesting
     public AdaptiveController(MonotonicClock clock,
                               Environment env,
-                              int W,
+                              int[] Ws,
                               double[] survivalFactors,
                               long dataSetSizeMB,
                               int numShards,
@@ -103,7 +103,7 @@ public class AdaptiveController extends Controller
     {
         super(clock, env, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled);
 
-        this.W = W;
+        this.Ws = Ws;
         this.intervalSec = intervalSec;
         this.minW = minW;
         this.maxW = maxW;
@@ -125,13 +125,16 @@ public class AdaptiveController extends Controller
                                   Map<String, String> options)
     {
         int W = options.containsKey(STARTING_SCALING_PARAMETER) ? Integer.parseInt(options.get(STARTING_SCALING_PARAMETER)) : DEFAULT_STARTING_SCALING_PARAMETER;
+        int Ws[] = new int[32];
+        //set W for each level to the starting scaling parameter or default scaling parameter
+        Arrays.fill(Ws, W);
         int minW = options.containsKey(MIN_SCALING_PARAMETER) ? Integer.parseInt(options.get(MIN_SCALING_PARAMETER)) : DEFAULT_MIN_SCALING_PARAMETER;
         int maxW = options.containsKey(MAX_SCALING_PARAMETER) ? Integer.parseInt(options.get(MAX_SCALING_PARAMETER)) : DEFAULT_MAX_SCALING_PARAMETER;
         int intervalSec = options.containsKey(INTERVAL_SEC) ? Integer.parseInt(options.get(INTERVAL_SEC)) : DEFAULT_INTERVAL_SEC;
         double threshold = options.containsKey(THRESHOLD) ? Double.parseDouble(options.get(THRESHOLD)) : DEFAULT_THRESHOLD;
         int minCost = options.containsKey(MIN_COST) ? Integer.parseInt(options.get(MIN_COST)) : DEFAULT_MIN_COST;
 
-        return new AdaptiveController(MonotonicClock.preciseTime, env, W, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled, intervalSec, minW, maxW, threshold, minCost);
+        return new AdaptiveController(MonotonicClock.preciseTime, env, Ws, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled, intervalSec, minW, maxW, threshold, minCost);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
@@ -190,7 +193,10 @@ public class AdaptiveController extends Controller
     @Override
     public int getScalingParameter(int index)
     {
-        return W;
+        if (index < 0)
+            throw new IllegalArgumentException("Index should be >= 0: " + index);
+
+        return index < Ws.length ? Ws[index] : Ws[Ws.length - 1];
     }
 
     @Override
@@ -258,8 +264,8 @@ public class AdaptiveController extends Controller
     {
         final long targetSize = Math.max(getDataSetSizeBytes(), (long) Math.ceil(calculator.spaceUsed()));
 
-        final int RA = readAmplification(targetSize, W);
-        final int WA = writeAmplification(targetSize, W);
+        final int RA = readAmplification(targetSize, Ws[0]);
+        final int WA = writeAmplification(targetSize, Ws[0]);
 
         final double readCost = calculator.getReadCostForQueries(RA);
         final double writeCost = calculator.getWriteCostForQueries(WA);
@@ -267,20 +273,20 @@ public class AdaptiveController extends Controller
 
         if (cost <= minCost)
         {
-            logger.debug("Adaptive compaction controller not updated, cost for current W {} is below minimum cost {}: read cost: {}, write cost: {}\\nAverages: {}", W, minCost, readCost, writeCost, calculator);
+            logger.debug("Adaptive compaction controller not updated, cost for current W {} is below minimum cost {}: read cost: {}, write cost: {}\\nAverages: {}", Ws[0], minCost, readCost, writeCost, calculator);
             return;
         }
 
         final double[] totCosts = new double[maxW - minW + 1];
         final double[] readCosts = new double[maxW - minW + 1];
         final double[] writeCosts = new double[maxW - minW + 1];
-        int candW = W;
+        int candW = Ws[0];
         double candCost = cost;
 
         for (int i = minW; i <= maxW; i++)
         {
             final int idx = i - minW;
-            if (i == W)
+            if (i == Ws[0])
             {
                 readCosts[idx] = readCost;
                 writeCosts[idx] = writeCost;
@@ -314,14 +320,26 @@ public class AdaptiveController extends Controller
         StringBuilder str = new StringBuilder(100);
         str.append("Adaptive compaction controller ");
 
-        if (W != candW && (cost - candCost) >= threshold * cost)
+        if (Ws[0] != candW && (cost - candCost) >= threshold * cost)
         {
-            str.append("updated ").append(W).append(" -> ").append(candW);
-            this.W = candW;
+            //W is updated
+            str.append("updated ").append(Ws[0]).append(" -> ").append(candW);
+            //update W for each level, (Ws[0] becomes candW, Ws[1] becoems previous Ws[0], Ws[2] becomes previous Ws[1], ...)
+            for (int i = Ws.length-1; i > 0; i--)
+            {
+                this.Ws[i] = Ws[i-1];
+            }
+            this.Ws[0] = candW;
         }
         else
         {
+            //W is not updated
             str.append("unchanged");
+            //update W for each level except level 0
+            for (int i = Ws.length-1; i > 0; i--)
+            {
+                this.Ws[i] = Ws[i-1];
+            }
         }
 
         str.append(", data size: ").append(FBUtilities.prettyPrintMemory(targetSize));
@@ -335,6 +353,6 @@ public class AdaptiveController extends Controller
     @Override
     public String toString()
     {
-        return String.format("m: %d, o: %s, W: %s - %s", minSstableSizeMB, Arrays.toString(survivalFactors), W, calculator);
+        return String.format("m: %d, o: %s, W: %s - %s", minSstableSizeMB, Arrays.toString(survivalFactors), Ws, calculator);
     }
 }
