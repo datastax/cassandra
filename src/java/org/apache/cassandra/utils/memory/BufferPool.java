@@ -191,7 +191,7 @@ public class BufferPool
         this.memoryUsageThreshold = memoryUsageThreshold;
         this.readableMemoryUsageThreshold = prettyPrintMemory(memoryUsageThreshold);
         this.globalPool = new GlobalPool();
-        this.metrics = new BufferPoolMetrics(name, this);
+        this.metrics = BufferPoolMetrics.create(name, this);
         this.recyclePartially = recyclePartially;
         this.localPoolCleaner = executorFactory().infiniteLoop("LocalPool-Cleaner-" + name, this::cleanupOneReference, UNSAFE);
     }
@@ -940,19 +940,19 @@ public class BufferPool
             }
             else if (size > NORMAL_CHUNK_SIZE)
             {
-                metrics.misses.mark();
+                metrics.markMissed();
                 return null;
             }
 
             ByteBuffer ret = pool.tryGetInternal(size, sizeIsLowerBound);
             if (ret != null)
             {
-                metrics.hits.mark();
+                metrics.markHit();
                 memoryInUse.add(ret.capacity());
             }
             else
             {
-                metrics.misses.mark();
+                metrics.markMissed();
             }
             return ret;
         }
