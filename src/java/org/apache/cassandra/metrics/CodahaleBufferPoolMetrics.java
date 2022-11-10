@@ -36,14 +36,14 @@ class CodahaleBufferPoolMetrics implements BufferPoolMetrics
     private final Gauge<Long> size;
 
     /** Total size, in bytes, of active buffered being used from the pool currently + overflow */
-    public final Gauge<Long> usedSize;
+    private final Gauge<Long> usedSize;
 
     /**
      * Total size, in bytes, of direct or heap buffers allocated by the pool but not part of the pool
      * either because they are too large to fit or because the pool has exceeded its maximum limit or because it's
      * on-heap allocation.
      */
-    public final Gauge<Long> overflowSize;
+    private final Gauge<Long> overflowSize;
 
     public CodahaleBufferPoolMetrics(String scope, BufferPool bufferPool)
     {
