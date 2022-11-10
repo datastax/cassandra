@@ -320,26 +320,18 @@ public class AdaptiveController extends Controller
         StringBuilder str = new StringBuilder(100);
         str.append("Adaptive compaction controller ");
 
+        //make room for the new choice of W
+        System.arraycopy(Ws, 0, Ws, 1, Ws.length - 1);
         if (Ws[0] != candW && (cost - candCost) >= threshold * cost)
         {
             //W is updated
             str.append("updated ").append(Ws[0]).append(" -> ").append(candW);
-            //update W for each level, (Ws[0] becomes candW, Ws[1] becoems previous Ws[0], Ws[2] becomes previous Ws[1], ...)
-            for (int i = Ws.length-1; i > 0; i--)
-            {
-                this.Ws[i] = Ws[i-1];
-            }
             this.Ws[0] = candW;
         }
         else
         {
             //W is not updated
             str.append("unchanged");
-            //update W for each level except level 0
-            for (int i = Ws.length-1; i > 0; i--)
-            {
-                this.Ws[i] = Ws[i-1];
-            }
         }
 
         str.append(", data size: ").append(FBUtilities.prettyPrintMemory(targetSize));
@@ -353,6 +345,6 @@ public class AdaptiveController extends Controller
     @Override
     public String toString()
     {
-        return String.format("m: %d, o: %s, W: %s - %s", minSstableSizeMB, Arrays.toString(survivalFactors), Ws, calculator);
+        return String.format("m: %d, o: %s, W: %s - %s", minSstableSizeMB, Arrays.toString(survivalFactors), Arrays.toString(Ws), calculator);
     }
 }
