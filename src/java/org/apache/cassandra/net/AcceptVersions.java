@@ -22,12 +22,18 @@ package org.apache.cassandra.net;
  */
 class AcceptVersions
 {
-    final int min, max;
+    final int min, max, dse;
 
     AcceptVersions(int min, int max)
     {
+        this(min, max, -1);
+    }
+
+    AcceptVersions(int min, int max, int dse)
+    {
         this.min = min;
         this.max = max;
+        this.dse = dse;
     }
 
     @Override
@@ -37,6 +43,7 @@ class AcceptVersions
             return false;
 
         return min == ((AcceptVersions) that).min
-            && max == ((AcceptVersions) that).max;
+               && max == ((AcceptVersions) that).max
+               && dse == ((AcceptVersions) that).dse;
     }
 }
