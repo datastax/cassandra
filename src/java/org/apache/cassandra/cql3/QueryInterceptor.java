@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 
 import javax.annotation.Nullable;
 
+import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -37,8 +38,25 @@ public interface QueryInterceptor
      * otherwise returns <code>null</code>
      */
     @Nullable
-    ResultMessage interceptStatement(CQLStatement statement,
-                                     QueryState queryState,
-                                     QueryOptions options,
-                                     long queryStartNanoTime);
+    default ResultMessage interceptStatement(CQLStatement statement,
+                                             QueryState queryState,
+                                             QueryOptions options,
+                                             long queryStartNanoTime)
+    {
+        return null;
+    }
+
+
+    /**
+     * Intercept a batch statement and process it if necessary. If the interceptor processes the batch statement, it
+     * returns a {@link ResultMessage}, otherwise returns <code>null</code>.
+     */
+    @Nullable
+    default ResultMessage interceptBatchStatement(BatchStatement batch,
+                                                  QueryState state,
+                                                  BatchQueryOptions options,
+                                                  long queryStartNanoTime)
+    {
+        return null;
+    }
 }

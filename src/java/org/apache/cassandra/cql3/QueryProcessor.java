@@ -791,6 +791,15 @@ public class QueryProcessor implements QueryHandler
     {
         ClientState clientState = queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace());
         Tracing.setupTracedKeyspace(batch);
+
+        for (QueryInterceptor interceptor: interceptors)
+        {
+            ResultMessage result = interceptor.interceptBatchStatement(batch, queryState, options, queryStartNanoTime);
+
+            if (result != null)
+                return result;
+        }
+
         batch.authorize(clientState);
         batch.validate();
         batch.validate(queryState);
