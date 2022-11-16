@@ -230,9 +230,10 @@ public enum ConsistencyLevel
     }
 
     // This is the same than validateForWrite really, but we include a slightly different error message for SERIAL/LOCAL_SERIAL
-    public void validateForCasCommit(AbstractReplicationStrategy replicationStrategy, String keyspaceName, QueryState queryState) throws InvalidRequestException
+    public void validateForCasCommit(AbstractReplicationStrategy replicationStrategy, String keyspaceName, QueryState queryState, boolean skipGuardrail) throws InvalidRequestException
     {
-        Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
+        if (!skipGuardrail)
+            Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
 
         switch (this)
         {
