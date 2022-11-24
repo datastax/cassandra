@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.guardrails;
 
+import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -305,6 +306,21 @@ public abstract class GuardrailTester extends CQLTester
         }
     }
 
+    protected long getMinNotifyInterval(Guardrail guardrail) throws Exception
+    {
+        Field intervalField = DefaultGuardrail.class.getDeclaredField("minNotifyIntervalInMs");
+        intervalField.setAccessible(true);
+        long interval = (Long)intervalField.get(guardrail);
+        intervalField.setAccessible(false);
+        return interval;
+    }
+
+    protected void setMinNotifyInterval(Guardrail guardrail, long interval)
+    {
+        ((DefaultGuardrail)guardrail).setMinNotifyIntervalInMs(interval);
+        ((DefaultGuardrail)guardrail).resetLastNotifyTime();
+    }
+
     static class TestListener implements Guardrails.Listener
     {
         @Nullable
@@ -360,7 +376,7 @@ public abstract class GuardrailTester extends CQLTester
             for (String msg : expectedMessages)
             {
                 assertTrue(String.format("Warning messages '%s' don't contain the expected '%s'", warnings, msg),
-                           warnings.stream().anyMatch(m -> m.contains(msg)));
+                           warnings.stream().anyMatch(m -> m.matches(msg)));
             }
         }
 
