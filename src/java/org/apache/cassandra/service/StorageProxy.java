@@ -463,7 +463,7 @@ public class StorageProxy implements StorageProxyMBean
         try
         {
             consistencyForPaxos.validateForCas(keyspaceName, state);
-            consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName, state, false);
+            consistencyForCommit.validateForCasCommit(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName, state);
 
             Supplier<Pair<PartitionUpdate, RowIterator>> updateProposer = () ->
             {
@@ -601,7 +601,7 @@ public class StorageProxy implements StorageProxyMBean
      *     this operation and 2) the result that the whole method should return. This can return {@code null} in the
      *     special where, after having "prepared" (and thus potentially replayed in-progress upgdates), we don't want
      *     to propose anything (the whole method then return {@code null}).
-     * @param skipGuardrailForCommitConsistency whether to skip {@link Guardrails#disallowedWriteConsistencies} for commit consistency
+     * @param skipCommitConsistencyValidation whether to skip {@link ConsistencyLevel#validateForCasCommit} for commit consistency
      * @return the second element of the pair returned by {@code createUpdateProposal} (for the last call of that method
      *     if that method is called multiple times due to retries).
      */
@@ -614,7 +614,7 @@ public class StorageProxy implements StorageProxyMBean
                                        long queryStartNanoTime,
                                        CASClientRequestMetrics casMetrics,
                                        Supplier<Pair<PartitionUpdate, RowIterator>> createUpdateProposal,
-                                       boolean skipGuardrailForCommitConsistency)
+                                       boolean skipCommitConsistencyValidation)
     throws UnavailableException, IsBootstrappingException, RequestFailureException, RequestTimeoutException, InvalidRequestException
     {
         int contentions = 0;
@@ -623,8 +623,9 @@ public class StorageProxy implements StorageProxyMBean
         try
         {
             consistencyForPaxos.validateForCas(metadata.keyspace, queryState);
-            consistencyForReplayCommits.validateForCasCommit(latestRs, metadata.keyspace, queryState, false);
-            consistencyForCommit.validateForCasCommit(latestRs, metadata.keyspace, queryState, skipGuardrailForCommitConsistency);
+            consistencyForReplayCommits.validateForCasCommit(latestRs, metadata.keyspace, queryState);
+            if (skipCommitConsistencyValidation)
+                consistencyForCommit.validateForCasCommit(latestRs, metadata.keyspace, queryState);
 
             long timeoutNanos = DatabaseDescriptor.getCasContentionTimeout(NANOSECONDS);
             while (System.nanoTime() - queryStartNanoTime < timeoutNanos)
