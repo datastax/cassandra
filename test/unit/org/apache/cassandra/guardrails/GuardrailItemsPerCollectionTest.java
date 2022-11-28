@@ -348,6 +348,7 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
 
         // only the non frozen collections will produce a warning during sstable write
         assertWarnedOnSSTableWrite(false,
+                                   true,
                                    format(".*Detected collection .* in table .* with %d items.*", THRESHOLD + 1),
                                    format(".*Detected collection .* in table .* with %d items.*", THRESHOLD + 2),
                                    format(".*Detected collection .* in table .* with %d items.*", THRESHOLD + 3));
@@ -396,7 +397,7 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
         assertValid("INSERT INTO %s (k, v) VALUES (2, ?)", set(THRESHOLD + 1));
 
         // sstable should produces warnings because the keyspace is not internal, regardless of the user
-        assertWarnedOnSSTableWrite(false, SSTABLE_WRITE_WARN_MESSAGE, SSTABLE_WRITE_WARN_MESSAGE);
+        assertWarnedOnSSTableWrite(false, true, SSTABLE_WRITE_WARN_MESSAGE, SSTABLE_WRITE_WARN_MESSAGE);
     }
 
     @Test
@@ -426,7 +427,7 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
         // because it is withing the minimum notification interval
         listener.clear();
         flush(keyspace());
-        listener.assertContainsWarns(SSTABLE_WRITE_WARN_MESSAGE);
+        listener.assertMatchesWarns(SSTABLE_WRITE_WARN_MESSAGE);
         listener.assertNotFailed();
     }
 
@@ -473,11 +474,11 @@ public class GuardrailItemsPerCollectionTest extends GuardrailWarningOnSSTableWr
 
     private void assertWarnedOnFlush()
     {
-        assertWarnedOnFlush(SSTABLE_WRITE_WARN_MESSAGE);
+        assertWarnedOnFlush(true, SSTABLE_WRITE_WARN_MESSAGE);
     }
 
     private void assertWarnedOnCompact()
     {
-        assertWarnedOnCompact(SSTABLE_WRITE_WARN_MESSAGE);
+        assertWarnedOnCompact(true, SSTABLE_WRITE_WARN_MESSAGE);
     }
 }

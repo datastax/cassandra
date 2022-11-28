@@ -376,6 +376,16 @@ public abstract class GuardrailTester extends CQLTester
             for (String msg : expectedMessages)
             {
                 assertTrue(String.format("Warning messages '%s' don't contain the expected '%s'", warnings, msg),
+                           warnings.stream().anyMatch(m -> m.contains(msg)));
+            }
+        }
+
+        synchronized void assertMatchesWarns(String... expectedMessages)
+        {
+            assertFalse(warnings.isEmpty());
+            for (String msg : expectedMessages)
+            {
+                assertTrue(String.format("Warning messages '%s' don't contain the expected '%s'", warnings, msg),
                            warnings.stream().anyMatch(m -> m.matches(msg)));
             }
         }
@@ -396,6 +406,7 @@ public abstract class GuardrailTester extends CQLTester
         {
             if (guardrail == null || guardrailName.equals(guardrail.name))
             {
+                System.out.println("Adding warning: " + message);
                 warnings.add(message);
             }
         }
@@ -405,6 +416,7 @@ public abstract class GuardrailTester extends CQLTester
         {
             if (guardrail == null || guardrailName.equals(guardrail.name))
             {
+                System.out.println("Adding failure: " + message);
                 failures.add(message);
             }
         }
