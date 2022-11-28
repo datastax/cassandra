@@ -29,6 +29,8 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICoordinator;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.DISK_USAGE_NOTIFY_INTERVAL_MS;
+
 /**
  * Tests the guardrail for the number of items on a collection, {@link Guardrails#itemsPerCollection}.
  * <p>
@@ -48,6 +50,8 @@ public class GuardrailItemsPerCollectionOnSSTableWriteTest extends GuardrailTest
     @BeforeClass
     public static void setupCluster() throws IOException
     {
+        // Ensure guardrail notifications are not suppressed
+        DISK_USAGE_NOTIFY_INTERVAL_MS.setLong(0L);
         cluster = init(Cluster.build(NUM_NODES)
                               .withConfig(c -> c.set("items_per_collection_warn_threshold", WARN_THRESHOLD)
                                                 .set("items_per_collection_fail_threshold", FAIL_THRESHOLD))
@@ -59,6 +63,7 @@ public class GuardrailItemsPerCollectionOnSSTableWriteTest extends GuardrailTest
     @AfterClass
     public static void teardownCluster()
     {
+        DISK_USAGE_NOTIFY_INTERVAL_MS.reset();
         if (cluster != null)
             cluster.close();
     }

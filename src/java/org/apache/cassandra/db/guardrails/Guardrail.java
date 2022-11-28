@@ -162,11 +162,16 @@ public abstract class Guardrail
      *                              default 0 means always log and trigger listeners.
      * @return current guardrail
      */
-    Guardrail minNotifyIntervalInMs(long minNotifyIntervalInMs)
+    public Guardrail minNotifyIntervalInMs(long minNotifyIntervalInMs)
     {
         assert minNotifyIntervalInMs >= 0;
         this.minNotifyIntervalInMs = minNotifyIntervalInMs;
         return this;
+    }
+    
+    public long minNotifyIntervalInMs()
+    {
+        return minNotifyIntervalInMs;
     }
 
     /**

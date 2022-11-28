@@ -31,6 +31,7 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.Feature;
 
 import static java.nio.ByteBuffer.allocate;
+import static org.apache.cassandra.config.CassandraRelevantProperties.DISK_USAGE_NOTIFY_INTERVAL_MS;
 
 /**
  * Tests the guardrail for the size of collections, {@link Guardrails#collectionSize}.
@@ -48,10 +49,13 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
     private static Cluster cluster;
     private static com.datastax.driver.core.Cluster driverCluster;
     private static Session driverSession;
+    private static long savedMinNotifyInterval;
 
     @BeforeClass
     public static void setupCluster() throws IOException
     {
+        // Ensure guardrail notifications are not suppressed
+        DISK_USAGE_NOTIFY_INTERVAL_MS.setLong(0L);
         cluster = init(Cluster.build(NUM_NODES)
                               .withConfig(c -> c.with(Feature.GOSSIP, Feature.NATIVE_PROTOCOL)
                                                 .set("collection_size_warn_threshold", WARN_THRESHOLD + "B")
@@ -65,6 +69,7 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
     @AfterClass
     public static void teardownCluster()
     {
+        DISK_USAGE_NOTIFY_INTERVAL_MS.reset();
         if (driverSession != null)
             driverSession.close();
 
@@ -416,6 +421,30 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
 
         execute("INSERT INTO %s (k, c1, c2, v) VALUES (2, 20, 'b', ?)", set(allocate(FAIL_THRESHOLD)));
         assertFailedOnFlush(failMessage("(2, 20, 'b')"));
+    }
+
+    @Test
+    public void testGuardrailRespectsMinimumNotificationInterval() throws Throwable
+    {
+        schemaChange("CREATE TABLE %s (k int PRIMARY KEY, v set<text>)");
+
+        execute("INSERT INTO %s (k, v) VALUES (0, null)");
+        assertNotWarnedOnFlush();
+        execute("INSERT INTO %s (k, v) VALUES (1, ?)", set(allocate(WARN_THRESHOLD)));
+        assertWarnedOnFlush();
+
+        Guardrails.collectionSize.minNotifyIntervalInMs(2000L);
+
+        execute("INSERT INTO %s (k, v) VALUES (2, ?)", set(allocate(WARN_THRESHOLD)));
+        assertWarnedOnFlush();
+        execute("INSERT INTO %s (k, v) VALUES (3, ?)", set(allocate(WARN_THRESHOLD)));
+        assertNotWarnedOnFlush();
+
+        Thread.sleep(2500L);
+
+        execute("INSERT INTO %s (k, v) VALUES (2, ?)", set(allocate(WARN_THRESHOLD)));
+        assertWarnedOnFlush(warnMessage("5"));
+        assertNotWarnedOnFlush();
     }
 
     private void execute(String query, Object... args)

@@ -26,6 +26,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import org.junit.After;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DataStorageSpec;
@@ -47,6 +49,7 @@ public class GuardrailCollectionSizeTest extends ThresholdTester
 {
     private static final int WARN_THRESHOLD = 1024; // bytes
     private static final int FAIL_THRESHOLD = WARN_THRESHOLD * 4; // bytes
+    private static long savedMinNotifyInterval;
 
     public GuardrailCollectionSizeTest()
     {
@@ -60,6 +63,19 @@ public class GuardrailCollectionSizeTest extends ThresholdTester
               size -> new DataStorageSpec.LongBytesBound(size).toBytes());
     }
 
+    @BeforeClass
+    public static void setup()
+    {
+        savedMinNotifyInterval = Guardrails.collectionSize.minNotifyIntervalInMs();
+        Guardrails.collectionSize.minNotifyIntervalInMs(0);
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
+        Guardrails.collectionSize.minNotifyIntervalInMs(savedMinNotifyInterval);
+    }
+    
     @After
     public void after()
     {
