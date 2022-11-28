@@ -25,6 +25,8 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.junit.After;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -42,6 +44,7 @@ public class GuardrailItemsPerCollectionTest extends ThresholdTester
 {
     private static final int WARN_THRESHOLD = 10;
     private static final int FAIL_THRESHOLD = 20;
+    private static long savedMinNotifyInterval;
 
     public GuardrailItemsPerCollectionTest()
     {
@@ -51,6 +54,19 @@ public class GuardrailItemsPerCollectionTest extends ThresholdTester
               Guardrails::setItemsPerCollectionThreshold,
               Guardrails::getItemsPerCollectionWarnThreshold,
               Guardrails::getItemsPerCollectionFailThreshold);
+    }
+
+    @BeforeClass
+    public static void setup()
+    {
+        savedMinNotifyInterval = Guardrails.itemsPerCollection.minNotifyIntervalInMs();
+        Guardrails.itemsPerCollection.minNotifyIntervalInMs(0);
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
+        Guardrails.itemsPerCollection.minNotifyIntervalInMs(savedMinNotifyInterval);
     }
 
     @After
