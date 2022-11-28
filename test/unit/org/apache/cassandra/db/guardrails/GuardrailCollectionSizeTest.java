@@ -26,6 +26,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import org.junit.After;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DataStorageSpec;
@@ -47,6 +49,7 @@ public class GuardrailCollectionSizeTest extends ThresholdTester
 {
     private static final int WARN_THRESHOLD = 1024; // bytes
     private static final int FAIL_THRESHOLD = WARN_THRESHOLD * 4; // bytes
+    private static long savedMinNotifyInterval;
 
     public GuardrailCollectionSizeTest()
     {
@@ -60,6 +63,19 @@ public class GuardrailCollectionSizeTest extends ThresholdTester
               size -> new DataStorageSpec.LongBytesBound(size).toBytes());
     }
 
+    @BeforeClass
+    public static void setup()
+    {
+        savedMinNotifyInterval = Guardrails.collectionSize.minNotifyIntervalInMs();
+        Guardrails.collectionSize.minNotifyIntervalInMs(0);
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
+        Guardrails.collectionSize.minNotifyIntervalInMs(savedMinNotifyInterval);
+    }
+    
     @After
     public void after()
     {
@@ -217,6 +233,33 @@ public class GuardrailCollectionSizeTest extends ThresholdTester
 
         assertWarns("INSERT INTO %s (k, v) VALUES (6, ?)", map(allocate(FAIL_THRESHOLD / 4), allocate(FAIL_THRESHOLD / 4)));
         assertWarns("UPDATE %s SET v = v + ? WHERE k = 6", map(allocate(FAIL_THRESHOLD / 4 + 1), allocate(FAIL_THRESHOLD / 4)));
+    }
+
+    @Test
+    public void testGuardrailRespectsMinimumNotificationInterval() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v set<text>)");
+
+        assertValid("INSERT INTO %s (k, v) VALUES (0, null)");
+        assertWarns("INSERT INTO %s (k, v) VALUES (1, ?)", set(allocate(WARN_THRESHOLD)));
+
+        long previousNotifyInterval = Guardrails.collectionSize.minNotifyIntervalInMs();
+        Guardrails.collectionSize.minNotifyIntervalInMs(2000L);
+        Guardrails.collectionSize.resetLastNotifyTime();
+
+        try
+        {
+            assertWarns("INSERT INTO %s (k, v) VALUES (2, ?)", set(allocate(WARN_THRESHOLD)));
+            assertValid("INSERT INTO %s (k, v) VALUES (3, ?)", set(allocate(WARN_THRESHOLD)));
+
+            Thread.sleep(2500L);
+
+            assertWarns("INSERT INTO %s (k, v) VALUES (2, ?)", set(allocate(WARN_THRESHOLD)));
+        }
+        finally
+        {
+            Guardrails.collectionSize.minNotifyIntervalInMs(previousNotifyInterval);
+        }
     }
 
     @Override
