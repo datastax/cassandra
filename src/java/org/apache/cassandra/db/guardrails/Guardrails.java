@@ -495,6 +495,8 @@ public final class Guardrails implements GuardrailsMBean
         long minNotifyInterval = CassandraRelevantProperties.DISK_USAGE_NOTIFY_INTERVAL_MS.getLong();
         localDataDiskUsage.minNotifyIntervalInMs(minNotifyInterval);
         replicaDiskUsage.minNotifyIntervalInMs(minNotifyInterval);
+        collectionSize.minNotifyIntervalInMs(minNotifyInterval);
+        itemsPerCollection.minNotifyIntervalInMs(minNotifyInterval);
     }
 
     /**
