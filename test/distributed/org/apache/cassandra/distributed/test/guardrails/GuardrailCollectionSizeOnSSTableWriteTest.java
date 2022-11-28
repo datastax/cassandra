@@ -32,6 +32,7 @@ import org.apache.cassandra.distributed.api.Feature;
 
 import static java.nio.ByteBuffer.allocate;
 import static org.apache.cassandra.config.CassandraRelevantProperties.ENABLE_GUARDRAILS_FOR_ANONYMOUS_USER;
+import static org.apache.cassandra.config.CassandraRelevantProperties.DISK_USAGE_NOTIFY_INTERVAL_MS;
 
 /**
  * Tests the guardrail for the size of collections, {@link Guardrails#collectionSize}.
@@ -57,6 +58,8 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
         // during sstable writes without being affected by the guardrail for anonymous users.
         ENABLE_GUARDRAILS_FOR_ANONYMOUS_USER.setBoolean(false);
         
+        // Ensure guardrail notifications are not suppressed
+        DISK_USAGE_NOTIFY_INTERVAL_MS.setLong(0L);
         cluster = init(Cluster.build(NUM_NODES)
                               .withConfig(c -> c.with(Feature.GOSSIP, Feature.NATIVE_PROTOCOL)
                                                 .set("collection_size_warn_threshold", WARN_THRESHOLD + "B")
@@ -70,6 +73,7 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
     @AfterClass
     public static void teardownCluster()
     {
+        DISK_USAGE_NOTIFY_INTERVAL_MS.reset();
         if (driverSession != null)
             driverSession.close();
 
@@ -394,7 +398,7 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
 
         execute("INSERT INTO %s (k, v) VALUES (6, ?)", map(allocate(FAIL_THRESHOLD / 4), allocate(FAIL_THRESHOLD / 4)));
         assertWarnedOnFlush(failMessage("6"));
-        execute("UPDATE %s SET v = v + ? WHERE k = 6", map(allocate(FAIL_THRESHOLD / 4 + 1), allocate(FAIL_THRESHOLD / 4)));
+        execute("UPDATE %s SET v = v + ? WHERE k = 6", map(allocate(FAIL_THRESHOLD / 4 + 3), allocate(FAIL_THRESHOLD / 4 + 3)));
         assertWarnedOnFlush(warnMessage("6"));
         assertFailedOnCompact(failMessage("6"));
     }
@@ -432,11 +436,11 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
 
     private String warnMessage(String key)
     {
-        return String.format("Detected collection v in row %s in table %s of size", key, qualifiedTableName);
+        return String.format("Detected collection v in table %s of size", qualifiedTableName);
     }
 
     private String failMessage(String key)
     {
-        return String.format("Detected collection v in row %s in table %s of size", key, qualifiedTableName);
+        return String.format("Detected collection v in table %s of size", qualifiedTableName);
     }
 }
