@@ -235,6 +235,8 @@ public abstract class Controller
      */
     public abstract int getScalingParameter(int index);
 
+    public abstract int getMaxAdaptiveCompactions();
+
     public int getFanout(int index) {
         int W = getScalingParameter(index);
         return W < 0 ? 2 - W : 2 + W; // see formula in design doc

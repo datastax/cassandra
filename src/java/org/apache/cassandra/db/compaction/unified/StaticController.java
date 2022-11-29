@@ -126,6 +126,12 @@ public class StaticController extends Controller
     }
 
     @Override
+    public int getMaxAdaptiveCompactions()
+    {
+        return 0;
+    }
+
+    @Override
     public String toString()
     {
         return String.format("Static controller, m: %d, o: %s, Ws: %s, cost: %s", minSstableSizeMB, Arrays.toString(survivalFactors), Arrays.toString(scalingParameters), calculator);

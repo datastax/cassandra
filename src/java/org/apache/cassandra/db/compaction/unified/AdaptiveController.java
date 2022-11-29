@@ -57,6 +57,7 @@ public class AdaptiveController extends Controller
 
     /** The maximum valid value for the scaling parameter */
     static final String MAX_SCALING_PARAMETER = "adaptive_max_scaling_parameter";
+    //TODO: is this supposed to be PREFIX + MIN_SCALING_PARAMETER or MAX_SCALING_PARAMETER?
     static private final int DEFAULT_MAX_SCALING_PARAMETER = Integer.getInteger(PREFIX + MIN_SCALING_PARAMETER, 36);
 
     /** The interval for periodically checking the optimal value for W */
@@ -72,14 +73,18 @@ public class AdaptiveController extends Controller
     static final String MIN_COST = "adaptive_min_cost";
     static private final int DEFAULT_MIN_COST = Integer.getInteger(PREFIX + MIN_COST, 1000);
 
+    /** The maximum number of concurrent Adaptive Compactions */
+    static final String MAX_ADAPTIVE_COMPACTIONS = "max_adaptive_compactions";
+    static private final int DEFAULT_MAX_ADAPTIVE_COMPACTIONS = Integer.getInteger(PREFIX + MAX_ADAPTIVE_COMPACTIONS, 2);
+
     private final int intervalSec;
     private final int minW;
     private final int maxW;
     private final double threshold;
     private final int minCost;
-
     private volatile int[] Ws;
     private volatile long lastChecked;
+    private final int maxAdaptiveCompactions;
 
     @VisibleForTesting
     public AdaptiveController(MonotonicClock clock,
@@ -99,7 +104,8 @@ public class AdaptiveController extends Controller
                               int minW,
                               int maxW,
                               double threshold,
-                              int minCost)
+                              int minCost,
+                              int maxAdaptiveCompactions)
     {
         super(clock, env, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled);
 
@@ -109,6 +115,7 @@ public class AdaptiveController extends Controller
         this.maxW = maxW;
         this.threshold = threshold;
         this.minCost = minCost;
+        this.maxAdaptiveCompactions = maxAdaptiveCompactions;
     }
 
     static Controller fromOptions(Environment env,
@@ -133,8 +140,9 @@ public class AdaptiveController extends Controller
         int intervalSec = options.containsKey(INTERVAL_SEC) ? Integer.parseInt(options.get(INTERVAL_SEC)) : DEFAULT_INTERVAL_SEC;
         double threshold = options.containsKey(THRESHOLD) ? Double.parseDouble(options.get(THRESHOLD)) : DEFAULT_THRESHOLD;
         int minCost = options.containsKey(MIN_COST) ? Integer.parseInt(options.get(MIN_COST)) : DEFAULT_MIN_COST;
+        int maxAdaptiveCompactions = options.containsKey(MAX_ADAPTIVE_COMPACTIONS) ? Integer.parseInt(options.get(MAX_ADAPTIVE_COMPACTIONS)) : DEFAULT_MAX_ADAPTIVE_COMPACTIONS;
 
-        return new AdaptiveController(MonotonicClock.preciseTime, env, Ws, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled, intervalSec, minW, maxW, threshold, minCost);
+        return new AdaptiveController(MonotonicClock.preciseTime, env, Ws, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled, intervalSec, minW, maxW, threshold, minCost, maxAdaptiveCompactions);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
@@ -179,6 +187,13 @@ public class AdaptiveController extends Controller
             int minCost = Integer.parseInt(s);
             if (minCost <= 0)
                 throw new ConfigurationException(String.format("Invalid configuration for minCost, it should be positive: %d", minCost));
+        }
+        s = options.remove(MAX_ADAPTIVE_COMPACTIONS);
+        if (s != null)
+        {
+            int maxAdaptiveCompactions = Integer.parseInt(s);
+            if (maxAdaptiveCompactions < 1 || maxAdaptiveCompactions > 8)
+                throw new ConfigurationException(String.format("Invalid configuration for maxAdaptiveCompactions, it should be between 1 and 8: %d", maxAdaptiveCompactions));
         }
         return options;
     }
@@ -229,6 +244,12 @@ public class AdaptiveController extends Controller
     public int getMinCost()
     {
         return minCost;
+    }
+
+    @Override
+    public int getMaxAdaptiveCompactions()
+    {
+        return maxAdaptiveCompactions;
     }
 
     @Override

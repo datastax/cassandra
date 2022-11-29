@@ -476,7 +476,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         int runningCompactions = 0;
         long spaceAvailable = spaceOverheadLimit;
         int runningAdaptiveCompactions = 0;
-        int maxAdaptiveCompactions = 2; //limit for number of compactions triggered by new W value
+        int maxAdaptiveCompactions = controller.getMaxAdaptiveCompactions(); //limit for number of compactions triggered by new W value
         for (CompactionPick compaction : backgroundCompactions.getCompactionsInProgress())
         {
             final int level = levelOf(compaction);
@@ -484,7 +484,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             ++runningCompactions;
             levelCount = Math.max(levelCount, level + 1);
             spaceAvailable -= controller.getOverheadSizeInBytes(compaction);
-            //TODO: not sure if this works the way I think it does
             if (compaction.isAdaptive(controller.getThreshold(level), controller.getThreshold(level+1)))
                 runningAdaptiveCompactions++;
         }

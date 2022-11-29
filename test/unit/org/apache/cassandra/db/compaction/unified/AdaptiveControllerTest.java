@@ -45,6 +45,7 @@ public class AdaptiveControllerTest extends ControllerTest
     private final int[] Ws = {0};
     private final int interval = 60;
     private final int minCost = 5;
+    private final int maxAdaptiveCompactions = 2;
     private final double baseCost = minCost * 5;
     private final double threshold = 0.15;
 
@@ -79,7 +80,8 @@ public class AdaptiveControllerTest extends ControllerTest
                                       minW,
                                       maxW,
                                       threshold,
-                                      minCost);
+                                      minCost,
+                                      maxAdaptiveCompactions);
     }
 
     @Test

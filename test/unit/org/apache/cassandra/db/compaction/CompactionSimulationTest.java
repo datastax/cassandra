@@ -187,6 +187,9 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
     @Option(name= {"--min-cost"}, description = "The minimum cost for adaptive analysis")
     int minCost = 5;
 
+    @Option(name= {"--max-adaptive-compactions"}, description = "The max nunmber of concurrent adaptive compactions")
+    int maxAdaptiveCompactions = 5;
+
     @Option(name= {"--gain"}, description = "The gain for adaptive analysis")
     double gain = 0.15;
 
@@ -395,7 +398,8 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                          minW,
                                                          maxW,
                                                          gain,
-                                                         minCost)
+                                                         minCost,
+                                                         maxAdaptiveCompactions)
                                 : new StaticController(new SimulatedEnvironment(counters, valueSize),
                                                        Ws,
                                                        new double[] { o },
