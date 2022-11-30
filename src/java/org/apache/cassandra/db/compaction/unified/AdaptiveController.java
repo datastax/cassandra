@@ -57,8 +57,7 @@ public class AdaptiveController extends Controller
 
     /** The maximum valid value for the scaling parameter */
     static final String MAX_SCALING_PARAMETER = "adaptive_max_scaling_parameter";
-    //TODO: is this supposed to be PREFIX + MIN_SCALING_PARAMETER or MAX_SCALING_PARAMETER?
-    static private final int DEFAULT_MAX_SCALING_PARAMETER = Integer.getInteger(PREFIX + MIN_SCALING_PARAMETER, 36);
+    static private final int DEFAULT_MAX_SCALING_PARAMETER = Integer.getInteger(PREFIX + MAX_SCALING_PARAMETER, 36);
 
     /** The interval for periodically checking the optimal value for W */
     static final String INTERVAL_SEC = "adaptive_interval_sec";
@@ -192,8 +191,8 @@ public class AdaptiveController extends Controller
         if (s != null)
         {
             int maxAdaptiveCompactions = Integer.parseInt(s);
-            if (maxAdaptiveCompactions < 1 || maxAdaptiveCompactions > 8)
-                throw new ConfigurationException(String.format("Invalid configuration for maxAdaptiveCompactions, it should be between 1 and 8: %d", maxAdaptiveCompactions));
+            if (maxAdaptiveCompactions < -1)
+                throw new ConfigurationException(String.format("Invalid configuration for maxAdaptiveCompactions, it should be >= -1 (-1 for no limit): %d", maxAdaptiveCompactions));
         }
         return options;
     }
