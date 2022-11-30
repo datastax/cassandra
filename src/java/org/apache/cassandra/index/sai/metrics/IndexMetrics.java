@@ -47,9 +47,9 @@ public class IndexMetrics extends AbstractMetrics
     public final Histogram compactionSegmentCellsPerSecond;
     public final Histogram compactionSegmentBytesPerSecond;
 
-    public IndexMetrics(IndexContext context, TableMetadata table)
+    public IndexMetrics(IndexContext context)
     {
-        super(table, context.getIndexName(), "IndexMetrics");
+        super(context.getKeyspace(), context.getTable(), context.getIndexName(), "IndexMetrics");
 
         memtableIndexWriteLatency = Metrics.timer(createMetricName("MemtableIndexWriteLatency"));
         compactionSegmentCellsPerSecond = Metrics.histogram(createMetricName("CompactionSegmentCellsPerSecond"), false);

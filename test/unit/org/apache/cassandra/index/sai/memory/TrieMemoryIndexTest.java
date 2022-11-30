@@ -36,12 +36,14 @@ import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.index.TargetParser;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.CachingParams;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -179,8 +181,17 @@ public class TrieMemoryIndexTest
         options.put("target", REG_COL);
 
         IndexMetadata indexMetadata = IndexMetadata.fromSchemaMetadata("col_index", IndexMetadata.Kind.CUSTOM, options);
-        IndexContext ci = new IndexContext(table, indexMetadata, MockSchema.newCFS(table));
-        return new TrieMemoryIndex(ci);
+        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(table, indexMetadata);
+        IndexContext indexContext = new IndexContext(table.keyspace,
+                                                     table.name,
+                                                     table.partitionKeyType,
+                                                     table.comparator,
+                                                     target.left,
+                                                     target.right,
+                                                     indexMetadata,
+                                                     MockSchema.newCFS(table));
+
+        return new TrieMemoryIndex(indexContext);
     }
 
     DecoratedKey makeKey(TableMetadata table, Object...partitionKeys)

@@ -27,9 +27,9 @@ import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 public abstract class ColumnQueryMetrics extends AbstractMetrics
 {
-    protected ColumnQueryMetrics(String indexName, TableMetadata table)
+    protected ColumnQueryMetrics(String keyspace, String table, String indexName)
     {
-        super(table, indexName, "ColumnQueryMetrics");
+        super(keyspace, table, indexName, "ColumnQueryMetrics");
     }
 
     public static class TrieIndexMetrics extends ColumnQueryMetrics implements QueryEventListener.TrieIndexEventListener
@@ -43,9 +43,9 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
 
         private final QueryEventListener.PostingListEventListener postingsListener;
 
-        public TrieIndexMetrics(String indexName, TableMetadata table)
+        public TrieIndexMetrics(String keyspace, String table, String indexName)
         {
-            super(indexName, table);
+            super(keyspace, table, indexName);
 
             termsTraversalTotalTime = Metrics.timer(createMetricName("TermsLookupLatency"));
 
@@ -83,9 +83,9 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
 
         private final QueryEventListener.PostingListEventListener postingsListener;
 
-        public BKDIndexMetrics(String indexName, TableMetadata table)
+        public BKDIndexMetrics(String keyspace, String table, String indexName)
         {
-            super(indexName, table);
+            super(keyspace, table, indexName);
 
             intersectionLatency = Metrics.timer(createMetricName("KDTreeIntersectionLatency"));
             intersectionEarlyExits = Metrics.meter(createMetricName("KDTreeIntersectionEarlyExits"));

@@ -90,7 +90,6 @@ import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -98,7 +97,6 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class StorageAttachedIndex implements Index
 {
@@ -183,7 +181,16 @@ public class StorageAttachedIndex implements Index
     {
         this.baseCfs = baseCfs;
         this.config = config;
-        this.indexContext = new IndexContext(baseCfs.metadata(), config, baseCfs);
+        TableMetadata tableMetadata = baseCfs.metadata();
+        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, config);
+        this.indexContext = new IndexContext(tableMetadata.keyspace,
+                                             tableMetadata.name,
+                                             tableMetadata.partitionKeyType,
+                                             tableMetadata.comparator,
+                                             target.left,
+                                             target.right,
+                                             config,
+                                             baseCfs);
     }
 
     /**
@@ -243,7 +250,7 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("Cannot create more than one storage-attached index on the same column: " + target.left);
         }
 
-        AbstractType<?> type = TypeUtil.cellValueType(target);
+        AbstractType<?> type = TypeUtil.cellValueType(target.left, target.right);
 
         // If we are indexing map entries we need to validate the sub-types
         if (TypeUtil.isComposite(type))

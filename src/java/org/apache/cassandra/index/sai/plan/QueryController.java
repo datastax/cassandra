@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,7 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -50,10 +52,12 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.index.TargetParser;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -64,6 +68,8 @@ import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
@@ -138,12 +144,17 @@ public class QueryController
     {
         StorageAttachedIndex index = getBestIndexFor(expression);
 
-        return index != null ? index.getIndexContext() : new IndexContext(cfs.metadata(), expression.column());
-    }
+        if (index != null)
+            return index.getIndexContext();
 
-    public StorageAttachedIndex getBestIndexFor(RowFilter.Expression expression)
-    {
-        return cfs.indexManager.getBestIndexFor(expression, StorageAttachedIndex.class).orElse(null);
+        return new IndexContext(cfs.metadata().keyspace,
+                                cfs.metadata().name,
+                                cfs.metadata().partitionKeyType,
+                                cfs.metadata().comparator,
+                                expression.column(),
+                                IndexTarget.Type.VALUES,
+                                null,
+                                cfs);
     }
 
     public UnfilteredRowIterator getPartition(PrimaryKey key, ReadExecutionController executionController)
@@ -232,6 +243,11 @@ public class QueryController
         return !indexFeatureSet.isRowAware() ||
                key.hasEmptyClustering() ||
                command.clusteringIndexFilter(key.partitionKey()).selects(key.clustering());
+    }
+
+    private StorageAttachedIndex getBestIndexFor(RowFilter.Expression expression)
+    {
+        return cfs.indexManager.getBestIndexFor(expression, StorageAttachedIndex.class).orElse(null);
     }
 
     // Note: This method assumes that the selects method has already been called for the
