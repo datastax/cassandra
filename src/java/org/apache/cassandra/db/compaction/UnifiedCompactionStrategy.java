@@ -721,7 +721,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 maxAdaptiveCompactions = Integer.MAX_VALUE;
             if (pick.isAdaptive(controller.getThreshold(currentLevel), controller.getThreshold(nextLevel)))
             {
-                if (runningAdaptiveCompactions >= maxAdaptiveCompactions && maxAdaptiveCompactions != -1)
+                if (runningAdaptiveCompactions >= maxAdaptiveCompactions)
                     continue; //do not allow more than maxAdaptiveCompactions to limit latency spikes upon changing W
                 runningAdaptiveCompactions++;
             }
