@@ -624,7 +624,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             consistencyForPaxos.validateForCas(metadata.keyspace, queryState);
             consistencyForReplayCommits.validateForCasCommit(latestRs, metadata.keyspace, queryState);
-            if (skipCommitConsistencyValidation)
+            if (!skipCommitConsistencyValidation)
                 consistencyForCommit.validateForCasCommit(latestRs, metadata.keyspace, queryState);
 
             long timeoutNanos = DatabaseDescriptor.getCasContentionTimeout(NANOSECONDS);
