@@ -128,7 +128,7 @@ public class StaticController extends Controller
     @Override
     public int getMaxAdaptiveCompactions()
     {
-        return 0;
+        return Integer.MAX_VALUE;
     }
 
     @Override
