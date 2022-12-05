@@ -340,13 +340,26 @@ public class AdaptiveController extends Controller
         StringBuilder str = new StringBuilder(100);
         str.append("Adaptive compaction controller ");
 
-        //make room for the new choice of W
-        System.arraycopy(Ws, 0, Ws, 1, Ws.length - 1);
         if (Ws[0] != candW && (cost - candCost) >= threshold * cost)
         {
             //W is updated
             str.append("updated ").append(Ws[0]).append(" -> ").append(candW);
             this.Ws[0] = candW;
+        }
+        else if (Ws[0] == candW)
+        {
+            // only update the lowest level that is not equal to candW
+            // example: candW = 4, Ws = {4, 4, 12, 16} --> Ws = {4, 4, 4, 16}
+            // as a result, higher levels will be less prone to changes
+            for (int i = 0; i < Ws.length; i++)
+            {
+                if (Ws[i] != candW)
+                {
+                    str.append("updated for level ").append(i).append(": ").append(Ws[i]).append(" -> ").append(candW);
+                    this.Ws[i] = candW;
+                    break;
+                }
+            }
         }
         else
         {
