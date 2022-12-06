@@ -351,7 +351,7 @@ public class AdaptiveController extends Controller
             // only update the lowest level that is not equal to candW
             // example: candW = 4, Ws = {4, 4, 12, 16} --> Ws = {4, 4, 4, 16}
             // as a result, higher levels will be less prone to changes
-            for (int i = 0; i < Ws.length; i++)
+            for (int i = 1; i < Ws.length; i++)
             {
                 if (Ws[i] != candW)
                 {
