@@ -66,10 +66,10 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private final MemtableTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
+    private Object writeLock = new Object();
 
     private ByteBuffer minTerm;
     private ByteBuffer maxTerm;
-    private ReentrantLock writeLock = new ReentrantLock();
 
     private static final FastThreadLocal<Integer> lastQueueSize = new FastThreadLocal<Integer>()
     {
@@ -92,13 +92,7 @@ public class TrieMemoryIndex extends MemoryIndex
                     LongConsumer onHeapAllocationsTracker,
                     LongConsumer offHeapAllocationsTracker)
     {
-        boolean locked = writeLock.tryLock();
-        if (!locked)
-        {
-            writeLock.lock();
-        }
-
-        try
+        synchronized (writeLock)
         {
             AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
             try
@@ -143,10 +137,6 @@ public class TrieMemoryIndex extends MemoryIndex
             {
                 analyzer.end();
             }
-        }
-        finally
-        {
-            writeLock.unlock();
         }
     }
 

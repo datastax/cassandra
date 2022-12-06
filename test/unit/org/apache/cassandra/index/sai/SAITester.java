@@ -208,6 +208,18 @@ public class SAITester extends CQLTester
         Injections.deleteAll();
     }
 
+    public static IndexContext createIndexContext(String name, AbstractType<?> validator, ColumnFamilyStore cfs)
+    {
+        return new IndexContext(cfs.getKeyspaceName(),
+                                cfs.getTableName(),
+                                UTF8Type.instance,
+                                new ClusteringComparator(),
+                                ColumnMetadata.regularColumn("sai", "internal", name, validator),
+                                IndexTarget.Type.SIMPLE,
+                                IndexMetadata.fromSchemaMetadata(name, IndexMetadata.Kind.CUSTOM, null),
+                                cfs);
+    }
+
     public static IndexContext createIndexContext(String name, AbstractType<?> validator)
     {
         return new IndexContext("test_ks",

@@ -26,11 +26,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.LongAdder;
-
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -57,7 +57,6 @@ public class MemtableIndex
     private final ShardBoundaries boundaries;
     private final MemoryIndex[] rangeIndexes;
     private final AbstractType<?> validator;
-    private final ClusteringComparator clusteringComparator;
     private final LongAdder writeCount = new LongAdder();
     private final LongAdder estimatedOnHeapMemoryUsed = new LongAdder();
     private final LongAdder estimatedOffHeapMemoryUsed = new LongAdder();
@@ -67,11 +66,16 @@ public class MemtableIndex
         this.boundaries = indexContext.owner().localRangeSplits(TrieMemtable.SHARD_COUNT);
         this.rangeIndexes = new MemoryIndex[boundaries.shardCount()];
         this.validator = indexContext.getValidator();
-        this.clusteringComparator = indexContext.comparator();
         for (int shard = 0; shard < boundaries.shardCount(); shard++)
         {
             this.rangeIndexes[shard] = new TrieMemoryIndex(indexContext);
         }
+    }
+
+    @VisibleForTesting
+    public int shardCount()
+    {
+        return rangeIndexes.length;
     }
 
     public long writeCount()
@@ -98,6 +102,8 @@ public class MemtableIndex
     // This can be null if the indexed memtable was empty. Users of the
     // {@code MemtableIndex} requiring a non-null minimum term should
     // use the {@link MemtableIndex#isEmpty} method.
+    // Note: Individual index shards can return null here if the index
+    // didn't receive any terms within the token range of the shard
     @Nullable
     public ByteBuffer getMinTerm()
     {
@@ -112,6 +118,8 @@ public class MemtableIndex
     // This can be null if the indexed memtable was empty. Users of the
     // {@code MemtableIndex} requiring a non-null maximum term should
     // use the {@link MemtableIndex#isEmpty} method.
+    // Note: Individual index shards can return null here if the index
+    // didn't receive any terms within the token range of the shard
     @Nullable
     public ByteBuffer getMaxTerm()
     {
@@ -145,10 +153,11 @@ public class MemtableIndex
     {
         RangeConcatIterator.Builder builder = RangeConcatIterator.builder();
 
-        for (MemoryIndex index : rangeIndexes)
+        for (int shard : boundaries.getShardsForRange(keyRange))
         {
-            builder.add(index.search(expression, keyRange));
+            builder.add(rangeIndexes[shard].search(expression, keyRange));
         }
+
         return builder.build();
     }
 
@@ -173,7 +182,7 @@ public class MemtableIndex
             rangeLists.add(rangeIndexes[i].iterator());
 
         return MergeIterator.get(rangeLists, (o1, o2) -> ByteComparable.compare(o1.left, o2.left, ByteComparable.Version.OSS41),
-                                 new PrimaryKeysMergeReducer(rangeIndexes.length, clusteringComparator));
+                                 new PrimaryKeysMergeReducer(rangeIndexes.length));
     }
 
     private static class PrimaryKeysMergeReducer extends Reducer<Pair<ByteComparable, PrimaryKeys>, Pair<ByteComparable, Iterator<PrimaryKey>>>
@@ -183,15 +192,11 @@ public class MemtableIndex
         private final Comparator<PrimaryKey> comparator;
 
         @SuppressWarnings("unchecked")
-        PrimaryKeysMergeReducer(int size, ClusteringComparator clusteringComparator)
+        PrimaryKeysMergeReducer(int size)
         {
             this.toMerge = new Pair[size];
             this.size = size;
-            this.comparator = (o1, o2) -> {
-                if (!o1.partitionKey().equals(o2.partitionKey()))
-                    return o1.partitionKey().compareTo(o2.partitionKey());
-                return clusteringComparator.compare(o1.clustering(), o2.clustering());
-            };
+            this.comparator = PrimaryKey::compareTo;
         }
 
         @Override
