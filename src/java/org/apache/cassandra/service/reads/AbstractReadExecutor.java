@@ -246,7 +246,7 @@ public abstract class AbstractReadExecutor
         if (cfs.sampleReadLatencyNanos > command.getTimeout(NANOSECONDS))
             return false;
 
-        return true; // do always speculate, be proactive in case a node is replying with a failure STAR-1723
+        return !handler.await(cfs.sampleReadLatencyNanos, NANOSECONDS);
     }
 
     ReplicaPlan.ForTokenRead replicaPlan()

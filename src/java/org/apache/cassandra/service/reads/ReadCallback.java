@@ -172,7 +172,10 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
                 
         failureReasonByEndpoint.put(from, failureReason);
 
-        if (blockFor + failuresUpdater.incrementAndGet(this) > replicaPlan().candidates().size())
+        int numContacts = replicaPlan(). contacts().size();
+        int numCandidates = replicaPlan(). candidates().size();
+        int failFastPoint = (numContacts < numCandidates) ? numContacts + 1 : numContacts;
+        if (blockFor + failuresUpdater.incrementAndGet(this) > failFastPoint)
             condition.signalAll();
     }
 
