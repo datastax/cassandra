@@ -22,7 +22,6 @@ import java.util.List;
 
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
-import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 

@@ -21,7 +21,6 @@ import java.util.concurrent.TimeUnit;
 
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.Timer;
-import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 

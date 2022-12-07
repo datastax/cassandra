@@ -28,7 +28,6 @@ import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;

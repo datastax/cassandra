@@ -17,14 +17,11 @@
  */
 package org.apache.cassandra.db.memtable;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
 import com.google.common.annotations.VisibleForTesting;
 

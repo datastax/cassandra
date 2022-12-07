@@ -30,7 +30,6 @@ import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.SortedSet;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.LongConsumer;
 
 import org.slf4j.Logger;
@@ -40,7 +39,6 @@ import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.tries.MemtableTrie;
 import org.apache.cassandra.db.tries.Trie;
