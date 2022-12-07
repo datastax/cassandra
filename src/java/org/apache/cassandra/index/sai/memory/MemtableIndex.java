@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.LongAdder;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
@@ -177,41 +178,53 @@ public class MemtableIndex
         int minSubrange = min == null ? 0 : boundaries.getShardForKey(min);
         int maxSubrange = max == null ? rangeIndexes.length - 1 : boundaries.getShardForKey(max);
 
-        List<Iterator<Pair<ByteComparable, PrimaryKeys>>> rangeLists = new ArrayList<>(maxSubrange - minSubrange + 1);
+        List<Iterator<Pair<ByteComparable, PrimaryKeys>>> rangeIterators = new ArrayList<>(maxSubrange - minSubrange + 1);
         for (int i = minSubrange; i <= maxSubrange; i++)
-            rangeLists.add(rangeIndexes[i].iterator());
+            rangeIterators.add(rangeIndexes[i].iterator());
 
-        return MergeIterator.get(rangeLists, (o1, o2) -> ByteComparable.compare(o1.left, o2.left, ByteComparable.Version.OSS41),
-                                 new PrimaryKeysMergeReducer(rangeIndexes.length));
+        return MergeIterator.get(rangeIterators, (o1, o2) -> ByteComparable.compare(o1.left, o2.left, ByteComparable.Version.OSS41),
+                                 new PrimaryKeysMergeReducer(rangeIterators.size()));
     }
 
+    // The PrimaryKeysMergeReducer receives the range iterators from each of the range indexes selected based on the
+    // min and max keys passed to the iterator method. It doesn't strictly do any reduction because the terms in each
+    // range index are unique. It will receive at most one range index entry per selected range index before getReduced
+    // is called.
     private static class PrimaryKeysMergeReducer extends Reducer<Pair<ByteComparable, PrimaryKeys>, Pair<ByteComparable, Iterator<PrimaryKey>>>
     {
-        private final Pair<ByteComparable, PrimaryKeys>[] toMerge;
-        private final int size;
+        private final Pair<ByteComparable, PrimaryKeys>[] rangeIndexEntriesToMerge;
         private final Comparator<PrimaryKey> comparator;
 
+        private ByteComparable term;
+
         @SuppressWarnings("unchecked")
+        // The size represents the number of range indexes that have been selected for the merger
         PrimaryKeysMergeReducer(int size)
         {
-            this.toMerge = new Pair[size];
-            this.size = size;
+            this.rangeIndexEntriesToMerge = new Pair[size];
             this.comparator = PrimaryKey::compareTo;
         }
 
         @Override
-        public void reduce(int idx, Pair<ByteComparable, PrimaryKeys> current)
+        // Receive the term entry for a range index. This should only be called once for each
+        // range index before reduction.
+        public void reduce(int index, Pair<ByteComparable, PrimaryKeys> termPair)
         {
-            toMerge[idx] = current;
+            Preconditions.checkArgument(rangeIndexEntriesToMerge[index] == null, "Terms should be unique in the memory index");
+
+            rangeIndexEntriesToMerge[index] = termPair;
+            if (termPair != null && term == null)
+                term = termPair.left;
         }
 
         @Override
+        // Return a merger of the term keys for the term.
         public Pair<ByteComparable, Iterator<PrimaryKey>> getReduced()
         {
-            ByteComparable term = getTerm();
+            Preconditions.checkArgument(term != null, "The term must exist in the memory index");
 
-            List<Iterator<PrimaryKey>> keyIterators = new ArrayList<>(size);
-            for (Pair<ByteComparable, PrimaryKeys> p : toMerge)
+            List<Iterator<PrimaryKey>> keyIterators = new ArrayList<>(rangeIndexEntriesToMerge.length);
+            for (Pair<ByteComparable, PrimaryKeys> p : rangeIndexEntriesToMerge)
                 if (p != null && p.right != null && !p.right.isEmpty())
                     keyIterators.add(p.right.iterator());
 
@@ -222,18 +235,8 @@ public class MemtableIndex
         @Override
         public void onKeyChange()
         {
-            for (int i = 0; i < size; i++)
-                toMerge[i] = null;
-        }
-
-        private ByteComparable getTerm()
-        {
-            for (Pair<ByteComparable, PrimaryKeys> p : toMerge)
-            {
-                if (p != null)
-                    return p.left;
-            }
-            throw new IllegalStateException("Term must exist in IndexMemtable.");
+            Arrays.fill(rangeIndexEntriesToMerge, null);
+            term = null;
         }
     }
 }

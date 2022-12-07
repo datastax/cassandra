@@ -22,7 +22,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -51,6 +53,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
@@ -60,6 +63,9 @@ import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.junit.Assert.assertEquals;
@@ -184,6 +190,10 @@ public class MemtableIndexTest extends SAITester
         Token left = tokens.get(3);
         Token right = tokens.get(7);
         AbstractBounds<PartitionPosition> keyRange = new Bounds<>(left.minKeyBound(), right.maxKeyBound());
+        // The expectedKeys are going to be from entries in the tokenMap that
+        // Meet the criteria of having tokens that exist inclusively withing
+        // the left and right tokens of the keyRange and meet the expression
+        // filter conditions of the search
         List<Integer> expectedKeys = tokenMap.entrySet()
                                              .stream()
                                              .filter(e -> e.getKey().compareTo(left) >= 0 && e.getKey().compareTo(right) <= 0)
@@ -192,6 +202,69 @@ public class MemtableIndexTest extends SAITester
                                              .collect(Collectors.toList());
 
         runMemtableIndexSearch(keyRange, expectedKeys, 4);
+    }
+
+    @Test
+    public void indexIteratorTest()
+    {
+        memtableIndex = new MemtableIndex(indexContext);
+
+        Map<Integer, List<DecoratedKey>> terms = buildTermMap();
+
+        terms.entrySet().stream().forEach(entry -> entry.getValue().forEach(pk -> addRow(Int32Type.instance.compose(pk.getKey()), entry.getKey())));
+
+        // These keys have midrange tokens that select 3 of the 8 range indexes
+        DecoratedKey minimum = makeKey(cfs.metadata(), 2017);
+        DecoratedKey maximum = makeKey(cfs.metadata(), 4127);
+
+        Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator = memtableIndex.iterator(minimum, maximum);
+
+        while (iterator.hasNext())
+        {
+            Pair<ByteComparable, Iterator<PrimaryKey>> termPair = iterator.next();
+            int term = termFromComparable(termPair.left);
+            // The iterator will return keys outside the range of min/max so we need to filter here to
+            // get the correct keys
+            List<DecoratedKey> expectedPks = terms.get(term)
+                                                  .stream()
+                                                  .filter(pk -> pk.compareTo(minimum) >= 0 && pk.compareTo(maximum) <= 0)
+                                                  .sorted()
+                                                  .collect(Collectors.toList());
+            List<DecoratedKey> termPks = new ArrayList<>();
+            while (termPair.right.hasNext())
+            {
+                DecoratedKey pk = termPair.right.next().partitionKey();
+                if (pk.compareTo(minimum) >= 0 && pk.compareTo(maximum) <= 0)
+                    termPks.add(pk);
+            }
+            assertEquals(expectedPks, termPks);
+        }
+    }
+
+    private int termFromComparable(ByteComparable comparable)
+    {
+        ByteSource.Peekable peekable = ByteSource.peekable(comparable.asComparableBytes(ByteComparable.Version.OSS41));
+        return Int32Type.instance.compose(Int32Type.instance.fromComparableBytes(peekable, ByteComparable.Version.OSS41));
+    }
+
+    private Map<Integer, List<DecoratedKey>> buildTermMap()
+    {
+        Map<Integer, List<DecoratedKey>> terms = new HashMap<>();
+
+        for (int pk = 0; pk < 10000; pk++)
+        {
+            int term = getRandom().nextIntBetween(0, 20);
+            List<DecoratedKey> pks;
+            if (terms.containsKey(term))
+                pks = terms.get(term);
+            else
+            {
+                pks = new ArrayList<>();
+                terms.put(term, pks);
+            }
+            pks.add(makeKey(cfs.metadata(), pk));
+        }
+        return terms;
     }
 
     private void createIndex()

@@ -354,7 +354,6 @@ public class TrieMemoryIndex extends MemoryIndex
                     maximumKey = maximumKey == null ? key : key.compareTo(maximumKey) > 0 ? key : maximumKey;
                 }
             }
-            return;
         }
     }
 }
