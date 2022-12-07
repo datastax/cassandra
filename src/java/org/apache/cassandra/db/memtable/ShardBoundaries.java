@@ -117,9 +117,9 @@ public class ShardBoundaries
         if (boundaries.length == 0)
             return EMPTY_BOUNDARIES_SHARDS;
 
-        // If the keyRange is a Range whose tokens match then it represents the entire token ring
-        // so we need to return all the shards.
-        if (keyRange instanceof Range && keyRange.left.compareTo(keyRange.right) == 0)
+        // If the keyRange tokens match and are minimum then it represents the entire token ring
+        // then we need to return all the shards.
+        if (keyRange.right.isMinimum() && keyRange.left.compareTo(keyRange.right) == 0)
             return allShards;
 
         // Otherwise we need to return all the shards whose range intersects the keyrange
