@@ -175,11 +175,8 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         int numContacts = replicaPlan(). contacts().size();
         int numCandidates = replicaPlan(). candidates().size();
         int failFastPoint = (numContacts < numCandidates) ? numContacts + 1 : numContacts;
-        if (blockFor + failuresUpdater.incrementAndGet(this) > failFastPoint) {
-            logger.warn("Failfast is {}; after {} failures stop waiting from contacts {} and candidates {}",
-                    failFastPoint, failuresUpdater.get(this), numContacts, numCandidates);
+        if (blockFor + failuresUpdater.incrementAndGet(this) > failFastPoint)
             condition.signalAll();
-        }
     }
 
     @Override
