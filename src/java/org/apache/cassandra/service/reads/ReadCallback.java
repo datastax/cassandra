@@ -172,8 +172,10 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
                 
         failureReasonByEndpoint.put(from, failureReason);
 
-        int numContacts = replicaPlan(). contacts().size();
-        int numCandidates = replicaPlan(). candidates().size();
+        int numContacts = replicaPlan().contacts().size();
+        int numCandidates = replicaPlan().candidates().size();
+        // If potentially there is a replica which could be requested as part of the speculative read path
+        // then increase the number of nodes we wait for in case of failures.
         int failFastPoint = (numContacts < numCandidates) ? numContacts + 1 : numContacts;
         if (blockFor + failuresUpdater.incrementAndGet(this) > failFastPoint)
             condition.signalAll();
