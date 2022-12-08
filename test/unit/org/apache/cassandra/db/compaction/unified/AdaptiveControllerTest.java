@@ -43,6 +43,7 @@ public class AdaptiveControllerTest extends ControllerTest
     private final int minW = -10;
     private final int maxW = 64;
     private final int[] Ws = {0};
+    private final int[] previousWs = {0};
     private final int interval = 60;
     private final int minCost = 5;
     private final int maxAdaptiveCompactions = 2;
@@ -66,6 +67,7 @@ public class AdaptiveControllerTest extends ControllerTest
         return new AdaptiveController(clock,
                                       env,
                                       Ws,
+                                      previousWs,
                                       Controller.DEFAULT_SURVIVAL_FACTORS,
                                       dataSizeGB << 10,
                                       numShards,

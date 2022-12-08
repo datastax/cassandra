@@ -82,6 +82,7 @@ public class AdaptiveController extends Controller
     private final double threshold;
     private final int minCost;
     private volatile int[] Ws;
+    private volatile int[] previousWs;
     private volatile long lastChecked;
     private final int maxAdaptiveCompactions;
 
@@ -89,6 +90,7 @@ public class AdaptiveController extends Controller
     public AdaptiveController(MonotonicClock clock,
                               Environment env,
                               int[] Ws,
+                              int[] previousWs,
                               double[] survivalFactors,
                               long dataSetSizeMB,
                               int numShards,
@@ -109,6 +111,7 @@ public class AdaptiveController extends Controller
         super(clock, env, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled);
 
         this.Ws = Ws;
+        this.previousWs = previousWs;
         this.intervalSec = intervalSec;
         this.minW = minW;
         this.maxW = maxW;
@@ -132,8 +135,10 @@ public class AdaptiveController extends Controller
     {
         int W = options.containsKey(STARTING_SCALING_PARAMETER) ? Integer.parseInt(options.get(STARTING_SCALING_PARAMETER)) : DEFAULT_STARTING_SCALING_PARAMETER;
         int Ws[] = new int[32];
+        int previousWs[] = new int[32];
         //set W for each level to the starting scaling parameter or default scaling parameter
         Arrays.fill(Ws, W);
+        Arrays.fill(previousWs, W);
         int minW = options.containsKey(MIN_SCALING_PARAMETER) ? Integer.parseInt(options.get(MIN_SCALING_PARAMETER)) : DEFAULT_MIN_SCALING_PARAMETER;
         int maxW = options.containsKey(MAX_SCALING_PARAMETER) ? Integer.parseInt(options.get(MAX_SCALING_PARAMETER)) : DEFAULT_MAX_SCALING_PARAMETER;
         int intervalSec = options.containsKey(INTERVAL_SEC) ? Integer.parseInt(options.get(INTERVAL_SEC)) : DEFAULT_INTERVAL_SEC;
@@ -141,7 +146,7 @@ public class AdaptiveController extends Controller
         int minCost = options.containsKey(MIN_COST) ? Integer.parseInt(options.get(MIN_COST)) : DEFAULT_MIN_COST;
         int maxAdaptiveCompactions = options.containsKey(MAX_ADAPTIVE_COMPACTIONS) ? Integer.parseInt(options.get(MAX_ADAPTIVE_COMPACTIONS)) : DEFAULT_MAX_ADAPTIVE_COMPACTIONS;
 
-        return new AdaptiveController(MonotonicClock.preciseTime, env, Ws, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled, intervalSec, minW, maxW, threshold, minCost, maxAdaptiveCompactions);
+        return new AdaptiveController(MonotonicClock.preciseTime, env, Ws, previousWs, survivalFactors, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, l0ShardsEnabled, intervalSec, minW, maxW, threshold, minCost, maxAdaptiveCompactions);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
@@ -211,6 +216,15 @@ public class AdaptiveController extends Controller
             throw new IllegalArgumentException("Index should be >= 0: " + index);
 
         return index < Ws.length ? Ws[index] : Ws[Ws.length - 1];
+    }
+
+    @Override
+    public int getPreviousScalingParameter(int index)
+    {
+        if (index < 0)
+            throw new IllegalArgumentException("Index should be >= 0: " + index);
+
+        return index < previousWs.length ? previousWs[index] : previousWs[previousWs.length - 1];
     }
 
     @Override
@@ -344,6 +358,7 @@ public class AdaptiveController extends Controller
         {
             //W is updated
             str.append("updated ").append(Ws[0]).append(" -> ").append(candW);
+            this.previousWs[0] = Ws[0]; //need to keep track of the previous scaling parameter for isAdaptive check
             this.Ws[0] = candW;
         }
         else if (Ws[0] == candW)
@@ -356,6 +371,7 @@ public class AdaptiveController extends Controller
                 if (Ws[i] != candW)
                 {
                     str.append("updated for level ").append(i).append(": ").append(Ws[i]).append(" -> ").append(candW);
+                    this.previousWs[i] = Ws[i];
                     this.Ws[i] = candW;
                     break;
                 }

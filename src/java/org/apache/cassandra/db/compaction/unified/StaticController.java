@@ -126,6 +126,13 @@ public class StaticController extends Controller
     }
 
     @Override
+    public int getPreviousScalingParameter(int index)
+    {
+        //scalingParameters is not updated in StaticController so previous scalingParameters = scalingParameters
+        return getScalingParameter(index);
+    }
+
+    @Override
     public int getMaxAdaptiveCompactions()
     {
         return Integer.MAX_VALUE;

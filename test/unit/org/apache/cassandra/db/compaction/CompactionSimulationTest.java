@@ -379,11 +379,12 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
     {
         double o = 1.0;
         int[] Ws = new int[] { W };
+        int[] previousWs = new int[] { W };
         double maxSpaceOverhead = 0.2;
 
         Controller controller = adaptive
                                 ? new AdaptiveController(MonotonicClock.preciseTime,
-                                                         new SimulatedEnvironment(counters, valueSize), Ws,
+                                                         new SimulatedEnvironment(counters, valueSize), Ws, previousWs,
                                                          new double[] { o },
                                                          datasetSizeGB << 10,  // MB
                                                          numShards,

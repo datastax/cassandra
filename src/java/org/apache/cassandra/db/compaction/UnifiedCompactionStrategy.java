@@ -484,7 +484,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             ++runningCompactions;
             levelCount = Math.max(levelCount, level + 1);
             spaceAvailable -= controller.getOverheadSizeInBytes(compaction);
-            if (compaction.isAdaptive(controller.getThreshold(level), controller.getThreshold(level+1)))
+            if (compaction.isAdaptive(controller.getThreshold(level), controller.getPreviousThreshold(level)))
                 runningAdaptiveCompactions++;
         }
 
@@ -716,10 +716,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (perLevel[levelOf(pick)] > perLevelCount)
                 continue;  // this level is already using up all its share + one, we can ignore candidate altogether
             int currentLevel = levelOf(pick);
-            int nextLevel = levelOf(pick)+1;
             if (maxAdaptiveCompactions == -1)
                 maxAdaptiveCompactions = Integer.MAX_VALUE;
-            if (pick.isAdaptive(controller.getThreshold(currentLevel), controller.getThreshold(nextLevel)))
+            if (pick.isAdaptive(controller.getThreshold(currentLevel), controller.getPreviousThreshold(currentLevel)))
             {
                 if (runningAdaptiveCompactions >= maxAdaptiveCompactions)
                     continue; //do not allow more than maxAdaptiveCompactions to limit latency spikes upon changing W
