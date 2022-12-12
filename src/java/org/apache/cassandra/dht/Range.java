@@ -135,18 +135,22 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
 
     public boolean intersects(IncludingExcludingBounds<T> that)
     {
-        if (!isWrapAround() && (this.left.compareTo(that.right) == 0))
+        if (!isWrapAround() && !that.right.isMinimum() && (this.left.compareTo(that.right) == 0))
             return false;
-        else if (isWrapAround() && (this.right.compareTo(that.right) == 0))
+        else if (isWrapAround() && !that.right.isMinimum() && (this.right.compareTo(that.right) == 0))
             return false;
         return contains(that.left) || (!that.left.equals(that.right) && intersects(new Range<T>(that.left, that.right)));
     }
 
     public boolean intersects(ExcludingBounds<T> that)
     {
-        if (!isWrapAround() && ((this.left.compareTo(that.right) == 0) || (this.right.compareTo(that.left) == 0)))
+        if (!isWrapAround() &&
+            ((!that.right.isMinimum() && (this.left.compareTo(that.right) == 0)) ||
+             (this.right.compareTo(that.left) == 0)))
             return false;
-        else if (isWrapAround() && ((this.left.compareTo(that.left) == 0) || (this.right.compareTo(that.right) == 0)))
+        else if (isWrapAround() &&
+                 ((this.left.compareTo(that.left) == 0) ||
+                  (!that.right.isMinimum() && (this.right.compareTo(that.right) == 0))))
             return false;
         return contains(that.left) || (!that.left.equals(that.right) && intersects(new Range<T>(that.left, that.right)));
     }

@@ -23,6 +23,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
+import org.apache.cassandra.index.sai.cql.DataModel;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -165,10 +166,20 @@ public class RangeIntersectsBoundsTest
         assertTrue(someWrapped.intersects(aa));
         assertFalse(someWrapped.intersects(bl));
         assertFalse(someWrapped.intersects(ra));
+
+        Range<Token> range = new Range<>(Murmur3Partitioner.MINIMUM, new Murmur3Partitioner.LongToken(-1));
+        ExcludingBounds<Token> bounds = new ExcludingBounds<>(new Murmur3Partitioner.LongToken(-3248873570005575792L), Murmur3Partitioner.MINIMUM);
+
+        assertTrue(range.intersects(bounds));
+
+        range = new Range<>(new Murmur3Partitioner.LongToken(-1), Murmur3Partitioner.MINIMUM);
+
+        assertTrue(range.intersects(bounds));
+
     }
 
     @Test
-    public void rangeIntersectsIncludingExcludingBounds() throws Exception
+    public void rangeIntersectsIncludingExcludingBounds()
     {
         Range<Token> all = new Range<>(new BigIntegerToken("0"), new BigIntegerToken("0"));
         Range<Token> some = new Range<>(new BigIntegerToken("4"), new BigIntegerToken("8"));
@@ -231,5 +242,33 @@ public class RangeIntersectsBoundsTest
         assertTrue(someWrapped.intersects(aa));
         assertFalse(someWrapped.intersects(bl));
         assertTrue(someWrapped.intersects(ra));
+    }
+
+    /**
+     * Test that we handle partial bounds of the type x > n or x >= n which specifically have
+     * their right value as minimum.
+     */
+    @Test
+    public void rangeIntersectsPartialBounds()
+    {
+        Range<Token> range = new Range<>(Murmur3Partitioner.MINIMUM, new Murmur3Partitioner.LongToken(-1L));
+
+        Bounds<Token> boundsMatch = new Bounds<>(new Murmur3Partitioner.LongToken(-2L), Murmur3Partitioner.MINIMUM);
+        Bounds<Token> boundsNoMatch = new Bounds<>(new Murmur3Partitioner.LongToken(0L), Murmur3Partitioner.MINIMUM);
+
+        assertTrue(range.intersects(boundsMatch));
+        assertFalse(range.intersects(boundsNoMatch));
+
+        ExcludingBounds<Token> excBoundsMatch = new ExcludingBounds<>(new Murmur3Partitioner.LongToken(-2L), Murmur3Partitioner.MINIMUM);
+        ExcludingBounds<Token> excBoundsNoMatch = new ExcludingBounds<>(new Murmur3Partitioner.LongToken(-1L), Murmur3Partitioner.MINIMUM);
+
+        assertTrue(range.intersects(excBoundsMatch));
+        assertFalse(range.intersects(excBoundsNoMatch));
+
+        IncludingExcludingBounds<Token> incExcBoundsMatch = new IncludingExcludingBounds<>(new Murmur3Partitioner.LongToken(-2L), Murmur3Partitioner.MINIMUM);
+        IncludingExcludingBounds<Token> incExcBoundsNoMatch = new IncludingExcludingBounds<>(new Murmur3Partitioner.LongToken(0L), Murmur3Partitioner.MINIMUM);
+
+        assertTrue(range.intersects(incExcBoundsMatch));
+        assertFalse(range.intersects(incExcBoundsNoMatch));
     }
 }

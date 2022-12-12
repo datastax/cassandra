@@ -155,7 +155,7 @@ public class IndexContext
             this.segmentCompactionEnabled = true;
         }
 
-        logger.info(logMessage("Initialized column context with index writer config: {}"), indexWriterConfig);
+        logger.info(logMessage("Initialized index context with index writer config: {}"), indexWriterConfig);
     }
 
     public AbstractType<?> keyValidator()
