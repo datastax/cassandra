@@ -18,8 +18,11 @@
 
 package org.apache.cassandra.cql3;
 
+import java.nio.ByteBuffer;
+import java.util.Map;
 import javax.annotation.Nullable;
 
+import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -38,8 +41,27 @@ public interface QueryInterceptor
      * otherwise returns <code>null</code>
      */
     @Nullable
-    ResultMessage interceptStatement(CQLStatement statement,
-                                     QueryState queryState,
-                                     QueryOptions options,
-                                     Dispatcher.RequestTime requestTime);
+    default ResultMessage interceptStatement(CQLStatement statement,
+                                             QueryState queryState,
+                                             QueryOptions options,
+                                             Map<String, ByteBuffer> customPayload,
+                                             Dispatcher.RequestTime requestTime)
+    {
+        return null;
+    }
+
+
+    /**
+     * Intercept a batch statement and process it if necessary. If the interceptor processes the batch statement, it
+     * returns a {@link ResultMessage}, otherwise returns <code>null</code>.
+     */
+    @Nullable
+    default ResultMessage interceptBatchStatement(BatchStatement batch,
+                                                  QueryState state,
+                                                  BatchQueryOptions options,
+                                                  Map<String, ByteBuffer> customPayload,
+                                                  Dispatcher.RequestTime requestTime)
+    {
+        return null;
+    }
 }
