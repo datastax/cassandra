@@ -33,7 +33,6 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 import com.google.common.util.concurrent.Striped;
-import org.apache.cassandra.utils.concurrent.Future;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -65,6 +64,7 @@ import org.apache.cassandra.utils.CounterId;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.btree.BTreeSet;
+import org.apache.cassandra.utils.concurrent.Future;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -126,6 +126,11 @@ public class CounterMutation implements IMutation
     public String getKeyspaceName()
     {
         return mutation.getKeyspaceName();
+    }
+
+    public Keyspace getKeyspace()
+    {
+        return mutation.getKeyspace();
     }
 
     public Collection<TableId> getTableIds()
