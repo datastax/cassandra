@@ -28,6 +28,7 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -46,12 +47,13 @@ public class ReadFailureTest extends TestBaseImpl
      * <p>
      * See CASSANDRA-16097 for further details.
      */
-    @Test
+    @Test(timeout = 20000000L) // 20k sec; will do 10k requests, which lot of may time out (command timeout is configured as 2s)
     public void testSpecExecRace() throws Throwable
     {
         try (Cluster cluster = init(Cluster.build()
                                            .withNodes(2)
                                            .withConfig(config -> {
+                                               config.set("read_request_timeout_in_ms", SECONDS.toMillis(2L));
                                                config.set("tombstone_warn_threshold", -1L);
                                                config.set("tombstone_failure_threshold", TOMBSTONE_FAIL_THRESHOLD);
                                            })
@@ -98,7 +100,7 @@ public class ReadFailureTest extends TestBaseImpl
                 String onFail = String.format("Did not receive expected ReadFailureException. Instead caught %s\n%s",
                                               t, ExceptionUtils.getStackTrace(t));
                 assertNotNull(onFail, t.getMessage());
-                assertTrue(onFail, t.getMessage().contains(RequestFailureReason.TIMEOUT.name()));
+                assertTrue(onFail, t.getMessage().contains(RequestFailureReason.READ_TOO_MANY_TOMBSTONES.name()));
             }
         }
     }
