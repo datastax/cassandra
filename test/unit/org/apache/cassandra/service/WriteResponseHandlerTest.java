@@ -39,6 +39,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
@@ -54,6 +55,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import static java.util.concurrent.TimeUnit.DAYS;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -315,6 +318,57 @@ public class WriteResponseHandlerTest
         assertEquals(startingCountForIdealCLWriteLatency, ks.metric.idealCLWriteLatency.totalLatency.getCount());
     }
 
+    @Test
+    public void testIsCompleted() throws Throwable
+    {
+        Dispatcher.RequestTime requestTime = Dispatcher.RequestTime.forImmediateExecution();
+        AbstractWriteResponseHandler<?> awr = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM, requestTime);
+        assertThat(awr.replicaPlan().blockFor()).isEqualTo(2);
+        assertThat(awr.writeType()).isEqualTo(WriteType.SIMPLE);
+        assertThat(awr.requestTime()).isEqualTo(requestTime);
+
+        assertThat(awr.isCompleted()).isFalse();
+        assertThat(awr.isCompletedExceptionally()).isFalse();
+
+        // LOCAL_QUORUM requires 2 reponses
+        awr.onResponse(createDummyMessage(0));
+        assertThat(awr.isCompleted()).isFalse();
+        assertThat(awr.isCompletedExceptionally()).isFalse();
+
+        awr.onResponse(createDummyMessage(1));
+        assertThat(awr.isCompleted()).isTrue();
+        assertThat(awr.isCompletedExceptionally()).isFalse();
+
+        awr.get();
+    }
+
+    @Test
+    public void testIsCompletedExceptionally() throws Throwable
+    {
+        Dispatcher.RequestTime requestTime = Dispatcher.RequestTime.forImmediateExecution();
+        AbstractWriteResponseHandler<?> awr = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM, requestTime);
+        assertThat(awr.replicaPlan().blockFor()).isEqualTo(2);
+        assertThat(awr.writeType()).isEqualTo(WriteType.SIMPLE);
+        assertThat(awr.requestTime()).isEqualTo(requestTime);
+
+        assertThat(awr.isCompleted()).isFalse();
+        assertThat(awr.isCompletedExceptionally()).isFalse();
+
+        // LOCAL_QUORUM requires 2 failure to fail handler
+        awr.onFailure(targets.get(0).endpoint(), RequestFailureReason.UNKNOWN);
+        assertThat(awr.isCompleted()).isFalse();
+        assertThat(awr.isCompletedExceptionally()).isFalse();
+        assertThat(awr.failures()).isEqualTo(1);
+        assertThat(awr.failureReasonByEndpoint()).hasSize(1);
+
+        awr.onFailure(targets.get(1).endpoint(), RequestFailureReason.UNKNOWN);
+        assertThat(awr.isCompleted()).isTrue();
+        assertThat(awr.isCompletedExceptionally()).isTrue();
+        assertThat(awr.failures()).isEqualTo(2);
+        assertThat(awr.failureReasonByEndpoint()).hasSize(2);
+
+        assertThatThrownBy(awr::get).isInstanceOf(WriteFailureException.class);
+    }
 
     private static AbstractWriteResponseHandler createWriteResponseHandler(ConsistencyLevel cl, ConsistencyLevel ideal)
     {
