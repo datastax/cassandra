@@ -81,7 +81,7 @@ public class ReadFailureTest extends TestBaseImpl
                                                ConsistencyLevel.TWO);
 
             // Create a bunch of latency samples for this failed operation.
-            loopFailStatement(cluster, 1);
+            loopFailStatement(cluster, 5000);
             // Update the spec exec threshold based on the above samples.
             // This would normally be done by the periodic task CassandraDaemon.SPECULATION_THRESHOLD_UPDATER.
             cluster.get(1).runOnInstance(() ->
