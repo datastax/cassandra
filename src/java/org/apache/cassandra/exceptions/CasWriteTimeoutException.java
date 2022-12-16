@@ -27,7 +27,12 @@ public class CasWriteTimeoutException extends WriteTimeoutException
 
     public CasWriteTimeoutException(WriteType writeType, ConsistencyLevel consistency, int received, int blockFor, int contentions)
     {
-        super(writeType, consistency, received, blockFor, String.format("CAS operation timed out: received %d of %d required responses after %d contention retries", received, blockFor, contentions));
+        this(writeType, consistency, received, blockFor, contentions, String.format("CAS operation timed out: received %d of %d required responses after %d contention retries", received, blockFor, contentions));
+    }
+
+    public CasWriteTimeoutException(WriteType writeType, ConsistencyLevel consistency, int received, int blockFor, int contentions, String message)
+    {
+        super(writeType, consistency, received, blockFor, message);
         this.contentions = contentions;
     }
 }

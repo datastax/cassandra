@@ -38,6 +38,7 @@ public interface IMutation
     String toString(boolean shallow);
     Collection<PartitionUpdate> getPartitionUpdates();
     Supplier<Mutation> hintOnFailure();
+    Keyspace getKeyspace();
 
     default void validateIndexedColumns(ClientState state)
     {
