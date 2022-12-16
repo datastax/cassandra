@@ -36,7 +36,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
@@ -204,6 +203,16 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         @Override
+        public AbstractWriteResponseHandler<IMutation> mutateCounterOnLeader(CounterMutation mutation,
+                                                                             String localDataCenter,
+                                                                             StorageProxy.WritePerformer performer,
+                                                                             Runnable callback,
+                                                                             long queryStartNanoTime)
+        {
+            return performWrite(mutation, mutation.consistency(), localDataCenter, performer, callback, WriteType.COUNTER, queryStartNanoTime);
+        }
+
+        @Override
         public AbstractWriteResponseHandler<IMutation> mutateStandard(Mutation mutation, ConsistencyLevel consistencyLevel, String localDataCenter, WritePerformer standardWritePerformer, Runnable callback, WriteType writeType, long queryStartNanoTime)
         {
             return performWrite(mutation, consistencyLevel, localDataCenter, standardWritePerformer, callback, writeType, queryStartNanoTime);
@@ -213,6 +222,125 @@ public class StorageProxy implements StorageProxyMBean
         public AbstractWriteResponseHandler<Commit> mutatePaxos(Commit proposal, ConsistencyLevel consistencyLevel, boolean allowHints, long queryStartNanoTime)
         {
             return defaultCommitPaxos(proposal, consistencyLevel, allowHints, queryStartNanoTime);
+        }
+
+        @Override
+        public void mutateAtomically(Collection<Mutation> mutations, ConsistencyLevel consistencyLevel, boolean requireQuorumForRemove, long queryStartNanoTime, ClientRequestsMetrics metrics, ClientState clientState) throws UnavailableException, OverloadedException, WriteTimeoutException
+        {
+            Tracing.trace("Determining replicas for atomic batch");
+            long startTime = nanoTime();
+
+            QueryInfoTracker.WriteTracker writeTracker = queryTracker().onWrite(clientState, true, mutations, consistencyLevel);
+
+            if (mutations.stream().anyMatch(mutation -> Keyspace.open(mutation.getKeyspaceName()).getReplicationStrategy().hasTransientReplicas()))
+                throw new AssertionError("Logged batches are unsupported with transient replication");
+
+            try
+            {
+
+                // If we are requiring quorum nodes for removal, we upgrade consistency level to QUORUM unless we already
+                // require ALL, or EACH_QUORUM. This is so that *at least* QUORUM nodes see the update.
+                ConsistencyLevel batchConsistencyLevel = requireQuorumForRemove
+                                                         ? ConsistencyLevel.QUORUM
+                                                         : consistencyLevel;
+
+                switch (consistencyLevel)
+                {
+                    case ALL:
+                    case EACH_QUORUM:
+                        batchConsistencyLevel = consistencyLevel;
+                }
+
+                ReplicaPlan.ForWrite replicaPlan = ReplicaPlans.forBatchlogWrite(batchConsistencyLevel == ConsistencyLevel.ANY,
+                                                                                 mutations.iterator().next().getKeyspaceName());
+
+                final TimeUUID batchUUID = nextTimeUUID();
+                BatchlogCleanup cleanup = new BatchlogCleanup(mutations.size(),
+                                                              () -> asyncRemoveFromBatchlog(replicaPlan, batchUUID));
+
+                // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
+                List<WriteResponseHandlerWrapper> wrappers = wrapBatchResponseHandlers(mutations, consistencyLevel, batchConsistencyLevel, cleanup, queryStartNanoTime);
+
+                // write to the batchlog
+                syncWriteToBatchlog(mutations, replicaPlan, batchUUID, queryStartNanoTime);
+
+                // now actually perform the writes and wait for them to complete
+                // note this is the actual change between CC and OSS - OSS uses syncWriteBatchedMutations and does not
+                // include waiting for the batched mutations to complete
+                asyncWriteBatchedMutations(wrappers);
+
+                // wait for batched mutations to complete
+                for (StorageProxy.WriteResponseHandlerWrapper wrapper : wrappers)
+                    wrapper.handler.get();
+
+                writeTracker.onDone();
+            }
+            catch (UnavailableException e)
+            {
+                metrics.writeMetrics.unavailables.mark();
+                metrics.writeMetricsForLevel(consistencyLevel).unavailables.mark();
+                Tracing.trace("Unavailable");
+                writeTracker.onError(e);
+                throw e;
+            }
+            catch (WriteTimeoutException e)
+            {
+                metrics.writeMetrics.timeouts.mark();
+                metrics.writeMetricsForLevel(consistencyLevel).timeouts.mark();
+                Tracing.trace("Write timeout; received {} of {} required replies", e.received, e.blockFor);
+                writeTracker.onError(e);
+                throw e;
+            }
+            catch (WriteFailureException e)
+            {
+                metrics.writeMetrics.failures.mark();
+                metrics.writeMetricsForLevel(consistencyLevel).failures.mark();
+                Tracing.trace("Write failure; received {} of {} required replies", e.received, e.blockFor);
+                writeTracker.onError(e);
+                throw e;
+            }
+            finally
+            {
+                long latency = nanoTime() - startTime;
+                metrics.writeMetrics.addNano(latency);
+                metrics.writeMetricsForLevel(consistencyLevel).addNano(latency);
+                updateCoordinatorWriteLatencyTableMetric(mutations, latency);
+            }
+        }
+
+        private static List<WriteResponseHandlerWrapper> wrapBatchResponseHandlers(Collection<Mutation> mutations, ConsistencyLevel consistencyLevel, ConsistencyLevel batchConsistencyLevel, BatchlogCleanup cleanup, long queryStartNanoTime)
+        {
+            List<WriteResponseHandlerWrapper> wrappers = new ArrayList<>(mutations.size());
+            for (Mutation mutation : mutations)
+            {
+                WriteResponseHandlerWrapper wrapper = wrapBatchResponseHandler(mutation,
+                                                                               consistencyLevel,
+                                                                               batchConsistencyLevel,
+                                                                               WriteType.BATCH,
+                                                                               cleanup,
+                                                                               queryStartNanoTime);
+                // exit early if we can't fulfill the CL at this time.
+                wrappers.add(wrapper);
+            }
+            return wrappers;
+        }
+
+        private void clearBatchlog(String keyspace, ReplicaPlan.ForWrite replicaPlan, TimeUUID batchUUID)
+        {
+            StorageProxy.asyncRemoveFromBatchlog(replicaPlan, batchUUID);
+        }
+
+        private void persistBatchlog(Collection<Mutation> mutations, long queryStartNanoTime, ReplicaPlan.ForWrite replicaPlan, TimeUUID batchUUID)
+        {
+            // write to the batchlog
+            StorageProxy.syncWriteToBatchlog(mutations, replicaPlan, batchUUID, queryStartNanoTime);
+        }
+
+        private void asyncWriteBatchedMutations(List<StorageProxy.WriteResponseHandlerWrapper> wrappers)
+        throws WriteTimeoutException, OverloadedException
+        {
+            String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
+            StorageProxy.asyncWriteBatchedMutations(wrappers, localDataCenter, Stage.MUTATION);
         }
     }
 
@@ -231,20 +359,6 @@ public class StorageProxy implements StorageProxyMBean
 
     private volatile long logBlockingReadRepairAttemptsUntilNanos = Long.MIN_VALUE;
     private static volatile QueryInfoTracker queryInfoTracker = QueryInfoTracker.NOOP;
-
-    // allows custom implementation of mutateAtomically
-    private static final AtomicReference<AtomicMutator> atomicMutator = new AtomicReference<>();
-    private static final AtomicMutator DEFAULT_ATOMIC_MUTATOR = (mutations, consistencyLevel, requireQuorumForRemove, queryStartNanoTime, metrics, clientState) -> {
-        throw new RuntimeException("the default atomic mutator is just a placeholder meaning " +
-                "that the default code path is being used; it should not be run directly");
-    };
-
-    public static void setAtomicMutator(AtomicMutator mutator)
-    {
-        boolean mutatorSet = atomicMutator.compareAndSet(null, mutator);
-        Preconditions.checkState(mutatorSet, "atomic mutator used before setting a custom mutator? " +
-                "Failing to prevent inconsistency; the already set mutator is " + atomicMutator.get());
-    }
 
     private StorageProxy()
     {
@@ -1271,100 +1385,7 @@ public class StorageProxy implements StorageProxyMBean
                                         ClientState clientState)
     throws UnavailableException, OverloadedException, WriteTimeoutException
     {
-        atomicMutator.compareAndSet(null, DEFAULT_ATOMIC_MUTATOR);
-
-        AtomicMutator mutator = atomicMutator.get();
-        if (mutator != DEFAULT_ATOMIC_MUTATOR)
-        {
-            mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, queryStartNanoTime, metrics, clientState);
-            return;
-        }
-
-        Tracing.trace("Determining replicas for atomic batch");
-        long startTime = nanoTime();
-
-        QueryInfoTracker.WriteTracker writeTracker = queryTracker().onWrite(clientState, true, mutations, consistencyLevel);
-
-        List<WriteResponseHandlerWrapper> wrappers = new ArrayList<>(mutations.size());
-
-        if (mutations.stream().anyMatch(mutation -> Keyspace.open(mutation.getKeyspaceName()).getReplicationStrategy().hasTransientReplicas()))
-            throw new AssertionError("Logged batches are unsupported with transient replication");
-
-        try
-        {
-
-            // If we are requiring quorum nodes for removal, we upgrade consistency level to QUORUM unless we already
-            // require ALL, or EACH_QUORUM. This is so that *at least* QUORUM nodes see the update.
-            ConsistencyLevel batchConsistencyLevel = requireQuorumForRemove
-                                                     ? ConsistencyLevel.QUORUM
-                                                     : consistencyLevel;
-
-            switch (consistencyLevel)
-            {
-                case ALL:
-                case EACH_QUORUM:
-                    batchConsistencyLevel = consistencyLevel;
-            }
-
-            ReplicaPlan.ForWrite replicaPlan = ReplicaPlans.forBatchlogWrite(batchConsistencyLevel == ConsistencyLevel.ANY,
-                    mutations.iterator().next().getKeyspaceName());
-
-            final TimeUUID batchUUID = nextTimeUUID();
-            BatchlogCleanup cleanup = new BatchlogCleanup(mutations.size(),
-                                                          () -> asyncRemoveFromBatchlog(replicaPlan, batchUUID));
-
-            // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
-            for (Mutation mutation : mutations)
-            {
-                WriteResponseHandlerWrapper wrapper = wrapBatchResponseHandler(mutation,
-                                                                               consistencyLevel,
-                                                                               batchConsistencyLevel,
-                                                                               WriteType.BATCH,
-                                                                               cleanup,
-                                                                               queryStartNanoTime);
-                // exit early if we can't fulfill the CL at this time.
-                wrappers.add(wrapper);
-            }
-
-            // write to the batchlog
-            syncWriteToBatchlog(mutations, replicaPlan, batchUUID, queryStartNanoTime);
-
-            // now actually perform the writes and wait for them to complete
-            syncWriteBatchedMutations(wrappers, Stage.MUTATION);
-
-            writeTracker.onDone();
-        }
-        catch (UnavailableException e)
-        {
-            metrics.writeMetrics.unavailables.mark();
-            metrics.writeMetricsForLevel(consistencyLevel).unavailables.mark();
-            Tracing.trace("Unavailable");
-            writeTracker.onError(e);
-            throw e;
-        }
-        catch (WriteTimeoutException e)
-        {
-            metrics.writeMetrics.timeouts.mark();
-            metrics.writeMetricsForLevel(consistencyLevel).timeouts.mark();
-            Tracing.trace("Write timeout; received {} of {} required replies", e.received, e.blockFor);
-            writeTracker.onError(e);
-            throw e;
-        }
-        catch (WriteFailureException e)
-        {
-            metrics.writeMetrics.failures.mark();
-            metrics.writeMetricsForLevel(consistencyLevel).failures.mark();
-            Tracing.trace("Write failure; received {} of {} required replies", e.received, e.blockFor);
-            writeTracker.onError(e);
-            throw e;
-        }
-        finally
-        {
-            long latency = nanoTime() - startTime;
-            metrics.writeMetrics.addNano(latency);
-            metrics.writeMetricsForLevel(consistencyLevel).addNano(latency);
-            updateCoordinatorWriteLatencyTableMetric(mutations, latency);
-        }
+        mutator.mutateAtomically(mutations, consistencyLevel, requireQuorumForRemove, queryStartNanoTime, metrics, clientState);
     }
 
     public static void updateCoordinatorWriteLatencyTableMetric(Collection<? extends IMutation> mutations, long latency)
@@ -1411,7 +1432,7 @@ public class StorageProxy implements StorageProxyMBean
         handler.get();
     }
 
-    private static void asyncRemoveFromBatchlog(ReplicaPlan.ForWrite replicaPlan, TimeUUID uuid)
+    protected static void asyncRemoveFromBatchlog(ReplicaPlan.ForWrite replicaPlan, TimeUUID uuid)
     {
         Message<TimeUUID> message = Message.out(Verb.BATCH_REMOVE_REQ, uuid);
         for (Replica target : replicaPlan.contacts())
@@ -1444,20 +1465,25 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    public static void syncWriteBatchedMutations(List<WriteResponseHandlerWrapper> wrappers, Stage stage)
-    throws WriteTimeoutException, OverloadedException
+    public static AbstractWriteResponseHandler<IMutation> getWriteResponseHandler(IMutation mutation,
+                                                                                  ConsistencyLevel consistencyLevel,
+                                                                                  @Nullable Runnable callback,
+                                                                                  WriteType writeType,
+                                                                                  long queryStartNanoTime)
     {
-        String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
+        Keyspace keyspace = mutation.getKeyspace();
+        Token tk = mutation.key().getToken();
 
-        for (WriteResponseHandlerWrapper wrapper : wrappers)
-        {
-            EndpointsForToken sendTo = wrapper.handler.replicaPlan.liveAndDown();
-            Replicas.temporaryAssertFull(sendTo); // TODO: CASSANDRA-14549
-            sendToHintedReplicas(wrapper.mutation, wrapper.handler.replicaPlan.withContacts(sendTo), wrapper.handler, localDataCenter, stage);
-        }
+        ReplicaPlan.ForWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, tk, ReplicaPlans.writeNormal);
+        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspace.getName());
+        if (replicaPlan.lookup(FBUtilities.getBroadcastAddressAndPort()) != null)
+            metrics.writeMetrics.localRequests.mark();
+        else
+            metrics.writeMetrics.remoteRequests.mark();
 
-        for (WriteResponseHandlerWrapper wrapper : wrappers)
-            wrapper.handler.get();
+        AbstractReplicationStrategy rs = replicaPlan.replicationStrategy();
+
+        return rs.getWriteResponseHandler(replicaPlan, callback, writeType, mutation.hintOnFailure(), queryStartNanoTime);
     }
 
     /**
@@ -1482,22 +1508,8 @@ public class StorageProxy implements StorageProxyMBean
                                                                        WriteType writeType,
                                                                        long queryStartNanoTime)
     {
-        String keyspaceName = mutation.getKeyspaceName();
-        Keyspace keyspace = Keyspace.open(keyspaceName);
-        Token tk = mutation.key().getToken();
-
-        ReplicaPlan.ForWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, tk, ReplicaPlans.writeNormal);
-
-        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspaceName);
-        if (replicaPlan.lookup(FBUtilities.getBroadcastAddressAndPort()) != null)
-            metrics.writeMetrics.localRequests.mark();
-        else
-            metrics.writeMetrics.remoteRequests.mark();
-
-        AbstractReplicationStrategy rs = replicaPlan.replicationStrategy();
-        AbstractWriteResponseHandler<IMutation> responseHandler = rs.getWriteResponseHandler(replicaPlan, callback, writeType, mutation.hintOnFailure(), queryStartNanoTime);
-
-        performer.apply(mutation, replicaPlan, responseHandler, localDataCenter);
+        AbstractWriteResponseHandler<IMutation> responseHandler = getWriteResponseHandler(mutation, consistencyLevel, callback, writeType, queryStartNanoTime);
+        performer.apply(mutation, responseHandler.replicaPlan, responseHandler, localDataCenter);
         return responseHandler;
     }
 
@@ -1509,20 +1521,9 @@ public class StorageProxy implements StorageProxyMBean
                                                                        BatchlogResponseHandler.BatchlogCleanup cleanup,
                                                                        long queryStartNanoTime)
     {
-        Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
-        Token tk = mutation.key().getToken();
-
-        ReplicaPlan.ForWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, tk, ReplicaPlans.writeNormal);
-
-        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspace.getName());
-        if (replicaPlan.lookup(FBUtilities.getBroadcastAddressAndPort()) != null)
-            metrics.writeMetrics.localRequests.mark();
-        else
-            metrics.writeMetrics.remoteRequests.mark();
-
-        AbstractReplicationStrategy rs = replicaPlan.replicationStrategy();
-        AbstractWriteResponseHandler<IMutation> writeHandler = rs.getWriteResponseHandler(replicaPlan, null, writeType, mutation, queryStartNanoTime);
-        BatchlogResponseHandler<IMutation> batchHandler = new BatchlogResponseHandler<>(writeHandler, batchConsistencyLevel.blockFor(rs), cleanup, queryStartNanoTime);
+        AbstractWriteResponseHandler<IMutation> writeHandler = getWriteResponseHandler(mutation, consistencyLevel, null, writeType, queryStartNanoTime);
+        int batchlogBlockFor = batchConsistencyLevel.blockFor(writeHandler.replicaPlan().replicationStrategy());
+        BatchlogResponseHandler<IMutation> batchHandler = new BatchlogResponseHandler<>(writeHandler, batchlogBlockFor, cleanup, queryStartNanoTime);
         return new WriteResponseHandlerWrapper(batchHandler, mutation);
     }
 
@@ -1554,10 +1555,10 @@ public class StorageProxy implements StorageProxyMBean
     // used by atomic_batch_mutate to decouple availability check from the write itself, caches consistency level and endpoints.
     public static class WriteResponseHandlerWrapper
     {
-        final BatchlogResponseHandler<IMutation> handler;
-        final Mutation mutation;
+        public final BatchlogResponseHandler<IMutation> handler;
+        public final Mutation mutation;
 
-        WriteResponseHandlerWrapper(BatchlogResponseHandler<IMutation> handler, Mutation mutation)
+        public WriteResponseHandlerWrapper(BatchlogResponseHandler<IMutation> handler, Mutation mutation)
         {
             this.handler = handler;
             this.mutation = mutation;
@@ -1924,7 +1925,7 @@ public class StorageProxy implements StorageProxyMBean
     public static AbstractWriteResponseHandler<IMutation> applyCounterMutationOnLeader(CounterMutation cm, String localDataCenter, Runnable callback, long queryStartNanoTime)
     throws UnavailableException, OverloadedException
     {
-        return performWrite(cm, cm.consistency(), localDataCenter, counterWritePerformer, callback, WriteType.COUNTER, queryStartNanoTime);
+        return mutator.mutateCounterOnLeader(cm, localDataCenter, counterWritePerformer, callback, queryStartNanoTime);
     }
 
     // Same as applyCounterMutationOnLeader but must with the difference that it use the MUTATION stage to execute the write (while
@@ -1932,7 +1933,7 @@ public class StorageProxy implements StorageProxyMBean
     public static AbstractWriteResponseHandler<IMutation> applyCounterMutationOnCoordinator(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
     throws UnavailableException, OverloadedException
     {
-        return performWrite(cm, cm.consistency(), localDataCenter, counterWriteOnCoordinatorPerformer, null, WriteType.COUNTER, queryStartNanoTime);
+        return mutator.mutateCounterOnLeader(cm, localDataCenter, counterWriteOnCoordinatorPerformer, null, queryStartNanoTime);
     }
 
     private static Runnable counterWriteTask(final IMutation mutation,
@@ -1949,7 +1950,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 Mutation result = ((CounterMutation) mutation).applyCounterMutation();
                 responseHandler.onResponse(null);
-                mutator.onAppliedCounter(result);
+                mutator.onAppliedCounter(result, responseHandler);
                 sendToHintedReplicas(result, replicaPlan, responseHandler, localDataCenter, Stage.COUNTER_MUTATION);
             }
         };

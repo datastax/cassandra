@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.service;
 
+import java.util.Collection;
 import javax.annotation.Nullable;
 
 import org.junit.Test;
@@ -28,6 +29,10 @@ import org.apache.cassandra.db.CounterMutation;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.exceptions.OverloadedException;
+import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.exceptions.WriteTimeoutException;
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.service.paxos.Commit;
 
 import static org.junit.Assert.assertSame;
@@ -43,6 +48,16 @@ public class MutatorProviderTest
         }
 
         @Override
+        public AbstractWriteResponseHandler<IMutation> mutateCounterOnLeader(CounterMutation mutation,
+                                                                             String localDataCenter,
+                                                                             StorageProxy.WritePerformer performer,
+                                                                             Runnable callback,
+                                                                             long queryStartNanoTime)
+        {
+            return null;
+        }
+
+        @Override
         public AbstractWriteResponseHandler<IMutation> mutateStandard(Mutation mutation, ConsistencyLevel consistencyLevel, String localDataCenter, StorageProxy.WritePerformer writePerformer, Runnable callback, WriteType writeType, long queryStartNanoTime)
         {
             return null;
@@ -53,6 +68,12 @@ public class MutatorProviderTest
         public AbstractWriteResponseHandler<Commit> mutatePaxos(Commit proposal, ConsistencyLevel consistencyLevel, boolean allowHints, long queryStartNanoTime)
         {
             return null;
+        }
+
+        @Override
+        public void mutateAtomically(Collection<Mutation> mutations, ConsistencyLevel consistencyLevel, boolean requireQuorumForRemove, long queryStartNanoTime, ClientRequestsMetrics metrics, ClientState clientState) throws UnavailableException, OverloadedException, WriteTimeoutException
+        {
+            // no-op
         }
     }
 
