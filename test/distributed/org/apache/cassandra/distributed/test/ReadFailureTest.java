@@ -98,7 +98,7 @@ public class ReadFailureTest extends TestBaseImpl
                 String onFail = String.format("Did not receive expected ReadFailureException. Instead caught %s\n%s",
                                               t, ExceptionUtils.getStackTrace(t));
                 assertNotNull(onFail, t.getMessage());
-                assertTrue(onFail, t.getMessage().contains(RequestFailureReason.READ_TOO_MANY_TOMBSTONES.name()));
+                assertTrue(onFail, t.getMessage().contains(RequestFailureReason.TIMEOUT.name()));
             }
         }
     }
