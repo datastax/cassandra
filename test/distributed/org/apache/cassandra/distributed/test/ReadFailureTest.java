@@ -39,6 +39,18 @@ public class ReadFailureTest extends TestBaseImpl
     static final int TOMBSTONE_FAIL_KEY = 100001;
     static final String TABLE = "t";
 
+    @Test(timeout = 3000L)
+    public void testTO1() throws Throwable
+    {
+        Thread.sleep(2000);
+    }
+
+    @Test(timeout = 1000L)
+    public void testTO2() throws Throwable
+    {
+        Thread.sleep(2000);
+    }
+
     /**
      * This test attempts to create a race condition with speculative executions that would previously cause an AssertionError.
      * N=2, RF=2, read ONE
@@ -47,13 +59,12 @@ public class ReadFailureTest extends TestBaseImpl
      * <p>
      * See CASSANDRA-16097 for further details.
      */
-    @Test(timeout = 20000000L) // 20k sec; will do 10k requests, which lot of may time out (command timeout is configured as 2s)
+    @Test
     public void testSpecExecRace() throws Throwable
     {
         try (Cluster cluster = init(Cluster.build()
                                            .withNodes(2)
                                            .withConfig(config -> {
-                                               config.set("read_request_timeout_in_ms", SECONDS.toMillis(2L));
                                                config.set("tombstone_warn_threshold", -1L);
                                                config.set("tombstone_failure_threshold", TOMBSTONE_FAIL_THRESHOLD);
                                            })
@@ -70,7 +81,7 @@ public class ReadFailureTest extends TestBaseImpl
                                                ConsistencyLevel.TWO);
 
             // Create a bunch of latency samples for this failed operation.
-            loopFailStatement(cluster, 5000);
+            loopFailStatement(cluster, 1);
             // Update the spec exec threshold based on the above samples.
             // This would normally be done by the periodic task CassandraDaemon.SPECULATION_THRESHOLD_UPDATER.
             cluster.get(1).runOnInstance(() ->
@@ -81,7 +92,7 @@ public class ReadFailureTest extends TestBaseImpl
                                          });
 
             // Run the request a bunch of times under racy conditions.
-            loopFailStatement(cluster, 5000);
+            loopFailStatement(cluster, 1);
         }
     }
 
