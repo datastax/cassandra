@@ -92,7 +92,7 @@ public class ReadFailureTest extends TestBaseImpl
                                          });
 
             // Run the request a bunch of times under racy conditions.
-            loopFailStatement(cluster, 1);
+            loopFailStatement(cluster, 100);
         }
     }
 
