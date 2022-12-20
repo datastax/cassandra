@@ -1582,6 +1582,11 @@ public abstract class CQLTester
         return sessionNet(protocolVersion).execute(statement);
     }
 
+    protected com.datastax.driver.core.ResultSet executeNet(Statement statement)
+    {
+        return sessionNet().execute(statement);
+    }
+
     protected com.datastax.driver.core.ResultSet executeNetWithPaging(ProtocolVersion version, String query, int pageSize)
     {
         return sessionNet(version).execute(new SimpleStatement(formatQuery(query)).setFetchSize(pageSize));
