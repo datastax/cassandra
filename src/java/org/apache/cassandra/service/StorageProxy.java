@@ -572,7 +572,8 @@ public class StorageProxy implements StorageProxyMBean
                            clientState,
                            requestTime,
                            metrics.casWriteMetrics,
-                           updateProposer);
+                           updateProposer,
+                           false);
 
         }
         catch (CasWriteUnknownResultException e)
@@ -663,6 +664,7 @@ public class StorageProxy implements StorageProxyMBean
      *     this operation and 2) the result that the whole method should return. This can return {@code null} in the
      *     special where, after having "prepared" (and thus potentially replayed in-progress upgdates), we don't want
      *     to propose anything (the whole method then return {@code null}).
+     * @param skipCommitConsistencyValidation whether to skip {@link ConsistencyLevel#validateForCasCommit} for commit consistency
      * @return the second element of the pair returned by {@code createUpdateProposal} (for the last call of that method
      *     if that method is called multiple times due to retries).
      */
@@ -674,7 +676,8 @@ public class StorageProxy implements StorageProxyMBean
                                        ClientState clientState,
                                        Dispatcher.RequestTime requestTime,
                                        CASClientRequestMetrics casMetrics,
-                                       Function<Ballot, Pair<PartitionUpdate, RowIterator>> createUpdateProposal)
+                                       Function<Ballot, Pair<PartitionUpdate, RowIterator>> createUpdateProposal,
+                                       boolean skipCommitConsistencyValidation)
     throws UnavailableException, IsBootstrappingException, RequestFailureException, RequestTimeoutException, InvalidRequestException
     {
         int contentions = 0;
@@ -684,7 +687,8 @@ public class StorageProxy implements StorageProxyMBean
         {
             consistencyForPaxos.validateForCas(metadata.keyspace, clientState);
             consistencyForReplayCommits.validateForCasCommit(latestRs, metadata.keyspace, clientState);
-            consistencyForCommit.validateForCasCommit(latestRs, metadata.keyspace, clientState);
+            if (!skipCommitConsistencyValidation)
+                consistencyForCommit.validateForCasCommit(latestRs, metadata.keyspace, clientState);
 
             long timeoutNanos = DatabaseDescriptor.getCasContentionTimeout(NANOSECONDS);
             long deadline = requestTime.computeDeadline(timeoutNanos);
@@ -2110,7 +2114,8 @@ public class StorageProxy implements StorageProxyMBean
                         clientState,
                         requestTime,
                         metrics.casReadMetrics,
-                        updateProposer);
+                        updateProposer,
+                        true); // skip guardrail for ANY which is blocked by CNDB
             }
             catch (WriteTimeoutException e)
             {
