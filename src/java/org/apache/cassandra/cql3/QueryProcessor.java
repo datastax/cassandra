@@ -279,6 +279,12 @@ public class QueryProcessor implements QueryHandler
     public ResultMessage processStatement(CQLStatement statement, QueryState queryState, QueryOptions options, Dispatcher.RequestTime requestTime)
     throws RequestExecutionException, RequestValidationException
     {
+        return processStatement(statement, queryState, options, Map.of(), requestTime);
+    }
+
+    public ResultMessage processStatement(CQLStatement statement, QueryState queryState, QueryOptions options, Map<String, ByteBuffer> customPayload, Dispatcher.RequestTime requestTime)
+    throws RequestExecutionException, RequestValidationException
+    {
         logger.trace("Process {} @CL.{}", statement, options.getConsistency());
         ClientState clientState = queryState.getClientState();
         statement.authorize(clientState);
@@ -288,15 +294,15 @@ public class QueryProcessor implements QueryHandler
 
         for (QueryInterceptor interceptor: interceptors)
         {
-            ResultMessage result = interceptor.interceptStatement(statement, queryState, options, requestTime);
+            ResultMessage result = interceptor.interceptStatement(statement, queryState, options, customPayload, requestTime);
 
             if (result != null)
                 return result;
         }
 
         ResultMessage result = options.getConsistency() == ConsistencyLevel.NODE_LOCAL
-                             ? processNodeLocalStatement(statement, queryState, options)
-                             : statement.execute(queryState, options, requestTime);
+                               ? processNodeLocalStatement(statement, queryState, options)
+                               : statement.execute(queryState, options, requestTime);
 
         return result == null ? new ResultMessage.Void() : result;
     }
@@ -387,17 +393,11 @@ public class QueryProcessor implements QueryHandler
         return getStatement(queryString, queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace()));
     }
 
-    public ResultMessage process(CQLStatement statement,
-                                 QueryState state,
+    public ResultMessage process(CQLStatement prepared,
+                                 QueryState queryState,
                                  QueryOptions options,
                                  Map<String, ByteBuffer> customPayload,
                                  Dispatcher.RequestTime requestTime) throws RequestExecutionException, RequestValidationException
-    {
-        return process(statement, state, options, requestTime);
-    }
-
-    public ResultMessage process(CQLStatement prepared, QueryState queryState, QueryOptions options, Dispatcher.RequestTime requestTime)
-    throws RequestExecutionException, RequestValidationException
     {
         options.prepare(prepared.getBindVariables());
         if (prepared.getBindVariables().size() != options.getValues().size())
@@ -406,7 +406,13 @@ public class QueryProcessor implements QueryHandler
         if (!queryState.getClientState().isInternal)
             metrics.regularStatementsExecuted.inc();
 
-        return processStatement(prepared, queryState, options, requestTime);
+        return processStatement(prepared, queryState, options, customPayload, requestTime);
+    }
+
+    public ResultMessage process(CQLStatement prepared, QueryState queryState, QueryOptions options, Dispatcher.RequestTime requestTime)
+    throws RequestExecutionException, RequestValidationException
+    {
+        return process(prepared, queryState, options, Map.of(), requestTime);
     }
 
     public static CQLStatement parseStatement(String queryStr, ClientState clientState) throws RequestValidationException
@@ -862,12 +868,6 @@ public class QueryProcessor implements QueryHandler
                                          Dispatcher.RequestTime requestTime)
                                                  throws RequestExecutionException, RequestValidationException
     {
-        return processPrepared(statement, state, options, requestTime);
-    }
-
-    public ResultMessage processPrepared(CQLStatement statement, QueryState queryState, QueryOptions options, Dispatcher.RequestTime requestTime)
-    throws RequestExecutionException, RequestValidationException
-    {
         List<ByteBuffer> variables = options.getValues();
         // Check to see if there are any bound variables to verify
         if (!(variables.isEmpty() && statement.getBindVariables().isEmpty()))
@@ -884,28 +884,43 @@ public class QueryProcessor implements QueryHandler
         }
 
         metrics.preparedStatementsExecuted.inc();
-        return processStatement(statement, queryState, options, requestTime);
+        return processStatement(statement, state, options, customPayload, requestTime);
     }
 
-    public ResultMessage processBatch(BatchStatement statement,
-                                      QueryState state,
+    public ResultMessage processPrepared(CQLStatement statement, QueryState queryState, QueryOptions options, Dispatcher.RequestTime requestTime)
+    throws RequestExecutionException, RequestValidationException
+    {
+        return processPrepared(statement, queryState, options, Map.of(), requestTime);
+    }
+
+    public ResultMessage processBatch(BatchStatement batch,
+                                      QueryState queryState,
                                       BatchQueryOptions options,
                                       Map<String, ByteBuffer> customPayload,
                                       Dispatcher.RequestTime requestTime)
                                               throws RequestExecutionException, RequestValidationException
     {
-        return processBatch(statement, state, options, requestTime);
+        ClientState clientState = queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace());
+        Tracing.setupTracedKeyspace(batch);
+
+        for (QueryInterceptor interceptor: interceptors)
+        {
+            ResultMessage result = interceptor.interceptBatchStatement(batch, queryState, options, customPayload, requestTime);
+
+            if (result != null)
+                return result;
+        }
+
+        batch.authorize(clientState);
+        batch.validate();
+        batch.validate(clientState);
+        return batch.execute(queryState, options, requestTime);
     }
 
     public ResultMessage processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options, Dispatcher.RequestTime requestTime)
     throws RequestExecutionException, RequestValidationException
     {
-        ClientState clientState = queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace());
-        Tracing.setupTracedKeyspace(batch);
-        batch.authorize(clientState);
-        batch.validate();
-        batch.validate(clientState);
-        return batch.execute(queryState, options, requestTime);
+        return processBatch(batch, queryState, options, Map.of(), requestTime);
     }
 
     public static CQLStatement getStatement(String queryStr, ClientState clientState)
