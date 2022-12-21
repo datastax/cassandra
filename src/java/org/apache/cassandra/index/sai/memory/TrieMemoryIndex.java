@@ -64,7 +64,6 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private final MemtableTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
-    private Object writeLock = new Object();
 
     private ByteBuffer minTerm;
     private ByteBuffer maxTerm;
@@ -84,57 +83,54 @@ public class TrieMemoryIndex extends MemoryIndex
         this.primaryKeysReducer = new PrimaryKeysReducer();
     }
 
-    public void add(DecoratedKey key,
-                    Clustering clustering,
-                    ByteBuffer value,
-                    LongConsumer onHeapAllocationsTracker,
-                    LongConsumer offHeapAllocationsTracker)
+    public synchronized void add(DecoratedKey key,
+                                 Clustering clustering,
+                                 ByteBuffer value,
+                                 LongConsumer onHeapAllocationsTracker,
+                                 LongConsumer offHeapAllocationsTracker)
     {
-        synchronized (writeLock)
+        AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
+        try
         {
-            AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
-            try
+            value = TypeUtil.encode(value, indexContext.getValidator());
+            analyzer.reset(value.duplicate());
+            final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
+            final long initialSizeOnHeap = data.sizeOnHeap();
+            final long initialSizeOffHeap = data.sizeOffHeap();
+            final long reducerHeapSize = primaryKeysReducer.heapAllocations();
+
+            while (analyzer.hasNext())
             {
-                value = TypeUtil.encode(value, indexContext.getValidator());
-                analyzer.reset(value.duplicate());
-                final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
-                final long initialSizeOnHeap = data.sizeOnHeap();
-                final long initialSizeOffHeap = data.sizeOffHeap();
-                final long reducerHeapSize = primaryKeysReducer.heapAllocations();
+                final ByteBuffer term = analyzer.next();
 
-                while (analyzer.hasNext())
+                setMinMaxTerm(term.duplicate());
+
+                final ByteComparable encodedTerm = encode(term.duplicate());
+
+                try
                 {
-                    final ByteBuffer term = analyzer.next();
-
-                    setMinMaxTerm(term.duplicate());
-
-                    final ByteComparable encodedTerm = encode(term.duplicate());
-
-                    try
+                    if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
                     {
-                        if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
-                        {
-                            data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
-                        }
-                        else
-                        {
-                            data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
-                        }
+                        data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
                     }
-                    catch (MemtableTrie.SpaceExhaustedException e)
+                    else
                     {
-                        Throwables.throwAsUncheckedException(e);
+                        data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
                     }
                 }
+                catch (MemtableTrie.SpaceExhaustedException e)
+                {
+                    Throwables.throwAsUncheckedException(e);
+                }
+            }
 
-                onHeapAllocationsTracker.accept((data.sizeOnHeap() - initialSizeOnHeap) +
-                                                (primaryKeysReducer.heapAllocations() - reducerHeapSize));
-                offHeapAllocationsTracker.accept(data.sizeOffHeap() - initialSizeOffHeap);
-            }
-            finally
-            {
-                analyzer.end();
-            }
+            onHeapAllocationsTracker.accept((data.sizeOnHeap() - initialSizeOnHeap) +
+                                            (primaryKeysReducer.heapAllocations() - reducerHeapSize));
+            offHeapAllocationsTracker.accept(data.sizeOffHeap() - initialSizeOffHeap);
+        }
+        finally
+        {
+            analyzer.end();
         }
     }
 
@@ -171,7 +167,7 @@ public class TrieMemoryIndex extends MemoryIndex
             case EQ:
             case CONTAINS_KEY:
             case CONTAINS_VALUE:
-                return exactMatch(expression);
+                return exactMatch(expression, keyRange);
             case RANGE:
                 return rangeMatch(expression, keyRange);
             default:
@@ -179,7 +175,7 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-    public RangeIterator exactMatch(Expression expression)
+    public RangeIterator exactMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : encode(expression.lower.value.encoded);
         final PrimaryKeys primaryKeys = data.get(prefix);
@@ -187,7 +183,7 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             return RangeIterator.empty();
         }
-        return new KeyRangeIterator(primaryKeys.keys());
+        return new FilteringKeyRangeIterator(primaryKeys.keys(), keyRange);
     }
 
     private RangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
@@ -218,7 +214,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
         Collector cd = new Collector(keyRange);
 
-        data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive).values().forEach(pk -> cd.processContent(pk));
+        data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive).values().forEach(cd::processContent);
 
         if (cd.mergedKeys.isEmpty())
         {

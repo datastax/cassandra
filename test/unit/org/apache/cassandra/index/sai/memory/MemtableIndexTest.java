@@ -47,9 +47,10 @@ import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.BootStrapper;
 import org.apache.cassandra.dht.Bounds;
+import org.apache.cassandra.dht.ExcludingBounds;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.IncludingExcludingBounds;
 import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -85,7 +86,8 @@ public class MemtableIndexTest extends SAITester
     private MemtableIndex memtableIndex;
     private AbstractAllocatorMemtable memtable;
     private IPartitioner partitioner;
-    private Map<Token, Integer> tokenMap = new TreeMap<>();
+    private Map<DecoratedKey, Integer> keyMap;
+    private Map<Integer, Integer> rowMap;
 
     @BeforeClass
     public static void setShardCount()
@@ -110,6 +112,8 @@ public class MemtableIndexTest extends SAITester
         memtable = (AbstractAllocatorMemtable) cfs.getCurrentMemtable();
         indexContext = SAITester.createIndexContext("index", Int32Type.instance, cfs);
         indexSearchCounter.reset();
+        keyMap = new TreeMap<>();
+        rowMap = new HashMap<>();
 
         Injections.inject(indexSearchCounter);
     }
@@ -159,49 +163,50 @@ public class MemtableIndexTest extends SAITester
     }
 
     @Test
-    public void unrestrictedQueryTest() throws Exception
+    public void randomQueryTest() throws Exception
     {
-        createIndex();
+        memtableIndex = new MemtableIndex(indexContext);
+        assertEquals(TrieMemtable.SHARD_COUNT, memtableIndex.shardCount());
 
-        AbstractBounds<PartitionPosition> keyRange = new Range<>(partitioner.getMinimumToken().minKeyBound(),
-                                                                 partitioner.getMinimumToken().minKeyBound());
-        List<Integer> expectedKeys = List.of(4, 5, 6, 7);
+        for (int row = 0; row < getRandom().nextIntBetween(1000, 5000); row++)
+        {
+            int pk = getRandom().nextIntBetween(0, 10000);
+            while (rowMap.containsKey(pk))
+                pk = getRandom().nextIntBetween(0, 10000);
+            int value = getRandom().nextIntBetween(0, 100);
+            rowMap.put(pk, value);
+            addRow(pk, value);
+        }
 
-        runMemtableIndexSearch(keyRange, expectedKeys, TrieMemtable.SHARD_COUNT);
-    }
+        List<DecoratedKey> keys = new ArrayList<>(keyMap.keySet());
 
-    @Test
-    public void singlePartitionBoundsQueryTest() throws Exception
-    {
-        createIndex();
+        for (int executionCount = 0; executionCount < 1000; executionCount++)
+        {
+            Expression expression = generateRandomExpression();
 
-        AbstractBounds<PartitionPosition> keyRange = new Bounds<>(makeKey(cfs.metadata(), 5), makeKey(cfs.metadata(), 5));
-        List<Integer> expectedKeys = List.of(5);
+            AbstractBounds<PartitionPosition> keyRange = generateRandomBounds(keys);
 
-        runMemtableIndexSearch(keyRange, expectedKeys, 1);
-    }
+            Set<Integer> expectedKeys = keyMap.keySet()
+                                              .stream()
+                                              .filter(keyRange::contains)
+                                              .map(keyMap::get)
+                                              .filter(pk -> expression.isSatisfiedBy(Int32Type.instance.decompose(rowMap.get(pk))))
+                                              .collect(Collectors.toSet());
 
-    @Test
-    public void tokenRangeBoundsQueryTest() throws Exception
-    {
-        createIndex();
+            Set<Integer> foundKeys = new HashSet<>();
 
-        List<Token> tokens = new ArrayList<>(tokenMap.keySet());
-        Token left = tokens.get(3);
-        Token right = tokens.get(7);
-        AbstractBounds<PartitionPosition> keyRange = new Bounds<>(left.minKeyBound(), right.maxKeyBound());
-        // The expectedKeys are going to be from entries in the tokenMap that
-        // Meet the criteria of having tokens that exist inclusively withing
-        // the left and right tokens of the keyRange and meet the expression
-        // filter conditions of the search
-        List<Integer> expectedKeys = tokenMap.entrySet()
-                                             .stream()
-                                             .filter(e -> e.getKey().compareTo(left) >= 0 && e.getKey().compareTo(right) <= 0)
-                                             .map(e -> e.getValue())
-                                             .filter(v -> v >= 4 && v <= 7)
-                                             .collect(Collectors.toList());
+            try (RangeIterator iterator = memtableIndex.search(expression, keyRange))
+            {
+                while (iterator.hasNext())
+                {
+                    int key = Int32Type.instance.compose(iterator.next().partitionKey().getKey());
+                    assertFalse(foundKeys.contains(key));
+                    foundKeys.add(key);
+                }
+            }
 
-        runMemtableIndexSearch(keyRange, expectedKeys, 4);
+            assertEquals(expectedKeys, foundKeys);
+        }
     }
 
     @Test
@@ -209,36 +214,101 @@ public class MemtableIndexTest extends SAITester
     {
         memtableIndex = new MemtableIndex(indexContext);
 
-        Map<Integer, List<DecoratedKey>> terms = buildTermMap();
+        Map<Integer, Set<DecoratedKey>> terms = buildTermMap();
 
-        terms.entrySet().stream().forEach(entry -> entry.getValue().forEach(pk -> addRow(Int32Type.instance.compose(pk.getKey()), entry.getKey())));
+        terms.entrySet()
+             .stream()
+             .forEach(entry -> entry.getValue()
+                                    .forEach(pk -> addRow(Int32Type.instance.compose(pk.getKey()), entry.getKey())));
 
-        // These keys have midrange tokens that select 3 of the 8 range indexes
-        DecoratedKey minimum = makeKey(cfs.metadata(), 2017);
-        DecoratedKey maximum = makeKey(cfs.metadata(), 4127);
-
-        Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator = memtableIndex.iterator(minimum, maximum);
-
-        while (iterator.hasNext())
+        for (int executionCount = 0; executionCount < 1000; executionCount++)
         {
-            Pair<ByteComparable, Iterator<PrimaryKey>> termPair = iterator.next();
-            int term = termFromComparable(termPair.left);
-            // The iterator will return keys outside the range of min/max so we need to filter here to
-            // get the correct keys
-            List<DecoratedKey> expectedPks = terms.get(term)
-                                                  .stream()
-                                                  .filter(pk -> pk.compareTo(minimum) >= 0 && pk.compareTo(maximum) <= 0)
-                                                  .sorted()
-                                                  .collect(Collectors.toList());
-            List<DecoratedKey> termPks = new ArrayList<>();
-            while (termPair.right.hasNext())
+            // These keys have midrange tokens that select 3 of the 8 range indexes
+            DecoratedKey minimum = makeKey(cfs.metadata(), getRandom().nextIntBetween(0, 20000));
+            DecoratedKey temp = makeKey(cfs.metadata(), getRandom().nextIntBetween(0, 20000));
+            while (temp.compareTo(minimum) <= 0)
+                temp = makeKey(cfs.metadata(), getRandom().nextIntBetween(0, 20000));
+            DecoratedKey maximum = temp;
+
+            Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator = memtableIndex.iterator(minimum, maximum);
+
+            while (iterator.hasNext())
             {
-                DecoratedKey pk = termPair.right.next().partitionKey();
-                if (pk.compareTo(minimum) >= 0 && pk.compareTo(maximum) <= 0)
-                    termPks.add(pk);
+                Pair<ByteComparable, Iterator<PrimaryKey>> termPair = iterator.next();
+                int term = termFromComparable(termPair.left);
+                // The iterator will return keys outside the range of min/max so we need to filter here to
+                // get the correct keys
+                List<DecoratedKey> expectedPks = terms.get(term)
+                                                      .stream()
+                                                      .filter(pk -> pk.compareTo(minimum) >= 0 && pk.compareTo(maximum) <= 0)
+                                                      .sorted()
+                                                      .collect(Collectors.toList());
+                List<DecoratedKey> termPks = new ArrayList<>();
+                while (termPair.right.hasNext())
+                {
+                    DecoratedKey pk = termPair.right.next().partitionKey();
+                    if (pk.compareTo(minimum) >= 0 && pk.compareTo(maximum) <= 0)
+                        termPks.add(pk);
+                }
+                assertEquals(expectedPks, termPks);
             }
-            assertEquals(expectedPks, termPks);
         }
+    }
+
+    private Expression generateRandomExpression()
+    {
+        Expression expression = new Expression(indexContext);
+
+        int equality = getRandom().nextIntBetween(0, 100);
+        int lower = getRandom().nextIntBetween(0, 75);
+        int upper = getRandom().nextIntBetween(25, 100);
+        while (upper <= lower)
+            upper = getRandom().nextIntBetween(0, 100);
+
+        if (getRandom().nextBoolean())
+            expression.add(Operator.EQ, Int32Type.instance.decompose(equality));
+        else
+        {
+            boolean useLower = getRandom().nextBoolean();
+            boolean useUpper = getRandom().nextBoolean();
+            if (!useLower && !useUpper)
+                useLower = useUpper = true;
+            if (useLower)
+                expression.add(getRandom().nextBoolean() ? Operator.GT : Operator.GTE, Int32Type.instance.decompose(lower));
+            if (useUpper)
+                expression.add(getRandom().nextBoolean() ? Operator.LT : Operator.LTE, Int32Type.instance.decompose(upper));
+        }
+        return expression;
+    }
+
+    private AbstractBounds<PartitionPosition> generateRandomBounds(List<DecoratedKey> keys)
+    {
+        PartitionPosition leftBound = getRandom().nextBoolean() ? partitioner.getMinimumToken().minKeyBound()
+                                                                : keys.get(getRandom().nextIntBetween(0, keys.size() - 1)).getToken().minKeyBound();
+
+        PartitionPosition rightBound = getRandom().nextBoolean() ? partitioner.getMinimumToken().minKeyBound()
+                                                                 : keys.get(getRandom().nextIntBetween(0, keys.size() - 1)).getToken().maxKeyBound();
+
+        AbstractBounds<PartitionPosition> keyRange;
+
+        if (leftBound.isMinimum() && rightBound.isMinimum())
+            keyRange = new Range<>(leftBound, rightBound);
+        else
+        {
+            if (AbstractBounds.strictlyWrapsAround(leftBound, rightBound))
+            {
+                PartitionPosition temp = leftBound;
+                leftBound = rightBound;
+                rightBound = temp;
+            }
+            if (getRandom().nextBoolean())
+                keyRange = new Bounds<>(leftBound, rightBound);
+            else if (getRandom().nextBoolean())
+                keyRange = new ExcludingBounds<>(leftBound, rightBound);
+            else
+                keyRange = new IncludingExcludingBounds<>(leftBound, rightBound);
+        }
+        return keyRange;
     }
 
     private int termFromComparable(ByteComparable comparable)
@@ -247,61 +317,27 @@ public class MemtableIndexTest extends SAITester
         return Int32Type.instance.compose(Int32Type.instance.fromComparableBytes(peekable, ByteComparable.Version.OSS41));
     }
 
-    private Map<Integer, List<DecoratedKey>> buildTermMap()
+    private Map<Integer, Set<DecoratedKey>> buildTermMap()
     {
-        Map<Integer, List<DecoratedKey>> terms = new HashMap<>();
+        Map<Integer, Set<DecoratedKey>> terms = new HashMap<>();
 
-        for (int pk = 0; pk < 10000; pk++)
+        for (int count = 0; count < 10000; count++)
         {
-            int term = getRandom().nextIntBetween(0, 20);
-            List<DecoratedKey> pks;
+            int term = getRandom().nextIntBetween(0, 100);
+            Set<DecoratedKey> pks;
             if (terms.containsKey(term))
                 pks = terms.get(term);
             else
             {
-                pks = new ArrayList<>();
+                pks = new HashSet<>();
                 terms.put(term, pks);
             }
-            pks.add(makeKey(cfs.metadata(), pk));
+            DecoratedKey key = makeKey(cfs.metadata(), getRandom().nextIntBetween(0, 20000));
+            while (pks.contains(key))
+                key = makeKey(cfs.metadata(), getRandom().nextIntBetween(0, 20000));
+            pks.add(key);
         }
         return terms;
-    }
-
-    private void createIndex()
-    {
-        memtableIndex = new MemtableIndex(indexContext);
-        assertEquals(TrieMemtable.SHARD_COUNT, memtableIndex.shardCount());
-
-        for (int row = 0; row < 10; row++)
-        {
-            addRow(row, row);
-        }
-    }
-
-    private void runMemtableIndexSearch(AbstractBounds<PartitionPosition> keyRange,
-                                        List<Integer> expectedKeys,
-                                        int numberOfShardsHit) throws Exception
-    {
-        Expression expression = new Expression(indexContext).add(Operator.GTE, Int32Type.instance.decompose(4))
-                                                            .add(Operator.LTE, Int32Type.instance.decompose(7));
-
-        try (RangeIterator iterator = memtableIndex.search(expression, keyRange))
-        {
-
-            int rowCount = 0;
-            Set<Integer> foundKeys = new HashSet<>();
-            while (iterator.hasNext())
-            {
-                int key = Int32Type.instance.compose(iterator.next().partitionKey().getKey());
-                System.out.println(key);
-                assertTrue(expectedKeys.contains(key));
-                assertFalse(foundKeys.contains(key));
-                foundKeys.add(key);
-                rowCount++;
-            }
-            assertEquals(expectedKeys.size(), rowCount);
-        }
-        assertEquals(numberOfShardsHit, indexSearchCounter.get());
     }
 
     private void addRow(int pk, int value)
@@ -312,7 +348,7 @@ public class MemtableIndexTest extends SAITester
                             Int32Type.instance.decompose(value),
                             cfs.getCurrentMemtable(),
                             new OpOrder().start());
-        tokenMap.put(key.getToken(), pk);
+        keyMap.put(key, pk);
     }
 
     private DecoratedKey makeKey(TableMetadata table, Integer partitionKey)

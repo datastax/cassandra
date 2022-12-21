@@ -115,7 +115,7 @@ public class MemtableIndex
                      .orElse(null);
     }
 
-    // Returns the mmaximum indexed term in the combined memory indexes.
+    // Returns the maximum indexed term in the combined memory indexes.
     // This can be null if the indexed memtable was empty. Users of the
     // {@code MemtableIndex} requiring a non-null maximum term should
     // use the {@link MemtableIndex#isEmpty} method.
@@ -156,6 +156,7 @@ public class MemtableIndex
 
         for (int shard : boundaries.getShardsForRange(keyRange))
         {
+            assert rangeIndexes[shard] != null;
             builder.add(rangeIndexes[shard].search(expression, keyRange));
         }
 
