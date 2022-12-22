@@ -18,7 +18,15 @@
 package org.apache.cassandra.dht;
 
 import java.io.Serializable;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import com.google.common.collect.Iterables;
@@ -125,7 +133,34 @@ public class Range<T extends RingPosition<T>> extends AbstractBounds<T> implemen
             return intersects((Range<T>) that);
         if (that instanceof Bounds)
             return intersects((Bounds<T>) that);
+        if (that instanceof ExcludingBounds)
+            return intersects((ExcludingBounds<T>) that);
+        if (that instanceof IncludingExcludingBounds)
+            return intersects((IncludingExcludingBounds<T>) that);
+
         throw new UnsupportedOperationException("Intersection is only supported for Bounds and Range objects; found " + that.getClass());
+    }
+
+    public boolean intersects(IncludingExcludingBounds<T> that)
+    {
+        if (!isWrapAround() && !that.right.isMinimum() && (this.left.compareTo(that.right) == 0))
+            return false;
+        else if (isWrapAround() && !that.right.isMinimum() && (this.right.compareTo(that.right) == 0))
+            return false;
+        return contains(that.left) || (!that.left.equals(that.right) && intersects(new Range<T>(that.left, that.right)));
+    }
+
+    public boolean intersects(ExcludingBounds<T> that)
+    {
+        if (!isWrapAround() &&
+            ((!that.right.isMinimum() && (this.left.compareTo(that.right) == 0)) ||
+             (this.right.compareTo(that.left) == 0)))
+            return false;
+        else if (isWrapAround() &&
+                 ((this.left.compareTo(that.left) == 0) ||
+                  (!that.right.isMinimum() && (this.right.compareTo(that.right) == 0))))
+            return false;
+        return contains(that.left) || (!that.left.equals(that.right) && intersects(new Range<T>(that.left, that.right)));
     }
 
     /**
