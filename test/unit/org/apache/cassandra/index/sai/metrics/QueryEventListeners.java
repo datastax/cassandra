@@ -19,9 +19,6 @@ package org.apache.cassandra.index.sai.metrics;
 
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.schema.TableMetadata;
-
 public class QueryEventListeners
 {
     public static final ColumnQueryMetrics NO_OP_BKD_LISTENER = new NoOpBkdIndexEventListener();
@@ -34,7 +31,7 @@ public class QueryEventListeners
     {
         NoOpTrieIndexEventListener()
         {
-            super(null, TableMetadata.builder("ks", "tb").addPartitionKeyColumn("pk", UTF8Type.instance).build());
+            super("ks", "tb", null);
         }
 
         @Override
@@ -56,7 +53,7 @@ public class QueryEventListeners
     {
         NoOpBkdIndexEventListener()
         {
-            super(null, TableMetadata.builder("ks", "tb").addPartitionKeyColumn("pk", UTF8Type.instance).build());
+            super("ks", "tb", null);
         }
 
         @Override
