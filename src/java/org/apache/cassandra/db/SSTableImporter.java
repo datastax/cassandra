@@ -32,9 +32,11 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.TargetParser;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -46,6 +48,9 @@ import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.OutputHandler;
@@ -121,7 +126,18 @@ public class SSTableImporter
 
                                     for (Index index : saiIndexGroup.getIndexes())
                                     {
-                                        if (!indexDescriptor.isPerIndexBuildComplete(new IndexContext(cfs.metadata(), index.getIndexMetadata())))
+                                        TableMetadata tableMetadata = cfs.metadata();
+                                        IndexMetadata indexMetadata = index.getIndexMetadata();
+                                        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, indexMetadata);
+                                        IndexContext indexContext = new IndexContext(tableMetadata.keyspace,
+                                                                                     tableMetadata.name,
+                                                                                     tableMetadata.partitionKeyType,
+                                                                                     tableMetadata.comparator,
+                                                                                     target.left,
+                                                                                     target.right,
+                                                                                     indexMetadata,
+                                                                                     cfs);
+                                        if (!indexDescriptor.isPerIndexBuildComplete(indexContext))
                                             throw new IllegalStateException(String.format("Missing SAI index to import for index %s on %s.%s",
                                                                                           index.getIndexMetadata().name,
                                                                                           keyspace,

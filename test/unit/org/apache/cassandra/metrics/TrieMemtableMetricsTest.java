@@ -40,6 +40,7 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.OverrideConfigurationLoader;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.EmbeddedCassandraService;
 import org.apache.cassandra.service.StorageService;
@@ -84,6 +85,8 @@ public class TrieMemtableMetricsTest extends SchemaLoader
 
         EmbeddedCassandraService cassandra = new EmbeddedCassandraService();
         cassandra.start();
+
+        assertEquals(AbstractShardedMemtable.getDefaultShardCount(), NUM_SHARDS);
 
         Cluster cluster = Cluster.builder().addContactPoint("127.0.0.1").withPort(DatabaseDescriptor.getNativeTransportPort()).build();
         session = cluster.connect();
