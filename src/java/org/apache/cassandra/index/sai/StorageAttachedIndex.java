@@ -97,7 +97,6 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.FutureCombiner;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
-import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class StorageAttachedIndex implements Index
 {
@@ -186,7 +185,16 @@ public class StorageAttachedIndex implements Index
     {
         this.baseCfs = baseCfs;
         this.config = config;
-        this.indexContext = new IndexContext(baseCfs.metadata(), config);
+        TableMetadata tableMetadata = baseCfs.metadata();
+        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, config);
+        this.indexContext = new IndexContext(tableMetadata.keyspace,
+                                             tableMetadata.name,
+                                             tableMetadata.partitionKeyType,
+                                             tableMetadata.comparator,
+                                             target.left,
+                                             target.right,
+                                             config,
+                                             baseCfs);
     }
 
     /**
@@ -577,18 +585,13 @@ public class StorageAttachedIndex implements Index
         @Override
         public void insertRow(Row row)
         {
-            adjustMemtableSize(indexContext.index(key, row, mt), CassandraWriteContext.fromContext(writeContext).getGroup());
+            indexContext.index(key, row, mt, CassandraWriteContext.fromContext(writeContext).getGroup());
         }
 
         @Override
         public void updateRow(Row oldRow, Row newRow)
         {
             insertRow(newRow);
-        }
-
-        void adjustMemtableSize(long additionalSpace, OpOrder.Group opGroup)
-        {
-            mt.markExtraOnHeapUsed(additionalSpace, opGroup);
         }
     }
 
