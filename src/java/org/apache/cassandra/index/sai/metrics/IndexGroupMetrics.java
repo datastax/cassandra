@@ -31,7 +31,7 @@ public class IndexGroupMetrics extends AbstractMetrics
 
     public IndexGroupMetrics(TableMetadata table, StorageAttachedIndexGroup group)
     {
-        super(table, INDEX_GROUP_METRICS_TYPE);
+        super(table.keyspace, table.name, INDEX_GROUP_METRICS_TYPE);
 
         openIndexFiles = Metrics.register(createMetricName("OpenIndexFiles"), group::openIndexFiles);
 
