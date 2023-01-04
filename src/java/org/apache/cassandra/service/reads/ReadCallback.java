@@ -24,13 +24,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.MessageParams;
-import org.apache.cassandra.locator.ReplicaPlan;
-import org.apache.cassandra.utils.concurrent.Condition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.MessageParams;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadResponse;
@@ -39,6 +37,7 @@ import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.net.RequestCallback;
@@ -47,6 +46,7 @@ import org.apache.cassandra.service.reads.thresholds.CoordinatorWarnings;
 import org.apache.cassandra.service.reads.thresholds.WarningContext;
 import org.apache.cassandra.service.reads.thresholds.WarningsSnapshot;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.concurrent.Condition;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -75,6 +75,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     private volatile WarningContext warningContext;
     private static final AtomicReferenceFieldUpdater<ReadCallback, WarningContext> warningsUpdater
         = AtomicReferenceFieldUpdater.newUpdater(ReadCallback.class, WarningContext.class, "warningContext");
+    private final boolean couldSpeculate;
 
     public ReadCallback(ResponseResolver<E, P> resolver, ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime)
     {
@@ -86,6 +87,12 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
         // we don't support read repair (or rapid read protection) for range scans yet (CASSANDRA-6897)
         assert !(command instanceof PartitionRangeReadCommand) || blockFor >= replicaPlan().contacts().size();
+        SpeculativeRetryPolicy retry = replicaPlan()
+                .keyspace()
+                .getColumnFamilyStore(command.metadata().id)
+                .metadata()
+                .params.speculativeRetry;
+        this.couldSpeculate = !NeverSpeculativeRetryPolicy.INSTANCE.equals(retry);
 
         if (logger.isTraceEnabled())
             logger.trace("Blockfor is {}; setting up requests to {}", blockFor, this.replicaPlan);
@@ -234,7 +241,12 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
                 
         failureReasonByEndpoint.put(from, failureReason);
 
-        if (blockFor + failuresUpdater.incrementAndGet(this) > replicaPlan().contacts().size())
+        int numContacts = replicaPlan().contacts().size();
+        int numCandidates = replicaPlan().readCandidates().size();
+        // If potentially there is a replica which could be requested as part of the speculative read path
+        // then increase the number of nodes we wait for in case of failures.
+        int failFastPoint = (numContacts < numCandidates && couldSpeculate) ? numContacts + 1 : numContacts;
+        if (blockFor + failuresUpdater.incrementAndGet(this) > failFastPoint)
             condition.signalAll();
     }
 
