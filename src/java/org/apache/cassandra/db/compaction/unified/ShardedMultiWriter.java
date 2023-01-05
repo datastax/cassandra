@@ -26,6 +26,8 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -34,7 +36,6 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
@@ -59,7 +60,7 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     private final long repairedAt;
     private final TimeUUID pendingRepair;
     private final boolean isTransient;
-    private final MetadataCollector meta;
+    private final IntervalSet<CommitLogPosition> commitLogPositions;
     private final SerializationHeader header;
     private final Collection<Index.Group> indexGroups;
     private final LifecycleNewTracker lifecycleNewTracker;
@@ -76,7 +77,7 @@ public class ShardedMultiWriter implements SSTableMultiWriter
                               long repairedAt,
                               TimeUUID pendingRepair,
                               boolean isTransient,
-                              MetadataCollector meta,
+                              IntervalSet<CommitLogPosition> commitLogPositions,
                               SerializationHeader header,
                               Collection<Index.Group> indexGroups,
                               LifecycleNewTracker lifecycleNewTracker,
@@ -89,7 +90,7 @@ public class ShardedMultiWriter implements SSTableMultiWriter
         this.repairedAt = repairedAt;
         this.pendingRepair = pendingRepair;
         this.isTransient = isTransient;
-        this.meta = meta;
+        this.commitLogPositions = commitLogPositions;
         this.header = header;
         this.indexGroups = indexGroups;
         this.lifecycleNewTracker = lifecycleNewTracker;
@@ -112,16 +113,17 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     private SSTableMultiWriter createWriter(Descriptor desc)
     {
         return SimpleSSTableMultiWriter.create(desc,
-                                                forSplittingKeysBy(estimatedSSTables),
-                                                repairedAt,
-                                                pendingRepair,
-                                                isTransient,
-                                                realm.metadataRef(),
-                                                meta,
-                                                header,
-                                                indexGroups,
-                                                lifecycleNewTracker,
-                                                realm);
+                                               forSplittingKeysBy(estimatedSSTables),
+                                               repairedAt,
+                                               pendingRepair,
+                                               isTransient,
+                                               realm.metadataRef(),
+                                               commitLogPositions,
+                                               0,
+                                               header,
+                                               indexGroups,
+                                               lifecycleNewTracker,
+                                               realm);
     }
 
     private long forSplittingKeysBy(long splits) {

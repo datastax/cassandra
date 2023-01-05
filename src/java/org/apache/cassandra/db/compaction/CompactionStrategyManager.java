@@ -46,6 +46,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.compaction.AbstractStrategyHolder.TasksSupplier;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -59,7 +61,6 @@ import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
@@ -1206,7 +1207,8 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
                                                        long repairedAt,
                                                        TimeUUID pendingRepair,
                                                        boolean isTransient,
-                                                       MetadataCollector collector,
+                                                       IntervalSet<CommitLogPosition> commitLogPositions,
+                                                       int sstableLevel,
                                                        SerializationHeader header,
                                                        Collection<Index.Group> indexGroups,
                                                        LifecycleNewTracker lifecycleNewTracker)
@@ -1221,7 +1223,8 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
                                                                                               repairedAt,
                                                                                               pendingRepair,
                                                                                               isTransient,
-                                                                                              collector,
+                                                                                              commitLogPositions,
+                                                                                              sstableLevel,
                                                                                               header,
                                                                                               indexGroups,
                                                                                               lifecycleNewTracker);
