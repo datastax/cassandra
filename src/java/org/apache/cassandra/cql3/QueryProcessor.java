@@ -296,7 +296,7 @@ public class QueryProcessor implements QueryHandler
     public ResultMessage processStatement(CQLStatement statement, QueryState queryState, QueryOptions options, Dispatcher.RequestTime requestTime)
     throws RequestExecutionException, RequestValidationException
     {
-        return processStatement(statement, queryState, options, Map.of(), requestTime);
+        return processStatement(statement, queryState, options, Collections.emptyMap(), requestTime);
     }
 
     public ResultMessage processStatement(CQLStatement statement, QueryState queryState, QueryOptions options, Map<String, ByteBuffer> customPayload, Dispatcher.RequestTime requestTime)
@@ -429,7 +429,7 @@ public class QueryProcessor implements QueryHandler
     public ResultMessage process(CQLStatement prepared, QueryState queryState, QueryOptions options, Dispatcher.RequestTime requestTime)
     throws RequestExecutionException, RequestValidationException
     {
-        return process(prepared, queryState, options, Map.of(), requestTime);
+        return process(prepared, queryState, options, Collections.emptyMap(), requestTime);
     }
 
     public static CQLStatement parseStatement(String queryStr, ClientState clientState) throws RequestValidationException
@@ -932,7 +932,7 @@ public class QueryProcessor implements QueryHandler
     public ResultMessage processPrepared(CQLStatement statement, QueryState queryState, QueryOptions options, Dispatcher.RequestTime requestTime)
     throws RequestExecutionException, RequestValidationException
     {
-        return processPrepared(statement, queryState, options, Map.of(), requestTime);
+        return processPrepared(statement, queryState, options, Collections.emptyMap(), requestTime);
     }
 
     public ResultMessage processBatch(BatchStatement batch,
@@ -962,7 +962,7 @@ public class QueryProcessor implements QueryHandler
     public ResultMessage processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options, Dispatcher.RequestTime requestTime)
     throws RequestExecutionException, RequestValidationException
     {
-        return processBatch(batch, queryState, options, Map.of(), requestTime);
+        return processBatch(batch, queryState, options, Collections.emptyMap(), requestTime);
     }
 
     public static CQLStatement getStatement(String queryStr, ClientState clientState)

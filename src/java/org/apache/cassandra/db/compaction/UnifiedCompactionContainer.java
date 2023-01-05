@@ -27,6 +27,8 @@ import javax.annotation.Nullable;
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
@@ -36,7 +38,6 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.utils.TimeUUID;
@@ -341,7 +342,8 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
                                                        long repairedAt,
                                                        TimeUUID pendingRepair,
                                                        boolean isTransient,
-                                                       MetadataCollector collector,
+                                                       IntervalSet<CommitLogPosition> commitLogPositions,
+                                                       int sstableLevel,
                                                        SerializationHeader header,
                                                        Collection<Index.Group> indexGroups,
                                                        LifecycleNewTracker lifecycleNewTracker)
@@ -351,7 +353,8 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
                                                  repairedAt,
                                                  pendingRepair,
                                                  isTransient,
-                                                 collector,
+                                                 commitLogPositions,
+                                                 sstableLevel,
                                                  header,
                                                  indexGroups,
                                                  lifecycleNewTracker);
