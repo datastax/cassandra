@@ -20,9 +20,9 @@ package org.apache.cassandra.io.sstable;
 import java.util.Collection;
 import java.util.Collections;
 
-import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
+import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.Index;
@@ -128,22 +128,6 @@ public class SimpleSSTableMultiWriter implements SSTableMultiWriter
         MetadataCollector metadataCollector = new MetadataCollector(metadata.get().comparator)
                                               .commitLogIntervals(commitLogPositions != null ? commitLogPositions : IntervalSet.empty())
                                               .sstableLevel(sstableLevel);
-        return create(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, indexGroups, lifecycleNewTracker, owner);
-    }
-
-    @SuppressWarnings({"resource", "RedundantSuppression"}) // SimpleSSTableMultiWriter closes writer
-    public static SSTableMultiWriter create(Descriptor descriptor,
-                                            long keyCount,
-                                            long repairedAt,
-                                            TimeUUID pendingRepair,
-                                            boolean isTransient,
-                                            TableMetadataRef metadata,
-                                            MetadataCollector metadataCollector,
-                                            SerializationHeader header,
-                                            Collection<Index.Group> indexGroups,
-                                            LifecycleNewTracker lifecycleNewTracker,
-                                            SSTable.Owner owner)
-    {
         SSTableWriter writer = descriptor.getFormat().getWriterFactory().builder(descriptor)
                                             .setKeyCount(keyCount)
                                             .setRepairedAt(repairedAt)
