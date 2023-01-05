@@ -33,6 +33,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
@@ -44,7 +46,6 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.utils.TimeUUID;
 
 abstract class AbstractCompactionStrategy implements CompactionStrategy
@@ -380,7 +381,8 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
                                                        long repairedAt,
                                                        TimeUUID pendingRepair,
                                                        boolean isTransient,
-                                                       MetadataCollector meta,
+                                                       IntervalSet<CommitLogPosition> commitLogPositions,
+                                                       int sstableLevel,
                                                        SerializationHeader header,
                                                        Collection<Index.Group> indexGroups,
                                                        LifecycleNewTracker lifecycleNewTracker)
@@ -391,7 +393,8 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
                                                pendingRepair,
                                                isTransient,
                                                realm.metadataRef(),
-                                               meta,
+                                               commitLogPositions,
+                                               sstableLevel,
                                                header,
                                                indexGroups,
                                                lifecycleNewTracker,
