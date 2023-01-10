@@ -1122,6 +1122,7 @@ public class Message<T>
             case VERSION_DSE_68:
                 if (serializedSizeDSE68 == 0)
                     serializedSizeDSE68 = (int) serializer.serializedSize(this, VERSION_DSE_68);
+                return serializedSizeDSE68;
             default:
                 throw new IllegalStateException("Unkown serialization version " + version);
         }
