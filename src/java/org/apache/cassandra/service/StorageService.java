@@ -64,7 +64,10 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import javax.annotation.Nullable;
+import javax.management.ListenerNotFoundException;
 import javax.management.NotificationBroadcasterSupport;
+import javax.management.NotificationFilter;
+import javax.management.NotificationListener;
 import javax.management.openmbean.CompositeData;
 import javax.management.openmbean.OpenDataException;
 import javax.management.openmbean.TabularData;
@@ -310,6 +313,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 Keyspace.open(keyspace).snapshot(snapshotName, null, false, null);
         }
     }
+
+    @VisibleForTesting // this is used for dtests only, see CASSANDRA-18152
+    public volatile boolean skipNotificationListeners = false;
 
     @Deprecated
     public boolean isInShutdownHook()
@@ -6326,4 +6332,26 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         logger.info("RepairRpcTimeout set to {}ms via JMX", timeoutInMillis);
     }
 
+    @Override
+    public void removeNotificationListener(NotificationListener listener) throws ListenerNotFoundException
+    {
+        if (!skipNotificationListeners)
+            super.removeNotificationListener(listener);
+    }
+
+    @Override
+    public void removeNotificationListener(NotificationListener listener, NotificationFilter filter, Object handback) throws ListenerNotFoundException
+    {
+        if (!skipNotificationListeners)
+            super.removeNotificationListener(listener, filter, handback);
+    }
+
+    @Override
+    public void addNotificationListener(NotificationListener listener,
+                                        NotificationFilter filter,
+                                        Object handback) throws java.lang.IllegalArgumentException
+    {
+        if (!skipNotificationListeners)
+            super.addNotificationListener(listener, filter, handback);
+    }
 }
