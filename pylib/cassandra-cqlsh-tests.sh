@@ -43,6 +43,7 @@ export CCM_CONFIG_DIR="${TMPDIR}/.ccm"
 export NUM_TOKENS="16"
 export CASSANDRA_DIR=${WORKSPACE}
 
+# Kate, there was some conflict after CNDB-10190, check this later, for now I focused on the unit tests so ignore it...
 if [[ -z "${version}" ]]; then
   version=$(grep 'property\s*name=\"base.version\"' ${CASSANDRA_DIR}/build.xml |sed -ne 's/.*value=\"\([^"]*\)\".*/\1/p')
 fi
