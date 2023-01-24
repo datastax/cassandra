@@ -174,7 +174,7 @@ public class CostsCalculator
 
         try
         {
-            return getReadCost(partitionsReadPerPeriod.avg.get()) * Math.min(1 + env.bloomFilterFpRatio() * RA / survivalFactor, RA) * readMultiplier;
+            return getReadCost(partitionsReadPerPeriod.avg.get()) * Math.min(RA / survivalFactor, RA) * readMultiplier;
         }
         finally
         {

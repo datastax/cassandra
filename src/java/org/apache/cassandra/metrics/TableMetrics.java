@@ -1065,12 +1065,12 @@ public class TableMetrics
         compactionTimePerKb.update(elapsedNanos / (double) Math.max(1, inputDiskSize / 1024L));
     }
 
-    public void updateSSTableIterated(int count, long elapsedNanos)
+    public void updateSSTableIterated(int count, int intersectingCount, long elapsedNanos)
     {
         sstablesPerReadHistogram.update(count);
 
-        if (count > 0)
-            sstablePartitionReadLatency.update(elapsedNanos / (double) count);
+        if (intersectingCount > 0)
+            sstablePartitionReadLatency.update(elapsedNanos / (double) intersectingCount);
     }
 
     /**
