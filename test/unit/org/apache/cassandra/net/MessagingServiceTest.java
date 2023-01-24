@@ -164,7 +164,8 @@ public class MessagingServiceTest
     @Test
     public void testNegativeDCLatency()
     {
-        MessagingMetrics.DCLatencyRecorder updater = MessagingService.instance().metrics.internodeLatencyRecorder(InetAddressAndPort.getLocalHost());
+        MessagingMetrics.DCLatencyRecorder updater =
+           (MessagingMetrics.DCLatencyRecorder) MessagingService.instance().metrics.internodeLatencyRecorder(InetAddressAndPort.getLocalHost());
 
         // if clocks are off should just not track anything
         int latency = -100;

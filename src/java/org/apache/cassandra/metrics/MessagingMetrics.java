@@ -56,7 +56,7 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
         public final Timer dcLatency;
         public final Timer allLatency;
 
-        DCLatencyRecorder(Timer dcLatency, Timer allLatency)
+        public DCLatencyRecorder(Timer dcLatency, Timer allLatency)
         {
             this.dcLatency = dcLatency;
             this.allLatency = allLatency;
@@ -108,7 +108,7 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
         }
     }
 
-    public DCLatencyRecorder internodeLatencyRecorder(InetAddressAndPort from)
+    public LatencyConsumer internodeLatencyRecorder(InetAddressAndPort from)
     {
         String dcName = DatabaseDescriptor.getEndpointSnitch().getDatacenter(from);
         DCLatencyRecorder dcUpdater = dcLatency.computeIfAbsent(dcName,
