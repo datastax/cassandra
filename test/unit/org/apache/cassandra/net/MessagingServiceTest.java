@@ -28,7 +28,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.*;
 import java.util.regex.Matcher;
 
@@ -186,7 +185,7 @@ public class MessagingServiceTest
         Verb verb = Verb.MUTATION_REQ;
 
         Map<Verb, Timer> queueWaitLatency = MessagingService.instance().metrics.internalLatency;
-        MessagingService.instance().metrics.recordInternalLatency(verb, latency, MILLISECONDS);
+        MessagingService.instance().metrics.recordInternalLatency(verb, InetAddressAndPort.getLocalHost(), latency, MILLISECONDS);
         assertEquals(1, queueWaitLatency.get(verb).getCount());
         long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, MILLISECONDS.toNanos(latency))) - 1];
         assertEquals(expectedBucket, queueWaitLatency.get(verb).getSnapshot().getMax());
@@ -202,7 +201,7 @@ public class MessagingServiceTest
         queueWaitLatency.clear();
 
         assertNull(queueWaitLatency.get(verb));
-        MessagingService.instance().metrics.recordInternalLatency(verb, latency, MILLISECONDS);
+        MessagingService.instance().metrics.recordInternalLatency(verb, InetAddressAndPort.getLocalHost(), latency, MILLISECONDS);
         assertNull(queueWaitLatency.get(verb));
     }
 

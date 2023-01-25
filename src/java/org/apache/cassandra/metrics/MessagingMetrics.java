@@ -117,7 +117,7 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
         return dcUpdater;
     }
 
-    public void recordInternalLatency(Verb verb, long timeTaken, TimeUnit units)
+    public void recordInternalLatency(Verb verb, InetAddressAndPort from, long timeTaken, TimeUnit units)
     {
         if (timeTaken > 0)
         {
