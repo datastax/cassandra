@@ -197,6 +197,11 @@ public enum CassandraRelevantProperties
     CUSTOM_HINTS_ENDPOINT_PROVIDER("cassandra.custom_hints_endpoint_provider"),
     CUSTOM_HINTS_HANDLER("cassandra.custom_hints_handler"),
     /**
+     * Which class to use for messaging metrics for {@link org.apache.cassandra.net.MessagingService}.
+     * The provided class name must point to an implementation of {@link org.apache.cassandra.metrics.MessagingMetrics}.
+     */
+    CUSTOM_MESSAGING_METRICS_PROVIDER_PROPERTY("cassandra.custom_messaging_metrics_provider_class"),
+    /**
      * Name of a custom implementation of {@link org.apache.cassandra.service.Mutator}.
      */
     CUSTOM_MUTATOR_CLASS("cassandra.custom_mutator_class"),
@@ -511,7 +516,7 @@ public enum CassandraRelevantProperties
     SCHEMA_UPDATE_HANDLER_FACTORY_CLASS("cassandra.schema.update_handler_factory.class"),
     SEARCH_CONCURRENCY_FACTOR("cassandra.search_concurrency_factor", "1"),
 
-    /**
+     /**
      * The maximum number of seeds returned by a seed provider before emmitting a warning.
      * A large seed list may impact effectiveness of the third gossip round.
      * The default used in SimpleSeedProvider is 20.
