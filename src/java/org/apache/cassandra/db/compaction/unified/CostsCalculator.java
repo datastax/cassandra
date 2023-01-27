@@ -50,7 +50,7 @@ public class CostsCalculator
      * and therefore the costs tend to be lower that for reads, so by reducing read costs we make the costs more comparable.
      */
     final static double defaultWriteMultiplier = Double.parseDouble(System.getProperty(Controller.PREFIX + "costs_write_multiplier", "1"));
-    final static double defaultReadMultiplier = Double.parseDouble(System.getProperty(Controller.PREFIX + "costs_read_multiplier", "0.1"));
+    final static double defaultReadMultiplier = Double.parseDouble(System.getProperty(Controller.PREFIX + "costs_read_multiplier", "0.25"));
 
     private final Environment env;
     private final double readMultiplier;
