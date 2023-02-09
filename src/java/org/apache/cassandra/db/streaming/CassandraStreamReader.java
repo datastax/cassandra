@@ -38,6 +38,7 @@ import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.io.sstable.RangeAwareSSTableWriter;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
@@ -165,7 +166,18 @@ public class CassandraStreamReader implements IStreamReader
         Preconditions.checkState(streamReceiver instanceof CassandraStreamReceiver);
         LifecycleNewTracker lifecycleNewTracker = CassandraStreamReceiver.fromReceiver(session.getAggregator(tableId)).createLifecycleNewTracker();
 
-        RangeAwareSSTableWriter writer = new RangeAwareSSTableWriter(cfs, estimatedKeys, repairedAt, pendingRepair, false, format, sstableLevel, totalSize, lifecycleNewTracker, getHeader(cfs.metadata()));
+        RangeAwareSSTableWriter writer = new RangeAwareSSTableWriter(cfs,
+                                                                     estimatedKeys,
+                                                                     repairedAt,
+                                                                     pendingRepair,
+                                                                     false,
+                                                                     format,
+                                                                     // Commit log intervals for other nodes are not relevant and should not be copied
+                                                                     IntervalSet.empty(),
+                                                                     sstableLevel,
+                                                                     totalSize,
+                                                                     lifecycleNewTracker,
+                                                                     getHeader(cfs.metadata()));
         return writer;
     }
 
