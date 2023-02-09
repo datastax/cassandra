@@ -668,7 +668,7 @@ public enum CassandraRelevantProperties
     UCS_NUM_SHARDS_OPTION("unified_compaction.num_shards"),
     UCS_OVERLAP_INCLUSION_METHOD("unified_compaction.overlap_inclusion_method"),
     UCS_SHARED_STORAGE("unified_compaction.shared_storage", "false"),
-    UCS_STATIC_SCALING_PARAMETERS_OPTION("unified_compaction.scaling_parameters", "2"),
+    UCS_STATIC_SCALING_PARAMETERS_OPTION("unified_compaction.scaling_parameters", "T4"),
     UCS_SURVIVAL_FACTOR("unified_compaction.survival_factor", "1"),
     UCS_TARGET_SSTABLE_SIZE("unified_compaction.target_sstable_size", "1GiB"),
     UDF_EXECUTOR_THREAD_KEEPALIVE_MS("cassandra.udf_executor_thread_keepalive_ms", "30000"),
