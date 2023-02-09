@@ -171,7 +171,7 @@ public class CostsCalculatorTest
         when(environment.flushTimePerKbInNanos()).thenReturn((double) TimeUnit.MICROSECONDS.toNanos(writeTimeMicros));
         when(environment.compactionTimePerKbInNanos()).thenReturn((double) TimeUnit.MICROSECONDS.toNanos(writeTimeMicros));
 
-        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService, survivalFactor, readMultiplier, writeMultiplier);
+        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService, survivalFactor);
         assertNotNull(cost);
         assertNotNull(cost.toString());
 
@@ -216,7 +216,7 @@ public class CostsCalculatorTest
         when(environment.flushTimePerKbInNanos()).thenReturn((double) TimeUnit.MICROSECONDS.toNanos(20));
         when(environment.compactionTimePerKbInNanos()).thenReturn((double) TimeUnit.MICROSECONDS.toNanos(20));
 
-        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService, survivalFactor, 1, 1);
+        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService, survivalFactor);
         assertNotNull(cost);
         assertNotNull(cost.toString());
 
@@ -244,7 +244,7 @@ public class CostsCalculatorTest
         when(environment.flushTimePerKbInNanos()).thenReturn((double) TimeUnit.MICROSECONDS.toNanos(20));
         when(environment.compactionTimePerKbInNanos()).thenReturn((double) TimeUnit.MICROSECONDS.toNanos(20));
 
-        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService, survivalFactor, 1, 1);
+        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService, survivalFactor);
         assertNotNull(cost);
         assertNotNull(cost.toString());
 

@@ -46,15 +46,7 @@ public class CostsCalculator
      * we many not collect sufficient data. */
     final static int samplingPeriodMs = Integer.getInteger(Controller.PREFIX + "sample_time_ms", 5000);
 
-    /** The multipliers can be used by users if they wish to adjust the costs. We reduce the read costs because writes are batch processes (flush and compaction)
-     * and therefore the costs tend to be lower that for reads, so by reducing read costs we make the costs more comparable.
-     */
-    final static double defaultWriteMultiplier = Double.parseDouble(System.getProperty(Controller.PREFIX + "costs_write_multiplier", "1"));
-    final static double defaultReadMultiplier = Double.parseDouble(System.getProperty(Controller.PREFIX + "costs_read_multiplier", "0.25"));
-
     private final Environment env;
-    private final double readMultiplier;
-    private final double writeMultiplier;
     private final double survivalFactor;
     private final MovingAverageOfDelta partitionsReadPerPeriod;
     private final MovingAverageOfDelta bytesInsertedPerPeriod;
@@ -72,19 +64,7 @@ public class CostsCalculator
                     ScheduledExecutorService executorService,
                     double survivalFactor)
     {
-        this(env, strategy, executorService, survivalFactor, defaultReadMultiplier, defaultWriteMultiplier);
-    }
-
-    CostsCalculator(Environment env,
-                    UnifiedCompactionStrategy strategy,
-                    ScheduledExecutorService executorService,
-                    double survivalFactor,
-                    double readMultiplier,
-                    double writeMultiplier)
-    {
         this.env = env;
-        this.readMultiplier = readMultiplier;
-        this.writeMultiplier = writeMultiplier;
         this.survivalFactor = survivalFactor;
         this.partitionsReadPerPeriod = new MovingAverageOfDelta(env.makeExpMovAverage());
         this.bytesInsertedPerPeriod = new MovingAverageOfDelta(env.makeExpMovAverage());
@@ -174,7 +154,7 @@ public class CostsCalculator
 
         try
         {
-            return getReadCost(partitionsReadPerPeriod.avg.get()) * Math.min(RA / survivalFactor, RA) * readMultiplier;
+            return getReadCost(partitionsReadPerPeriod.avg.get()) * Math.min(RA / survivalFactor, RA) * strategy.getOptions().getReadMultiplier();
         }
         finally
         {
@@ -213,7 +193,7 @@ public class CostsCalculator
         {
             double bytesInserted = this.bytesInsertedPerPeriod.avg.get();
             // using bytesInserted for the compaction cost doesn't take into account overwrites but for now it's good enough
-            return (getFlushCost(bytesInserted) + getCompactionCost(bytesInserted) * WA) * writeMultiplier;
+            return (getFlushCost(bytesInserted) + getCompactionCost(bytesInserted) * WA) * strategy.getOptions().getWriteMultiplier();
         }
         finally
         {
