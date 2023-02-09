@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.compaction.CompactionRealm;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
@@ -45,31 +46,40 @@ public class SortedLocalRanges
 {
     private static final Logger logger = LoggerFactory.getLogger(SortedLocalRanges.class);
 
-    private final StorageService storageService;
     private final CompactionRealm realm;
     private final long ringVersion;
     private final List<Splitter.WeightedRange> ranges;
-    private final Map<Integer, List<PartitionPosition>> splits;
+    private final Map<Integer, List<Token>> splits;
 
     private volatile boolean valid;
 
-    public SortedLocalRanges(StorageService storageService, CompactionRealm realm, long ringVersion, List<Splitter.WeightedRange> ranges)
+    public SortedLocalRanges(CompactionRealm realm, long ringVersion, List<Splitter.WeightedRange> ranges)
     {
-        this.storageService = storageService;
         this.realm = realm;
         this.ringVersion = ringVersion;
 
-        List<Splitter.WeightedRange> sortedRanges = new ArrayList<>(ranges.size());
-        for (Splitter.WeightedRange range : ranges)
+        if (ranges == null)
         {
-            for (Range<Token> unwrapped : range.range().unwrap())
-            {
-                sortedRanges.add(new Splitter.WeightedRange(range.weight(), unwrapped));
-            }
+            IPartitioner partitioner = realm.getPartitioner();
+            this.ranges = new ArrayList<>(1);
+            this.ranges.add(new Splitter.WeightedRange(1.0,
+                                                       new Range<>(partitioner.getMinimumToken(),
+                                                                   partitioner.getMinimumToken())));
         }
-        sortedRanges.sort(Comparator.comparing(Splitter.WeightedRange::left));
+        else
+        {
+            List<Splitter.WeightedRange> sortedRanges = new ArrayList<>(ranges.size());
+            for (Splitter.WeightedRange range : ranges)
+            {
+                for (Range<Token> unwrapped : range.range().unwrap())
+                {
+                    sortedRanges.add(new Splitter.WeightedRange(range.weight(), unwrapped));
+                }
+            }
+            sortedRanges.sort(Comparator.comparing(Splitter.WeightedRange::left));
 
-        this.ranges = sortedRanges;
+            this.ranges = sortedRanges;
+        }
         this.splits = new ConcurrentHashMap<>();
         this.valid = true;
     }
@@ -83,7 +93,6 @@ public class SortedLocalRanges
      */
     static SortedLocalRanges create(ColumnFamilyStore cfs)
     {
-        StorageService storageService = StorageService.instance;
         RangesAtEndpoint localRanges;
         List<Splitter.WeightedRange> weightedRanges;
         long ringVersion;
@@ -108,7 +117,7 @@ public class SortedLocalRanges
         while (ringVersion != tmd.getRingVersion()); // if ringVersion is different here it means that
         // it might have changed before we calculated localRanges - recalculate
 
-        return new SortedLocalRanges(storageService, cfs, ringVersion, weightedRanges);
+        return new SortedLocalRanges(cfs, ringVersion, weightedRanges);
     }
 
     private static RangesAtEndpoint getLocalRanges(ColumnFamilyStore cfs, TokenMetadata tmd)
@@ -133,7 +142,12 @@ public class SortedLocalRanges
     @VisibleForTesting
     public static SortedLocalRanges forTesting(CompactionRealm realm, List<Splitter.WeightedRange> ranges)
     {
-        return new SortedLocalRanges(null, realm, 0, ranges);
+        return new SortedLocalRanges(realm, 0, ranges);
+    }
+
+    public static SortedLocalRanges forTestingFull(CompactionRealm realm)
+    {
+        return forTesting(realm, null);
     }
 
     /**
@@ -166,12 +180,12 @@ public class SortedLocalRanges
      *
      * @return a list of positions into which the local ranges were split
      */
-    public List<PartitionPosition> split(int numParts)
+    public List<Token> split(int numParts)
     {
         return splits.computeIfAbsent(numParts, this::doSplit);
     }
 
-    private List<PartitionPosition> doSplit(int numParts)
+    private List<Token> doSplit(int numParts)
     {
         Splitter splitter = realm.getPartitioner().splitter().orElse(null);
 
@@ -188,7 +202,7 @@ public class SortedLocalRanges
         }
 
         logger.debug("Boundaries for {}.{}: {} ({} splits)", realm.getKeyspaceName(), realm.getTableName(), boundaries, boundaries.size());
-        return boundaries.stream().map(Token::maxKeyBound).collect(Collectors.toList());
+        return boundaries;
     }
 
     /**
