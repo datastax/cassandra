@@ -55,7 +55,10 @@ public class StaticController extends Controller
                             int maxSSTablesToCompact,
                             long expiredSSTableCheckFrequency,
                             boolean ignoreOverlapsInExpirationCheck,
-                            boolean l0ShardsEnabled)
+                            boolean l0ShardsEnabled,
+                            int baseShardCount,
+                            double targetSStableSize,
+                            OverlapInclusionMethod overlapInclusionMethod)
     {
         super(MonotonicClock.Global.preciseTime,
               env,
@@ -68,7 +71,10 @@ public class StaticController extends Controller
               maxSSTablesToCompact,
               expiredSSTableCheckFrequency,
               ignoreOverlapsInExpirationCheck,
-              l0ShardsEnabled);
+              l0ShardsEnabled,
+              baseShardCount,
+              targetSStableSize,
+              overlapInclusionMethod);
         this.scalingParameters = scalingParameters;
     }
 
@@ -83,6 +89,9 @@ public class StaticController extends Controller
                                   long expiredSSTableCheckFrequency,
                                   boolean ignoreOverlapsInExpirationCheck,
                                   boolean l0ShardsEnabled,
+                                  int baseShardCount,
+                                  double targetSStableSize,
+                                  OverlapInclusionMethod overlapInclusionMethod,
                                   Map<String, String> options)
     {
         int[] scalingParameters;
@@ -101,18 +110,10 @@ public class StaticController extends Controller
                                     maxSSTablesToCompact,
                                     expiredSSTableCheckFrequency,
                                     ignoreOverlapsInExpirationCheck,
-                                    l0ShardsEnabled);
-    }
-
-    @VisibleForTesting
-    static int[] parseScalingParameters(String str)
-    {
-        String[] vals = str.split(",");
-        int[] ret = new int[vals.length];
-        for (int i = 0; i < vals.length; i++)
-            ret[i] = Integer.parseInt(vals[i].trim());
-
-        return ret;
+                                    l0ShardsEnabled,
+                                    baseShardCount,
+                                    targetSStableSize,
+                                    overlapInclusionMethod);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
@@ -153,6 +154,6 @@ public class StaticController extends Controller
     @Override
     public String toString()
     {
-        return String.format("Static controller, m: %d, o: %s, scalingParameters: %s, cost: %s", minSstableSizeMB, Arrays.toString(survivalFactors), Arrays.toString(scalingParameters), calculator);
+        return String.format("Static controller, m: %d, o: %s, scalingParameters: %s, cost: %s", minSstableSizeMB, Arrays.toString(survivalFactors), printScalingParameters(scalingParameters), calculator);
     }
 }
