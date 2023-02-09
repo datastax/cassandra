@@ -799,7 +799,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor, long keyCount, long repairedAt, TimeUUID pendingRepair, boolean isTransient, SerializationHeader header, LifecycleNewTracker lifecycleNewTracker)
     {
-        return createSSTableMultiWriter(descriptor, keyCount, repairedAt, pendingRepair, isTransient, null, 0, header, lifecycleNewTracker);
+        return createSSTableMultiWriter(descriptor, keyCount, repairedAt, pendingRepair, isTransient, IntervalSet.empty(), 0, header, lifecycleNewTracker);
     }
 
     public SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor, long keyCount, long repairedAt, TimeUUID pendingRepair, boolean isTransient, IntervalSet<CommitLogPosition> commitLogPositions, SerializationHeader header, LifecycleNewTracker lifecycleNewTracker)
@@ -1712,7 +1712,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
              shardBoundaries.ringVersion != keyspace.getReplicationStrategy().getTokenMetadata().getRingVersion()))
         {
             SortedLocalRanges localRanges = getLocalRanges();
-            List<PartitionPosition> positions = localRanges.split(shardCount);
+            List<Token> positions = localRanges.split(shardCount);
             shardBoundaries = new ShardBoundaries(positions.subList(0, positions.size() - 1),
                                                   localRanges.getRingVersion());
             cachedShardBoundaries = shardBoundaries;
