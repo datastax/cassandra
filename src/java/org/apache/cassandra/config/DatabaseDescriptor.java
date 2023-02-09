@@ -892,7 +892,7 @@ public class DatabaseDescriptor
             logger.warn("Allowing java.lang.System.* access in UDFs is dangerous and not recommended. Set allow_extra_insecure_udfs: false to disable.");
 
         if(conf.enable_scripted_user_defined_functions)
-            logger.warn("JavaScript user-defined functions have been deprecated. You can still use them but the plan is to remove them in the next major version. For more information - CASSANDRA-17280");
+            throw new ConfigurationException("JavaScript user-defined functions were removed in CASSANDRA-18252.");
 
         if (conf.commitlog_segment_size_in_mb <= 0)
             throw new ConfigurationException("commitlog_segment_size_in_mb must be positive, but was "
@@ -3134,16 +3134,6 @@ public class DatabaseDescriptor
     public static boolean enableUserDefinedFunctions()
     {
         return conf.enable_user_defined_functions;
-    }
-
-    public static boolean enableScriptedUserDefinedFunctions()
-    {
-        return conf.enable_scripted_user_defined_functions;
-    }
-
-    public static void enableScriptedUserDefinedFunctions(boolean enableScriptedUserDefinedFunctions)
-    {
-        conf.enable_scripted_user_defined_functions = enableScriptedUserDefinedFunctions;
     }
 
     public static boolean enableUserDefinedFunctionsThreads()
