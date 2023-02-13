@@ -53,6 +53,7 @@ public final class JVMStabilityInspector
 
     private static Object lock = new Object();
     private static boolean printingHeapHistogram;
+    private static volatile Consumer<Throwable> globalHandler;
     private static volatile Consumer<Throwable> diskHandler;
     private static volatile Function<String, Consumer<Throwable>> commitLogHandler;
     private static final List<Pair<Thread, Runnable>> shutdownHooks = new ArrayList<>(1);
@@ -62,11 +63,17 @@ public final class JVMStabilityInspector
 
     static
     {
+        setGlobalErrorHandler(JVMStabilityInspector::defaultGlobalErrorHandler);
         setDiskErrorHandler(JVMStabilityInspector::inspectDiskError);
         setCommitLogErrorHandler(JVMStabilityInspector::createDefaultCommitLogErrorHandler);
     }
 
     private JVMStabilityInspector() {}
+
+    public static void setGlobalErrorHandler(Consumer<Throwable> errorHandler)
+    {
+        globalHandler = errorHandler;
+    }
 
     public static void setDiskErrorHandler(Consumer<Throwable> errorHandler)
     {
@@ -102,21 +109,20 @@ public final class JVMStabilityInspector
             FileUtils.handleFSError((FSError) t);
     }
 
-    public static void inspectThrowable(Throwable t, Consumer<Throwable> fn) throws OutOfMemoryError
+    public static void inspectThrowable(Throwable t, Consumer<Throwable> additionalHandler) throws OutOfMemoryError
     {
-        fn.accept(t);
-
-        soonToBeTheGlobalHandler(t);
+        additionalHandler.accept(t);
+        globalHandler.accept(t);
 
         if (t.getSuppressed() != null)
             for (Throwable suppressed : t.getSuppressed())
-                inspectThrowable(suppressed, fn);
+                inspectThrowable(suppressed, additionalHandler);
 
         if (t.getCause() != null)
-            inspectThrowable(t.getCause(), fn);
+            inspectThrowable(t.getCause(), additionalHandler);
     }
 
-    private static void soonToBeTheGlobalHandler(Throwable t)
+    private static void defaultGlobalErrorHandler(Throwable t)
     {
         boolean isUnstable = false;
         if (t instanceof OutOfMemoryError)
