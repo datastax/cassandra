@@ -104,6 +104,20 @@ public final class JVMStabilityInspector
 
     public static void inspectThrowable(Throwable t, Consumer<Throwable> fn) throws OutOfMemoryError
     {
+        fn.accept(t);
+
+        soonToBeTheGlobalHandler(t);
+
+        if (t.getSuppressed() != null)
+            for (Throwable suppressed : t.getSuppressed())
+                inspectThrowable(suppressed, fn);
+
+        if (t.getCause() != null)
+            inspectThrowable(t.getCause(), fn);
+    }
+
+    private static void soonToBeTheGlobalHandler(Throwable t)
+    {
         boolean isUnstable = false;
         if (t instanceof OutOfMemoryError)
         {
@@ -135,8 +149,6 @@ public final class JVMStabilityInspector
             isUnstable = true;
         }
 
-        fn.accept(t);
-
         // Check for file handle exhaustion
         if (t instanceof FileNotFoundException || t instanceof FileSystemException || t instanceof SocketException)
             if (t.getMessage() != null && t.getMessage().contains("Too many open files"))
@@ -144,13 +156,6 @@ public final class JVMStabilityInspector
 
         if (isUnstable)
             killer.killJVM(t);
-
-        if (t.getSuppressed() != null)
-            for (Throwable suppressed : t.getSuppressed())
-                inspectThrowable(suppressed, fn);
-
-        if (t.getCause() != null)
-            inspectThrowable(t.getCause(), fn);
     }
 
     /**
