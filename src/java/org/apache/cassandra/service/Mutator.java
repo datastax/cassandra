@@ -19,6 +19,8 @@
 package org.apache.cassandra.service;
 
 import java.util.Collection;
+import java.util.List;
+import java.util.UUID;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -29,6 +31,7 @@ import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
+import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.service.paxos.Commit;
 
@@ -86,6 +89,18 @@ public interface Mutator
      */
     @Nullable
     AbstractWriteResponseHandler<Commit> mutatePaxos(Commit proposal, ConsistencyLevel consistencyLevel, boolean allowHints, long queryStartNanoTime);
+
+    /**
+     * Used to persist the given batch of mutations. Usually invoked as part of
+     * {@link #mutateAtomically(Collection, ConsistencyLevel, boolean, long, ClientRequestsMetrics, ClientState)}.
+     */
+    void persistBatchlog(Collection<Mutation> mutations, long queryStartNanoTime, ReplicaPlan.ForTokenWrite replicaPlan, UUID batchUUID);
+
+    /**
+     * Used to clear the given batch id. Usually invoked as part of
+     * {@link #mutateAtomically(Collection, ConsistencyLevel, boolean, long, ClientRequestsMetrics, ClientState)}.
+     */
+    void clearBatchlog(String keyspace, ReplicaPlan.ForTokenWrite replicaPlan, UUID batchUUID);
 
     /**
      * Callback invoked when the given {@code mutation} is localy applied.
