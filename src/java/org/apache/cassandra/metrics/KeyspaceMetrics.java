@@ -125,6 +125,12 @@ public class KeyspaceMetrics
     public final Histogram bytesValidated;
     /** histogram over the number of partitions we have validated */
     public final Histogram partitionsValidated;
+    /** Coordinator read metrics */
+    public final Timer coordinatorReadLatency;
+    /** Coordinator range metrics */
+    public final Timer coordinatorScanLatency;
+    /** Coordinator write metrics */
+    public final Timer coordinatorWriteLatency;
 
     /*
      * Metrics for inconsistencies detected between repaired data sets across replicas. These
@@ -229,6 +235,10 @@ public class KeyspaceMetrics
         repairSyncTime = createKeyspaceTimer("RepairSyncTime");
         partitionsValidated = createKeyspaceHistogram("PartitionsValidated", false);
         bytesValidated = createKeyspaceHistogram("BytesValidated", false);
+
+        coordinatorReadLatency = createKeyspaceTimer("CoordinatorReadLatency");
+        coordinatorScanLatency = createKeyspaceTimer("CoordinatorScanLatency");
+        coordinatorWriteLatency = createKeyspaceTimer("CoordinatorWriteLatency");
 
         confirmedRepairedInconsistencies = createKeyspaceMeter("RepairedDataInconsistenciesConfirmed");
         unconfirmedRepairedInconsistencies = createKeyspaceMeter("RepairedDataInconsistenciesUnconfirmed");
