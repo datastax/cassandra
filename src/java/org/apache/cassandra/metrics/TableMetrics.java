@@ -17,7 +17,9 @@
  */
 package org.apache.cassandra.metrics;
 
+import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumMap;
@@ -34,6 +36,8 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import org.apache.commons.lang3.ArrayUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
@@ -42,6 +46,7 @@ import com.codahale.metrics.Meter;
 import com.codahale.metrics.Metric;
 import com.codahale.metrics.RatioGauge;
 import com.codahale.metrics.Timer;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
@@ -54,8 +59,10 @@ import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.metrics.Sampler.SamplerType;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.ExpMovingAverage;
+import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.MovingAverage;
 import org.apache.cassandra.utils.Pair;
 
@@ -67,6 +74,60 @@ import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
  */
 public class TableMetrics
 {
+
+    // CNDB will set this to MetricsAggregation.AGGREGATED in order to support large number of tenants and dedicated tenants with a large number of tables
+    public static final String TABLE_METRICS_DEFAULT_HISTOGRAMS_AGGREGATION =
+    CassandraRelevantProperties.TABLE_METRICS_DEFAULT_HISTOGRAMS_AGGREGATION.getString();
+
+    private static final Logger logger = LoggerFactory.getLogger(TableMetrics.class);
+
+    public static final String TABLE_EXTENSIONS_HISTOGRAMS_METRICS_KEY = "HISTOGRAM_METRICS";
+
+    public enum MetricsAggregation
+    {
+        AGGREGATED((byte) 0x00),
+        INDIVIDUAL((byte) 0x01);
+
+        public final byte val;
+
+        MetricsAggregation(byte val)
+        {
+            this.val = val;
+        }
+
+        public static MetricsAggregation fromMetadata(TableMetadata metadata)
+        {
+            MetricsAggregation defaultValue = MetricsAggregation.valueOf(TABLE_METRICS_DEFAULT_HISTOGRAMS_AGGREGATION);
+            ByteBuffer bb = null;
+            try
+            {
+                bb = metadata.params.extensions.get(TABLE_EXTENSIONS_HISTOGRAMS_METRICS_KEY);
+                return bb == null ? defaultValue : MetricsAggregation.fromByte(bb.get(bb.position())); // do not change the position of the ByteBuffer!
+            }
+            catch (BufferUnderflowException | IllegalStateException ex)
+            {
+                logger.error("Failed to decode metadata extensions for metrics aggregation ({}), using default value {}", bb, defaultValue);
+                return defaultValue;
+            }
+        }
+
+        public static MetricsAggregation fromByte(byte val) throws IllegalStateException
+        {
+            for (MetricsAggregation aggr : values())
+            {
+                if (aggr.val == val)
+                    return aggr;
+            }
+
+            throw new IllegalStateException("Invalid byte: " + val);
+        }
+
+        public String asCQLString()
+        {
+            return "0x" + Hex.bytesToHex(val);
+        }
+    }
+
     /**
      * stores metrics that will be rolled into a single global metric
      */
