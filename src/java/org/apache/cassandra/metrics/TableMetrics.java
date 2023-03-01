@@ -1378,7 +1378,7 @@ public class TableMetrics
     {
         void addNano(long latencyNanos);
 
-        Timer tableOrKeyspaceTimer();
+        LatencyMetrics tableOrKeyspaceMetric();
 
         /**
          * Used when {@link MetricsAggregation#AGGREGATED} is set for this table.
@@ -1407,9 +1407,9 @@ public class TableMetrics
             }
 
             @Override
-            public Timer tableOrKeyspaceTimer()
+            public LatencyMetrics tableOrKeyspaceMetric()
             {
-                return keyspace.latency;
+                return keyspace;
             }
 
             @Override
@@ -1440,9 +1440,9 @@ public class TableMetrics
             }
 
             @Override
-            public Timer tableOrKeyspaceTimer()
+            public LatencyMetrics tableOrKeyspaceMetric()
             {
-                return latencyMetrics.latency;
+                return latencyMetrics;
             }
 
             @Override

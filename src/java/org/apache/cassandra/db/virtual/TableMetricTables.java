@@ -68,11 +68,11 @@ public class TableMetricTables
     public static Collection<VirtualTable> getAll(String name)
     {
         return ImmutableList.of(
-            new LatencyTableMetric(name, "local_read_latency", t -> t.readLatency.tableOrKeyspaceTimer()),
-            new LatencyTableMetric(name, "local_scan_latency", t -> t.rangeLatency.tableOrKeyspaceTimer()),
+            new LatencyTableMetric(name, "local_read_latency", t -> t.readLatency.tableOrKeyspaceMetric().latency),
+            new LatencyTableMetric(name, "local_scan_latency", t -> t.rangeLatency.tableOrKeyspaceMetric().latency),
             new LatencyTableMetric(name, "coordinator_read_latency", t -> t.coordinatorReadLatency.tableOrKeyspaceTimer()),
             new LatencyTableMetric(name, "coordinator_scan_latency", t -> t.coordinatorScanLatency.tableOrKeyspaceTimer()),
-            new LatencyTableMetric(name, "local_write_latency", t -> t.writeLatency.tableOrKeyspaceTimer()),
+            new LatencyTableMetric(name, "local_write_latency", t -> t.writeLatency.tableOrKeyspaceMetric().latency),
             new LatencyTableMetric(name, "coordinator_write_latency", t -> t.coordinatorWriteLatency.tableOrKeyspaceTimer()),
             new HistogramTableMetric(name, "tombstones_per_read", t -> t.tombstoneScannedHistogram.tableOrKeyspaceHistogram()),
             new HistogramTableMetric(name, "rows_per_read", t -> t.liveScannedHistogram.tableOrKeyspaceHistogram()),

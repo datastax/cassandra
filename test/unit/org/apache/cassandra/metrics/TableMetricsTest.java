@@ -134,7 +134,7 @@ public class TableMetricsTest
 
         // The table with its non-aggregated histograms will have individual table counts
         assertEquals(tableCount, cfs.metric.coordinatorWriteLatency.tableOrKeyspaceTimer().getCount());
-        assertEquals(tableCount, cfs.metric.writeLatency.tableOrKeyspaceTimer().getCount());
+        assertEquals(tableCount, cfs.metric.writeLatency.tableOrKeyspaceMetric().latency.getCount());
 
         assertEquals(ksCount, keyspace.metric.coordinatorWriteLatency.getCount());
         assertEquals(ksCount, keyspace.metric.writeLatency.latency.getCount());
