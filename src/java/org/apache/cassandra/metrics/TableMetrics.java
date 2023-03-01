@@ -25,11 +25,14 @@ import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import javax.annotation.Nullable;
 
@@ -81,6 +84,9 @@ public class TableMetrics
     // tenants with a large number of tables
     public static final String TABLE_METRICS_DEFAULT_HISTOGRAMS_AGGREGATION =
     CassandraRelevantProperties.TABLE_METRICS_DEFAULT_HISTOGRAMS_AGGREGATION.getString();
+
+    // CNDB will set this to false as it does not need global metrics since the aggregation is done in Prometheus
+    public static final boolean EXPORT_GLOBAL_METRICS = CassandraRelevantProperties.TABLE_METRICS_EXPORT_GLOBALS.getBoolean();
 
     private static final Logger logger = LoggerFactory.getLogger(TableMetrics.class);
 
@@ -139,9 +145,9 @@ public class TableMetrics
     private static final MetricNameFactory GLOBAL_FACTORY = new AllTableMetricNameFactory("Table");
     private static final MetricNameFactory GLOBAL_ALIAS_FACTORY = new AllTableMetricNameFactory("ColumnFamily");
 
-    public final static LatencyMetrics GLOBAL_READ_LATENCY = new LatencyMetrics(GLOBAL_FACTORY, GLOBAL_ALIAS_FACTORY, "Read");
-    public final static LatencyMetrics GLOBAL_WRITE_LATENCY = new LatencyMetrics(GLOBAL_FACTORY, GLOBAL_ALIAS_FACTORY, "Write");
-    public final static LatencyMetrics GLOBAL_RANGE_LATENCY = new LatencyMetrics(GLOBAL_FACTORY, GLOBAL_ALIAS_FACTORY, "Range");
+    public final static Optional<LatencyMetrics> GLOBAL_READ_LATENCY = EXPORT_GLOBAL_METRICS ? Optional.of(new LatencyMetrics(GLOBAL_FACTORY, GLOBAL_ALIAS_FACTORY, "Read")) : Optional.empty();
+    public final static Optional<LatencyMetrics> GLOBAL_WRITE_LATENCY = EXPORT_GLOBAL_METRICS ? Optional.of(new LatencyMetrics(GLOBAL_FACTORY, GLOBAL_ALIAS_FACTORY, "Write")) : Optional.empty();
+    public final static Optional<LatencyMetrics> GLOBAL_RANGE_LATENCY = EXPORT_GLOBAL_METRICS ? Optional.of(new LatencyMetrics(GLOBAL_FACTORY, GLOBAL_ALIAS_FACTORY, "Range")) : Optional.empty();
 
     /** Total amount of data stored in the memtable that resides on-heap, including column related overhead and partitions overwritten. */
     public final Gauge<Long> memtableOnHeapDataSize;
@@ -968,9 +974,9 @@ public class TableMetrics
 
         droppedMutations = createTableCounter("DroppedMutations");
 
-        casPrepare = createLatencyMetrics("CasPrepare", cfs.getKeyspaceMetrics().casPrepare);
-        casPropose = createLatencyMetrics("CasPropose", cfs.getKeyspaceMetrics().casPropose);
-        casCommit = createLatencyMetrics("CasCommit", cfs.getKeyspaceMetrics().casCommit);
+        casPrepare = createLatencyMetrics("CasPrepare", cfs.getKeyspaceMetrics().casPrepare, Optional.empty());
+        casPropose = createLatencyMetrics("CasPropose", cfs.getKeyspaceMetrics().casPropose, Optional.empty());
+        casCommit = createLatencyMetrics("CasCommit", cfs.getKeyspaceMetrics().casCommit, Optional.empty());
 
         repairsStarted = createTableCounter("RepairJobsStarted");
         repairsCompleted = createTableCounter("RepairJobsCompleted");
@@ -1223,17 +1229,22 @@ public class TableMetrics
 
     protected TableHistogram createTableHistogram(String name, String alias, Histogram keyspaceHistogram, boolean considerZeroes)
     {
-        Histogram globalHistogram = Metrics.histogram(GLOBAL_FACTORY.createMetricName(name),
-                                                      GLOBAL_ALIAS_FACTORY.createMetricName(alias),
-                                                      considerZeroes);
+        Histogram globalHistogram = null;
+        if (EXPORT_GLOBAL_METRICS)
+        {
+            globalHistogram = Metrics.histogram(GLOBAL_FACTORY.createMetricName(name),
+                                                GLOBAL_ALIAS_FACTORY.createMetricName(alias),
+                                                considerZeroes);
+        }
 
+        Histogram tableHistogram = null;
         if (metricsAggregation == MetricsAggregation.INDIVIDUAL)
         {
-            Histogram cfHistogram = Metrics.histogram(factory.createMetricName(name), aliasFactory.createMetricName(alias), considerZeroes);
-            register(name, alias, cfHistogram);
-            return new TableHistogram(cfHistogram, keyspaceHistogram, globalHistogram);
+            tableHistogram = Metrics.histogram(factory.createMetricName(name), aliasFactory.createMetricName(alias), considerZeroes);
+            register(name, alias, tableHistogram);
         }
-        return new TableHistogram(keyspaceHistogram, globalHistogram);
+
+        return new TableHistogram(tableHistogram, keyspaceHistogram, globalHistogram);
     }
 
     protected Histogram createTableHistogram(String name, boolean considerZeroes)
@@ -1250,14 +1261,20 @@ public class TableMetrics
 
     protected TableTimer createTableTimer(String name, Timer keyspaceTimer)
     {
-        Timer global = Metrics.timer(GLOBAL_FACTORY.createMetricName(name), GLOBAL_ALIAS_FACTORY.createMetricName(name));
+        Timer globalTimer = null;
+        if (EXPORT_GLOBAL_METRICS)
+        {
+            globalTimer = Metrics.timer(GLOBAL_FACTORY.createMetricName(name), GLOBAL_ALIAS_FACTORY.createMetricName(name));
+        }
+
+        Timer tableTimer = null;
         if (metricsAggregation == MetricsAggregation.INDIVIDUAL)
         {
-            Timer cfTimer = Metrics.timer(factory.createMetricName(name), aliasFactory.createMetricName(name));
+            tableTimer = Metrics.timer(factory.createMetricName(name), aliasFactory.createMetricName(name));
             register(name, name, keyspaceTimer);
-            return new TableTimer(cfTimer, keyspaceTimer, global);
         }
-        return new TableTimer(keyspaceTimer, global);
+
+        return new TableTimer(tableTimer, keyspaceTimer, globalTimer);
     }
 
     protected Timer createTableTimer(String name)
@@ -1274,28 +1291,36 @@ public class TableMetrics
 
     protected TableMeter createTableMeter(String name, String alias, Meter keyspaceMeter)
     {
-        Meter globalMeter = Metrics.meter(GLOBAL_FACTORY.createMetricName(name),
-                                          GLOBAL_ALIAS_FACTORY.createMetricName(alias));
+        Meter globalMeter = null;
+        if (EXPORT_GLOBAL_METRICS)
+        {
+            globalMeter = Metrics.meter(GLOBAL_FACTORY.createMetricName(name),
+                                        GLOBAL_ALIAS_FACTORY.createMetricName(alias));
+        }
+
+        Meter tableMeter = null;
         if (metricsAggregation == MetricsAggregation.INDIVIDUAL)
         {
-            Meter meter = Metrics.meter(factory.createMetricName(name), aliasFactory.createMetricName(alias));
-            register(name, alias, meter);
-            return new TableMeter(meter, keyspaceMeter, globalMeter);
+            tableMeter = Metrics.meter(factory.createMetricName(name), aliasFactory.createMetricName(alias));
+            register(name, alias, tableMeter);
         }
-        return new TableMeter(keyspaceMeter, globalMeter);
+
+        return new TableMeter(tableMeter, keyspaceMeter, globalMeter);
     }
 
-    private TableLatencyMetrics createLatencyMetrics(String namePrefix, LatencyMetrics ... parents)
+    private TableLatencyMetrics createLatencyMetrics(String namePrefix, LatencyMetrics keyspace, Optional<LatencyMetrics> global)
     {
         TableLatencyMetrics metric;
         if (metricsAggregation == MetricsAggregation.INDIVIDUAL)
         {
+            LatencyMetrics[] parents = Stream.of(Optional.of(keyspace), global).filter(Optional::isPresent)
+                                             .map(Optional::get).toArray(LatencyMetrics[]::new);
             LatencyMetrics innerMetrics = new LatencyMetrics(factory, namePrefix, parents);
             metric = new TableLatencyMetrics.IndividualTableLatencyMetrics(innerMetrics);
         }
         else
         {
-            metric = new TableLatencyMetrics.AggregatingTableLatencyMetrics(parents);
+            metric = new TableLatencyMetrics.AggregatingTableLatencyMetrics(keyspace, global);
         }
         all.add(metric);
         return metric;
@@ -1364,27 +1389,27 @@ public class TableMetrics
          */
         class AggregatingTableLatencyMetrics implements TableLatencyMetrics
         {
-            private final LatencyMetrics[] parents;
+            private final LatencyMetrics keyspace;
+            private final Optional<LatencyMetrics> global;
 
-            public AggregatingTableLatencyMetrics(LatencyMetrics ... parents)
+            public AggregatingTableLatencyMetrics(LatencyMetrics keyspace, Optional<LatencyMetrics> global)
             {
-                Preconditions.checkState(parents.length > 0, "Parent metrics should not be empty");
-                this.parents = parents;
+                this.keyspace = keyspace;
+                this.global = global;
+                Preconditions.checkState(keyspace != null, "Keyspace metrics should not be null");
             }
 
             @Override
             public void addNano(long latencyNanos)
             {
-                for (LatencyMetrics parent : parents)
-                {
-                    parent.addNano(latencyNanos);
-                }
+                keyspace.addNano(latencyNanos);
+                global.ifPresent(g -> g.addNano(latencyNanos));
             }
 
             @Override
             public Timer tableOrKeyspaceTimer()
             {
-                return parents[0].latency;
+                return keyspace.latency;
             }
 
             @Override
@@ -1431,29 +1456,23 @@ public class TableMetrics
     public static class TableMeter
     {
         public final Meter[] all;
-        /**
-         * {@code null} if the metrics are not collected indidually for each table, see
-         * {@link TableMetrics#metricsAggregation}.
-         */
         @Nullable
         private final Meter table;
-        private final Meter global;
         private final Meter keyspace;
 
-        private TableMeter(Meter table, Meter keyspace, Meter global)
+        /**
+         * Table meter wrapper that forwards updates to all provided non-null meters.
+         *
+         * @param table meter that is {@code null} if the metrics are not collected indidually for each table, see {@link TableMetrics#metricsAggregation}.
+         * @param keyspace meter
+         * @param global meter that is {@code null} if global metrics are not collected, see {@link TableMetrics#EXPORT_GLOBAL_METRICS}
+         */
+        private TableMeter(@Nullable Meter table, Meter keyspace, @Nullable Meter global)
         {
+            Preconditions.checkState(keyspace != null, "Keyspace meter can't be null");
             this.table = table;
             this.keyspace = keyspace;
-            this.global = global;
-            this.all = new Meter[]{table, keyspace, global};
-        }
-
-        private TableMeter(Meter keyspace, Meter global)
-        {
-            this.table = null;
-            this.keyspace = keyspace;
-            this.global = global;
-            this.all = new Meter[]{keyspace, global};
+            this.all = Stream.of(table, keyspace, global).filter(Objects::nonNull).toArray(Meter[]::new);
         }
 
         public void mark()
@@ -1473,29 +1492,23 @@ public class TableMetrics
     public static class TableHistogram
     {
         private final Histogram[] all;
-        /**
-         * {@code null} if the metrics are not collected indidually for each table, see
-         * {@link TableMetrics#metricsAggregation}.
-         */
         @Nullable
         private final Histogram table;
         private final Histogram keyspace;
-        private final Histogram global;
 
-        private TableHistogram(Histogram table, Histogram keyspace, Histogram global)
+        /**
+         * Table histogram wrapper that forwards updates to all provided non-null histograms.
+         *
+         * @param table histogram that is {@code null} if the metrics are not collected indidually for each table, see {@link TableMetrics#metricsAggregation}.
+         * @param keyspace histogram
+         * @param global histogram that is {@code null} if global metrics are not collected, see {@link TableMetrics#EXPORT_GLOBAL_METRICS}
+         */
+        private TableHistogram(@Nullable Histogram table, Histogram keyspace, @Nullable Histogram global)
         {
+            Preconditions.checkState(keyspace != null, "Keyspace histogram can't be null");
             this.table = table;
-            this.global = global;
             this.keyspace = keyspace;
-            this.all = new Histogram[]{ table, keyspace, global};
-        }
-
-        private TableHistogram(Histogram keyspace, Histogram global)
-        {
-            this.table = null;
-            this.global = global;
-            this.keyspace = keyspace;
-            this.all = new Histogram[]{keyspace, global};
+            this.all = Stream.of(table, keyspace, global).filter(Objects::nonNull).toArray(Histogram[]::new);
         }
 
         public void update(long i)
@@ -1515,26 +1528,23 @@ public class TableMetrics
     public static class TableTimer
     {
         private final Timer[] all;
-        /**
-         * {@code null} if the metrics are not collected indidually for each table, see
-         * {@link TableMetrics#metricsAggregation}.
-         */
         @Nullable
         private final Timer cf;
         private final Timer keyspace;
 
-        private TableTimer(Timer cf, Timer keyspace, Timer global)
+        /**
+         * Table timer wrapper that forwards updates to all provided non-null timers.
+         *
+         * @param cf timer that is {@code null} if the metrics are not collected indidually for each table, see {@link TableMetrics#metricsAggregation}.
+         * @param keyspace timer
+         * @param global timer that is {@code null} if global metrics are not collected, see {@link TableMetrics#EXPORT_GLOBAL_METRICS}
+         */
+        private TableTimer(@Nullable Timer cf, Timer keyspace, @Nullable Timer global)
         {
+            Preconditions.checkState(keyspace != null, "Keyspace timer can't be null");
             this.cf = cf;
             this.keyspace = keyspace;
-            this.all = new Timer[]{cf, keyspace, global};
-        }
-
-        private TableTimer(Timer keyspace, Timer global)
-        {
-            this.cf = null;
-            this.keyspace = keyspace;
-            this.all = new Timer[]{keyspace, global};
+            this.all = Stream.of(cf, keyspace, global).filter(Objects::nonNull).toArray(Timer[]::new);
         }
 
         public void update(long i, TimeUnit unit)
