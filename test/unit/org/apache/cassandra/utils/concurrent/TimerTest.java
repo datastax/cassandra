@@ -58,7 +58,7 @@ public class TimerTest
     {
         CountDownLatch latch = new CountDownLatch(1);
 
-        Future result = Timer.INSTANCE.onTimeout(() -> latch.countDown(), 1, TimeUnit.SECONDS);
+        Future<Void> result = Timer.INSTANCE.onTimeout(latch::countDown, 1, TimeUnit.SECONDS);
         result.cancel(true);
 
         Assertions.assertThat(latch.await(3, TimeUnit.SECONDS)).isFalse();
