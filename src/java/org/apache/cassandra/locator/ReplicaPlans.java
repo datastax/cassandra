@@ -213,7 +213,7 @@ public class ReplicaPlans
      * Returns endpoint for a batchlog write.
      *
      * @param isAny if batch consistency level is ANY, in which case a local node will be picked
-     * @param preferLocalRack if true, a randm endpoint from the local rack will be preferred for batch storage
+     * @param preferLocalRack if true, a random endpoint from the local rack will be preferred for batch storage
      * @param keyspaceName the name of the keyspace used to compute batch storage endpoints
      */
     public static ReplicaPlan.ForTokenWrite forBatchlogWrite(boolean isAny, boolean preferLocalRack, String keyspaceName) throws UnavailableException
