@@ -290,7 +290,7 @@ public class ReplicaPlans
 
         /*
          * if we have only 1 `other` rack to select replicas from (whether it be the local rack or a single non-local rack),
-         * pick two random nodes from there and return realy;
+         * pick two random nodes from there and return early;
          * we are guaranteed to have at least two nodes in the single remaining rack because of the above if block.
          */
         if (validated.keySet().size() == 1)
