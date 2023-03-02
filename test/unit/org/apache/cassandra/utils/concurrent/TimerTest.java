@@ -75,7 +75,7 @@ public class TimerTest
         ClientWarn.instance.warn("test");
         Tracing.instance.set(Tracing.instance.get(Tracing.instance.newSession(ClientState.forInternalCalls(), Tracing.TraceType.NONE)));
         UUID sessionId = Tracing.instance.get().sessionId;
-        Future result = Timer.INSTANCE.onTimeout(() ->
+        Future<Void> result = Timer.INSTANCE.onTimeout(() ->
                                                  {
                                                      if (ClientWarn.instance.getWarnings().contains("test") &&
                                                          Tracing.instance.get().sessionId.equals(sessionId))
