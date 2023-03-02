@@ -320,7 +320,7 @@ public class ReplicaPlans
             shuffle.accept((List<?>) racks);
         }
 
-        // grab a random member of nodes
+        // grab two random nodes from two different racks
 
         List<InetAddressAndPort> result = new ArrayList<>(2);
         for (String rack : Iterables.limit(racks, 2))
