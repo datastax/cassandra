@@ -46,7 +46,7 @@ public class Timer
 
     private final HashedWheelTimer timer;
 
-    public Timer()
+    private Timer()
     {
         this.timer = new HashedWheelTimer(new ThreadFactoryBuilder().setDaemon(true).setNameFormat(THREAD_NAME).build(),
                                           100, TimeUnit.MILLISECONDS);

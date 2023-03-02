@@ -46,7 +46,7 @@ public class BatchlogEndpointFilterTest
     }
 
     @Test
-    public void shouldSelect2HostsFromLocalRackIfPreferred() throws UnknownHostException
+    public void shouldUseLocalRackIfPreferred() throws UnknownHostException
     {
         Multimap<String, InetAddressAndPort> endpoints = ImmutableMultimap.<String, InetAddressAndPort> builder()
                                                                           .put(LOCAL, InetAddressAndPort.getByName("0"))
