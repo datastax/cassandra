@@ -40,6 +40,10 @@ import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 
 import static java.util.Arrays.asList;
+import java.util.function.BiConsumer;
+
+import static org.apache.cassandra.utils.JVMStabilityInspector.getGlobalErrorHandler;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
@@ -232,5 +236,26 @@ public class JVMStabilityInspectorTest
         JVMStabilityInspector.registerShutdownHook(new Thread(() -> testShutdownHook.shutdownHook()), () -> testShutdownHook.onHookRemoved());
         JVMStabilityInspector.removeShutdownHooks();
         assertTrue(testShutdownHook.shutdownHookRemoved);
+    }
+
+    @Test
+    public void testSettingCustomGlobalHandler()
+    {
+        BiConsumer<Throwable,Boolean> globalHandler = Mockito.mock(BiConsumer.class);
+        BiConsumer<Throwable,Boolean> previous = getGlobalErrorHandler();
+        JVMStabilityInspector.setGlobalErrorHandler(globalHandler);
+
+        Throwable causeThrowable = new Throwable("cause");
+        Throwable topThrowable = new Throwable("hello", causeThrowable);
+        Throwable suppressedThrowable = new Throwable("suppressed");
+        topThrowable.addSuppressed(suppressedThrowable);
+
+        JVMStabilityInspector.inspectThrowable(topThrowable);
+
+        Mockito.verify(globalHandler).accept(Mockito.eq(topThrowable), Mockito.eq(false));
+        Mockito.verify(globalHandler).accept(Mockito.eq(suppressedThrowable), Mockito.eq(false));
+        Mockito.verify(globalHandler).accept(Mockito.eq(causeThrowable), Mockito.eq(false));
+        
+        JVMStabilityInspector.setGlobalErrorHandler(previous);
     }
 }
