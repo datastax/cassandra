@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -34,6 +35,7 @@ import com.google.common.collect.ImmutableSet;
 import org.apache.cassandra.exceptions.UnrecoverableIllegalStateException;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.tracing.Tracing;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,6 +61,7 @@ public final class JVMStabilityInspector
 
     private static Object lock = new Object();
     private static boolean printingHeapHistogram;
+    private static volatile BiConsumer<Throwable,Boolean> globalHandler;
     private static volatile Consumer<Throwable> diskHandler;
     private static volatile Function<String, Consumer<Throwable>> commitLogHandler;
     private static final List<Pair<Thread, Runnable>> shutdownHooks = new ArrayList<>(1);
@@ -68,6 +71,7 @@ public final class JVMStabilityInspector
 
     static
     {
+        setGlobalErrorHandler(JVMStabilityInspector::defaultGlobalErrorHandler);
         setDiskErrorHandler(JVMStabilityInspector::inspectDiskError);
         setCommitLogErrorHandler(JVMStabilityInspector::createDefaultCommitLogErrorHandler);
     }
@@ -87,7 +91,18 @@ public final class JVMStabilityInspector
         }
         inspectThrowable(t, JVMStabilityInspector::inspectDiskError, true);
     }
-    
+
+    public static void setGlobalErrorHandler(BiConsumer<Throwable,Boolean> errorHandler)
+    {
+        globalHandler = errorHandler;
+    }
+
+    @VisibleForTesting
+    public static BiConsumer<Throwable,Boolean> getGlobalErrorHandler()
+    {
+        return globalHandler;
+    }
+
     public static void setDiskErrorHandler(Consumer<Throwable> errorHandler)
     {
         diskHandler = errorHandler;
@@ -123,6 +138,19 @@ public final class JVMStabilityInspector
     }
 
     public static void inspectThrowable(Throwable t, Consumer<Throwable> fn, boolean isUncaughtException) throws OutOfMemoryError
+    {
+        globalHandler.accept(t, isUncaughtException);
+        fn.accept(t);
+
+        if (t.getSuppressed() != null)
+            for (Throwable suppressed : t.getSuppressed())
+                inspectThrowable(suppressed, fn, isUncaughtException);
+
+        if (t.getCause() != null)
+            inspectThrowable(t.getCause(), fn, isUncaughtException);
+    }
+
+    private static void defaultGlobalErrorHandler(Throwable t, boolean isUncaughtException)
     {
         boolean isUnstable = false;
         if (t instanceof OutOfMemoryError)
@@ -183,22 +211,6 @@ public final class JVMStabilityInspector
                 FileUtils.handleStartupFSError(t);
             killer.killJVM(t);
         }
-
-        try
-        {
-            fn.accept(t);
-        }
-        catch (Exception | Error e)
-        {
-            logger.warn("Unexpected error while handling unexpected error", e);
-        }
-
-        if (t.getSuppressed() != null)
-            for (Throwable suppressed : t.getSuppressed())
-                inspectThrowable(suppressed, fn, isUncaughtException);
-
-        if (t.getCause() != null)
-            inspectThrowable(t.getCause(), fn, isUncaughtException);
     }
 
     private static final Set<String> FORCE_HEAP_OOM_IGNORE_SET = ImmutableSet.of("Java heap space", "GC Overhead limit exceeded");
