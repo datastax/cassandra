@@ -215,4 +215,6 @@ public interface CompactionStrategy extends CompactionObserver
     {
         return true;
     }
+
+    void periodicReport();
 }

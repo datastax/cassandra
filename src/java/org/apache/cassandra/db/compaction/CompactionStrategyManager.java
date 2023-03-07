@@ -325,7 +325,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
             writeLock.unlock();
         }
 
-        if (repaired.first().getOptions().isLogAll())
+        if (repaired.first().getOptions().isLogEnabled())
             compactionLogger.enable();
     }
 
@@ -1239,6 +1239,15 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     public boolean supportsEarlyOpen()
     {
         return supportsEarlyOpen;
+    }
+
+    @Override
+    public void periodicReport()
+    {
+        for (CompactionStrategy strat : getAllStrategies())
+        {
+            strat.periodicReport();
+        }
     }
 
     public ReentrantReadWriteLock.WriteLock getWriteLock()
