@@ -228,6 +228,7 @@ public enum CassandraRelevantProperties
     DATA_OUTPUT_STREAM_PLUS_TEMP_BUFFER_SIZE("cassandra.data_output_stream_plus_temp_buffer_size", "8192"),
     DECAYING_ESTIMATED_HISTOGRAM_RESERVOIR_STRIPE_COUNT("cassandra.dehr_stripe_count", "2"),
     DEFAULT_COMPACTION_LOGS("default.compaction.logs"),
+    DEFAULT_COMPACTION_LOG_MINUTES("default.compaction.log_minutes"),
     DEFAULT_INDEX_CLASS("cassandra.default_index_implementation_class"),
     DEFAULT_PROVIDE_OVERLAPPING_TOMBSTONES("default.provide.overlapping.tombstones"),
     /** determinism properties for testing */
