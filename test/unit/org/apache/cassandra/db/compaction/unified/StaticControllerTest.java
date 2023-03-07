@@ -68,6 +68,12 @@ public class StaticControllerTest extends ControllerTest
     }
 
     @Test
+    public void testValidateCompactionStrategyOptions()
+    {
+        super.testValidateCompactionStrategyOptions(true);
+    }
+
+    @Test
     public void testSurvivalFactorForSharedStorage()
     {
         try (WithProperties ignore = new WithProperties().set(UCS_SHARED_STORAGE, true))

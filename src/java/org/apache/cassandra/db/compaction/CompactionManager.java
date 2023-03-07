@@ -57,6 +57,7 @@ import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.concurrent.ExecutorFactory;
 import org.apache.cassandra.concurrent.WrappedExecutorPlus;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -161,6 +162,9 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         instance = new CompactionManager();
 
         MBeanWrapper.instance.registerMBean(instance, MBEAN_OBJECT_NAME);
+
+        /*Schedule periodic reports to run every minute*/
+        ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(CompactionManager::periodicReports, 1, 1, TimeUnit.MINUTES);
     }
 
     private final CompactionExecutor executor = new CompactionExecutor();
@@ -183,6 +187,18 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     private final AtomicInteger globalCompactionPauseCount = new AtomicInteger(0);
 
     private final RateLimiter compactionRateLimiter = RateLimiter.create(Double.MAX_VALUE);
+
+    protected static void periodicReports()
+    {
+        for (String keyspace : Schema.instance.getKeyspaces())
+        {
+            for ( ColumnFamilyStore cfs : Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStores())
+            {
+                CompactionStrategy strat = cfs.getCompactionStrategy();
+                strat.periodicReport();
+            }
+        }
+    }
 
     public CompactionMetrics getMetrics()
     {
