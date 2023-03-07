@@ -985,6 +985,16 @@ public class CompactionsCQLTest extends CQLTester
         return holder;
     }
 
+    @Test
+    public void testPeriodicCompactionsCall()
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY) WITH compaction = {'class': 'TestCompactionClass'}");
+        TestCompactionClass cs = (TestCompactionClass) getCurrentColumnFamilyStore().getCompactionStrategyContainer().getStrategies().get(0);
+        int prCount = cs.periodicReportsCalled;
+        CompactionManager.periodicReports();
+        assertTrue(cs.periodicReportsCalled > prCount);
+    }
+
     private void loadTestSStables(ColumnFamilyStore cfs, File ksDir) throws IOException
     {
         Keyspace.open(cfs.getKeyspaceName()).getColumnFamilyStore(cfs.name).truncateBlocking();
