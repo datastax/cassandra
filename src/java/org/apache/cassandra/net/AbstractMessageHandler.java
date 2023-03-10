@@ -311,7 +311,10 @@ public abstract class AbstractMessageHandler extends ChannelInboundHandlerAdapte
                 decoder.reactivate();
 
                 if (decoder.isActive())
-                    ClientMetrics.instance.unpauseConnection();
+                    // Only update the ClientMetrics if it's initialized. This is to prevent
+                    // throwing a NPE if implementation of this class do not need/use ClientMetrics
+                    // e.g. InboundMessageHandler running in a CNDB Writer service.
+                    ClientMetrics.updateIfInitialized(ClientMetrics::unpauseConnection);
             }
         }
         catch (Throwable t)

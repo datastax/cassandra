@@ -20,6 +20,9 @@ package org.apache.cassandra.metrics;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+
+import com.google.common.annotations.VisibleForTesting;
 
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Histogram;
@@ -124,6 +127,27 @@ public final class ClientMetrics
         unknownException = registerMeter("UnknownException");
 
         initialized = true;
+    }
+
+    /**
+     * Updates the static {@link ClientMetrics#instance}, via applying the provided
+     * <code>update</code>, only if it has been properly initialized. Otherwise, skips
+     * the update.
+     *
+     * @param update The update to apply to the {@link ClientMetrics#instance}
+     */
+    public static void updateIfInitialized(Consumer<ClientMetrics> update)
+    {
+        if (!instance.initialized)
+            return;
+
+        update.accept(instance);
+    }
+
+    @VisibleForTesting
+    Optional<Integer> getPausedConnections()
+    {
+        return Optional.ofNullable(pausedConnections).map(AtomicInteger::get);
     }
 
     private int countConnectedClients()
