@@ -154,7 +154,7 @@ public class CostsCalculator
 
         try
         {
-            return getReadCost(partitionsReadPerPeriod.avg.get()) * Math.min(RA / survivalFactor, RA) * strategy.getOptions().getReadMultiplier();
+            return getReadCost(partitionsReadPerPeriod.avg.get()) * RA * strategy.getOptions().getReadMultiplier();
         }
         finally
         {

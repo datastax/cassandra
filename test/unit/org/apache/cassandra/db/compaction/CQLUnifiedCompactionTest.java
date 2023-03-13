@@ -170,8 +170,8 @@ public class CQLUnifiedCompactionTest extends CQLTester
         assertEquals((long) dataSetSizeGB << 30, controller.getDataSetSizeBytes());
         assertEquals(numShards, controller.getNumShards());
         assertEquals((long) sstableSizeMB << 20, controller.getMinSstableSizeBytes());
-        assertEquals(-6, controller.getMinW());
-        assertEquals(16, controller.getMaxW());
+        assertEquals(-6, controller.getMinScalingParameter());
+        assertEquals(16, controller.getMaxScalingParameter());
         assertEquals(300, controller.getInterval());
         assertEquals(0.25, controller.getThreshold(), 0.000001);
         assertEquals(1, controller.getMinCost());
