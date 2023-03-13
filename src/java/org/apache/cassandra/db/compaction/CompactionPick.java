@@ -315,9 +315,7 @@ public class CompactionPick
     public boolean isAdaptive(int currentThreshold, int previousThreshold)
     {
         int numTables = sstables.size();
-        if (numTables >= currentThreshold && numTables < previousThreshold)
-            return true;
-        return false;
+        return (numTables >= currentThreshold && numTables < previousThreshold);
     }
 
     @Override

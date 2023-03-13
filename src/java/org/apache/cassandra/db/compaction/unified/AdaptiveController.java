@@ -74,7 +74,7 @@ public class AdaptiveController extends Controller
 
     /** The maximum number of concurrent Adaptive Compactions */
     static final String MAX_ADAPTIVE_COMPACTIONS = "max_adaptive_compactions";
-    static private final int DEFAULT_MAX_ADAPTIVE_COMPACTIONS = Integer.getInteger(PREFIX + MAX_ADAPTIVE_COMPACTIONS, 2);
+    private static final int DEFAULT_MAX_ADAPTIVE_COMPACTIONS = Integer.getInteger(PREFIX + MAX_ADAPTIVE_COMPACTIONS, 2);
 
     private final int intervalSec;
     private final int minScalingParameter;
@@ -135,8 +135,8 @@ public class AdaptiveController extends Controller
                                   Map<String, String> options)
     {
         int scalingParameter = options.containsKey(STARTING_SCALING_PARAMETER) ? Integer.parseInt(options.get(STARTING_SCALING_PARAMETER)) : DEFAULT_STARTING_SCALING_PARAMETER;
-        int scalingParameters[] = new int[32];
-        int previousScalingParameters[] = new int[32];
+        int[] scalingParameters = new int[32];
+        int[] previousScalingParameters = new int[32];
         //set the scaling parameter for each level to the starting scaling parameter or default scaling parameter
         Arrays.fill(scalingParameters, scalingParameter);
         Arrays.fill(previousScalingParameters, scalingParameter);
