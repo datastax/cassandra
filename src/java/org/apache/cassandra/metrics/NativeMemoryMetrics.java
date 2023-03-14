@@ -42,10 +42,6 @@ public interface NativeMemoryMetrics
     NativeMemoryMetrics instance = CassandraRelevantProperties.USE_MICROMETER.getBoolean() ? new MicrometerNativeMemoryMetrics()
                                                                : new CodehaleNativeMemoryMetrics();
 
-    void alignedAllocation();
-
-    void smallAlignedAllocation();
-
     long usedNioDirectMemoryValue();
 
     default long rawNativeMemory()

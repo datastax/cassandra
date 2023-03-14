@@ -33,14 +33,6 @@ public class CodehaleNativeMemoryMetrics implements NativeMemoryMetrics
 
     private final MetricNameFactory factory;
 
-    /** The total number of page-aligned direct byte buffer allocations that were done using
-     * {@link org.apache.cassandra.io.compress.BufferType#OFF_HEAP_ALIGNED} */
-    private final Meter totalAlignedAllocations;
-
-    /** The number of page-aligned direct byte buffer allocations that are less than the small buffer threshold defined above,
-     * currently 16k, and that were done using {@link org.apache.cassandra.io.compress.BufferType#OFF_HEAP_ALIGNED} */
-    private final Meter smallAlignedAllocations;
-
     /** Total size of memory allocated directly by calling Native.malloc via {@link UnsafeMemoryAccess}, bypassing the JVM.
      * This is in addition to nio direct memory, for example off-heap memtables will use this type of memory. */
     private final Gauge<Long> rawNativeMemory;
@@ -78,9 +70,6 @@ public class CodehaleNativeMemoryMetrics implements NativeMemoryMetrics
         if (directBufferPool == null)
             logger.error("Direct memory buffer pool MBean not present, native memory metrics will be missing for nio buffers");
 
-        totalAlignedAllocations = Metrics.meter(factory.createMetricName("TotalAlignedAllocations"));
-        smallAlignedAllocations = Metrics.meter(factory.createMetricName("SmallAlignedAllocations"));
-
         rawNativeMemory = Metrics.register(factory.createMetricName("RawNativeMemory"), this::rawNativeMemory);
         bloomFilterMemory = Metrics.register(factory.createMetricName("BloomFilterMemory"), this::bloomFilterMemory);
         usedNioDirectMemory = Metrics.register(factory.createMetricName("UsedNioDirectMemory"), this::usedNioDirectMemory);
@@ -88,18 +77,6 @@ public class CodehaleNativeMemoryMetrics implements NativeMemoryMetrics
         networkDirectMemory = Metrics.register(factory.createMetricName("NetworkDirectMemory"), this::networkDirectMemory);
         nioDirectBufferCount = Metrics.register(factory.createMetricName("NioDirectBufferCount"), this::nioDirectBufferCount);
         totalMemory = Metrics.register(factory.createMetricName("TotalMemory"), this::totalMemory);
-    }
-
-    @Override
-    public void alignedAllocation()
-    {
-        totalAlignedAllocations.mark();
-    }
-
-    @Override
-    public void smallAlignedAllocation()
-    {
-        smallAlignedAllocations.mark();
     }
 
     @Override

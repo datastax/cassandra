@@ -21,7 +21,6 @@ package org.apache.cassandra.metrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 
@@ -38,19 +37,11 @@ public class MicrometerNativeMemoryMetrics extends MicrometerMetrics implements 
     public static final String TOTAL_NIO_MEMORY = METRICS_PREFIX + "_total_nio_direct_memory";
     public static final String NIO_DIRECT_BUFFER_COUNT = METRICS_PREFIX + "_nio_direct_buffer_count";
     public static final String TOTAL_MEMORY = METRICS_PREFIX + "_total_memory";
-    public static final String TOTAL_ALIGNED_ALLOCATIONS = METRICS_PREFIX + "_total_aligned_allocations_total";
-    public static final String SMALL_ALIGNED_ALLOCATIONS = METRICS_PREFIX + "_small_aligned_allocations_total";
-
-    private volatile Counter totalAlignedAllocations;
-    private volatile Counter smallAlignedAllocations;
 
     public MicrometerNativeMemoryMetrics()
     {
         if (directBufferPool == null)
             logger.error("Direct memory buffer pool MBean not present, native memory metrics will be missing for nio buffers");
-
-        this.totalAlignedAllocations = counter(TOTAL_ALIGNED_ALLOCATIONS);
-        this.smallAlignedAllocations = counter(SMALL_ALIGNED_ALLOCATIONS);
     }
 
     @Override
@@ -65,21 +56,6 @@ public class MicrometerNativeMemoryMetrics extends MicrometerMetrics implements 
         gauge(TOTAL_NIO_MEMORY, this, NativeMemoryMetrics::totalNioDirectMemory);
         gauge(NIO_DIRECT_BUFFER_COUNT, this, NativeMemoryMetrics::nioDirectBufferCount);
         gauge(TOTAL_MEMORY, this, NativeMemoryMetrics::totalMemory);
-
-        this.totalAlignedAllocations = counter(TOTAL_ALIGNED_ALLOCATIONS);
-        this.smallAlignedAllocations = counter(SMALL_ALIGNED_ALLOCATIONS);
-    }
-
-    @Override
-    public void alignedAllocation()
-    {
-        this.totalAlignedAllocations.increment();
-    }
-
-    @Override
-    public void smallAlignedAllocation()
-    {
-        this.smallAlignedAllocations.increment();
     }
 
     @Override
