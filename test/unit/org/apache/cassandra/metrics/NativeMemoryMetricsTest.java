@@ -18,19 +18,17 @@
 
 package org.apache.cassandra.metrics;
 
-import org.junit.BeforeClass;
-import org.junit.Test;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.lang.management.BufferPoolMXBean;
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
+import org.junit.BeforeClass;
+import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.UnsafeMemoryAccess;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 
 import static org.junit.Assert.assertEquals;
 
@@ -43,9 +41,6 @@ public class NativeMemoryMetricsTest
     @BeforeClass
     public static void setupClass()
     {
-        // Meter depends on LongAdder, which depends on TPC, which needs DD
-        DatabaseDescriptor.daemonInitialization();
-
         nativeMemoryMetrics = NativeMemoryMetrics.instance;
 
         directBufferPool = ManagementFactory.getPlatformMXBeans(BufferPoolMXBean.class)
@@ -53,6 +48,12 @@ public class NativeMemoryMetricsTest
                                             .filter(bpMBean -> bpMBean.getName().equals("direct"))
                                             .findFirst()
                                             .orElse(null);
+
+        // touch every field under test that may result in additional allocations (see MemoryUtil static init)
+        nativeMemoryMetrics.totalMemory();
+        nativeMemoryMetrics.totalNioDirectMemory();
+        nativeMemoryMetrics.usedNioDirectMemory();
+        nativeMemoryMetrics.nioDirectBufferCount();
     }
 
     @Test
@@ -93,10 +94,10 @@ public class NativeMemoryMetricsTest
     {
         assertEquals(0, nativeMemoryMetrics.rawNativeMemory());
 
-        long peer = UnsafeMemoryAccess.allocate(128);
+        long peer = MemoryUtil.allocate(128);
         assertEquals(128, nativeMemoryMetrics.rawNativeMemory());
 
-        UnsafeMemoryAccess.free(peer, 128);
+        MemoryUtil.free(peer, 128);
         assertEquals(0, nativeMemoryMetrics.rawNativeMemory());
     }
 }

@@ -18,21 +18,16 @@
 
 package org.apache.cassandra.metrics;
 
-
-package org.apache.cassandra.metrics;
-
 import java.lang.management.BufferPoolMXBean;
 import java.lang.management.ManagementFactory;
 
 import io.netty.util.internal.PlatformDependent;
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.utils.UnsafeMemoryAccess;
-import org.apache.cassandra.utils.obs.OffHeapBitSet;
+import org.apache.cassandra.utils.BloomFilter;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 
 public interface NativeMemoryMetrics
 {
-    long smallBufferThreshold = 4 * UnsafeMemoryAccess.pageSize();
-
     BufferPoolMXBean directBufferPool = ManagementFactory.getPlatformMXBeans(BufferPoolMXBean.class)
                                                          .stream()
                                                          .filter(bpMBean -> bpMBean.getName().equals("direct"))
@@ -46,12 +41,12 @@ public interface NativeMemoryMetrics
 
     default long rawNativeMemory()
     {
-        return UnsafeMemoryAccess.allocated();
+        return MemoryUtil.allocated();
     }
 
     default long bloomFilterMemory()
     {
-        return OffHeapBitSet.memoryAllocated();
+        return BloomFilter.memoryLimiter.memoryAllocated();
     }
 
     default long usedNioDirectMemory()

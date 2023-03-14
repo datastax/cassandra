@@ -22,7 +22,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Gauge;
-import org.apache.cassandra.utils.UnsafeMemoryAccess;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
@@ -32,7 +32,7 @@ public class CodehaleNativeMemoryMetrics implements NativeMemoryMetrics
 
     private final MetricNameFactory factory;
 
-    /** Total size of memory allocated directly by calling Native.malloc via {@link UnsafeMemoryAccess}, bypassing the JVM.
+    /** Total size of memory allocated directly by calling Native.malloc via {@link MemoryUtil}, bypassing the JVM.
      * This is in addition to nio direct memory, for example off-heap memtables will use this type of memory. */
     private final Gauge<Long> rawNativeMemory;
 
