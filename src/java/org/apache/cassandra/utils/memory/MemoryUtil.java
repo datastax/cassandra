@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.sun.jna.Native;
 
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Architecture;
 
 import sun.misc.Unsafe;
@@ -60,8 +61,8 @@ public abstract class MemoryUtil
             // OpenJDK for some reason allocates bytes when capacity == 0. When -Dsun.nio.PageAlignDirectMemory is false
             // DirectByteBuffer allocates 1 byte, when true a whole page is allocated.
             // This breaks our native memory metrics tests that don't expect Bits.RESERVED_MEMORY > Bits.TOTAL_CAPACITY.
-            // Allocate the buffer with capacity of 1 byte, to mitigate the problem.
-            ByteBuffer byteBuffer = ByteBuffer.allocateDirect(1);
+            // The buffer will be manually cleaned to mitigate the problem.
+            ByteBuffer byteBuffer = ByteBuffer.allocateDirect(0);
             Class<?> clazz = byteBuffer.getClass();
             DIRECT_BYTE_BUFFER_ADDRESS_OFFSET = unsafe.objectFieldOffset(Buffer.class.getDeclaredField("address"));
             DIRECT_BYTE_BUFFER_CAPACITY_OFFSET = unsafe.objectFieldOffset(Buffer.class.getDeclaredField("capacity"));
@@ -77,6 +78,7 @@ public abstract class MemoryUtil
             BYTE_BUFFER_CLASS = clazz;
 
             BYTE_ARRAY_BASE_OFFSET = unsafe.arrayBaseOffset(byte[].class);
+            FileUtils.clean(byteBuffer);
         }
         catch (Exception e)
         {
