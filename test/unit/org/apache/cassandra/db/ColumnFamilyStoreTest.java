@@ -165,9 +165,9 @@ public class ColumnFamilyStoreTest
                 .applyUnsafe();
         Util.flush(cfs);
 
-        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear(); // resets counts
+        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.tableOrKeyspaceHistogram()).clear(); // resets counts
         Util.getAll(Util.cmd(cfs, "key1").includeRow("c1").build());
-        assertEquals(1, cfs.metric.sstablesPerReadHistogram.cf.getCount());
+        assertEquals(1, cfs.metric.sstablesPerReadHistogram.tableOrKeyspaceHistogram().getCount());
     }
 
     @Test
@@ -410,13 +410,13 @@ public class ColumnFamilyStoreTest
         }
         // Sanity check the metrics - 50th percentile of linear 0-10000ms
         // remember, latencies are only an estimate - off by up to 20% by the 1.2 factor between buckets.
-        assertThat(cfs.metric.coordinatorReadLatency.getCount()).isEqualTo(count);
-        assertThat(cfs.metric.coordinatorReadLatency.getSnapshot().getValue(0.5))
+        assertThat(cfs.metric.coordinatorReadLatency.tableOrKeyspaceTimer().getCount()).isEqualTo(count);
+        assertThat(cfs.metric.coordinatorReadLatency.tableOrKeyspaceTimer().getSnapshot().getValue(0.5))
             .isBetween((double) TimeUnit.MILLISECONDS.toMicros(5839),
                        (double) TimeUnit.MILLISECONDS.toMicros(5840));
         // Sanity check the metrics - 75th percentileof linear 0-10000ms
-        assertThat(cfs.metric.coordinatorWriteLatency.getCount()).isEqualTo(count);
-        assertThat(cfs.metric.coordinatorWriteLatency.getSnapshot().getValue(0.75))
+        assertThat(cfs.metric.coordinatorWriteLatency.tableOrKeyspaceTimer().getCount()).isEqualTo(count);
+        assertThat(cfs.metric.coordinatorWriteLatency.tableOrKeyspaceTimer().getSnapshot().getValue(0.75))
         .isBetween((double) TimeUnit.MILLISECONDS.toMicros(8409),
                    (double) TimeUnit.MILLISECONDS.toMicros(8410));
 
