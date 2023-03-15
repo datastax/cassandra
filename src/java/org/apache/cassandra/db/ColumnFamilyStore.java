@@ -365,7 +365,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     private final Directories directories;
 
-    public final TableMetrics metric;
+    public volatile TableMetrics metric;
     public volatile long sampleReadLatencyMicros;
     public volatile long additionalWriteLatencyMicros;
 
@@ -462,6 +462,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         if (DatabaseDescriptor.isDaemonInitialized())
             switchMemtableOrNotify(FlushReason.SCHEMA_CHANGE, Memtable::metadataUpdated);
+
+        if (metric.metricsAggregation != TableMetrics.MetricsAggregation.fromMetadata(metadata()))
+        { // Reload the metrics if histogram aggregation has changed
+            metric.release(); // release first because of those static tables containing metric names
+            metric = new TableMetrics(this, memtableFactory.createMemtableMetrics(metadata));
+        }
     }
 
     /**
@@ -700,8 +706,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         try
         {
-            sampleReadLatencyMicros = metadata().params.speculativeRetry.calculateThreshold(metric.coordinatorReadLatency, sampleReadLatencyMicros);
-            additionalWriteLatencyMicros = metadata().params.additionalWritePolicy.calculateThreshold(metric.coordinatorWriteLatency, additionalWriteLatencyMicros);
+            sampleReadLatencyMicros = metadata().params.speculativeRetry.calculateThreshold(metric.coordinatorReadLatency.tableOrKeyspaceTimer(), sampleReadLatencyMicros);
+            additionalWriteLatencyMicros = metadata().params.additionalWritePolicy.calculateThreshold(metric.coordinatorWriteLatency.tableOrKeyspaceTimer(), additionalWriteLatencyMicros);
         }
         catch (Throwable e)
         {
