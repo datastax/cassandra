@@ -27,6 +27,7 @@ import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.virtual.LogMessagesTable;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.service.FileSystemOwnershipCheck;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
@@ -570,6 +571,12 @@ public enum CassandraRelevantProperties
     SYSTEM_DISTRIBUTED_NTS_DC_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_dc_names"),
     SYSTEM_DISTRIBUTED_NTS_RF_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_per_dc"),
     SYSTEM_TRACES_DEFAULT_RF("cassandra.system_traces.default_rf", "2"),
+
+    // Default metric aggegration strategy for tables without aggregation explicitly set.
+    TABLE_METRICS_DEFAULT_HISTOGRAMS_AGGREGATION("cassandra.table_metrics_default_histograms_aggregation", TableMetrics.MetricsAggregation.INDIVIDUAL.name()),
+    // Determines if table metrics should be also exported to shared global metric
+    TABLE_METRICS_EXPORT_GLOBALS("cassandra.table_metrics_export_globals", "true"),
+
     TEST_BBFAILHELPER_ENABLED("test.bbfailhelper.enabled"),
     TEST_BLOB_SHARED_SEED("cassandra.test.blob.shared.seed"),
     TEST_BYTEMAN_TRANSFORMATIONS_DEBUG("cassandra.test.byteman.transformations.debug"),
