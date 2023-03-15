@@ -21,12 +21,14 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.functions.types.utils.Bytes;
 import org.apache.cassandra.cql3.statements.PropertyDefinitions;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -42,7 +44,22 @@ import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 
 import static java.lang.String.format;
-import static org.apache.cassandra.schema.TableParams.Option.*;
+import static org.apache.cassandra.schema.TableParams.Option.ADDITIONAL_WRITE_POLICY;
+import static org.apache.cassandra.schema.TableParams.Option.BLOOM_FILTER_FP_CHANCE;
+import static org.apache.cassandra.schema.TableParams.Option.CACHING;
+import static org.apache.cassandra.schema.TableParams.Option.CDC;
+import static org.apache.cassandra.schema.TableParams.Option.COMMENT;
+import static org.apache.cassandra.schema.TableParams.Option.COMPRESSION;
+import static org.apache.cassandra.schema.TableParams.Option.CRC_CHECK_CHANCE;
+import static org.apache.cassandra.schema.TableParams.Option.DEFAULT_TIME_TO_LIVE;
+import static org.apache.cassandra.schema.TableParams.Option.EXTENSIONS;
+import static org.apache.cassandra.schema.TableParams.Option.GC_GRACE_SECONDS;
+import static org.apache.cassandra.schema.TableParams.Option.INCREMENTAL_BACKUPS;
+import static org.apache.cassandra.schema.TableParams.Option.MAX_INDEX_INTERVAL;
+import static org.apache.cassandra.schema.TableParams.Option.MEMTABLE_FLUSH_PERIOD_IN_MS;
+import static org.apache.cassandra.schema.TableParams.Option.MIN_INDEX_INTERVAL;
+import static org.apache.cassandra.schema.TableParams.Option.READ_REPAIR;
+import static org.apache.cassandra.schema.TableParams.Option.SPECULATIVE_RETRY;
 
 public final class TableAttributes extends PropertyDefinitions
 {
@@ -124,7 +141,7 @@ public final class TableAttributes extends PropertyDefinitions
     {
         return Sets.union(validKeywords, obsoleteKeywords);
     }
-    
+
     /**
      * Returs `true` if this attributes instance has a COMPACTION option with a recognized unsupported compaction
      * strategy class (coming from DSE). `false` otherwise.
@@ -156,7 +173,7 @@ public final class TableAttributes extends PropertyDefinitions
 
         if (hasOption(COMMENT))
             builder.comment(getString(COMMENT));
-        
+
         if (hasOption(Option.COMPACTION))
         {
             if (hasUnsupportedDseCompaction())
@@ -184,9 +201,16 @@ public final class TableAttributes extends PropertyDefinitions
         if (hasOption(DEFAULT_TIME_TO_LIVE))
             builder.defaultTimeToLive(getInt(DEFAULT_TIME_TO_LIVE));
 
+        // extensions in CQL are strings, but are stored as a frozen map<string,bytes>
+        if (hasOption(EXTENSIONS))
+            builder.extensions(getMap(EXTENSIONS)
+                               .entrySet()
+                               .stream()
+                               .collect(Collectors.toMap(Map.Entry::getKey, entry -> Bytes.fromHexString(entry.getValue()))));
+
         if (hasOption(GC_GRACE_SECONDS))
             builder.gcGraceSeconds(getInt(GC_GRACE_SECONDS));
-        
+
         if (hasOption(INCREMENTAL_BACKUPS))
             builder.incrementalBackups(getBoolean(INCREMENTAL_BACKUPS.toString(), true));
 
