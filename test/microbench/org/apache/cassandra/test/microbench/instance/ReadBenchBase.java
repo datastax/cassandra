@@ -30,7 +30,11 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.utils.FBUtilities;
-import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
 
 @State(Scope.Benchmark)
 public abstract class ReadBenchBase extends SimpleTableWriter
@@ -84,7 +88,7 @@ public abstract class ReadBenchBase extends SimpleTableWriter
                           cfs.getLiveSSTables().size(),
                           FBUtilities.prettyPrintMemory(cfs.metric.liveDiskSpaceUsed.getCount()),
                           cfs.metric.estimatedPartitionCount.getValue(),
-                          cfs.metric.writeLatency.latency.getSnapshot().getMean());
+                          cfs.metric.writeLatency.tableOrKeyspaceMetric().latency.getSnapshot().getMean());
         // Needed to stabilize sstable count for off-cache sized tests (e.g. count = 100_000_000)
         while (cfs.getLiveSSTables().size() >= 15)
         {
@@ -94,7 +98,7 @@ public abstract class ReadBenchBase extends SimpleTableWriter
                               cfs.getLiveSSTables().size(),
                               FBUtilities.prettyPrintMemory(cfs.metric.liveDiskSpaceUsed.getCount()),
                               cfs.metric.estimatedPartitionCount.getValue(),
-                              cfs.metric.writeLatency.latency.getSnapshot().getMean());
+                              cfs.metric.writeLatency.tableOrKeyspaceMetric().latency.getSnapshot().getMean());
         }
     }
 
