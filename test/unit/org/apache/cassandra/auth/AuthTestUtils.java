@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.auth;
 
-import java.util.List;
-import java.util.Map;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
@@ -30,6 +28,8 @@ import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
 
@@ -258,27 +258,27 @@ public class AuthTestUtils
     {
         ColumnFamilyStore networkPemissionsTable =
                 Keyspace.open(SchemaConstants.AUTH_KEYSPACE_NAME).getColumnFamilyStore(AuthKeyspace.NETWORK_PERMISSIONS);
-        return networkPemissionsTable.metric.readLatency.latency.getCount();
+        return networkPemissionsTable.metric.readLatency.tableOrKeyspaceMetric().latency.getCount();
     }
 
     public static long getCidrPermissionsReadCount()
     {
         ColumnFamilyStore cidrPemissionsTable =
         Keyspace.open(SchemaConstants.AUTH_KEYSPACE_NAME).getColumnFamilyStore(AuthKeyspace.CIDR_PERMISSIONS);
-        return cidrPemissionsTable.metric.readLatency.latency.getCount();
+        return cidrPemissionsTable.metric.readLatency.tableOrKeyspaceMetric().latency.getCount();
     }
 
     public static long getRolePermissionsReadCount()
     {
         ColumnFamilyStore rolesPemissionsTable =
                 Keyspace.open(SchemaConstants.AUTH_KEYSPACE_NAME).getColumnFamilyStore(AuthKeyspace.ROLE_PERMISSIONS);
-        return rolesPemissionsTable.metric.readLatency.latency.getCount();
+        return rolesPemissionsTable.metric.readLatency.tableOrKeyspaceMetric().latency.getCount();
     }
 
     public static long getRolesReadCount()
     {
         ColumnFamilyStore rolesTable = Keyspace.open(SchemaConstants.AUTH_KEYSPACE_NAME).getColumnFamilyStore(AuthKeyspace.ROLES);
-        return rolesTable.metric.readLatency.latency.getCount();
+        return rolesTable.metric.readLatency.tableOrKeyspaceMetric().latency.getCount();
     }
 
     public static RoleOptions getLoginRoleOptions()

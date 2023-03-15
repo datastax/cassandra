@@ -586,7 +586,7 @@ public class ReadCommandTest
             }
         }
 
-        assertEquals(5, cfs.metric.tombstoneScannedHistogram.cf.getSnapshot().getMax());
+        assertEquals(5, cfs.metric.tombstoneScannedHistogram.tableOrKeyspaceHistogram().getSnapshot().getMax());
     }
 
     @Test
@@ -662,7 +662,7 @@ public class ReadCommandTest
             }
         }
 
-        assertEquals(1, cfs.metric.tombstoneScannedHistogram.cf.getSnapshot().getMax());
+        assertEquals(1, cfs.metric.tombstoneScannedHistogram.tableOrKeyspaceHistogram().getSnapshot().getMax());
     }
 
     @Test
@@ -951,8 +951,8 @@ public class ReadCommandTest
     private long getAndResetOverreadCount(ColumnFamilyStore cfs)
     {
         // always clear the histogram after reading to make comparisons & asserts easier
-        long rows = cfs.metric.repairedDataTrackingOverreadRows.cf.getSnapshot().getMax();
-        ((ClearableHistogram)cfs.metric.repairedDataTrackingOverreadRows.cf).clear();
+        long rows = cfs.metric.repairedDataTrackingOverreadRows.tableOrKeyspaceHistogram().getSnapshot().getMax();
+        ((ClearableHistogram)cfs.metric.repairedDataTrackingOverreadRows.tableOrKeyspaceHistogram()).clear();
         return rows;
     }
 
