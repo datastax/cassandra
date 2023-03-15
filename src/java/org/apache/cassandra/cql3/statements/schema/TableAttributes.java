@@ -21,12 +21,14 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.functions.types.utils.Bytes;
 import org.apache.cassandra.cql3.statements.PropertyDefinitions;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -124,7 +126,7 @@ public final class TableAttributes extends PropertyDefinitions
     {
         return Sets.union(validKeywords, obsoleteKeywords);
     }
-    
+
     /**
      * Returs `true` if this attributes instance has a COMPACTION option with a recognized unsupported compaction
      * strategy class (coming from DSE). `false` otherwise.
@@ -174,9 +176,16 @@ public final class TableAttributes extends PropertyDefinitions
         if (hasOption(DEFAULT_TIME_TO_LIVE))
             builder.defaultTimeToLive(getInt(DEFAULT_TIME_TO_LIVE));
 
+        // extensions in CQL are strings, but are stored as a frozen map<string,bytes>
+        if (hasOption(EXTENSIONS))
+            builder.extensions(getMap(EXTENSIONS)
+                               .entrySet()
+                               .stream()
+                               .collect(Collectors.toMap(Map.Entry::getKey, entry -> Bytes.fromHexString(entry.getValue()))));
+
         if (hasOption(GC_GRACE_SECONDS))
             builder.gcGraceSeconds(getInt(GC_GRACE_SECONDS));
-        
+
         if (hasOption(INCREMENTAL_BACKUPS))
             builder.incrementalBackups(getBoolean(INCREMENTAL_BACKUPS.toString(), true));
 

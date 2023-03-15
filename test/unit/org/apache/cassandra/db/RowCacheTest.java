@@ -32,14 +32,11 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cache.RowCacheKey;
-import org.apache.cassandra.db.marshal.ValueAccessors;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.schema.KeyspaceMetadata;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.ValueAccessors;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ColumnData;
@@ -50,17 +47,22 @@ import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.ByteOrderedPartitioner.BytesToken;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.schema.CachingParams;
+import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_ORG_CAFFINITAS_OHC_SEGMENTCOUNT;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class RowCacheTest
 {
@@ -503,7 +505,7 @@ public class RowCacheTest
         //force flush for confidence that SSTables exists
         Util.flush(cachedStore);
 
-        ((ClearableHistogram)cachedStore.metric.sstablesPerReadHistogram.cf).clear();
+        ((ClearableHistogram)cachedStore.metric.sstablesPerReadHistogram.tableOrKeyspaceHistogram()).clear();
 
         for (int i = 0; i < 100; i++)
         {
@@ -511,14 +513,14 @@ public class RowCacheTest
 
             Util.getAll(Util.cmd(cachedStore, key).build());
 
-            long count_before = cachedStore.metric.sstablesPerReadHistogram.cf.getCount();
+            long count_before = cachedStore.metric.sstablesPerReadHistogram.tableOrKeyspaceHistogram().getCount();
             Util.getAll(Util.cmd(cachedStore, key).build());
 
             // check that SSTablePerReadHistogram has been updated by zero,
             // so count has been increased and in a 1/2 of requests there were zero read SSTables
-            long count_after = cachedStore.metric.sstablesPerReadHistogram.cf.getCount();
-            double belowMedian = cachedStore.metric.sstablesPerReadHistogram.cf.getSnapshot().getValue(0.49D);
-            double mean_after = cachedStore.metric.sstablesPerReadHistogram.cf.getSnapshot().getMean();
+            long count_after = cachedStore.metric.sstablesPerReadHistogram.tableOrKeyspaceHistogram().getCount();
+            double belowMedian = cachedStore.metric.sstablesPerReadHistogram.tableOrKeyspaceHistogram().getSnapshot().getValue(0.49D);
+            double mean_after = cachedStore.metric.sstablesPerReadHistogram.tableOrKeyspaceHistogram().getSnapshot().getMean();
             assertEquals("SSTablePerReadHistogram should be updated even key found in row cache", count_before + 1, count_after);
             assertTrue("In half of requests we have not touched SSTables, " +
                        "so 49 percentile (" + belowMedian + ") must be strongly less than 0.9", belowMedian < 0.9D);
@@ -526,7 +528,7 @@ public class RowCacheTest
                        "so mean value (" + mean_after + ") must be strongly less than 1, but greater than 0", mean_after < 0.999D && mean_after > 0.001D);
         }
 
-        assertEquals("Min value of SSTablesPerRead should be zero", 0, cachedStore.metric.sstablesPerReadHistogram.cf.getSnapshot().getMin());
+        assertEquals("Min value of SSTablesPerRead should be zero", 0, cachedStore.metric.sstablesPerReadHistogram.tableOrKeyspaceHistogram().getSnapshot().getMin());
 
         CacheService.instance.setRowCacheCapacityInMB(0);
     }
