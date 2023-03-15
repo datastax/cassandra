@@ -40,14 +40,10 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.Futures;
-
-import org.apache.cassandra.distributed.api.Feature;
-import org.apache.cassandra.gms.ApplicationState;
-import org.apache.cassandra.gms.VersionedValue;
-import org.apache.cassandra.io.util.File;
 import org.junit.Assert;
 
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.distributed.api.IInstance;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
@@ -56,6 +52,9 @@ import org.apache.cassandra.distributed.api.IMessageFilters;
 import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.distributed.impl.AbstractCluster;
 import org.apache.cassandra.distributed.impl.InstanceConfig;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.VersionedValue;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tools.SystemExitException;
 import org.apache.cassandra.utils.FBUtilities;
@@ -813,7 +812,7 @@ public class ClusterUtils
         out.add(getCommitLogDirectory(instance));
         out.add(getHintsDirectory(instance));
         out.add(getSavedCachesDirectory(instance));
-        out.add(getMetadataDirectory(instance));
+        // out.add(getMetadataDirectory(instance));
         return out;
     }
 
