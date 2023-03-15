@@ -43,7 +43,11 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class ColumnFamilyMetricTest
 {
@@ -107,18 +111,18 @@ public class ColumnFamilyMetricTest
         ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard2");
 
         // This confirms another test/set up did not overflow the histogram
-        store.metric.colUpdateTimeDeltaHistogram.cf.getSnapshot().get999thPercentile();
+        store.metric.colUpdateTimeDeltaHistogram.tableOrKeyspaceHistogram().getSnapshot().get999thPercentile();
 
         applyMutation(store.metadata(), "4242", ByteBufferUtil.bytes("0"), 0);
 
         // The histogram should not have overflowed on the first write
-        store.metric.colUpdateTimeDeltaHistogram.cf.getSnapshot().get999thPercentile();
+        store.metric.colUpdateTimeDeltaHistogram.tableOrKeyspaceHistogram().getSnapshot().get999thPercentile();
 
         // smallest time delta that would overflow the histogram if unfiltered
         applyMutation(store.metadata(), "4242", ByteBufferUtil.bytes("1"), 18165375903307L);
 
         // CASSANDRA-11117 - update with large timestamp delta should not overflow the histogram
-        store.metric.colUpdateTimeDeltaHistogram.cf.getSnapshot().get999thPercentile();
+        store.metric.colUpdateTimeDeltaHistogram.tableOrKeyspaceHistogram().getSnapshot().get999thPercentile();
     }
 
     @Test
