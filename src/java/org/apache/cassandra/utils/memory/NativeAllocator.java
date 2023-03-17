@@ -23,11 +23,17 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.NativeClustering;
+import org.apache.cassandra.db.NativeDecoratedKey;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.NativeCell;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-import org.apache.cassandra.utils.concurrent.Semaphore;
 import org.apache.cassandra.utils.concurrent.OpOrder.Group;
+import org.apache.cassandra.utils.concurrent.Semaphore;
 
 import static org.apache.cassandra.utils.concurrent.Semaphore.newSemaphore;
 
@@ -180,7 +186,7 @@ public class NativeAllocator extends MemtableAllocator
         if (currentRegion.compareAndSet(current, next))
             regions.add(next);
         else if (!raceAllocated.stash(next))
-            MemoryUtil.free(next.peer);
+            MemoryUtil.free(next.peer, next.capacity);
     }
 
     private long allocateOversize(int size)
@@ -200,7 +206,7 @@ public class NativeAllocator extends MemtableAllocator
     public void setDiscarded()
     {
         for (Region region : regions)
-            MemoryUtil.free(region.peer);
+            MemoryUtil.free(region.peer, region.capacity);
 
         super.setDiscarded();
     }
