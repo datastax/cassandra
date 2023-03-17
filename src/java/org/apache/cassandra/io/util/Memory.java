@@ -21,7 +21,6 @@ import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 
 import net.nicoulaj.compilecommand.annotations.Inline;
-
 import org.apache.cassandra.utils.Architecture;
 import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.concurrent.Ref;
@@ -339,7 +338,7 @@ public class Memory implements AutoCloseable, ReadableMemory
 
     public void free()
     {
-        if (peer != 0) MemoryUtil.free(peer);
+        if (peer != 0) MemoryUtil.free(peer, size);
         else assert size == 0;
         peer = 0;
     }
