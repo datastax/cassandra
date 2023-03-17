@@ -31,6 +31,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 public class NativeMemoryMetricsTest
 {
@@ -65,6 +66,9 @@ public class NativeMemoryMetricsTest
 
         logger.debug("Total Nio Memory: {}, Reserved Nio Memory: {}, Num Nio buffers: {}",
                      totalNioDirectMemory, usedNioDirectMemory, nioDirectBufferCount);
+
+        assertFalse("sun.nio.PageAlignDirectMemory should not be set for this test",
+                    Boolean.getBoolean("sun.nio.PageAlignDirectMemory"));
 
         assertEquals("Total and reserved nio memory should be equal since -Dsun.nio.PageAlignDirectMemory=true should not be set",
                      totalNioDirectMemory, usedNioDirectMemory);
