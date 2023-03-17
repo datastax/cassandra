@@ -34,7 +34,9 @@ public interface NativeMemoryMetrics
                                                          .findFirst()
                                                          .orElse(null);
 
-    NativeMemoryMetrics instance = CassandraRelevantProperties.USE_MICROMETER.getBoolean() ? new MicrometerNativeMemoryMetrics()
+    NativeMemoryMetrics instance = CassandraRelevantProperties.USE_MICROMETER.getBoolean()
+                                   ? new MicrometerNativeMemoryMetrics()
+                                   : new CodehaleNativeMemoryMetrics();
                                                                : new CodehaleNativeMemoryMetrics();
 
     long usedNioDirectMemoryValue();
