@@ -143,6 +143,8 @@ public enum CassandraRelevantProperties
     COMMIT_LOG_REPLAY_LIST("cassandra.replayList"),
     COMPACTION_HISTORY_ENABLED("cassandra.compaction_history_enabled", "true"),
     COMPACTION_RATE_LIMIT_GRANULARITY_IN_KB("compaction_rate_limit_granularity_in_kb"),
+
+
     /**
      * This property indicates the location for the access file. If com.sun.management.jmxremote.authenticate is false,
      * then this property and the password and access files, are ignored. Otherwise, the access file must exist and
@@ -560,6 +562,7 @@ public enum CassandraRelevantProperties
     /** Platform word size sun.arch.data.model. Examples: "32", "64", "unknown"*/
     SUN_ARCH_DATA_MODEL("sun.arch.data.model"),
     SUN_JAVA_COMMAND("sun.java.command", ""),
+    SUN_NIO_PAGE_ALIGN_DIRECT_MEMORY("sun.nio.PageAlignDirectMemory"),
     /**
      * Controls the JMX server threadpool keap-alive time.
      * Should only be set by in-jvm dtests.
