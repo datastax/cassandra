@@ -399,7 +399,7 @@ public abstract class Controller
         if (calculator != null)
             throw new IllegalStateException("Already started");
 
-        startup(strategy, new CostsCalculator(env, strategy, executorService, survivalFactors[0]));
+        startup(strategy, new CostsCalculator(env, strategy, executorService));
     }
 
     @VisibleForTesting

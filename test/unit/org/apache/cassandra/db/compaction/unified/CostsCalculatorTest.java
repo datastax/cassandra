@@ -48,7 +48,6 @@ public class CostsCalculatorTest
 {
     private static final double epsilon = 0.00000001;
     private static final Random random = new Random(0L);
-    private static final double survivalFactor = 1;
 
     @Mock
     private Environment environment;
@@ -95,7 +94,7 @@ public class CostsCalculatorTest
     @Test
     public void testCreateAndClose()
     {
-        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService, survivalFactor);
+        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService);
         assertNotNull(cost);
         assertNotNull(cost.toString());
 
@@ -108,57 +107,50 @@ public class CostsCalculatorTest
     @Test
     public void testUpdate() throws InterruptedException
     {
-        testCosts(100, 100, PageAware.PAGE_SIZE, 1, 1, survivalFactor);
+        testCosts(100, 100, PageAware.PAGE_SIZE, 1, 1);
     }
 
     @Test
     public void testDoubleReadTime() throws InterruptedException
     {
-        testCosts(200, 100, PageAware.PAGE_SIZE, 1, 1, survivalFactor);
+        testCosts(200, 100, PageAware.PAGE_SIZE, 1, 1);
     }
 
     @Test
     public void testDoubleWriteTime() throws InterruptedException
     {
-        testCosts(100, 200, PageAware.PAGE_SIZE, 1, 1, survivalFactor);
+        testCosts(100, 200, PageAware.PAGE_SIZE, 1, 1);
     }
 
     @Test
     public void testLargerChunkSize() throws InterruptedException
     {
-        testCosts(100, 100, 64 << 10, 1, 1, survivalFactor);
+        testCosts(100, 100, 64 << 10, 1, 1);
     }
 
     @Test
     public void testHalfCacheMissRatio() throws InterruptedException
     {
-        testCosts(100, 100, PageAware.PAGE_SIZE, 1, 1, survivalFactor);
+        testCosts(100, 100, PageAware.PAGE_SIZE, 1, 1);
     }
 
     @Test
     public void testReadMultiplier() throws InterruptedException
     {
-        testCosts(1000, 100, PageAware.PAGE_SIZE, 0.1, 1, survivalFactor);
+        testCosts(1000, 100, PageAware.PAGE_SIZE, 0.1, 1);
     }
 
     @Test
     public void testWriteMultiplier() throws InterruptedException
     {
-        testCosts(100, 100, PageAware.PAGE_SIZE, 1, 10, survivalFactor);
-    }
-
-    @Test
-    public void testSurvivalRatio() throws InterruptedException
-    {
-        testCosts(100, 100, PageAware.PAGE_SIZE, 1, 1, 0.5);
+        testCosts(100, 100, PageAware.PAGE_SIZE, 1, 10);
     }
 
     private void testCosts(long readTimeMicros,
                            long writeTimeMicros,
                            int chunkSize,
                            double readMultiplier,
-                           double writeMultiplier,
-                           double survivalFactor) throws InterruptedException
+                           double writeMultiplier) throws InterruptedException
     {
         int blockSize = PageAware.PAGE_SIZE;
         long totPartitionsRead = 1 + random.nextInt(32);
@@ -174,7 +166,7 @@ public class CostsCalculatorTest
         when(options.getReadMultiplier()).thenReturn(readMultiplier);
         when(options.getWriteMultiplier()).thenReturn(writeMultiplier);
 
-        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService, survivalFactor);
+        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService);
         assertNotNull(cost);
         assertNotNull(cost.toString());
 
@@ -221,7 +213,7 @@ public class CostsCalculatorTest
         when(strategy.getOptions()).thenReturn(options);
         when(options.getWriteMultiplier()).thenReturn(1.0);
 
-        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService, survivalFactor);
+        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService);
         assertNotNull(cost);
         assertNotNull(cost.toString());
 
@@ -251,7 +243,7 @@ public class CostsCalculatorTest
         when(strategy.getOptions()).thenReturn(options);
         when(options.getReadMultiplier()).thenReturn(0.5);
 
-        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService, survivalFactor);
+        CostsCalculator cost = new CostsCalculator(environment, strategy, executorService);
         assertNotNull(cost);
         assertNotNull(cost.toString());
 

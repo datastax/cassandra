@@ -47,7 +47,6 @@ public class CostsCalculator
     final static int samplingPeriodMs = Integer.getInteger(Controller.PREFIX + "sample_time_ms", 5000);
 
     private final Environment env;
-    private final double survivalFactor;
     private final MovingAverageOfDelta partitionsReadPerPeriod;
     private final MovingAverageOfDelta bytesInsertedPerPeriod;
     private final MovingAverage numSSTables;
@@ -61,11 +60,9 @@ public class CostsCalculator
 
     CostsCalculator(Environment env,
                     UnifiedCompactionStrategy strategy,
-                    ScheduledExecutorService executorService,
-                    double survivalFactor)
+                    ScheduledExecutorService executorService)
     {
         this.env = env;
-        this.survivalFactor = survivalFactor;
         this.partitionsReadPerPeriod = new MovingAverageOfDelta(env.makeExpMovAverage());
         this.bytesInsertedPerPeriod = new MovingAverageOfDelta(env.makeExpMovAverage());
         this.numSSTables = env.makeExpMovAverage();
