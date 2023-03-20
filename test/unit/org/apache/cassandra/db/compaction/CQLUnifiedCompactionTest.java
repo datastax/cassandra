@@ -154,6 +154,7 @@ public class CQLUnifiedCompactionTest extends CQLTester
                     String.format("'adaptive_max_scaling_parameter' : '%s', ", 16) +
                     String.format("'adaptive_interval_sec': '%d', ", 300) +
                     String.format("'adaptive_threshold': '%f', ", 0.25) +
+                    String.format("'max_adaptive_compactions': '%d', ", 5) +
                     String.format("'adaptive_min_cost': '%d'}", 1));
 
         CompactionStrategy strategy = getCurrentCompactionStrategy();
@@ -175,6 +176,7 @@ public class CQLUnifiedCompactionTest extends CQLTester
         assertEquals(300, controller.getInterval());
         assertEquals(0.25, controller.getThreshold(), 0.000001);
         assertEquals(1, controller.getMinCost());
+        assertEquals(5, controller.getMaxAdaptiveCompactions());
     }
 
     @Test

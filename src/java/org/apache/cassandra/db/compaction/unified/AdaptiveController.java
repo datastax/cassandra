@@ -74,7 +74,7 @@ public class AdaptiveController extends Controller
 
     /** The maximum number of concurrent Adaptive Compactions */
     static final String MAX_ADAPTIVE_COMPACTIONS = "max_adaptive_compactions";
-    private static final int DEFAULT_MAX_ADAPTIVE_COMPACTIONS = Integer.getInteger(PREFIX + MAX_ADAPTIVE_COMPACTIONS, 2);
+    private static final int DEFAULT_MAX_ADAPTIVE_COMPACTIONS = Integer.getInteger(PREFIX + MAX_ADAPTIVE_COMPACTIONS, 5);
 
     private final int intervalSec;
     private final int minScalingParameter;

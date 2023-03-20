@@ -96,12 +96,16 @@ public class AdaptiveControllerTest extends ControllerTest
         options.put(AdaptiveController.INTERVAL_SEC, "120");
         options.put(AdaptiveController.THRESHOLD, "0.15");
         options.put(AdaptiveController.MIN_COST, "5");
+        options.put(AdaptiveController.MAX_ADAPTIVE_COMPACTIONS, "-1");
 
         Controller controller = testFromOptions(true, options);
         assertTrue(controller instanceof AdaptiveController);
 
         for (int i = 0; i < 10; i++)
+        {
             assertEquals(0, controller.getScalingParameter(i));
+            assertEquals(0, controller.getPreviousScalingParameter(i));
+        }
     }
 
     @Test
@@ -114,6 +118,7 @@ public class AdaptiveControllerTest extends ControllerTest
         options.put(AdaptiveController.INTERVAL_SEC, "120");
         options.put(AdaptiveController.THRESHOLD, "0.15");
         options.put(AdaptiveController.MIN_COST, "5");
+        options.put(AdaptiveController.MAX_ADAPTIVE_COMPACTIONS, "-1");
 
         super.testValidateOptions(options, true);
     }
