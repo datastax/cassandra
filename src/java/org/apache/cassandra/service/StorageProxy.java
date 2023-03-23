@@ -194,7 +194,7 @@ public class StorageProxy implements StorageProxyMBean
 
     private static final Mutator mutator = MutatorProvider.instance;
 
-    static class DefaultMutator implements Mutator
+    public static class DefaultMutator implements Mutator
     {
         @Override
         public AbstractWriteResponseHandler<IMutation> mutateCounter(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
@@ -252,6 +252,7 @@ public class StorageProxy implements StorageProxyMBean
                 }
 
                 ReplicaPlan.ForWrite replicaPlan = ReplicaPlans.forBatchlogWrite(batchConsistencyLevel == ConsistencyLevel.ANY,
+                                                                                 false,
                                                                                  mutations.iterator().next().getKeyspaceName());
 
                 final TimeUUID batchUUID = nextTimeUUID();
@@ -325,12 +326,14 @@ public class StorageProxy implements StorageProxyMBean
             return wrappers;
         }
 
-        private void clearBatchlog(String keyspace, ReplicaPlan.ForWrite replicaPlan, TimeUUID batchUUID)
+        @Override
+        public void clearBatchlog(String keyspace, ReplicaPlan.ForWrite replicaPlan, TimeUUID batchUUID)
         {
             StorageProxy.asyncRemoveFromBatchlog(replicaPlan, batchUUID);
         }
 
-        private void persistBatchlog(Collection<Mutation> mutations, long queryStartNanoTime, ReplicaPlan.ForWrite replicaPlan, TimeUUID batchUUID)
+        @Override
+        public void persistBatchlog(Collection<Mutation> mutations, long queryStartNanoTime, ReplicaPlan.ForWrite replicaPlan, TimeUUID batchUUID)
         {
             // write to the batchlog
             StorageProxy.syncWriteToBatchlog(mutations, replicaPlan, batchUUID, queryStartNanoTime);
