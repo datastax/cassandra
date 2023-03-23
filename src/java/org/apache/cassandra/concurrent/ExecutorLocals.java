@@ -44,7 +44,7 @@ public class ExecutorLocals implements WithResources, Closeable
 
     public static class Impl
     {
-        protected static void set(TraceState traceState, ClientWarn.State clientWarnState)
+        public static void set(TraceState traceState, ClientWarn.State clientWarnState)
         {
             if (traceState == null && clientWarnState == null) locals.set(none);
             else locals.set(new ExecutorLocals(traceState, clientWarnState));
@@ -83,7 +83,6 @@ public class ExecutorLocals implements WithResources, Closeable
         ExecutorLocals current = locals.get();
         return current.traceState == traceState ? current : new ExecutorLocals(traceState, current.clientWarnState);
     }
-
     public static void clear()
     {
         locals.set(none);
