@@ -227,12 +227,13 @@ public class ReplicaPlans
     }
 
     /**
-     * Requires that the provided endpoints are alive.  Converts them to their relevant system replicas.
-     * Note that the liveAndDown collection and live are equal to the provided endpoints.
+     * Returns endpoint for a batchlog write.
      *
      * @param isAny if batch consistency level is ANY, in which case a local node will be picked
+     * @param preferLocalRack if true, a random endpoint from the local rack will be preferred for batch storage
+     * @param keyspaceName the name of the keyspace used to compute batch storage endpoints
      */
-    public static ReplicaPlan.ForWrite forBatchlogWrite(boolean isAny, String keyspaceName) throws UnavailableException
+    public static ReplicaPlan.ForWrite forBatchlogWrite(boolean isAny, boolean preferLocalRack, String keyspaceName) throws UnavailableException
     {
         // A single case we write not for range or token, but multiple mutations to many tokens
         Token token = DatabaseDescriptor.getPartitioner().getMinimumToken();
@@ -246,7 +247,7 @@ public class ReplicaPlans
         //  - replicas should be in the local datacenter
         //  - choose min(2, number of qualifying candiates above)
         //  - allow the local node to be the only replica only if it's a single-node DC
-        Collection<InetAddressAndPort> chosenEndpoints = filterBatchlogEndpoints(false, snitch.getLocalRack(), localEndpoints);
+        Collection<InetAddressAndPort> chosenEndpoints = filterBatchlogEndpoints(preferLocalRack, snitch.getLocalRack(), localEndpoints);
 
         // Batchlog is hosted by either one node or two nodes from different racks.
         ConsistencyLevel consistencyLevel = chosenEndpoints.size() == 1 ? ConsistencyLevel.ONE : ConsistencyLevel.TWO;
@@ -312,7 +313,7 @@ public class ReplicaPlans
         if (!(DatabaseDescriptor.getBatchlogEndpointStrategy().preferLocalRack || preferLocalRack)
                 && validated.size() - validated.get(localRack).size() >= REQUIRED_BATCHLOG_REPLICA_COUNT)
         {
-            // we have enough endpoints in other racks
+            // if the local rack should not be preferred and there are enough nodes in other racks, remove it:
             validated.removeAll(localRack);
         }
 
@@ -346,9 +347,9 @@ public class ReplicaPlans
         if (validated.keySet().size() == 1)
         {
             /*
-             * we have only 1 `other` rack to select replicas from (whether it be the local rack or a single non-local rack)
-             * pick two random nodes from there; we are guaranteed to have at least two nodes in the single remaining rack
-             * because of the preceding if block.
+             * if we have only 1 `other` rack to select replicas from (whether it be the local rack or a single non-local rack),
+             * pick two random nodes from there and return early;
+             * we are guaranteed to have at least two nodes in the single remaining rack because of the above if block.
              */
             List<InetAddressAndPort> otherRack = Lists.newArrayList(validated.values());
             shuffle.accept(otherRack);
@@ -356,6 +357,7 @@ public class ReplicaPlans
         }
 
         // randomize which racks we pick from if more than 2 remaining
+
         Collection<String> racks;
         if (validated.keySet().size() == REQUIRED_BATCHLOG_REPLICA_COUNT)
         {

@@ -196,7 +196,7 @@ public class BatchlogEndpointFilterTest
         Collection<InetAddressAndPort> result = filterBatchlogEndpointsRandomForTests(false, endpoints);
         // result should be the last two non-local replicas
         // (Collections.shuffle has been replaced with Collections.reverse for testing)
-        assertThat(result.size(), is(2));
+        assertThat(result.size()).isEqualTo(2);
         assertTrue(result.contains(InetAddressAndPort.getByName("11")));
         assertTrue(result.contains(InetAddressAndPort.getByName("111")));
     }
@@ -215,7 +215,7 @@ public class BatchlogEndpointFilterTest
         Collection<InetAddressAndPort> result = filterBatchlogEndpointsRandomForTests(false, endpoints);
         // result should be the last two non-local replicas
         // (Collections.shuffle has been replaced with Collections.reverse for testing)
-        assertThat(result.size(), is(2));
+        assertThat(result.size()).isEqualTo(2);
         assertTrue(result.contains(InetAddressAndPort.getByName("111")));
         assertTrue(result.contains(InetAddressAndPort.getByName("1111")));
     }

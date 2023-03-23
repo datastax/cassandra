@@ -19,9 +19,9 @@ package org.apache.cassandra.batchlog;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
-
-import com.google.common.annotations.VisibleForTesting;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -81,10 +81,14 @@ public final class Batch
         return decodedMutations.size() + encodedMutations.size();
     }
     
-    @VisibleForTesting
     public Collection<ByteBuffer> getEncodedMutations()
     {
         return encodedMutations;
+    }
+
+    public Collection<Mutation> getDecodedMutations()
+    {
+        return decodedMutations;
     }
 
     /**
