@@ -32,9 +32,11 @@ import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
+import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.transport.Dispatcher;
+import org.apache.cassandra.utils.TimeUUID;
 
 import static org.junit.Assert.assertSame;
 
@@ -73,6 +75,18 @@ public class MutatorProviderTest
 
         @Override
         public void mutateAtomically(Collection<Mutation> mutations, ConsistencyLevel consistencyLevel, boolean requireQuorumForRemove, Dispatcher.RequestTime requestTime, ClientRequestsMetrics metrics, ClientState clientState) throws UnavailableException, OverloadedException, WriteTimeoutException
+        {
+            // no-op
+        }
+
+        @Override
+        public void persistBatchlog(Collection<Mutation> mutations, Dispatcher.RequestTime requestTime, ReplicaPlan.ForWrite replicaPlan, TimeUUID batchUUID)
+        {
+            // no-op
+        }
+
+        @Override
+        public void clearBatchlog(String keyspace, Dispatcher.RequestTime requestTime, ReplicaPlan.ForWrite replicaPlan, TimeUUID batchUUID)
         {
             // no-op
         }
