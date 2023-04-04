@@ -86,7 +86,7 @@ public class Timer
                                               }
                                           }, timeout, unit);
 
-        return new Future<Void>()
+        return new Future<>()
         {
             @Override
             public boolean cancel(boolean mayInterruptIfRunning)
