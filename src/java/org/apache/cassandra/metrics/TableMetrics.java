@@ -1061,8 +1061,9 @@ public class TableMetrics
     {
         compactionBytesRead.inc(inputDiskSize);
         compactionBytesWritten.inc(outputDiskSize);
-        // this assumes that at least 1 Kb was compacted, which should always be the case, then rounds down
-        compactionTimePerKb.update(elapsedNanos / (double) Math.max(1, inputDiskSize / 1024L));
+        // only update compactionTimePerKb when there are non-expired sstables (inputDiskSize > 0)
+        if (inputDiskSize > 0)
+            compactionTimePerKb.update(elapsedNanos / (double) Math.max(1, inputDiskSize / 1024L));
     }
 
     public void updateSSTableIterated(int count, int intersectingCount, long elapsedNanos)

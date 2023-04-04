@@ -208,12 +208,6 @@ public class CompactionTask extends AbstractCompactionTask
         // sanity check: all sstables must belong to the same cfs
         assert !Iterables.any(transaction.originals(), sstable -> !sstable.descriptor.cfname.equals(realm.getTableName()));
 
-        long fullyExpiredSSTablesBytes = 0;
-        for (CompactionSSTable sstable : fullyExpiredSSTables)
-        {
-            fullyExpiredSSTablesBytes += sstable.onDiskLength();
-        }
-
         Set<SSTableReader> actuallyCompact = Sets.difference(transaction.originals(), fullyExpiredSSTables);
 
         // Cursors currently don't support:
@@ -235,9 +229,9 @@ public class CompactionTask extends AbstractCompactionTask
                      realm.metadata().enforceStrictLiveness() ? "strict liveness" : "");
 
         if (compactByIterators)
-            return new CompactionOperationIterator(controller, actuallyCompact, fullyExpiredSSTables.size(), fullyExpiredSSTablesBytes);
+            return new CompactionOperationIterator(controller, actuallyCompact, fullyExpiredSSTables.size());
         else
-            return new CompactionOperationCursor(controller, actuallyCompact, fullyExpiredSSTables.size(), fullyExpiredSSTablesBytes);
+            return new CompactionOperationCursor(controller, actuallyCompact, fullyExpiredSSTables.size());
     }
 
     /**
@@ -255,7 +249,6 @@ public class CompactionTask extends AbstractCompactionTask
         private final long startTime;
         final Set<SSTableReader> actuallyCompact;
         private final int fullyExpiredSSTablesCount;
-        private final long fullyExpiredSSTablesBytes;
 
         // resources that are updated and may be read by another thread
         volatile Collection<SSTableReader> newSStables;
@@ -280,7 +273,7 @@ public class CompactionTask extends AbstractCompactionTask
          * @param actuallyCompact the set of sstables to compact (excludes any fully expired ones)
          * @param fullyExpiredSSTablesCount the number of fully expired sstables (used in metrics)
          */
-        private CompactionOperation(CompactionController controller, Set<SSTableReader> actuallyCompact, int fullyExpiredSSTablesCount, long fullyExpiredSSTablesBytes)
+        private CompactionOperation(CompactionController controller, Set<SSTableReader> actuallyCompact, int fullyExpiredSSTablesCount)
         {
             this.controller = controller;
             this.actuallyCompact = actuallyCompact;
@@ -291,7 +284,6 @@ public class CompactionTask extends AbstractCompactionTask
             this.startTime = System.currentTimeMillis();
             this.newSStables = Collections.emptyList();
             this.fullyExpiredSSTablesCount = fullyExpiredSSTablesCount;
-            this.fullyExpiredSSTablesBytes = fullyExpiredSSTablesBytes;
             this.totalKeysWritten = 0;
             this.estimatedKeys = 0;
             this.completed = false;
@@ -420,7 +412,7 @@ public class CompactionTask extends AbstractCompactionTask
                                                               newSStables);
 
                 // update the metrics
-                realm.metrics().incBytesCompacted(adjustedInputDiskSize() + fullyExpiredSSTablesBytes,
+                realm.metrics().incBytesCompacted(adjustedInputDiskSize(),
                                                   outputDiskSize(),
                                                   System.nanoTime() - startNanos);
             }
@@ -559,9 +551,9 @@ public class CompactionTask extends AbstractCompactionTask
          * <p/>
          * @param controller the compaction controller is needed by the scanners and compaction iterator to manage options
          */
-        CompactionOperationIterator(CompactionController controller, Set<SSTableReader> actuallyCompact, int fullyExpiredSSTablesCount, long fullyExpiredSSTablesBytes)
+        CompactionOperationIterator(CompactionController controller, Set<SSTableReader> actuallyCompact, int fullyExpiredSSTablesCount)
         {
-            super(controller, actuallyCompact, fullyExpiredSSTablesCount, fullyExpiredSSTablesBytes);
+            super(controller, actuallyCompact, fullyExpiredSSTablesCount);
         }
 
         @Override
@@ -687,9 +679,9 @@ public class CompactionTask extends AbstractCompactionTask
          * <p/>
          * @param controller the compaction controller is needed by the scanners and compaction iterator to manage options
          */
-        CompactionOperationCursor(CompactionController controller, Set<SSTableReader> actuallyCompact, int fullyExpiredSSTablesCount, long fullyExpiredSSTablesBytes)
+        CompactionOperationCursor(CompactionController controller, Set<SSTableReader> actuallyCompact, int fullyExpiredSSTablesCount)
         {
-            super(controller, actuallyCompact, fullyExpiredSSTablesCount, fullyExpiredSSTablesBytes);
+            super(controller, actuallyCompact, fullyExpiredSSTablesCount);
         }
 
         @Override
