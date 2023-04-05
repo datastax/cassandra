@@ -25,6 +25,7 @@ import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -71,6 +72,9 @@ public class CQLUnifiedCompactionTest extends CQLTester
     @BeforeClass
     public static void beforeClass()
     {
+        DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setReadThresholdsEnabled(false);
+
         CQLTester.setUpClass();
         StorageService.instance.initServer();
     }
@@ -154,6 +158,7 @@ public class CQLUnifiedCompactionTest extends CQLTester
                     String.format("'adaptive_max_scaling_parameter' : '%s', ", 16) +
                     String.format("'adaptive_interval_sec': '%d', ", 300) +
                     String.format("'adaptive_threshold': '%f', ", 0.25) +
+                    String.format("'max_adaptive_compactions': '%d', ", 5) +
                     String.format("'adaptive_min_cost': '%d'}", 1));
 
         CompactionStrategy strategy = getCurrentCompactionStrategy();
@@ -170,11 +175,12 @@ public class CQLUnifiedCompactionTest extends CQLTester
         assertEquals((long) dataSetSizeGB << 30, controller.getDataSetSizeBytes());
         assertEquals(numShards, controller.getNumShards());
         assertEquals((long) sstableSizeMB << 20, controller.getMinSstableSizeBytes());
-        assertEquals(-6, controller.getMinW());
-        assertEquals(16, controller.getMaxW());
+        assertEquals(-6, controller.getMinScalingParameter());
+        assertEquals(16, controller.getMaxScalingParameter());
         assertEquals(300, controller.getInterval());
         assertEquals(0.25, controller.getThreshold(), 0.000001);
         assertEquals(1, controller.getMinCost());
+        assertEquals(5, controller.getMaxAdaptiveCompactions());
     }
 
     @Test
