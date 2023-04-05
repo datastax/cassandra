@@ -33,8 +33,6 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MovingAverage;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_ADAPTIVE_COSTS_READ_MULTIPLIER;
-import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_ADAPTIVE_COSTS_WRITE_MULTIPLIER;
 import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_ADAPTIVE_SAMPLE_TIME_MS;
 
 /**
@@ -50,16 +48,7 @@ public class CostsCalculator
      * we many not collect sufficient data. */
     final static int samplingPeriodMs = UCS_ADAPTIVE_SAMPLE_TIME_MS.getInt();
 
-    /** The multipliers can be used by users if they wish to adjust the costs. We reduce the read costs because writes are batch processes (flush and compaction)
-     * and therefore the costs tend to be lower that for reads, so by reducing read costs we make the costs more comparable.
-     */
-    final static double defaultWriteMultiplier = UCS_ADAPTIVE_COSTS_WRITE_MULTIPLIER.getDouble();
-    final static double defaultReadMultiplier = UCS_ADAPTIVE_COSTS_READ_MULTIPLIER.getDouble();
-
     private final Environment env;
-    private final double readMultiplier;
-    private final double writeMultiplier;
-    private final double survivalFactor;
     private final MovingAverageOfDelta partitionsReadPerPeriod;
     private final MovingAverageOfDelta bytesInsertedPerPeriod;
     private final MovingAverage numSSTables;
@@ -73,23 +62,9 @@ public class CostsCalculator
 
     CostsCalculator(Environment env,
                     UnifiedCompactionStrategy strategy,
-                    ScheduledExecutorService executorService,
-                    double survivalFactor)
-    {
-        this(env, strategy, executorService, survivalFactor, defaultReadMultiplier, defaultWriteMultiplier);
-    }
-
-    CostsCalculator(Environment env,
-                    UnifiedCompactionStrategy strategy,
-                    ScheduledExecutorService executorService,
-                    double survivalFactor,
-                    double readMultiplier,
-                    double writeMultiplier)
+                    ScheduledExecutorService executorService)
     {
         this.env = env;
-        this.readMultiplier = readMultiplier;
-        this.writeMultiplier = writeMultiplier;
-        this.survivalFactor = survivalFactor;
         this.partitionsReadPerPeriod = new MovingAverageOfDelta(env.makeExpMovAverage());
         this.bytesInsertedPerPeriod = new MovingAverageOfDelta(env.makeExpMovAverage());
         this.numSSTables = env.makeExpMovAverage();
@@ -178,7 +153,7 @@ public class CostsCalculator
 
         try
         {
-            return getReadCost(partitionsReadPerPeriod.avg.get()) * Math.min(1 + env.bloomFilterFpRatio() * RA / survivalFactor, RA) * readMultiplier;
+            return getReadCost(partitionsReadPerPeriod.avg.get()) * RA * strategy.getOptions().getReadMultiplier();
         }
         finally
         {
@@ -217,7 +192,7 @@ public class CostsCalculator
         {
             double bytesInserted = this.bytesInsertedPerPeriod.avg.get();
             // using bytesInserted for the compaction cost doesn't take into account overwrites but for now it's good enough
-            return (getFlushCost(bytesInserted) + getCompactionCost(bytesInserted) * WA) * writeMultiplier;
+            return (getFlushCost(bytesInserted) + getCompactionCost(bytesInserted) * WA) * strategy.getOptions().getWriteMultiplier();
         }
         finally
         {
