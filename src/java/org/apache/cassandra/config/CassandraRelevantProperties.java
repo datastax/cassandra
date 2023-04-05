@@ -230,6 +230,7 @@ public enum CassandraRelevantProperties
     DATA_OUTPUT_BUFFER_ALLOCATE_TYPE("cassandra.dob.allocate_type"),
     DATA_OUTPUT_STREAM_PLUS_TEMP_BUFFER_SIZE("cassandra.data_output_stream_plus_temp_buffer_size", "8192"),
     DECAYING_ESTIMATED_HISTOGRAM_RESERVOIR_STRIPE_COUNT("cassandra.dehr_stripe_count", "2"),
+    DEFAULT_COMPACTION_COSTS_READ_MULTIPLIER("default.compaction.costs_read_multiplier"),
     DEFAULT_COMPACTION_LOGS("default.compaction.logs"),
     DEFAULT_COMPACTION_LOG_MINUTES("default.compaction.log_minutes"),
     DEFAULT_INDEX_CLASS("cassandra.default_index_implementation_class"),
@@ -653,13 +654,14 @@ public enum CassandraRelevantProperties
     UCS_ADAPTIVE_STARTING_SCALING_PARAMETER("unified_compaction.adaptive_starting_scaling_parameter", "0"),
     UCS_ADAPTIVE_THRESHOLD("unified_compaction.adaptive_threshold", "0.15"),
     UCS_BASE_SHARD_COUNT("unified_compaction.base_shard_count", "4"),
+
     /**
      * To provide custom implementation to prioritize compaction tasks in UCS
      */
     UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
-
     UCS_DATASET_SIZE_OPTION_GB("unified_compaction.dataset_size_in_gb"),
     UCS_L0_SHARDS_ENABLED("unified_compaction.l0_shards_enabled", "true"),
+    UCS_MAX_ADAPTIVE_COMPACTIONS("unified_compaction.max_adaptive_compactions", "5"),
     UCS_MAX_SPACE_OVERHEAD_OPTION("unified_compaction.max_space_overhead", "0.2"),
     UCS_MIN_SSTABLE_SIZE_OPTION_MB("unified_compaction.min_sstable_size_in_mb", "100"),
     UCS_NUM_SHARDS_OPTION("unified_compaction.num_shards"),

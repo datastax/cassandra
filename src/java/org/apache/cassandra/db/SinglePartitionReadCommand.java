@@ -529,7 +529,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                 cfs.metric.rowCacheHit.inc();
                 Tracing.trace("Row cache hit");
                 UnfilteredRowIterator unfilteredRowIterator = clusteringIndexFilter().getUnfilteredRowIterator(columnFilter(), cachedPartition);
-                cfs.metric.updateSSTableIterated(0, 0);
+                cfs.metric.updateSSTableIterated(0, 0, 0);
                 return unfilteredRowIterator;
             }
 
@@ -816,7 +816,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             StorageHook.instance.reportRead(cfs.metadata().id, partitionKey());
 
             List<UnfilteredRowIterator> iterators = inputCollector.finalizeIterators(cfs, nowInSec(), controller.oldestUnrepairedTombstone());
-            return withSSTablesIterated(iterators, cfs.metric, metricsCollector, startTimeNanos);
+            return withSSTablesIterated(iterators, view.sstables.size(), cfs.metric, metricsCollector, startTimeNanos);
         }
         catch (RuntimeException | Error e)
         {
@@ -885,6 +885,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
      */
     @SuppressWarnings("resource")
     private UnfilteredRowIterator withSSTablesIterated(List<UnfilteredRowIterator> iterators,
+                                                       int totalIntersectingSSTables,
                                                        TableMetrics metrics,
                                                        SSTableReadMetricsCollector metricsCollector,
                                                        long startTimeNanos)
@@ -904,7 +905,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
            public void onPartitionClose()
            {
                int mergedSSTablesIterated = metricsCollector.getMergedSSTables();
-               metrics.updateSSTableIterated(mergedSSTablesIterated, Clock.Global.nanoTime() - startTimeNanos);
+               metrics.updateSSTableIterated(mergedSSTablesIterated, totalIntersectingSSTables, Clock.Global.nanoTime() - startTimeNanos);
                Tracing.trace("Merged data from memtables and {} sstables", mergedSSTablesIterated);
            }
         }
@@ -1025,7 +1026,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             }
         }
 
-        cfs.metric.updateSSTableIterated(metricsCollector.getMergedSSTables(), Clock.Global.nanoTime() - startTimeNanos);
+        cfs.metric.updateSSTableIterated(metricsCollector.getMergedSSTables(), view.sstables.size(), Clock.Global.nanoTime() - startTimeNanos);
 
         if (result == null || result.isEmpty())
             return EmptyIterators.unfilteredRow(metadata(), partitionKey(), false);
