@@ -59,7 +59,6 @@ import io.airlift.airline.Command;
 import io.airlift.airline.HelpOption;
 import io.airlift.airline.Option;
 import io.airlift.airline.SingleCommand;
-
 import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
@@ -187,6 +186,9 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
 
     @Option(name= {"--min-cost"}, description = "The minimum cost for adaptive analysis")
     int minCost = 5;
+
+    @Option(name= {"--max-adaptive-compactions"}, description = "The max nunmber of concurrent adaptive compactions")
+    int maxAdaptiveCompactions = 5;
 
     @Option(name= {"--gain"}, description = "The gain for adaptive analysis")
     double gain = 0.15;
@@ -377,11 +379,12 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
     {
         double o = 1.0;
         int[] Ws = new int[] { W };
+        int[] previousWs = new int[] { W };
         double maxSpaceOverhead = 0.2;
 
         Controller controller = adaptive
                                 ? new AdaptiveController(MonotonicClock.Global.preciseTime,
-                                                         new SimulatedEnvironment(counters, valueSize), Ws[0],
+                                                         new SimulatedEnvironment(counters, valueSize), Ws, previousWs,
                                                          new double[] { o },
                                                          datasetSizeGB << 10,  // MB
                                                          numShards,
@@ -396,7 +399,8 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                          minW,
                                                          maxW,
                                                          gain,
-                                                         minCost)
+                                                         minCost,
+                                                         maxAdaptiveCompactions)
                                 : new StaticController(new SimulatedEnvironment(counters, valueSize),
                                                        Ws,
                                                        new double[] { o },
