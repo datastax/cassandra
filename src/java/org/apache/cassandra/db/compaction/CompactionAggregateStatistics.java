@@ -20,12 +20,10 @@ package org.apache.cassandra.db.compaction;
 
 import java.io.Serializable;
 import java.util.Collection;
-import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableList;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
@@ -101,7 +99,8 @@ public class CompactionAggregateStatistics implements Serializable
                                   long totBytesToDrop,
                                   long readBytes,
                                   long writtenBytes,
-                                  long durationNanos,
+                                  double readThroughput,
+                                  double writeThroughput,
                                   double hotness)
     {
         this.numCompactions = numCompactions;
@@ -115,8 +114,8 @@ public class CompactionAggregateStatistics implements Serializable
         this.totalBytesToDrop = totBytesToDrop;
         this.readBytes = readBytes;
         this.writtenBytes = writtenBytes;
-        this.readThroughput = durationNanos == 0 ? 0 : ((double) readBytes / durationNanos) * TimeUnit.SECONDS.toNanos(1);
-        this.writeThroughput = durationNanos == 0 ? 0 : ((double) writtenBytes / durationNanos) * TimeUnit.SECONDS.toNanos(1);
+        this.readThroughput = readThroughput;
+        this.writeThroughput = writeThroughput;
         this.hotness = hotness;
     }
 
