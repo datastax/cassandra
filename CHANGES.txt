@@ -1,6 +1,7 @@
 Future version (tbd)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
 Merged from 5.0:
+ * Fix ClassCastException  from jdk GaloisCounterMode when using JDK17 provider (CASSANDRA-18180)
  * Prevent InaccessibleObjectException when the Leak Detector is traversing objects (CASSANDRA-18708)
  * Remove Scripted UDFs internals; hooks to be added later in CASSANDRA-17281 (CASSANDRA-18252)
  * Add guardrail for vector dimensions (CASSANDRA-18730)
