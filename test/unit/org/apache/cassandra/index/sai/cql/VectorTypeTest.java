@@ -29,11 +29,13 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.VectorType;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-public class AnnTest extends SAITester
+public class VectorTypeTest extends SAITester
 {
     private int dimensionCount;
 
@@ -46,7 +48,7 @@ public class AnnTest extends SAITester
     @Test
     public void endToEndTest() throws Throwable
     {
-        createTable("CREATE TABLE %s (pk int, str_val text, val dense float32[3], PRIMARY KEY(pk))");
+        createTable("CREATE TABLE %s (pk int, str_val text, val float vector[3], PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
 
@@ -55,12 +57,12 @@ public class AnnTest extends SAITester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', [3.0, 4.0, 5.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'D', [4.0, 5.0, 6.0])");
 
-        UntypedResultSet result = execute("SELECT * FROM %s WHERE val ann [2.5, 3.5, 4.5] LIMIT 3");
+        UntypedResultSet result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 3");
         assertThat(result).hasSize(3);
         System.out.println(makeRowStrings(result));
 
         flush();
-        result = execute("SELECT * FROM %s WHERE val ann [2.5, 3.5, 4.5] LIMIT 3");
+        result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 3");
         assertThat(result).hasSize(3);
         System.out.println(makeRowStrings(result));
 
@@ -72,9 +74,36 @@ public class AnnTest extends SAITester
         flush();
         compact();
 
-        result = execute("SELECT * FROM %s WHERE val ann [2.5, 3.5, 4.5] LIMIT 5");
+        result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 5");
         assertThat(result).hasSize(5);
         System.out.println(makeRowStrings(result));
+    }
+
+    @Test
+    public void cannotInsertWrongNumberOfDimensions()
+    {
+        createTable("CREATE TABLE %s (pk int, str_val text, val float vector[3], PRIMARY KEY(pk))");
+
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0])"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessage("Invalid number of dimensions 2 in list literal for val of type float vector[3]");
+    }
+
+    @Test
+    public void cannotQueryWrongNumberOfDimensions() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, str_val text, val float vector[3], PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', [3.0, 4.0, 5.0])");
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'D', [4.0, 5.0, 6.0])");
+
+        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5] LIMIT 5"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessage("Invalid number of dimensions 2 in list literal for val of type float vector[3]");
     }
 
     @Test
