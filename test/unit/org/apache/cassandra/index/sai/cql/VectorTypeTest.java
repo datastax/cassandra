@@ -107,9 +107,44 @@ public class VectorTypeTest extends SAITester
     }
 
     @Test
+    public void changingOptionsTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, str_val text, val float vector[3], PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = " +
+                    "{'maximum_node_connections' : 10, 'queue_size' : 200, 'similarity_function' : 'euclidean' }");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', [3.0, 4.0, 5.0])");
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'D', [4.0, 5.0, 6.0])");
+
+        UntypedResultSet result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 3");
+        assertThat(result).hasSize(3);
+        System.out.println(makeRowStrings(result));
+
+        flush();
+        result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 3");
+        assertThat(result).hasSize(3);
+        System.out.println(makeRowStrings(result));
+
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (4, 'E', [5.0, 2.0, 3.0])");
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (5, 'F', [6.0, 3.0, 4.0])");
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (6, 'G', [7.0, 4.0, 5.0])");
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (7, 'H', [8.0, 5.0, 6.0])");
+
+        flush();
+        compact();
+
+        result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 5");
+        assertThat(result).hasSize(5);
+        System.out.println(makeRowStrings(result));
+    }
+
+    @Test
     public void randomizedTest() throws Throwable
     {
-        createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val dense float32[%d], PRIMARY KEY(pk))", dimensionCount));
+        createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val float vector[%d], PRIMARY KEY(pk))", dimensionCount));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
 
@@ -122,14 +157,14 @@ public class VectorTypeTest extends SAITester
 
         // query memtable index
         int limit = Math.min(getRandom().nextIntBetween(5, 100), vectorCount);
-        UntypedResultSet result = execute("SELECT * FROM %s WHERE val ann  " + randomVectorAsString() + "  LIMIT " + limit);
+        UntypedResultSet result = execute("SELECT * FROM %s WHERE val ann of " + randomVectorAsString() + "  LIMIT " + limit);
         verifyResultVectors(result, limit, vectors);
 
         flush();
 
         // query on-disk index
         limit = Math.min(getRandom().nextIntBetween(5, 100), vectors.size());
-        result = execute("SELECT * FROM %s WHERE val ann " + randomVectorAsString() + " LIMIT " + limit);
+        result = execute("SELECT * FROM %s WHERE val ann of " + randomVectorAsString() + " LIMIT " + limit);
         verifyResultVectors(result, limit, vectors);
 
         // populate some more vectors
@@ -139,7 +174,7 @@ public class VectorTypeTest extends SAITester
 
         // query both memtable index and on-disk index
         limit = Math.min(getRandom().nextIntBetween(5, 100), vectors.size());
-        result = execute("SELECT * FROM %s WHERE val ann  " + randomVectorAsString() + "  LIMIT " + limit);
+        result = execute("SELECT * FROM %s WHERE val ann of " + randomVectorAsString() + "  LIMIT " + limit);
         verifyResultVectors(result, limit, vectors);
 
         flush();
@@ -147,7 +182,7 @@ public class VectorTypeTest extends SAITester
 
         // query compacted on-disk index
         limit = Math.min(getRandom().nextIntBetween(5, 100), vectors.size());
-        result = execute("SELECT * FROM %s WHERE val ann  " + randomVectorAsString() + "  LIMIT " + limit);
+        result = execute("SELECT * FROM %s WHERE val ann of " + randomVectorAsString() + "  LIMIT " + limit);
         verifyResultVectors(result, limit, vectors);
     }
 
