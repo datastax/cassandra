@@ -59,7 +59,7 @@ public class CompactionStrategyOptions
     public static final String DEFAULT_UNCHECKED_TOMBSTONE_COMPACTION_OPTION = "false";
     public static final String DEFAULT_LOG_TYPE_OPTION = DEFAULT_COMPACTION_LOGS.getString("none");
     public static final String DEFAULT_LOG_PERIOD_MINUTES_OPTION = DEFAULT_COMPACTION_LOG_MINUTES.getString("1");
-    public static final String DEFAULT_READ_MULTIPLIER_OPTION = DEFAULT_COMPACTION_COSTS_READ_MULTIPLIER.getString("0.5");
+    public static final String DEFAULT_READ_MULTIPLIER_OPTION = DEFAULT_COMPACTION_COSTS_READ_MULTIPLIER.getString("1.0");
     public static final String DEFAULT_WRITE_MULTIPLIER_OPTION = DEFAULT_COMPACTION_COSTS_READ_MULTIPLIER.getString("1.0");
 
     public static final String TOMBSTONE_THRESHOLD_OPTION = "tombstone_threshold";
