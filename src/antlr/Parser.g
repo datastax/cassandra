@@ -1824,7 +1824,7 @@ tuple_type returns [CQL3Type.Raw t]
     ;
 
 vector_type returns [CQL3Type.Raw vt]
-    : K_FLOAT_VECTOR  '[' d=INTEGER ']'
+    : K_FLOAT K_VECTOR  '[' d=INTEGER ']'
         { $vt = CQL3Type.Raw.vector(Integer.parseInt($d.text)); }
     ;
 
