@@ -49,7 +49,7 @@ public class RangeCommands
      * don't want a burst of range requests that will back up, hurting all other queries. At the same time,
      * we want to give range queries a chance to run if resources are available.
      */
-    private static final int MAX_CONCURRENT_RANGE_REQUESTS = Math.max(1, Integer.getInteger("cassandra.max_concurrent_range_requests",
+    static final int MAX_CONCURRENT_RANGE_REQUESTS = Math.max(1, Integer.getInteger("cassandra.max_concurrent_range_requests",
                                                                                             FBUtilities.getAvailableProcessors() * 10));
 
     @SuppressWarnings("resource") // created iterators will be closed in CQL layer through the chain of transformations
@@ -78,6 +78,8 @@ public class RangeCommands
                                                                    command.indexQueryPlan(),
                                                                    keyspace,
                                                                    consistencyLevel);
+        if (command.isTopK())
+            return new ScanAllRangesCommandIterator(keyspace, replicaPlans, command, replicaPlans.size(), queryStartNanoTime);
 
         // our estimate of how many result rows there will be per-range
         float resultsPerRange = estimateResultsPerRange(command, keyspace);
