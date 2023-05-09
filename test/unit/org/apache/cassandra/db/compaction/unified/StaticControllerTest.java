@@ -142,7 +142,7 @@ public class StaticControllerTest extends ControllerTest
             final int rf = 3;
             when(replicationStrategy.getReplicationFactor()).thenReturn(ReplicationFactor.fullOnly(rf));
 
-            Controller controller = Controller.fromOptions(cfs,  new HashMap<>());
+            Controller controller = Controller.fromOptions(cfs,  new HashMap<>(), keyspaceName, tableName);
             assertNotNull(controller);
             assertNotNull(controller.toString());
 
@@ -177,6 +177,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_BASE_SHARD_COUNT,
                                                            Controller.DEFAULT_TARGET_SSTABLE_SIZE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD);
+        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTORS, dataSizeGB << 10, numShards, sstableSizeMB, 0, 0, Controller.DEFAULT_MAX_SPACE_OVERHEAD, 0, Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS, Controller.DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION, Controller.DEFAULT_L0_SHARDS_ENABLED, keyspaceName, tableName);
         super.testStartShutdown(controller);
     }
 
@@ -198,6 +199,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_BASE_SHARD_COUNT,
                                                            Controller.DEFAULT_TARGET_SSTABLE_SIZE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD);
+        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTORS, dataSizeGB << 10, numShards, sstableSizeMB, 0, 0, Controller.DEFAULT_MAX_SPACE_OVERHEAD, 0, Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS, Controller.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION, Controller.DEFAULT_L0_SHARDS_ENABLED, keyspaceName, tableName);
         super.testShutdownNotStarted(controller);
     }
 
@@ -219,6 +221,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_BASE_SHARD_COUNT,
                                                            Controller.DEFAULT_TARGET_SSTABLE_SIZE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD);
+        StaticController controller = new StaticController(env, Ws, Controller.DEFAULT_SURVIVAL_FACTORS, dataSizeGB << 10, numShards, sstableSizeMB, 0, 0, Controller.DEFAULT_MAX_SPACE_OVERHEAD, 0, Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS, Controller.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION, Controller.DEFAULT_L0_SHARDS_ENABLED, keyspaceName, tableName);
         super.testStartAlreadyStarted(controller);
     }
 

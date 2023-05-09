@@ -71,6 +71,8 @@ public abstract class ControllerTest
     static final boolean compactionEnabled = true;
     static final double readMultiplier = 0.5;
     static final double writeMultiplier = 1.0;
+    static final String keyspaceName = "ks";
+    static final String tableName = "tbl";
 
     @Mock
     ColumnFamilyStore cfs;
@@ -130,7 +132,7 @@ public abstract class ControllerTest
         addOptions(adaptive, options);
         Controller.validateOptions(options);
 
-        Controller controller = Controller.fromOptions(cfs, options);
+        Controller controller = Controller.fromOptions(cfs, options, keyspaceName, tableName);
         assertNotNull(controller);
         assertNotNull(controller.toString());
 
