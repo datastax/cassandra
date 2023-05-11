@@ -22,8 +22,6 @@ import java.util.HashSet;
 import java.util.Set;
 
 import com.google.common.base.Preconditions;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.EmptyIterators;
@@ -53,8 +51,6 @@ import org.apache.cassandra.utils.CloseableIterator;
  */
 public class ScanAllRangesCommandIterator extends RangeCommandIterator
 {
-    private static final Logger logger = LoggerFactory.getLogger(ScanAllRangesCommandIterator.class);
-
     private final Keyspace keyspace;
 
     ScanAllRangesCommandIterator(Keyspace keyspace, CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans,
@@ -104,7 +100,7 @@ public class ScanAllRangesCommandIterator extends RangeCommandIterator
         rangesQueried += plan.vnodeCount();
         batchesRequested++;
 
-        Tracing.trace("Submitted scaning all ranges requests to {} nodes", nodes);
+        Tracing.trace("Submitted scanning all ranges requests to {} nodes", nodes);
 
         // skip read-repair for top-k query because data mismatch may be caused by top-k algorithm instead of actual inconsistency.
         return new SingleRangeResponse(resolver, handler, NoopReadRepair.instance);

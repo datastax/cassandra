@@ -167,12 +167,12 @@ public interface ReplicaPlan<E extends Endpoints<E>, P extends ReplicaPlan<E, P>
     public static class ForFullRangeRead extends ForRangeRead
     {
         public ForFullRangeRead(Keyspace keyspace,
-                            AbstractReplicationStrategy replicationStrategy,
-                            ConsistencyLevel consistencyLevel,
-                            AbstractBounds<PartitionPosition> range,
-                            EndpointsForRange candidates,
-                            EndpointsForRange contact,
-                            int vnodeCount)
+                                AbstractReplicationStrategy replicationStrategy,
+                                ConsistencyLevel consistencyLevel,
+                                AbstractBounds<PartitionPosition> range,
+                                EndpointsForRange candidates,
+                                EndpointsForRange contact,
+                                int vnodeCount)
         {
             super(keyspace, replicationStrategy, consistencyLevel, range, candidates, contact, vnodeCount);
         }

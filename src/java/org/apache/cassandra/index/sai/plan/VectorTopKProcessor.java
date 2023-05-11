@@ -54,7 +54,7 @@ import org.apache.cassandra.utils.Pair;
  * - collect rows with score into PriorityQueue that sorts rows based on score. If there are multiple vector indexes,
  *   the final score is the sum of all vector index scores.
  * - remove rows with the lowest scores from PQ if PQ size exceeds limit
- * - return rows with the highest scores from PQ in token/clustering order to client
+ * - return rows from PQ in primary key order to client
  *
  * Note that recall will be lower with paging, because:
  * - page size is used as limit
