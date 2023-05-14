@@ -23,13 +23,11 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -520,33 +518,5 @@ public class IndexContext
                         .stream()
                         .mapToLong(SSTableIndex::indexFileCacheSize)
                         .sum();
-    }
-
-    public FieldInfo createFieldInfoForVector(int vectorDimension)
-    {
-        Preconditions.checkState(vectorDimension > 0);
-
-        String name = this.getIndexName();
-        int number = 0;
-        boolean storeTermVector = false;
-        boolean omitNorms = false;
-        boolean storePayloads = false;
-        IndexOptions indexOptions = IndexOptions.NONE;
-        DocValuesType docValues = DocValuesType.NONE;
-        // doc value update generation
-        long dvGen = -1;
-        Map<String, String> attributes = Map.of();
-        // If both pointDimensionCount and pointIndexDimensionCount are positive, means it's point index
-        int pointDimensionCount = 0;
-        int pointIndexDimensionCount = 0;
-        int pointNumBytes = 0;
-        // if vectorDimension is positive, means it's vector index
-        VectorEncoding vectorEncoding = VectorEncoding.FLOAT32;
-        VectorSimilarityFunction vectorSimilarityFunction = indexWriterConfig.getSimilarityFunction();
-        boolean softDeletesField = false;
-
-        return new FieldInfo(name, number, storeTermVector, omitNorms, storePayloads, indexOptions, docValues,
-                             dvGen, attributes, pointDimensionCount, pointIndexDimensionCount, pointNumBytes,
-                             vectorDimension, vectorEncoding, vectorSimilarityFunction, softDeletesField);
     }
 }
