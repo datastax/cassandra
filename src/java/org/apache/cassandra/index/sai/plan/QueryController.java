@@ -21,6 +21,8 @@ package org.apache.cassandra.index.sai.plan;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 
@@ -45,6 +47,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.IndexSearchResultIterator;
 import org.apache.cassandra.index.sai.disk.SSTableIndex;
+import org.apache.cassandra.index.sai.iterators.HnswIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
@@ -165,20 +168,24 @@ public class QueryController
      */
     public KeyRangeIterator.Builder getIndexQueryResults(Collection<Expression> expressions)
     {
-        KeyRangeIterator.Builder builder = KeyRangeIntersectionIterator.builder(expressions.size());
-
+        KeyRangeIterator.Builder builder;
+        var annExpression = getAnnExpression(expressions);
+        if (annExpression == null)
+        {
+            builder = KeyRangeIntersectionIterator.builder(expressions.size());
+        } else {
+            builder = HnswIntersectionIterator.builder(expressions.size());
+        }
         QueryViewBuilder queryViewBuilder = new QueryViewBuilder(expressions, mergeRange);
-
         Collection<Pair<Expression, Collection<SSTableIndex>>> queryView = queryViewBuilder.build();
 
         try
         {
             for (Pair<Expression, Collection<SSTableIndex>> queryViewPair : queryView)
             {
-                @SuppressWarnings({"resource", "RedundantSuppression"}) // RangeIterators are closed by releaseIndexes
-                KeyRangeIterator index = IndexSearchResultIterator.build(queryViewPair.left, queryViewPair.right, mergeRange, queryContext, command.limits().count());
-
-                builder.add(index);
+                @SuppressWarnings({ "resource", "RedundantSuppression" }) // RangeIterators are closed by releaseIndexes
+                Supplier<KeyRangeIterator> supplier = () -> IndexSearchResultIterator.build(queryViewPair.left, queryViewPair.right, mergeRange, queryContext, command.limits().count());
+                builder.add(queryViewPair.left, supplier);
             }
         }
         catch (Throwable t)
@@ -189,6 +196,15 @@ public class QueryController
             throw t;
         }
         return builder;
+    }
+
+    private Expression getAnnExpression(Collection<Expression> expressions)
+    {
+        var L = expressions.stream().filter(e -> e.operator == Expression.IndexOperator.ANN).collect(Collectors.toList());
+        if (L.size() > 1) {
+            throw new IllegalArgumentException("Only one ANN expression is allowed");
+        }
+        return L.size() == 1 ? L.get(0) : null;
     }
 
     /**

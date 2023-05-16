@@ -307,6 +307,7 @@ public class Operation
             {
                 boolean canFilter = child.canFilter();
                 if (canFilter)
+                    // FIXME do we need to use the Supplier overload here?
                     builder.add(child.rangeIterator(controller));
             }
             return builder.build();

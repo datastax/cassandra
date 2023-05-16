@@ -19,10 +19,14 @@ package org.apache.cassandra.index.sai.iterators;
 
 import java.io.Closeable;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 
+import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.AbstractGuavaIterator;
 
@@ -177,6 +181,11 @@ public abstract class KeyRangeIterator extends AbstractGuavaIterator<PrimaryKey>
         }
 
         public abstract Builder add(KeyRangeIterator range);
+
+        public Builder add(Expression expression, Supplier<KeyRangeIterator> iteratorSupplier)
+        {
+            return add(iteratorSupplier.get());
+        }
 
         public abstract int rangeCount();
 
