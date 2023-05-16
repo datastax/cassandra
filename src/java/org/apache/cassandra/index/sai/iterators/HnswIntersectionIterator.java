@@ -49,7 +49,7 @@ public class HnswIntersectionIterator extends KeyRangeIterator
 
     private HnswOnePassIterator newOnePassIterator(Builder builder)
     {
-        return new HnswOnePassIterator(builder.limit(),
+        return new HnswOnePassIterator(builder.limit,
                                        builder.otherSuppliers.stream().map(Supplier::get).collect(Collectors.toList()));
     }
 
@@ -103,7 +103,7 @@ public class HnswIntersectionIterator extends KeyRangeIterator
 
     private int limit()
     {
-        return builder.limit();
+        return builder.limit;
     }
 
     public static KeyRangeIterator.Builder builder(int otherExpressionsSize)
@@ -163,6 +163,7 @@ public class HnswIntersectionIterator extends KeyRangeIterator
         private List<Supplier<KeyRangeIterator>> otherSuppliers;
         private Expression hnswExpression;
         private KeyRangeIterator hnswIterator;
+        private int limit;
 
         public Builder(int expressionCount)
         {
@@ -177,11 +178,11 @@ public class HnswIntersectionIterator extends KeyRangeIterator
         }
 
         @Override
-        public KeyRangeIterator.Builder add(Expression expression, Supplier<KeyRangeIterator> iteratorSupplier)
+        public KeyRangeIterator.Builder add(Supplier<KeyRangeIterator> iteratorSupplier, Expression expression, int limit)
         {
             if (expression.getOp() == Expression.IndexOperator.ANN)
             {
-                this.hnswExpression = expression;
+                this.limit = limit;
                 this.hnswIterator = iteratorSupplier.get();
             }
             else
@@ -189,12 +190,6 @@ public class HnswIntersectionIterator extends KeyRangeIterator
                 otherSuppliers.add(iteratorSupplier);
             }
             return this;
-        }
-
-        public int limit()
-        {
-            assert hnswExpression.topK > 0;
-            return hnswExpression.topK;
         }
 
         @Override

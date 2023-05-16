@@ -185,7 +185,7 @@ public class QueryController
             {
                 @SuppressWarnings({ "resource", "RedundantSuppression" }) // RangeIterators are closed by releaseIndexes
                 Supplier<KeyRangeIterator> supplier = () -> IndexSearchResultIterator.build(queryViewPair.left, queryViewPair.right, mergeRange, queryContext, command.limits().count());
-                builder.add(queryViewPair.left, supplier);
+                builder.add(supplier, queryViewPair.left, command.limits().count());
             }
         }
         catch (Throwable t)

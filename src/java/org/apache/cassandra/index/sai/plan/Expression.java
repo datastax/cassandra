@@ -87,7 +87,6 @@ public class Expression
     // if the datatype being filtered is rounded in the index. These flags are used in the post-filtering
     // process to remove values equal to the bounds.
     public boolean upperInclusive, lowerInclusive;
-    public int topK;
 
     public Expression(IndexContext indexContext)
     {

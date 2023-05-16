@@ -133,7 +133,8 @@ public class VectorMemtableIndexTest extends SAITester
                                            .collect(Collectors.toSet());
 
             Set<Integer> foundKeys = new HashSet<>();
-            try (KeyRangeIterator iterator = memtableIndex.search(expression, keyRange, getRandom().nextIntBetween(1, 100)))
+            int topK = getRandom().nextIntBetween(1, 100);
+            try (KeyRangeIterator iterator = memtableIndex.search(expression, keyRange, topK))
             {
                 while (iterator.hasNext())
                 {
@@ -144,7 +145,7 @@ public class VectorMemtableIndexTest extends SAITester
                 }
             }
             // with -Dcassandra.test.random.seed=260652334768666, there is one missing key
-            long expectedResult = Math.min(expression.topK, keysInRange.size());
+            long expectedResult = Math.min(topK, keysInRange.size());
             assertEquals("Missing key: " + Sets.difference(keysInRange, foundKeys), expectedResult, foundKeys.size());
         }
     }
