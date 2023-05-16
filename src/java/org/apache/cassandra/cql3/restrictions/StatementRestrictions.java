@@ -874,10 +874,9 @@ public final class StatementRestrictions
         for (Restrictions restrictions : filterRestrictions.getRestrictions())
             numberOfRestrictions += restrictions.size();
 
-        return numberOfRestrictions > 1
-                || (numberOfRestrictions == 0 && !clusteringColumnsRestrictions.isEmpty())
-                || (numberOfRestrictions != 0
-                        && nonPrimaryKeyRestrictions.hasMultipleContains());
+        return (numberOfRestrictions == 0 && !clusteringColumnsRestrictions.isEmpty())
+               || (numberOfRestrictions != 0
+                   && nonPrimaryKeyRestrictions.hasMultipleContains());
     }
 
     private void validateSecondaryIndexSelections()
