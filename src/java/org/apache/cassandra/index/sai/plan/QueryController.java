@@ -169,7 +169,7 @@ public class QueryController
     public KeyRangeIterator.Builder getIndexQueryResults(Collection<Expression> expressions)
     {
         KeyRangeIterator.Builder builder;
-        var annExpression = getAnnExpression(expressions);
+        var annExpression = expressions.size() > 1 ? getAnnExpression(expressions) : null;
         if (annExpression == null)
         {
             builder = KeyRangeIntersectionIterator.builder(expressions.size());
