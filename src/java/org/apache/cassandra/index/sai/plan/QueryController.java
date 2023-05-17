@@ -174,7 +174,7 @@ public class QueryController
         {
             builder = KeyRangeIntersectionIterator.builder(expressions.size());
         } else {
-            builder = HnswIntersectionIterator.builder(expressions.size());
+            builder = HnswIntersectionIterator.builder(this.metadata().partitioner, expressions.size());
         }
         QueryViewBuilder queryViewBuilder = new QueryViewBuilder(expressions, mergeRange);
         Collection<Pair<Expression, Collection<SSTableIndex>>> queryView = queryViewBuilder.build();
