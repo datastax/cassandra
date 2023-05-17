@@ -55,9 +55,16 @@ public class HnswIntersectionIterator extends KeyRangeIterator
     }
 
     @Override
+    public PrimaryKey skipTo(PrimaryKey nextKey)
+    {
+        return onePassIterator.skipTo(nextKey);
+    }
+
+    @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        onePassIterator.performSkipTo(nextKey);
+        // external callers will call skipTo()
+        throw new UnsupportedOperationException();
     }
 
     @Override

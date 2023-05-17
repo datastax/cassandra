@@ -85,7 +85,7 @@ public abstract class KeyRangeIterator extends AbstractGuavaIterator<PrimaryKey>
      *
      * @return The next current key after the skip was performed
      */
-    public final PrimaryKey skipTo(PrimaryKey nextKey)
+    public PrimaryKey skipTo(PrimaryKey nextKey)
     {
         if (min == null || max == null)
             return endOfData();
