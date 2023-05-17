@@ -29,6 +29,22 @@ import java.util.stream.Collectors;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
+/**
+ * The HnswIntersectionIterator is an implementation of the KeyRangeIterator
+ * that handles intersection operations between normal SAI predicates and Hierarchical
+ * Navigable Small World (HNSW) graphs.
+ *
+ * HNSW is special because it returns results in similarity order, not in key order,
+ * and because it's really more of an order by than a where clause; HNSW doesn't
+ * "eliminate" any keys, they will all be in the results if you iterate far down enough.
+ *
+ * HnswIntersectionIterator performs what the Pinterest guys call Post Filtering:
+ * we perform the HNSW search, then go through the keys from the other predicates
+ * looking for matches.  If we don't get enough matches, we expand the HNSW search
+ * window and perform the search over again.
+ *
+ * To attempt to minimize the passes, we double the HNSW window with each iteration.
+ */
 public class HnswIntersectionIterator extends KeyRangeIterator
 {
     private final Builder builder;
@@ -73,9 +89,11 @@ public class HnswIntersectionIterator extends KeyRangeIterator
         onePassIterator.close();
     }
 
+    // TODO do we need to compute all the rows, and then re-sort by PK?
     @Override
     protected PrimaryKey computeNext()
     {
+        // TODO integrate this better with the actual HNSW batch window
         while (seenMatchingKeys.size() < limit())
         {
             while (onePassIterator.hasNext())
@@ -120,6 +138,9 @@ public class HnswIntersectionIterator extends KeyRangeIterator
         return new Builder(otherExpressionsSize);
     }
 
+    /**
+     * Performs a single pass over the other predicates, looking for matches.
+     */
     private class HnswOnePassIterator extends KeyRangeIterator
     {
         private final KeyRangeIterator otherIterator;
@@ -170,7 +191,6 @@ public class HnswIntersectionIterator extends KeyRangeIterator
     public static class Builder extends KeyRangeIterator.Builder
     {
         private List<Supplier<KeyRangeIterator>> otherSuppliers;
-        private Expression hnswExpression;
         private KeyRangeIterator hnswIterator;
         private int limit;
 
