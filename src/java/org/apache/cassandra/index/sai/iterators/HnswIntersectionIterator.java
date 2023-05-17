@@ -45,6 +45,7 @@ public class HnswIntersectionIterator extends KeyRangeIterator
         this.hnswIterator = builder.hnswIterator;
         hnswBatchSize = limit();
         this.onePassIterator = newOnePassIterator(builder);
+        loadMoreHnswMatches();
     }
 
     private HnswOnePassIterator newOnePassIterator(Builder builder)
@@ -81,6 +82,8 @@ public class HnswIntersectionIterator extends KeyRangeIterator
 
             if (!loadMoreHnswMatches()) {
                 return endOfData();
+            } else {
+                hnswBatchSize *= 2;
             }
             onePassIterator = newOnePassIterator(builder);
         }
@@ -89,7 +92,6 @@ public class HnswIntersectionIterator extends KeyRangeIterator
 
     private boolean loadMoreHnswMatches()
     {
-        hnswBatchSize *= 2;
         for (int i = 0; i < hnswBatchSize; i++)
         {
             if (!hnswIterator.hasNext())
