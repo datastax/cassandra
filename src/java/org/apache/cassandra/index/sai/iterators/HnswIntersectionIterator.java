@@ -26,8 +26,6 @@ import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import jnr.ffi.annotations.In;
-import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
@@ -42,7 +40,7 @@ public class HnswIntersectionIterator extends KeyRangeIterator
 
     protected HnswIntersectionIterator(Builder builder)
     {
-        super(builder.partitioner.getMinimumToken().minKeyBound()., builder.partitioner.getMinimumToken().maxKeyBound(), Integer.MAX_VALUE);
+        super(builder.statistics);
         this.builder = builder;
         this.hnswIterator = builder.hnswIterator;
         hnswBatchSize = limit();
@@ -52,9 +50,8 @@ public class HnswIntersectionIterator extends KeyRangeIterator
 
     private HnswOnePassIterator newOnePassIterator(Builder builder)
     {
-        var otherBuilder = KeyRangeIntersectionIterator.builder(builder.otherSuppliers.size(), builder.limit);
-        otherBuilder.add(builder.otherSuppliers.stream().map(Supplier::get).collect(Collectors.toList()));
-        return new HnswOnePassIterator(otherBuilder.statistics, otherBuilder.build());
+        return new HnswOnePassIterator(builder.limit,
+                                       builder.otherSuppliers.stream().map(Supplier::get).collect(Collectors.toList()));
     }
 
     @Override
@@ -111,19 +108,20 @@ public class HnswIntersectionIterator extends KeyRangeIterator
         return builder.limit;
     }
 
-    public static KeyRangeIterator.Builder builder(IPartitioner partitioner, int otherExpressionsSize)
+    public static KeyRangeIterator.Builder builder(int otherExpressionsSize)
     {
-        return new Builder(partitioner, otherExpressionsSize);
+        return new Builder(otherExpressionsSize);
     }
 
     private class HnswOnePassIterator extends KeyRangeIterator
     {
         private final KeyRangeIterator otherIterator;
 
-        public HnswOnePassIterator(Builder.Statistics statistics, KeyRangeIterator otherIterator)
+        public HnswOnePassIterator(int limit, List<KeyRangeIterator> otherIterators)
         {
-            super(statistics);
-            this.otherIterator = otherIterator;
+            super(new PlaceholderStatistics());
+            var builder = KeyRangeIntersectionIterator.builder(otherIterators.size(), limit);
+            otherIterator = builder.add(otherIterators).build();
         }
 
         @Override
@@ -159,21 +157,19 @@ public class HnswIntersectionIterator extends KeyRangeIterator
         @Override
         public void update(KeyRangeIterator range)
         {
-            throw new UnsupportedOperationException();
         }
     }
 
     public static class Builder extends KeyRangeIterator.Builder
     {
-        private final IPartitioner partitioner;
-        private final List<Supplier<KeyRangeIterator>> otherSuppliers;
+        private List<Supplier<KeyRangeIterator>> otherSuppliers;
+        private Expression hnswExpression;
         private KeyRangeIterator hnswIterator;
         private int limit;
 
-        public Builder(IPartitioner partitioner, int expressionCount)
+        public Builder(int expressionCount)
         {
             super(new PlaceholderStatistics());
-            this.partitioner = partitioner;
             otherSuppliers = new ArrayList<>(expressionCount);
         }
 
