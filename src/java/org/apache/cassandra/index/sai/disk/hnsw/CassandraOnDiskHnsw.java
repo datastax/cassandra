@@ -19,15 +19,14 @@
 package org.apache.cassandra.index.sai.disk.hnsw;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+import java.util.ArrayDeque;
 
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.postings.PostingList;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.lucene.index.VectorEncoding;
@@ -66,7 +65,7 @@ public class CassandraOnDiskHnsw
      * @return Row IDs associated with the topK vectors near the query
      */
     // TODO make this return something with a size
-    public AnnResultIterator search(float[] queryVector, int topK, Bits acceptBits, int vistLimit)
+    public AnnPostingList search(float[] queryVector, int topK, Bits acceptBits, int vistLimit)
     {
         NeighborQueue queue;
         try
@@ -79,12 +78,12 @@ public class CassandraOnDiskHnsw
                                              hnsw,
                                              acceptBits,
                                              vistLimit);
+            return new AnnPostingList(queue);
         }
         catch (IOException e)
         {
             throw new RuntimeException(e);
         }
-        return new AnnResultIterator(queue);
     }
 
     public void close()
@@ -184,95 +183,66 @@ public class CassandraOnDiskHnsw
         }
     }
 
-    public static class AnnResult
+    public static class AnnResultRowId
     {
         public final int vectorOrdinal;
         public final int[] segmentRowIds;
 
-        public AnnResult(int vectorOrdinal, int[] segmentRowIds)
+        public AnnResultRowId(int vectorOrdinal, int[] segmentRowIds)
         {
             this.vectorOrdinal = vectorOrdinal;
             this.segmentRowIds = segmentRowIds;
         }
     }
 
-    public class AnnResultIterator implements Iterator<AnnResult>
+    public class AnnPostingList implements PostingList
     {
-        private final List<AnnResult> results;
-        int remaining;
+        private final ArrayDeque<AnnResultRowId> results;
+        private int size;
+        private AnnResultRowId currentResult;
+        private int currentResultIndex;
 
-        public AnnResultIterator(NeighborQueue queue) throws IOException
+        public AnnPostingList(NeighborQueue queue) throws IOException
         {
-            results = new ArrayList<>(queue.size());
+            results = new ArrayDeque<>(queue.size());
             while (queue.size() > 0) {
                 int ordinal = queue.pop();
-                AnnResult result = new AnnResult(ordinal, ordinalsMap.getSegmentRowIdsMatching(ordinal));
+                AnnResultRowId result = new AnnResultRowId(ordinal, ordinalsMap.getSegmentRowIdsMatching(ordinal));
                 results.add(result);
-                remaining += result.segmentRowIds.length;
+                size += result.segmentRowIds.length;
             }
-        }
-
-        public int getRemaining()
-        {
-            return remaining;
         }
 
         @Override
-        public boolean hasNext()
+        public long nextPosting() throws IOException
         {
-            return remaining > 0;
+            if (currentResultIndex == currentResult.segmentRowIds.length)
+            {
+                if (results.isEmpty())
+                    return PostingList.END_OF_STREAM;
+                currentResult = results.removeFirst();
+                currentResultIndex = 0;
+            }
+
+            // FIXME convert segment to row ids
+            return currentResult.segmentRowIds[currentResultIndex++];
         }
 
         @Override
-        public AnnResult next()
+        public long size()
         {
-            remaining--;
-            try
-            {
-                return new AnnResult(ordinal, );
-            }
-            catch (IOException e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-    }
-
-    public class AnnResultIterator implements Iterator<AnnResultRowId>
-    {
-        private final NeighborQueue queue;
-        int remaining;
-
-        public AnnResultIterator(NeighborQueue queue)
-        {
-            this.queue = queue;
-            remaining = queue.size();
-        }
-
-        public int getRemaining()
-        {
-            return remaining;
+            return size;
         }
 
         @Override
-        public boolean hasNext()
+        public long advance(long targetRowID) throws IOException
         {
-            return remaining > 0;
-        }
-
-        @Override
-        public AnnResultRowId next()
-        {
-            remaining--;
-            int ordinal = queue.pop();
-            try
+            long rowId;
+            do
             {
-                return new AnnResultRowId(ordinal, ordinalsMap.getRowIdsMatching(ordinal));
-            }
-            catch (IOException e)
-            {
-                throw new RuntimeException(e);
-            }
+                rowId = nextPosting();
+            } while (rowId < targetRowID);
+            return rowId;
         }
     }
 }

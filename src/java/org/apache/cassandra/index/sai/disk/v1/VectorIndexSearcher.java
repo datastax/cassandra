@@ -18,10 +18,8 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
-import java.util.PriorityQueue;
 
 import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
@@ -29,26 +27,20 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.disk.ArrayPostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw;
-import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw.AnnResult;
-import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw.AnnResultIterator;
 import org.apache.cassandra.index.sai.disk.v1.segment.IndexSegmentSearcher;
 import org.apache.cassandra.index.sai.disk.v1.segment.SegmentMetadata;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.SegementOrdering;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.postings.PostingList;
-import org.apache.lucene.util.BitSet;
-import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.SparseFixedBitSet;
 
 /**
  * Executes ann search against the HNSW graph for an individual index segment.
  */
-public class VectorIndexSearcher extends IndexSegmentSearcher, SegementOrdering
+public class VectorIndexSearcher extends IndexSegmentSearcher implements SegementOrdering
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -81,8 +73,8 @@ public class VectorIndexSearcher extends IndexSegmentSearcher, SegementOrdering
 
         ByteBuffer buffer = exp.lower.value.raw;
         float[] queryVector = (float[])indexContext.getValidator().getSerializer().deserialize(buffer.duplicate());
-
-        return toIterator(new BatchPostingList(queryVector, limit), context);
+        var results = graph.search(queryVector, limit, null, Integer.MAX_VALUE);
+        return toIterator(results, context);
     }
 
     @Override
@@ -106,7 +98,7 @@ public class VectorIndexSearcher extends IndexSegmentSearcher, SegementOrdering
         ByteBuffer buffer = exp.lower.value.raw;
         float[] queryVector = (float[])indexContext.getValidator().getSerializer().deserialize(buffer.duplicate());
         var results = graph.search(queryVector, limit, bits, Integer.MAX_VALUE);
-        return toIterator(new AnnPostingList(results), context);
+        return toIterator(results, context);
     }
 
     @Override
@@ -121,50 +113,5 @@ public class VectorIndexSearcher extends IndexSegmentSearcher, SegementOrdering
     public void close() throws IOException
     {
         graph.close();
-    }
-
-    private static class AnnPostingList implements PostingList
-    {
-        private final int size;
-        private final AnnResultIterator results;
-        private int rowIndex;
-        private AnnResult annResult;
-
-        public AnnPostingList(AnnResultIterator results)
-        {
-            size = results.getRemaining();
-            this.results = results;
-        }
-
-        @Override
-        public long nextPosting() throws IOException
-        {
-            if (rowIndex == annResult.rowIds.length)
-            {
-                if (results.hasNext())
-                    return PostingList.END_OF_STREAM;
-                annResult = results.next();
-            }
-
-            // FIXME convert segment to row ids
-            return annResult.segmentRowIds[rowIndex++];
-        }
-
-        @Override
-        public long size()
-        {
-            return size;
-        }
-
-        @Override
-        public long advance(long targetRowID) throws IOException
-        {
-            long rowId;
-            do
-            {
-                rowId = nextPosting();
-            } while (rowId < targetRowID);
-            return rowId;
-        }
     }
 }
