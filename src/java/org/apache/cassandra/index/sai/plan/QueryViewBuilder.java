@@ -57,10 +57,10 @@ public class QueryViewBuilder
 
     public static class QueryView
     {
-        public final Collection<List<IndexExpression>> view;
+        public final Map<SSTableReader, List<IndexExpression>> view;
         public final Set<SSTableIndex> referencedIndexes;
 
-        public QueryView(Collection<List<IndexExpression>> view, Set<SSTableIndex> referencedIndexes)
+        public QueryView(Map<SSTableReader, List<IndexExpression>> view, Set<SSTableIndex> referencedIndexes)
         {
             this.view = view;
             this.referencedIndexes = referencedIndexes;
@@ -83,8 +83,8 @@ public class QueryViewBuilder
                 referencedIndexes.clear();
                 failed.set(false);
 
-                Collection<List<IndexExpression>> view = getQueryView(expressions);
-                view
+                Map<SSTableReader, List<IndexExpression>> view = getQueryView(expressions);
+                view.values()
                 .stream()
                 .flatMap(expressions -> expressions.stream().map(e -> e.index))
                 .forEach(index ->
@@ -129,7 +129,7 @@ public class QueryViewBuilder
      * Group the expressions and corresponding indexes by sstable
      */
     // FIXME this should collate by Segment, not by sstable
-    private Collection<List<IndexExpression>> getQueryView(Collection<Expression> expressions)
+    private Map<SSTableReader, List<IndexExpression>> getQueryView(Collection<Expression> expressions)
     {
         Map<SSTableReader, List<IndexExpression>> queryView = new HashMap<>();
 
@@ -154,7 +154,7 @@ public class QueryViewBuilder
             }
         }
 
-        return queryView.values();
+        return queryView;
     }
 
     // REVIEWME:

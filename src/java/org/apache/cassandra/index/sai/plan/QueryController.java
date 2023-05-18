@@ -54,11 +54,14 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.CheckpointingIterator;
 import org.apache.cassandra.index.sai.disk.SSTableIndex;
+import org.apache.cassandra.index.sai.disk.v1.V1SSTableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
+import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -178,19 +181,35 @@ public class QueryController
      */
     public KeyRangeIterator getIndexQueryResults(Collection<Expression> expressions)
     {
+        // FIXME the ANN expression should move to ORDER BY:
+        // SELECT * FROM foo ORDER BY columnname ANN OF ?
+        var annExpression = getAnnExpression(expressions);
+        if (annExpression != null)
+            expressions = expressions.stream().filter(e -> e != annExpression).collect(Collectors.toList());
+
         var queryView = new QueryViewBuilder(expressions, mergeRange).build();
 
         try
         {
-            var sstableIntersections = queryView.view
+            var sstableIntersections = queryView.view.entrySet()
                                        .stream()
-                                       .map(L -> createIntersectionIterator(L))
+                                       .map(e -> {
+                                           var it = createIntersectionIterator(e.getValue());
+                                           if (annExpression != null)
+                                               it = reorderAndLimitBy(it, e.getKey(), annExpression);
+                                           return it;
+                                       })
                                        .collect(Collectors.toList());
 
             var mim = Iterables.getLast(expressions).context.getMemtableIndexManager();
-            var memtableIntersections = mim.iteratorsForSearch(expressions, mergeRange, getLimit())
+            var memtableIntersections = mim.iteratorsForSearch(expressions, mergeRange, getLimit()).entrySet()
                                         .stream()
-                                        .map(subIterators -> KeyRangeIntersectionIterator.build(subIterators))
+                                        .map(e -> {
+                                            KeyRangeIterator it = KeyRangeIntersectionIterator.build(e.getValue());
+                                            if (annExpression != null)
+                                                it = reorderAndLimitBy(it, e.getKey(), annExpression);
+                                            return it;
+                                        })
                                         .collect(Collectors.toList());
 
             var allIntersections = Iterables.concat(sstableIntersections, memtableIntersections);
@@ -208,6 +227,37 @@ public class QueryController
             queryView.referencedIndexes.forEach(SSTableIndex::releaseQuietly);
             throw t;
         }
+    }
+
+    private KeyRangeIterator reorderAndLimitBy(KeyRangeIterator original, MemtableIndex mi, Expression expression)
+    {
+        return mi.reorderOneComponent(queryContext, original, expression, getLimit());
+    }
+
+    private KeyRangeIterator reorderAndLimitBy(KeyRangeIterator original, SSTableReader sstable, Expression expression)
+    {
+        var index = expression.context.getView().getIndexes()
+                    .stream().filter(i -> i.getSSTable() == sstable).findFirst().orElseThrow();
+        // FIXME segment collation
+        var segment = ((V1SSTableIndex) index).segments.stream().findFirst().orElseThrow();
+        try
+        {
+            return segment.reorderOneComponent(queryContext, original, expression, getLimit());
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private Expression getAnnExpression(Collection<Expression> expressions)
+    {
+        var L = expressions.stream().filter(e -> e.operator == Expression.IndexOperator.ANN).collect(Collectors.toList());
+        if (L.size() > 1) {
+            // FIXME move this to the parser
+            throw new IllegalArgumentException("Only one ANN expression is allowed");
+        }
+        return L.size() == 1 ? L.get(0) : null;
     }
 
     private KeyRangeIterator createIntersectionIterator(List<QueryViewBuilder.IndexExpression> indexExpressions)

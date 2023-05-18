@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
@@ -118,14 +119,14 @@ public class MemtableIndexManager
                                    .orElse(null);
     }
 
-    public List<List<KeyRangeIterator>> iteratorsForSearch(Collection<Expression> expressions, AbstractBounds<PartitionPosition> keyRange, int limit)
-    {
+    public Map<MemtableIndex, List<KeyRangeIterator>> iteratorsForSearch(Collection<Expression> expressions, AbstractBounds<PartitionPosition> keyRange, int limit) {
         Collection<MemtableIndex> memtableIndexes = liveMemtableIndexMap.values();
         return memtableIndexes
                .stream()
-               .map(mi -> expressions.stream().map(e -> mi.search(e, keyRange, limit)).collect(Collectors.toList()))
-               .collect(Collectors.toList());
+               .collect(Collectors.toMap(mi -> mi,
+                                         mi -> expressions.stream().map(e -> mi.search(e, keyRange, limit)).collect(Collectors.toList())));
     }
+
 
     public long liveMemtableWriteCount()
     {

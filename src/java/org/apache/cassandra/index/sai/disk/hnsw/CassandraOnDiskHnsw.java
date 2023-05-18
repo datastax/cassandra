@@ -183,12 +183,12 @@ public class CassandraOnDiskHnsw
         }
     }
 
-    public static class AnnResultRowId
+    private static class AnnResult
     {
         public final int vectorOrdinal;
         public final int[] segmentRowIds;
 
-        public AnnResultRowId(int vectorOrdinal, int[] segmentRowIds)
+        public AnnResult(int vectorOrdinal, int[] segmentRowIds)
         {
             this.vectorOrdinal = vectorOrdinal;
             this.segmentRowIds = segmentRowIds;
@@ -197,9 +197,9 @@ public class CassandraOnDiskHnsw
 
     public class AnnPostingList implements PostingList
     {
-        private final ArrayDeque<AnnResultRowId> results;
+        private final ArrayDeque<AnnResult> results;
         private int size;
-        private AnnResultRowId currentResult;
+        private AnnResult currentResult;
         private int currentResultIndex;
 
         public AnnPostingList(NeighborQueue queue) throws IOException
@@ -207,7 +207,7 @@ public class CassandraOnDiskHnsw
             results = new ArrayDeque<>(queue.size());
             while (queue.size() > 0) {
                 int ordinal = queue.pop();
-                AnnResultRowId result = new AnnResultRowId(ordinal, ordinalsMap.getSegmentRowIdsMatching(ordinal));
+                AnnResult result = new AnnResult(ordinal, ordinalsMap.getSegmentRowIdsMatching(ordinal));
                 results.add(result);
                 size += result.segmentRowIds.length;
             }
