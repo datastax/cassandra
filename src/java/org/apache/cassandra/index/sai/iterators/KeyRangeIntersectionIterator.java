@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.iterators;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -131,116 +132,9 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
         return iterator.hasNext() ? iterator.next() : null;
     }
 
-    public static Builder builder(int size)
+    public static KeyRangeIntersectionIterator build(List<KeyRangeIterator> subIterators)
     {
-        return builder(size, INTERSECTION_CLAUSE_LIMIT);
-    }
-
-    @VisibleForTesting
-    public static Builder builder(int size, int limit)
-    {
-        return new Builder(size, limit);
-    }
-
-    @VisibleForTesting
-    public static class Builder extends KeyRangeIterator.Builder
-    {
-        private final int limit;
-        // tracks if any of the added ranges are disjoint with the other ranges, which is useful
-        // in case of intersection, as it gives a direct answer whether the iterator is going
-        // to produce any results.
-        private boolean isDisjoint;
-
-        protected final List<KeyRangeIterator> rangeIterators;
-
-        Builder(int size, int limit)
-        {
-            super(new IntersectionStatistics());
-            rangeIterators = new ArrayList<>(size);
-            this.limit = limit;
-        }
-
-        @Override
-        public KeyRangeIterator.Builder add(KeyRangeIterator range)
-        {
-            if (range == null)
-                return this;
-
-            if (range.getCount() > 0)
-                rangeIterators.add(range);
-            else
-                FileUtils.closeQuietly(range);
-
-            updateStatistics(statistics, range);
-
-            return this;
-        }
-
-        @Override
-        public int rangeCount()
-        {
-            return rangeIterators.size();
-        }
-
-        @Override
-        public void cleanup()
-        {
-            FileUtils.closeQuietly(rangeIterators);
-        }
-
-        @Override
-        protected KeyRangeIterator buildIterator()
-        {
-            rangeIterators.sort(Comparator.comparingLong(KeyRangeIterator::getCount));
-            int initialSize = rangeIterators.size();
-            // all ranges will be included
-            if (limit >= rangeIterators.size() || limit <= 0)
-                return buildIterator(statistics, rangeIterators);
-
-            // Apply most selective iterators during intersection, because larger number of iterators will result lots of disk seek.
-            Statistics selectiveStatistics = new IntersectionStatistics();
-            isDisjoint = false;
-            for (int i = rangeIterators.size() - 1; i >= 0 && i >= limit; i--)
-                FileUtils.closeQuietly(rangeIterators.remove(i));
-
-            rangeIterators.forEach(range -> updateStatistics(selectiveStatistics, range));
-
-            if (Tracing.isTracing())
-                Tracing.trace("Selecting {} {} of {} out of {} indexes",
-                              rangeIterators.size(),
-                              rangeIterators.size() > 1 ? "indexes with cardinalities" : "index with cardinality",
-                              rangeIterators.stream().map(KeyRangeIterator::getCount).map(Object::toString).collect(Collectors.joining(", ")),
-                              initialSize);
-
-            return buildIterator(selectiveStatistics, rangeIterators);
-        }
-
-        public boolean isDisjoint()
-        {
-            return isDisjoint;
-        }
-
-        private KeyRangeIterator buildIterator(Statistics statistics, List<KeyRangeIterator> ranges)
-        {
-            // if the ranges are disjoint, or we have an intersection with an empty set,
-            // we can simply return an empty iterator, because it's not going to produce any results.
-            if (isDisjoint)
-            {
-                FileUtils.closeQuietly(ranges);
-                return KeyRangeIterator.empty();
-            }
-
-            if (ranges.size() == 1)
-                return ranges.get(0);
-
-            return new KeyRangeIntersectionIterator(statistics, ranges);
-        }
-
-        private void updateStatistics(Statistics statistics, KeyRangeIterator range)
-        {
-            statistics.update(range);
-            isDisjoint |= isDisjointInternal(statistics.min, statistics.max, range);
-        }
+        return new KeyRangeIntersectionIterator(new IntersectionStatistics(), subIterators);
     }
 
     private static class IntersectionStatistics extends KeyRangeIterator.Builder.Statistics

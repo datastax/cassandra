@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.plan;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
@@ -175,10 +176,8 @@ public class QueryController
      * The results from each call to {@link CheckpointingIterator#build(Expression, Collection, AbstractBounds, QueryContext)}
      * are added to a {@link KeyRangeIntersectionIterator} and returned.
      */
-    public KeyRangeIterator.Builder getIndexQueryResults(Collection<Expression> expressions)
+    public KeyRangeIterator getIndexQueryResults(Collection<Expression> expressions)
     {
-        KeyRangeIterator.Builder builder = KeyRangeIntersectionIterator.builder(expressions.size());
-
         QueryViewBuilder queryViewBuilder = new QueryViewBuilder(expressions, mergeRange);
 
         var queryView = queryViewBuilder.build();
