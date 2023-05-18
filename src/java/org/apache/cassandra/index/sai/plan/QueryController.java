@@ -63,7 +63,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 
 public class QueryController
@@ -183,7 +182,7 @@ public class QueryController
         // FIXME the ANN expression should move to ORDER BY:
         // SELECT * FROM foo ORDER BY columnname ANN OF ?
         var annExpression = getAnnExpression(expressions);
-        if (annExpression != null && expressions.size() > 1)
+        if (annExpression != null)
             expressions = expressions.stream().filter(e -> e != annExpression).collect(Collectors.toList());
 
         var queryView = new QueryViewBuilder(expressions, mergeRange).build();
@@ -207,11 +206,10 @@ public class QueryController
                                        })
                                        .collect(Collectors.toList());
 
-            var mim = Iterables.getLast(expressions).context.getMemtableIndexManager();
             var memtableIntersections = iteratorsByMemtable.entrySet()
                                         .stream()
                                         .map(e -> {
-                                            KeyRangeIterator it = KeyRangeIntersectionIterator.build(e.getValue());
+                                            KeyRangeIterator it = KeyRangeIntersectionIterator.builder(e.getValue()).build();
                                             if (annExpression != null)
                                                 it = reorderAndLimitBy(it, e.getKey(), annExpression);
                                             return it;
@@ -237,7 +235,6 @@ public class QueryController
 
     private KeyRangeIterator reorderAndLimitBy(KeyRangeIterator original, Memtable memtable, Expression expression)
     {
-        // REVIEWME this probably isn't the best way to get the correct MemtableIndex
         var mim = expression.context.getMemtableIndexManager();
         return mim.reorderOneComponent(memtable, queryContext, original, expression, getLimit());
     }
@@ -260,6 +257,11 @@ public class QueryController
 
     private Expression getAnnExpression(Collection<Expression> expressions)
     {
+        if (expressions.size() < 2)
+        {
+            // if there is a single expression, just run search against it even if it's ANN
+            return null;
+        }
         var L = expressions.stream().filter(e -> e.operator == Expression.IndexOperator.ANN).collect(Collectors.toList());
         if (L.size() > 1) {
             // FIXME move this to the parser
@@ -287,7 +289,7 @@ public class QueryController
            }
        }).collect(Collectors.toList());
 
-        return KeyRangeIntersectionIterator.build(subIterators);
+        return KeyRangeIntersectionIterator.builder(subIterators).build();
     }
 
     private int getLimit()

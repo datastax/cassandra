@@ -112,6 +112,11 @@ public class VectorMemtableIndex implements MemtableIndex
     public KeyRangeIterator reorderOneComponent(QueryContext context, KeyRangeIterator iterator, Expression exp, int limit)
     {
         Set<PrimaryKey> results = new HashSet<>();
+        while (iterator.hasNext())
+        {
+            var key = iterator.next();
+            results.add(key);
+        }
         ByteBuffer buffer = exp.lower.value.raw;
         float[] qv = (float[])indexContext.getValidator().getSerializer().deserialize(buffer.duplicate());
         var bits = new KeyFilteringBits(results);
@@ -202,12 +207,12 @@ public class VectorMemtableIndex implements MemtableIndex
         @Override
         protected void performSkipTo(PrimaryKey nextKey)
         {
+            // FIXME this is broken
             PrimaryKey key;
             while ((key = computeNext()) != null)
             {
                 if (key.compareTo(nextKey) >= 0)
                     break;
-                keyQueue.poll();
             }
         }
 
