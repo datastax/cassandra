@@ -178,16 +178,14 @@ public class QueryController
      */
     public KeyRangeIterator getIndexQueryResults(Collection<Expression> expressions)
     {
-        QueryViewBuilder queryViewBuilder = new QueryViewBuilder(expressions, mergeRange);
-
-        var queryView = queryViewBuilder.build();
+        var queryView = new QueryViewBuilder(expressions, mergeRange).build();
 
         try
         {
-            var sstableIntersections = queryView
-                                .entrySet().stream()
-                                .map(e -> createIntersectionIterator(e.getKey(), e.getValue()))
-                                .collect(Collectors.toList());
+            var sstableIntersections = queryView.view
+                                       .stream()
+                                       .map(L -> createIntersectionIterator(L))
+                                       .collect(Collectors.toList());
 
             var mim = Iterables.getLast(expressions).context.getMemtableIndexManager();
             var memtableIntersections = mim.iteratorsForSearch(expressions, mergeRange, getLimit())
@@ -197,37 +195,39 @@ public class QueryController
 
             var allIntersections = Iterables.concat(sstableIntersections, memtableIntersections);
 
-            queryContext.sstablesHit += queryView.size();
+            queryContext.sstablesHit += queryView.referencedIndexes
+                                        .stream()
+                                        .map(SSTableIndex::getSSTable).collect(Collectors.toSet()).size();
             queryContext.checkpoint();
             var union = KeyRangeUnionIterator.build(allIntersections);
-            return new CheckpointingIterator(union, queryView.keySet(), queryContext);
+            return new CheckpointingIterator(union, queryView.referencedIndexes, queryContext);
         }
         catch (Throwable t)
         {
             // all sstable indexes in view have been referenced, need to clean up when exception is thrown
-            queryView.keySet().forEach(SSTableIndex::releaseQuietly);
+            queryView.referencedIndexes.forEach(SSTableIndex::releaseQuietly);
             throw t;
         }
     }
 
-    private KeyRangeIterator createIntersectionIterator(SSTableIndex index, Collection<Expression> expressions)
+    private KeyRangeIterator createIntersectionIterator(List<QueryViewBuilder.IndexExpression> indexExpressions)
     {
-        List<KeyRangeIterator> subIterators;
-        subIterators = expressions.stream()
-                                  .flatMap(e -> {
-                                      try
-                                      {
-                                          return index.search(e, mergeRange, queryContext, getLimit()).stream();
-                                      }
-                                      catch (Throwable ex)
-                                      {
-                                          if (!(ex instanceof QueryCancelledException))
-                                              logger.debug(index.getIndexContext().logMessage(String.format("Failed search on index %s, aborting query.", index.getSSTable())), ex);
-
-                                          throw Throwables.cleaned(ex);
-                                      }
-                                  })
-                                  .collect(Collectors.toList());
+        var subIterators = indexExpressions
+                           .stream()
+                           // FIXME this changes to normal map() once we have the view collating by segment
+                           .flatMap(ie ->
+        {
+           try
+           {
+               return ie.index.search(ie.expression, mergeRange, queryContext, getLimit()).stream();
+           }
+           catch (Throwable ex)
+           {
+               if (!(ex instanceof QueryCancelledException))
+                   logger.debug(ie.index.getIndexContext().logMessage(String.format("Failed search on index %s, aborting query.", ie.index.getSSTable())), ex);
+               throw Throwables.cleaned(ex);
+           }
+       }).collect(Collectors.toList());
 
         return KeyRangeIntersectionIterator.build(subIterators);
     }
