@@ -18,7 +18,6 @@
 package org.apache.cassandra.index.sai.iterators;
 
 import java.util.Arrays;
-import java.util.List;
 import java.util.function.BiFunction;
 
 import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
@@ -44,13 +43,12 @@ public class AbstractKeyRangeIteratorTester extends SAIRandomizedTester
 
     final KeyRangeIterator buildIntersection(KeyRangeIterator... ranges)
     {
-        return KeyRangeIntersectionIterator.build(List.of(ranges));
+        return KeyRangeIntersectionIterator.builder(16, Integer.MAX_VALUE).add(Arrays.asList(ranges)).build();
     }
 
-    // FIXME
     final KeyRangeIterator buildSelectiveIntersection(int limit, KeyRangeIterator... ranges)
     {
-        return KeyRangeIntersectionIterator.build(List.of(ranges));
+        return KeyRangeIntersectionIterator.builder(16, limit).add(Arrays.asList(ranges)).build();
     }
 
     final KeyRangeIterator buildIntersection(long[]... ranges)
