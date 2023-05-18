@@ -63,7 +63,8 @@ public class CassandraOnDiskHnsw
     /**
      * @return Row IDs associated with the topK vectors near the query
      */
-    public Iterator<AnnResultRowId> search(float[] queryVector, int topK, Bits acceptBits, int vistLimit)
+    // TODO make this return something with a size
+    public AnnResultIterator search(float[] queryVector, int topK, Bits acceptBits, int vistLimit)
     {
         NeighborQueue queue;
         try
@@ -81,31 +82,7 @@ public class CassandraOnDiskHnsw
         {
             throw new RuntimeException(e);
         }
-        return new Iterator<>()
-        {
-            int remaining = queue.size();
-
-            @Override
-            public boolean hasNext()
-            {
-                return remaining > 0;
-            }
-
-            @Override
-            public AnnResultRowId next()
-            {
-                remaining--;
-                int ordinal = queue.pop();
-                try
-                {
-                    return new AnnResultRowId(ordinal, ordinalsMap.getRowIdsMatching(ordinal));
-                }
-                catch (IOException e)
-                {
-                    throw new RuntimeException(e);
-                }
-            }
-        };
+        return new AnnResultIterator(queue);
     }
 
     public void close()
@@ -113,6 +90,12 @@ public class CassandraOnDiskHnsw
         vectorValues.close();
         ordinalsMap.close();
         hnsw.close();
+    }
+
+    public int getOrdinal(int segmentRowId)
+    {
+        // FIXME
+        return segmentRowId;
     }
 
     private static class OnDiskOrdinalsMap
@@ -126,7 +109,7 @@ public class CassandraOnDiskHnsw
             this.size = reader.readInt();
         }
 
-        public int[] getRowIdsMatching(int vectorOrdinal) throws IOException
+        public int[] getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
         {
             Preconditions.checkArgument(vectorOrdinal < size, "vectorOrdinal %s is out of bounds %s", vectorOrdinal, size);
 
@@ -199,15 +182,53 @@ public class CassandraOnDiskHnsw
         }
     }
 
-    public static class AnnResultRowId
+    public static class AnnResult
     {
         public final int vectorOrdinal;
-        public final int[] rowIds;
+        public final int[] segmentRowIds;
 
-        public AnnResultRowId(int vectorOrdinal, int[] rowIds)
+        public AnnResult(int vectorOrdinal, int[] segmentRowIds)
         {
             this.vectorOrdinal = vectorOrdinal;
-            this.rowIds = rowIds;
+            this.segmentRowIds = segmentRowIds;
+        }
+    }
+
+    public class AnnResultIterator implements Iterator<AnnResult>
+    {
+        private final NeighborQueue queue;
+        int remaining;
+
+        public AnnResultIterator(NeighborQueue queue)
+        {
+            this.queue = queue;
+            remaining = queue.size();
+        }
+
+        public int getRemaining()
+        {
+            return remaining;
+        }
+
+        @Override
+        public boolean hasNext()
+        {
+            return remaining > 0;
+        }
+
+        @Override
+        public AnnResult next()
+        {
+            remaining--;
+            int ordinal = queue.pop();
+            try
+            {
+                return new AnnResult(ordinal, ordinalsMap.getSegmentRowIdsMatching(ordinal));
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
         }
     }
 }

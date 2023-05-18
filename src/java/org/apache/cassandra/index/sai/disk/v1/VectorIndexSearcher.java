@@ -28,12 +28,16 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.disk.ArrayPostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw;
+import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw.AnnResultIterator;
+import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw.AnnResult;
 import org.apache.cassandra.index.sai.disk.v1.segment.IndexSegmentSearcher;
 import org.apache.cassandra.index.sai.disk.v1.segment.SegmentMetadata;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.SegementOrdering;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.postings.PostingList;
 import org.apache.lucene.util.BitSet;
@@ -43,7 +47,7 @@ import org.apache.lucene.util.SparseFixedBitSet;
 /**
  * Executes ann search against the HNSW graph for an individual index segment.
  */
-public class VectorIndexSearcher extends IndexSegmentSearcher
+public class VectorIndexSearcher extends IndexSegmentSearcher, SegementOrdering
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -78,6 +82,30 @@ public class VectorIndexSearcher extends IndexSegmentSearcher
         float[] queryVector = (float[])indexContext.getValidator().getSerializer().deserialize(buffer.duplicate());
 
         return toIterator(new BatchPostingList(queryVector, limit), context);
+    }
+
+    @Override
+    public KeyRangeIterator reorderOneComponent(QueryContext context, KeyRangeIterator iterator, Expression exp, int limit) throws IOException
+    {
+        // materialize the underlying iterator as a bitset, then ask hnsw to search.
+        // the iterator represents keys from the same sstable segment as us,
+        // so we can use row ids to order the results by vector similarity
+        SparseFixedBitSet bits;
+        try (var mapper = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
+        {
+            bits = new SparseFixedBitSet(metadata.segmentedRowId(metadata.maxSSTableRowId));
+            while (iterator.hasNext())
+            {
+                var pk = iterator.next();
+                var segmentRowId = metadata.segmentedRowId(mapper.rowIdFromPrimaryKey(pk));
+                var ordinal = graph.getOrdinal(segmentRowId);
+                bits.set(ordinal);
+            }
+        }
+        ByteBuffer buffer = exp.lower.value.raw;
+        float[] queryVector = (float[])indexContext.getValidator().getSerializer().deserialize(buffer.duplicate());
+        var results = graph.search(queryVector, limit, bits, Integer.MAX_VALUE);
+        return toIterator(new AnnPostingList(results), context);
     }
 
     @Override
@@ -153,7 +181,8 @@ public class VectorIndexSearcher extends IndexSegmentSearcher
             {
                 var r = results.next();
                 bitset.set(r.vectorOrdinal);
-                for (var rowId : r.rowIds) {
+                for (var rowId : r.segmentRowIds) {
+                    // FIXME convert segment row id to global row id
                     queue.offer((long) rowId);
                 }
             }
@@ -179,6 +208,51 @@ public class VectorIndexSearcher extends IndexSegmentSearcher
         public int length()
         {
             return wrapped == null ? 0 : wrapped.length();
+        }
+    }
+
+    private static class AnnPostingList implements PostingList
+    {
+        private final int size;
+        private final AnnResultIterator results;
+        private int rowIndex;
+        private AnnResult annResult;
+
+        public AnnPostingList(AnnResultIterator results)
+        {
+            this.results = results;
+            this.size = results.size();
+        }
+
+        @Override
+        public long nextPosting() throws IOException
+        {
+            if (rowIndex == annResult.segmentRowIds.length)
+            {
+                if (results.hasNext())
+                    return PostingList.END_OF_STREAM;
+                annResult = results.next();
+            }
+
+            // FIXME convert segment to row ids
+            return annResult.segmentRowIds[rowIndex++];
+        }
+
+        @Override
+        public long size()
+        {
+            return size;
+        }
+
+        @Override
+        public long advance(long targetRowID) throws IOException
+        {
+            long rowId;
+            do
+            {
+                rowId = nextPosting();
+            } while (rowId < targetRowID);
+            return rowId;
         }
     }
 }
