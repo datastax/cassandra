@@ -19,10 +19,9 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -45,6 +44,7 @@ import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
@@ -58,7 +58,6 @@ import org.apache.cassandra.index.sai.disk.v1.V1SSTableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
-import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -184,10 +183,17 @@ public class QueryController
         // FIXME the ANN expression should move to ORDER BY:
         // SELECT * FROM foo ORDER BY columnname ANN OF ?
         var annExpression = getAnnExpression(expressions);
-        if (annExpression != null)
+        if (annExpression != null && expressions.size() > 1)
             expressions = expressions.stream().filter(e -> e != annExpression).collect(Collectors.toList());
 
         var queryView = new QueryViewBuilder(expressions, mergeRange).build();
+        Map<Memtable, List<KeyRangeIterator>> iteratorsByMemtable = expressions
+                                                                    .stream()
+                                                                    .flatMap(expr -> {
+            var mim = expr.context.getMemtableIndexManager();
+            return mim.iteratorsForSearch(expr, mergeRange, getLimit()).stream();
+        }).collect(Collectors.groupingBy(pair -> pair.left,
+                                         Collectors.mapping(pair -> pair.right, Collectors.toList())));
 
         try
         {
@@ -202,7 +208,7 @@ public class QueryController
                                        .collect(Collectors.toList());
 
             var mim = Iterables.getLast(expressions).context.getMemtableIndexManager();
-            var memtableIntersections = mim.iteratorsForSearch(expressions, mergeRange, getLimit()).entrySet()
+            var memtableIntersections = iteratorsByMemtable.entrySet()
                                         .stream()
                                         .map(e -> {
                                             KeyRangeIterator it = KeyRangeIntersectionIterator.build(e.getValue());
@@ -229,9 +235,11 @@ public class QueryController
         }
     }
 
-    private KeyRangeIterator reorderAndLimitBy(KeyRangeIterator original, MemtableIndex mi, Expression expression)
+    private KeyRangeIterator reorderAndLimitBy(KeyRangeIterator original, Memtable memtable, Expression expression)
     {
-        return mi.reorderOneComponent(queryContext, original, expression, getLimit());
+        // REVIEWME this probably isn't the best way to get the correct MemtableIndex
+        var mim = expression.context.getMemtableIndexManager();
+        return mim.reorderOneComponent(memtable, queryContext, original, expression, getLimit());
     }
 
     private KeyRangeIterator reorderAndLimitBy(KeyRangeIterator original, SSTableReader sstable, Expression expression)
