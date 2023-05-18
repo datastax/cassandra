@@ -205,15 +205,14 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         @Override
+        // REVIEWME
         protected void performSkipTo(PrimaryKey nextKey)
         {
-            // FIXME this is broken
-            PrimaryKey key;
-            while ((key = computeNext()) != null)
-            {
-                if (key.compareTo(nextKey) >= 0)
-                    break;
-            }
+            PrimaryKey lastSkipped = null;
+            while (!keyQueue.isEmpty() && keyQueue.peek().compareTo(nextKey) < 0)
+                lastSkipped = keyQueue.poll();
+            if (lastSkipped != null)
+                keyQueue.add(lastSkipped);
         }
 
         @Override
