@@ -65,6 +65,30 @@ public class VectorTypeTest extends SAITester
     }
 
     @Test
+    public void testCombinedPredicates() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, b boolean, v float vector[3], PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, b, v) VALUES (0, true, [1.0, 2.0, 3.0])");
+        execute("INSERT INTO %s (pk, b, v) VALUES (1, true, [2.0, 3.0, 4.0])");
+        execute("INSERT INTO %s (pk, b, v) VALUES (2, false, [3.0, 4.0, 5.0])");
+
+        // the vector given is closest to row 2, but we exclude that row because b=false
+        var result = execute("SELECT * FROM %s WHERE b=true AND v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
+        // TODO assert specific row keys
+        assertThat(result).hasSize(2);
+
+        flush();
+        compact();
+
+        result = execute("SELECT * FROM %s WHERE b=true AND v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
+        assertThat(result).hasSize(2);
+    }
+
+    @Test
     public void testSameVectorMultipleRows() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val float vector[3], PRIMARY KEY(pk))");
