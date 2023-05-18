@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
 import java.util.PriorityQueue;
@@ -32,8 +33,8 @@ import org.apache.cassandra.index.sai.disk.ArrayPostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw;
-import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw.AnnResultIterator;
 import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw.AnnResult;
+import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw.AnnResultIterator;
 import org.apache.cassandra.index.sai.disk.v1.segment.IndexSegmentSearcher;
 import org.apache.cassandra.index.sai.disk.v1.segment.SegmentMetadata;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -122,95 +123,6 @@ public class VectorIndexSearcher extends IndexSegmentSearcher, SegementOrdering
         graph.close();
     }
 
-    private class BatchPostingList implements PostingList
-    {
-        private final float[] queryVector;
-        private final PriorityQueue<Long> queue;
-
-        private final int limit;
-        private BitSet bitset;
-
-        BatchPostingList(float[] queryVector, int limit)
-        {
-            this.queryVector = queryVector;
-            this.limit = limit;
-            this.queue = new PriorityQueue<>();
-        }
-
-        @Override
-        public long nextPosting() throws IOException
-        {
-            return computeNextPosting();
-        }
-
-        @Override
-        public long size()
-        {
-            // TODO Figure out what this should be
-            return limit;
-        }
-
-        @Override
-        public long advance(long targetRowID) throws IOException
-        {
-            long rowId = computeNextPosting();
-            while (rowId < targetRowID)
-                rowId = computeNextPosting();
-
-            return rowId;
-        }
-
-        private long computeNextPosting()
-        {
-            if (queue.isEmpty())
-            {
-                readBatch();
-                if (queue.isEmpty())
-                    return PostingList.END_OF_STREAM;
-            }
-
-            return queue.poll();
-        }
-
-        private void readBatch()
-        {
-            var results = graph.search(queryVector, limit, new InvertedBits(bitset), Integer.MAX_VALUE);
-            if (bitset == null)
-                bitset = new SparseFixedBitSet(graph.size());
-            while (results.hasNext())
-            {
-                var r = results.next();
-                bitset.set(r.vectorOrdinal);
-                for (var rowId : r.segmentRowIds) {
-                    // FIXME convert segment row id to global row id
-                    queue.offer((long) rowId);
-                }
-            }
-        }
-    }
-
-    private static class InvertedBits implements Bits
-    {
-        private final Bits wrapped;
-
-        InvertedBits(Bits wrapped)
-        {
-            this.wrapped = wrapped;
-        }
-
-        @Override
-        public boolean get(int i)
-        {
-            return wrapped == null ? true : !wrapped.get(i);
-        }
-
-        @Override
-        public int length()
-        {
-            return wrapped == null ? 0 : wrapped.length();
-        }
-    }
-
     private static class AnnPostingList implements PostingList
     {
         private final int size;
@@ -220,14 +132,14 @@ public class VectorIndexSearcher extends IndexSegmentSearcher, SegementOrdering
 
         public AnnPostingList(AnnResultIterator results)
         {
+            size = results.getRemaining();
             this.results = results;
-            this.size = results.size();
         }
 
         @Override
         public long nextPosting() throws IOException
         {
-            if (rowIndex == annResult.segmentRowIds.length)
+            if (rowIndex == annResult.rowIds.length)
             {
                 if (results.hasNext())
                     return PostingList.END_OF_STREAM;

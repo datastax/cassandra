@@ -19,7 +19,9 @@
 package org.apache.cassandra.index.sai.disk.hnsw;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 
 import com.google.common.base.Preconditions;
 
@@ -196,6 +198,48 @@ public class CassandraOnDiskHnsw
 
     public class AnnResultIterator implements Iterator<AnnResult>
     {
+        private final List<AnnResult> results;
+        int remaining;
+
+        public AnnResultIterator(NeighborQueue queue) throws IOException
+        {
+            results = new ArrayList<>(queue.size());
+            while (queue.size() > 0) {
+                int ordinal = queue.pop();
+                AnnResult result = new AnnResult(ordinal, ordinalsMap.getSegmentRowIdsMatching(ordinal));
+                results.add(result);
+                remaining += result.segmentRowIds.length;
+            }
+        }
+
+        public int getRemaining()
+        {
+            return remaining;
+        }
+
+        @Override
+        public boolean hasNext()
+        {
+            return remaining > 0;
+        }
+
+        @Override
+        public AnnResult next()
+        {
+            remaining--;
+            try
+            {
+                return new AnnResult(ordinal, );
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    public class AnnResultIterator implements Iterator<AnnResultRowId>
+    {
         private final NeighborQueue queue;
         int remaining;
 
@@ -217,13 +261,13 @@ public class CassandraOnDiskHnsw
         }
 
         @Override
-        public AnnResult next()
+        public AnnResultRowId next()
         {
             remaining--;
             int ordinal = queue.pop();
             try
             {
-                return new AnnResult(ordinal, ordinalsMap.getSegmentRowIdsMatching(ordinal));
+                return new AnnResultRowId(ordinal, ordinalsMap.getRowIdsMatching(ordinal));
             }
             catch (IOException e)
             {
