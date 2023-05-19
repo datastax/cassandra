@@ -133,12 +133,17 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
         return iterator.hasNext() ? iterator.next() : null;
     }
 
-    public static Builder builder(List<KeyRangeIterator> ranges)
+    public static Builder builder(List<KeyRangeIterator> ranges, int limit)
     {
-        var builder = builder(ranges.size());
+        var builder = builder(ranges.size(), limit);
         for (var range : ranges)
             builder.add(range);
         return builder;
+    }
+
+    public static Builder builder(List<KeyRangeIterator> ranges)
+    {
+        return builder(ranges, INTERSECTION_CLAUSE_LIMIT);
     }
 
     public static Builder builder(int size)

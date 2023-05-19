@@ -209,7 +209,8 @@ public class QueryController
             var memtableIntersections = iteratorsByMemtable.entrySet()
                                         .stream()
                                         .map(e -> {
-                                            KeyRangeIterator it = KeyRangeIntersectionIterator.builder(e.getValue()).build();
+                                            // we need to do all the intersections at the index level, or ordering won't work
+                                            KeyRangeIterator it = KeyRangeIntersectionIterator.builder(e.getValue(), Integer.MAX_VALUE).build();
                                             if (annExpression != null)
                                                 it = reorderAndLimitBy(it, e.getKey(), annExpression);
                                             return it;
@@ -289,7 +290,8 @@ public class QueryController
            }
        }).collect(Collectors.toList());
 
-        return KeyRangeIntersectionIterator.builder(subIterators).build();
+        // we need to do all the intersections at the index level, or ordering won't work
+        return KeyRangeIntersectionIterator.builder(subIterators, Integer.MAX_VALUE).build();
     }
 
     private int getLimit()
