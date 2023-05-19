@@ -179,7 +179,7 @@ public class QueryController
      */
     public KeyRangeIterator getIndexQueryResults(Collection<Expression> expressions)
     {
-        // FIXME the ANN expression should move to ORDER BY:
+        // FIXME the ANN expression should move to ORDER BY, maybe something like:
         // SELECT * FROM foo ORDER BY columnname ANN OF ?
         var annExpression = getAnnExpression(expressions);
         if (annExpression != null)

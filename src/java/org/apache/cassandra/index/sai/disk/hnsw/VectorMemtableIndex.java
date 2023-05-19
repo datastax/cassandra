@@ -206,6 +206,7 @@ public class VectorMemtableIndex implements MemtableIndex
 
         @Override
         // REVIEWME
+        // (it's inefficient, but is it correct?)
         protected void performSkipTo(PrimaryKey nextKey)
         {
             PrimaryKey lastSkipped = null;
