@@ -86,7 +86,7 @@ public class VectorIndexSearcher extends IndexSegmentSearcher implements Segemen
         SparseFixedBitSet bits;
         try (var mapper = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
         {
-            bits = new SparseFixedBitSet(metadata.segmentedRowId(metadata.maxSSTableRowId));
+            bits = new SparseFixedBitSet(1 + metadata.segmentedRowId(metadata.maxSSTableRowId));
             while (iterator.hasNext())
             {
                 var pk = iterator.next();
