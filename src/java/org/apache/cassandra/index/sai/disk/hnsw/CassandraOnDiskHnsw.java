@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.hnsw;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
+import java.util.PriorityQueue;
 
 import com.google.common.base.Preconditions;
 
@@ -197,35 +198,28 @@ public class CassandraOnDiskHnsw
 
     public class AnnPostingList implements PostingList
     {
-        private final ArrayDeque<AnnResult> results;
+        private final PriorityQueue<Integer> results;
         private int size;
-        private AnnResult currentResult;
-        private int currentResultIndex;
 
         public AnnPostingList(NeighborQueue queue) throws IOException
         {
-            results = new ArrayDeque<>(queue.size());
+            results = new PriorityQueue<>(queue.size());
             while (queue.size() > 0) {
                 int ordinal = queue.pop();
                 AnnResult result = new AnnResult(ordinal, ordinalsMap.getSegmentRowIdsMatching(ordinal));
-                results.add(result);
-                size += result.segmentRowIds.length;
+                // FIXME convert segment to row ids
+                for (int segmentRowId : result.segmentRowIds)
+                    results.add(segmentRowId);
             }
+            size = results.size();
         }
 
         @Override
         public long nextPosting() throws IOException
         {
-            if (currentResultIndex == currentResult.segmentRowIds.length)
-            {
-                if (results.isEmpty())
-                    return PostingList.END_OF_STREAM;
-                currentResult = results.removeFirst();
-                currentResultIndex = 0;
-            }
-
-            // FIXME convert segment to row ids
-            return currentResult.segmentRowIds[currentResultIndex++];
+            if (results.isEmpty())
+                return PostingList.END_OF_STREAM;
+            return results.poll();
         }
 
         @Override
