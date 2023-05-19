@@ -23,11 +23,23 @@ import java.util.function.Function;
 
 public class DiskBinarySearch
 {
-    public static int searchInt(int low, int high, int target, Function<Integer, Integer> f)
+    /**
+     * Search for the target int between positions low and high, using the provided function
+     * to retrieve the int value at the given ordinal.
+     *
+     * Returns the position at which target is found.  Raises an exception if it is not found.
+     *
+     * This will not call f() after the target is found, so if f is performing disk seeks,
+     * it will leave the underlying reader at the position right after reading the target.
+     */
+    public static long searchInt(long low, long high, int target, Function<Long, Integer> f)
     {
+        assert high < Long.MAX_VALUE >> 2 : "high is too large to avoid potential overflow: " + high;
+        assert low < high : "low must be less than high: " + low + " >= " + high;
+
         while (low < high)
         {
-            int i = low + (high - low) / 2;
+            long i = low + (high - low) / 2;
             int value = f.apply(i);
             if (target == value)
                 return i;
