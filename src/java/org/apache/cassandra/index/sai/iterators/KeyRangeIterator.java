@@ -18,10 +18,10 @@
 package org.apache.cassandra.index.sai.iterators;
 
 import java.io.Closeable;
-import java.util.List;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.AbstractGuavaIterator;
@@ -81,7 +81,9 @@ public abstract class KeyRangeIterator extends AbstractGuavaIterator<PrimaryKey>
      *
      * @param nextKey value to skip the iterator forward until matching
      *
-     * @return The next current key after the skip was performed
+     * @return The next current key after the skip was performed.
+     * This key will also be the next key returned by next(), i.e.,
+     * we are "peeking" at the next key as part of the skip.
      */
     public final PrimaryKey skipTo(PrimaryKey nextKey)
     {
@@ -106,13 +108,18 @@ public abstract class KeyRangeIterator extends AbstractGuavaIterator<PrimaryKey>
         return recomputeNext();
     }
 
+    /**
+     * Skip up to nextKey, but leave your internal state in a position where
+     * calling computeNext() will return nextKey or the first one after it.
+     */
     protected abstract void performSkipTo(PrimaryKey nextKey);
 
-    protected PrimaryKey recomputeNext()
+    private PrimaryKey recomputeNext()
     {
         return tryToComputeNext() ? peek() : endOfData();
     }
 
+    // protected because inherited from Guava. We don't want to expose this method.
     protected boolean tryToComputeNext()
     {
         boolean hasNext = super.tryToComputeNext();
@@ -159,9 +166,9 @@ public abstract class KeyRangeIterator extends AbstractGuavaIterator<PrimaryKey>
             return statistics.count;
         }
 
-        public Builder add(List<KeyRangeIterator> ranges)
+        public Builder add(Iterable<KeyRangeIterator> ranges)
         {
-            if (ranges == null || ranges.isEmpty())
+            if (ranges == null || Iterables.isEmpty(ranges))
                 return this;
 
             ranges.forEach(this::add);
