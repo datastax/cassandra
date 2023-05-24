@@ -205,7 +205,7 @@ public class QueryController
             List<RangeIterator<PrimaryKey>> sstableIntersections = queryView.view.entrySet()
                                                                                  .stream()
                                                                                  .map(e -> {
-                                                                                     RangeIterator<Long> it = createRowIdIterator(op, e.getValue(), defer);
+                                                                                     RangeIterator<Long> it = createRowIdIterator(op, e.getValue(), defer, annExpressionInHybridSearch != null);
                                                                                      if (annExpressionInHybridSearch != null)
                                                                                          return reorderAndLimitBySSTableRowIds(it, e.getKey(), annExpressionInHybridSearch);
                                                                                      return convertToPrimaryKeyIterator(e.getKey(), it);
@@ -216,7 +216,7 @@ public class QueryController
                                                                                        .stream()
                                                                                        .map(e -> {
                                                                                            // we need to do all the intersections at the index level, or ordering won't work
-                                                                                           RangeIterator<PrimaryKey> it = buildIterator(op, e.getValue());
+                                                                                           RangeIterator<PrimaryKey> it = buildIterator(op, e.getValue(), annExpressionInHybridSearch != null);
                                                                                            if (annExpressionInHybridSearch != null)
                                                                                                it = reorderAndLimitBy(it, e.getKey(), annExpressionInHybridSearch);
                                                                                            return it;
@@ -296,7 +296,7 @@ public class QueryController
         return L.size() == 1 ? L.get(0) : null;
     }
 
-    private RangeIterator<Long> createRowIdIterator(Operation.OperationType op, List<QueryViewBuilder.IndexExpression> indexExpressions, boolean defer)
+    private RangeIterator<Long> createRowIdIterator(Operation.OperationType op, List<QueryViewBuilder.IndexExpression> indexExpressions, boolean defer, boolean hasAnn)
     {
         var subIterators = indexExpressions
                            .stream()
@@ -318,15 +318,21 @@ public class QueryController
                                     }).collect(Collectors.toList());
 
         // we need to do all the intersections at the index level, or ordering won't work
-        return buildIterator(op, subIterators);
+        return buildIterator(op, subIterators, hasAnn);
     }
 
-    private static <T extends Comparable<T>> RangeIterator<T> buildIterator(Operation.OperationType op, List<RangeIterator<T>> subIterators)
+    private static <T extends Comparable<T>> RangeIterator<T> buildIterator(Operation.OperationType op, List<RangeIterator<T>> subIterators, boolean hasAnn)
     {
-        var builder = op == Operation.OperationType.OR
-                      ? RangeUnionIterator.<T>builder(subIterators.size())
-                      // By default, pick 2 most selective indexes
-                      : RangeIntersectionIterator.<T>builder();
+        RangeIterator.Builder<T> builder = null;
+        if (op == Operation.OperationType.OR)
+            builder = RangeUnionIterator.<T>builder(subIterators.size());
+        else if (hasAnn)
+            // if there is ANN, intersect all available indexes so result will be correct top-k
+            builder = RangeIntersectionIterator.<T>builder(subIterators.size());
+        else
+            // Otherwise, pick 2 most selective indexes for better performance
+            builder = RangeIntersectionIterator.<T>builder();
+
         return builder.add(subIterators).build();
     }
 
