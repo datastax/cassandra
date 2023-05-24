@@ -23,6 +23,7 @@ import java.util.function.UnaryOperator;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
+import com.google.common.base.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +34,10 @@ import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
+import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
+import org.apache.cassandra.cql3.restrictions.SingleRestriction;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -74,6 +79,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.lucene.index.VectorSimilarityFunction;
 
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
@@ -118,7 +124,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     /**
      * The comparator used to orders results when multiple keys are selected (using IN).
      */
-    private final Comparator<List<ByteBuffer>> orderingComparator;
+    private final ColumnComparator<List<ByteBuffer>> orderingComparator;
 
     // Used by forSelection below
     private static final Parameters defaultParameters = new Parameters(Collections.emptyMap(),
@@ -135,7 +141,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                            StatementRestrictions restrictions,
                            boolean isReversed,
                            AggregationSpecification aggregationSpec,
-                           Comparator<List<ByteBuffer>> orderingComparator,
+                           ColumnComparator<List<ByteBuffer>> orderingComparator,
                            Term limit,
                            Term perPartitionLimit)
     {
@@ -305,10 +311,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
      * is unnecessary in this case. That applies to the page size defined in rows - if the page size is defined in bytes
      * we cannot say anything about the relation beteween the user rows limit and the page size.
      */
-    private boolean canSkipPaging(DataLimits userLimits, PageSize pageSize)
+    private boolean canSkipPaging(DataLimits userLimits, PageSize pageSize, boolean topK)
     {
         return !pageSize.isDefined() ||
-               pageSize.getUnit() == PageSize.PageUnit.ROWS && !pageSize.isCompleted(userLimits.count(), PageSize.PageUnit.ROWS);
+               pageSize.getUnit() == PageSize.PageUnit.ROWS && !pageSize.isCompleted(userLimits.count(), PageSize.PageUnit.ROWS) ||
+               topK;
     }
 
     public ResultMessage.Rows execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
@@ -330,7 +337,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (query.limits().isGroupByLimit() && pageSize != null && pageSize.isDefined() && pageSize.getUnit() == PageSize.PageUnit.BYTES)
             throw new InvalidRequestException("Paging in bytes cannot be specified for aggregation queries");
 
-        if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize))
+        if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize, query.isTopK()))
             return execute(query, options, queryState, selectors, nowInSec, userLimit, queryStartNanoTime);
 
         QueryPager pager = getPager(query, options);
@@ -494,7 +501,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
-        if (!pager.isExhausted())
+        if (!pager.isExhausted() && !pager.pager.isTopK())
             msg.result.metadata.setHasMorePages(pager.state());
 
         return msg;
@@ -532,7 +539,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         try (ReadExecutionController executionController = query.executionController())
         {
-            if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize))
+            if (aggregationSpec == null && canSkipPaging(query.limits(), pageSize, query.isTopK()))
             {
                 try (PartitionIterator data = query.executeInternal(executionController))
                 {
@@ -771,7 +778,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         // If we do post ordering we need to get all the results sorted before we can trim them.
         if (aggregationSpec != AggregationSpecification.AGGREGATE_EVERYTHING)
         {
-            if (!needsPostQueryOrdering())
+            if (!needsToSkipUserLimit())
                 cqlRowLimit = userLimit;
             cqlPerPartitionLimit = perPartitionLimit;
         }
@@ -896,7 +903,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         ResultSet cqlRows = result.build();
 
-        orderResults(cqlRows);
+        orderResults(cqlRows, options);
 
         cqlRows.trim(userLimit);
 
@@ -994,21 +1001,27 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
     }
 
+    private boolean needsToSkipUserLimit()
+    {
+        // if post query ordering is required, and it's not ANN
+        return needsPostQueryOrdering() && !(orderingComparator instanceof AnnColumnComparator);
+    }
+
     private boolean needsPostQueryOrdering()
     {
-        // We need post-query ordering only for queries with IN on the partition key and an ORDER BY.
-        return restrictions.keyIsInRelation() && !parameters.orderings.isEmpty();
+        // We need post-query ordering only for queries with IN on the partition key and an ORDER BY or ANN
+        return restrictions.keyIsInRelation() && !parameters.orderings.isEmpty() || (orderingComparator instanceof AnnColumnComparator);
     }
 
     /**
      * Orders results when multiple keys are selected (using IN)
      */
-    private void orderResults(ResultSet cqlRows)
+    private void orderResults(ResultSet cqlRows, QueryOptions options)
     {
         if (cqlRows.size() == 0 || !needsPostQueryOrdering())
             return;
 
-        Collections.sort(cqlRows.rows, orderingComparator);
+        Collections.sort(cqlRows.rows, orderingComparator.comparatorFor(options));
     }
 
     public static class RawStatement extends QualifiedStatement<SelectStatement>
@@ -1077,7 +1090,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             checkFalse(aggregationSpec == AggregationSpecification.AGGREGATE_EVERYTHING && perPartitionLimit != null,
                        "PER PARTITION LIMIT is not allowed with aggregate queries.");
 
-            Comparator<List<ByteBuffer>> orderingComparator = null;
+            ColumnComparator<List<ByteBuffer>> orderingComparator = null;
             boolean isReversed = false;
 
             if (!orderingColumns.isEmpty())
@@ -1087,7 +1100,16 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 orderingComparator = getOrderingComparator(selection, restrictions, orderingColumns);
                 isReversed = isReversed(table, orderingColumns, restrictions);
                 if (isReversed)
-                    orderingComparator = Collections.reverseOrder(orderingComparator);
+                    orderingComparator = orderingComparator.reverse();
+            }
+            else
+            {
+                List<SingleRestriction> annRestrictions = restrictions.getAnnRestrictions();
+                if (restrictions.usesSecondaryIndexing() && !annRestrictions.isEmpty())
+                {
+                    Preconditions.checkState(annRestrictions.size() == 1);
+                    orderingComparator = getOrderingComparator(selection, (SingleColumnRestriction.AnnRestriction) annRestrictions.get(0));
+                }
             }
 
             checkDisjunctionIsSupported(table, restrictions);
@@ -1291,7 +1313,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             return AggregationSpecification.aggregatePkPrefix(metadata.comparator, clusteringPrefixSize);
         }
 
-        private Comparator<List<ByteBuffer>> getOrderingComparator(Selection selection,
+        private ColumnComparator<List<ByteBuffer>> getOrderingComparator(Selection selection,
                                                                    StatementRestrictions restrictions,
                                                                    Map<ColumnMetadata, Boolean> orderingColumns)
                                                                    throws InvalidRequestException
@@ -1309,6 +1331,20 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             }
             return idToSort.size() == 1 ? new SingleColumnComparator(idToSort.get(0), sorters.get(0))
                     : new CompositeComparator(sorters, idToSort);
+        }
+
+        private ColumnComparator<List<ByteBuffer>> getOrderingComparator(Selection selection,
+                                                                         SingleColumnRestriction.AnnRestriction annRestriction) throws InvalidRequestException
+        {
+            List<Integer> idToSort = new ArrayList<>(1);
+            List<AbstractType<?>> sorters = new ArrayList<>(1);
+
+            ColumnMetadata orderingColumn = annRestriction.getFirstColumn();
+
+            idToSort.add(selection.getOrderingIndex(orderingColumn));
+            sorters.add(orderingColumn.type);
+
+            return new AnnColumnComparator<>(annRestriction, idToSort.get(0), (VectorType) sorters.get(0));
         }
 
         private boolean isReversed(TableMetadata table, Map<ColumnMetadata, Boolean> orderingColumns, StatementRestrictions restrictions) throws InvalidRequestException
@@ -1431,8 +1467,33 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
             return bValue == null ? 1 : comparator.compare(aValue, bValue);
         }
+
+        public ColumnComparator<T> reverse()
+        {
+            return new ReversedColumnComparator<>(this);
+        }
+
+        public ColumnComparator<T> comparatorFor(QueryOptions options)
+        {
+            return this;
+        }
     }
 
+    private static class ReversedColumnComparator<T> extends ColumnComparator<T>
+    {
+        private final ColumnComparator<T> wrapped;
+
+        public ReversedColumnComparator(ColumnComparator<T> wrapped)
+        {
+            this.wrapped = wrapped;
+        }
+
+        @Override
+        public int compare(T o1, T o2)
+        {
+            return wrapped.compare(o2, o1);
+        }
+    }
     /**
      * Used in orderResults(...) method when single 'ORDER BY' condition where given
      */
@@ -1450,6 +1511,54 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         public int compare(List<ByteBuffer> a, List<ByteBuffer> b)
         {
             return compare(comparator, a.get(index), b.get(index));
+        }
+    }
+
+    private static class AnnColumnComparator<T> extends ColumnComparator<List<ByteBuffer>>
+    {
+        private final SingleColumnRestriction.AnnRestriction restriction;
+        private final int index;
+        private final VectorType type;
+
+        private final float[] target;
+
+        // maybe cached in prepared statement
+        public AnnColumnComparator(SingleColumnRestriction.AnnRestriction restriction, int columnIndex, VectorType type)
+        {
+            this.restriction = restriction;
+            this.index = columnIndex;
+            this.type = type;
+            this.target = null;
+        }
+
+        // for actual re-ordering
+        private AnnColumnComparator(SingleColumnRestriction.AnnRestriction restriction, float[] target, int columnIndex, VectorType type)
+        {
+            this.restriction = restriction;
+            this.target = target;
+            this.index = columnIndex;
+            this.type = type;
+        }
+
+        @Override
+        public int compare(List<ByteBuffer> a, List<ByteBuffer> b)
+        {
+            Preconditions.checkNotNull(target);
+
+            VectorSimilarityFunction function = VectorSimilarityFunction.COSINE;
+            float[] left = type.compose(a.get(index).duplicate());
+            double scoreLeft = function.compare(left, target);
+
+            float[] right = type.compose(b.get(index).duplicate());
+            double scoreRight = function.compare(right, target);
+            return Double.compare(scoreRight, scoreLeft); // descending order
+        }
+
+        @Override
+        public ColumnComparator<List<ByteBuffer>> comparatorFor(QueryOptions options)
+        {
+            float[] target = type.compose(restriction.value(options).duplicate());
+            return new AnnColumnComparator<>(restriction, target, index, type);
         }
     }
 

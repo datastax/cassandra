@@ -36,6 +36,11 @@ public interface SingleRestriction extends Restriction
         return false;
     }
 
+    public default boolean isAnn()
+    {
+        return false;
+    }
+
     public default boolean isLIKE()
     {
         return false;

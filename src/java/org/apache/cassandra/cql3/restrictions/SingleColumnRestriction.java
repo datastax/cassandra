@@ -806,6 +806,17 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             this.value = value;
         }
 
+        public ByteBuffer value(QueryOptions options)
+        {
+            return value.bindAndGet(options);
+        }
+
+        @Override
+        public boolean isAnn()
+        {
+            return true;
+        }
+
         @Override
         public void addFunctionsTo(List<Function> functions)
         {
