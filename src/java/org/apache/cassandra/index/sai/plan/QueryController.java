@@ -300,12 +300,14 @@ public class QueryController
     {
         var subIterators = indexExpressions
                            .stream()
-                           .flatMap(ie ->
+                           .map(ie ->
                                     {
                                         try
                                         {
                                             var sstContext = queryContext.getSSTableQueryContext(ie.index.getSSTable());
-                                            return ie.index.searchSSTableRowIds(ie.expression, mergeRange, sstContext, defer, getLimit()).stream();
+                                            List<RangeIterator<Long>> iterators = ie.index.searchSSTableRowIds(ie.expression, mergeRange, sstContext, defer, getLimit());
+                                            // union the result from multiple segments for the same index
+                                            return RangeUnionIterator.build(iterators);
                                         }
                                         catch (Throwable ex)
                                         {
@@ -323,7 +325,8 @@ public class QueryController
     {
         var builder = op == Operation.OperationType.OR
                       ? RangeUnionIterator.<T>builder(subIterators.size())
-                      : RangeIntersectionIterator.<T>builder(subIterators.size(), Integer.MAX_VALUE);
+                      // By default, pick 2 most selective indexes
+                      : RangeIntersectionIterator.<T>builder();
         return builder.add(subIterators).build();
     }
 
