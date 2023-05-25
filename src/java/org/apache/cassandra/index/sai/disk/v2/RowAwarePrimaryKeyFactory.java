@@ -114,6 +114,23 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public ByteSource asComparableBytes(ByteComparable.Version version)
         {
+            return asComparableBytes(version == ByteComparable.Version.LEGACY ? ByteSource.END_OF_STREAM : ByteSource.TERMINATOR, version, true);
+        }
+
+        @Override
+        public ByteSource asComparableBytesMinPrefix(ByteComparable.Version version)
+        {
+            return asComparableBytes(ByteSource.LT_NEXT_COMPONENT, version, false);
+        }
+
+        @Override
+        public ByteSource asComparableBytesMaxPrefix(ByteComparable.Version version)
+        {
+            return asComparableBytes(ByteSource.GT_NEXT_COMPONENT, version, false);
+        }
+
+        private ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean includeNullComponents)
+        {
             // We need to make sure that the key is loaded before returning a
             // byte comparable representation. If we don't we won't get a correct
             // comparison because we potentially won't be using the partition key
@@ -123,6 +140,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             ByteSource tokenComparable = token.asComparableBytes(version);
             ByteSource keyComparable = partitionKey == null ? null
                                                             : ByteSource.of(partitionKey.getKey(), version);
+
             // It is important that the ClusteringComparator.asBytesComparable method is used
             // to maintain the correct clustering sort order
             ByteSource clusteringComparable = clusteringComparator.size() == 0 ||
@@ -130,12 +148,15 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
                                               clustering.isEmpty() ? null
                                                                    : clusteringComparator.asByteComparable(clustering)
                                                                                          .asComparableBytes(version);
-            return ByteSource.withTerminator(version == ByteComparable.Version.LEGACY
-                                             ? ByteSource.END_OF_STREAM
-                                             : ByteSource.TERMINATOR,
-                                             tokenComparable,
-                                             keyComparable,
-                                             clusteringComparable);
+
+            if (!includeNullComponents)
+            {
+                if (keyComparable == null)
+                    return ByteSource.withTerminator(terminator, tokenComparable);
+                else if (clusteringComparable == null)
+                    return ByteSource.withTerminator(terminator, tokenComparable, keyComparable);
+            }
+            return ByteSource.withTerminator(terminator, tokenComparable, keyComparable, clusteringComparable);
         }
 
         @Override
