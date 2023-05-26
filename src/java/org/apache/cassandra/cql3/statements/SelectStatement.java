@@ -1004,13 +1004,18 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     private boolean needsToSkipUserLimit()
     {
         // if post query ordering is required, and it's not ANN
-        return needsPostQueryOrdering() && (orderingComparator == null || !orderingComparator.isAnn());
+        return needsPostQueryOrdering() && !needAnnOrdering();
     }
 
     private boolean needsPostQueryOrdering()
     {
         // We need post-query ordering only for queries with IN on the partition key and an ORDER BY or ANN
-        return restrictions.keyIsInRelation() && !parameters.orderings.isEmpty() || (orderingComparator != null && orderingComparator.isAnn());
+        return restrictions.keyIsInRelation() && !parameters.orderings.isEmpty() || needAnnOrdering();
+    }
+
+    private boolean needAnnOrdering()
+    {
+        return orderingComparator != null && orderingComparator.isAnn();
     }
 
     /**
