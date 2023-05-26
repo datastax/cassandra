@@ -1004,13 +1004,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     private boolean needsToSkipUserLimit()
     {
         // if post query ordering is required, and it's not ANN
-        return needsPostQueryOrdering() && !(orderingComparator instanceof AnnColumnComparator);
+        return needsPostQueryOrdering() && (orderingComparator == null || !orderingComparator.isAnn());
     }
 
     private boolean needsPostQueryOrdering()
     {
         // We need post-query ordering only for queries with IN on the partition key and an ORDER BY or ANN
-        return restrictions.keyIsInRelation() && !parameters.orderings.isEmpty() || (orderingComparator instanceof AnnColumnComparator);
+        return restrictions.keyIsInRelation() && !parameters.orderings.isEmpty() || (orderingComparator != null && orderingComparator.isAnn());
     }
 
     /**
@@ -1100,7 +1100,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 orderingComparator = getOrderingComparator(selection, restrictions, orderingColumns);
                 isReversed = isReversed(table, orderingColumns, restrictions);
                 if (isReversed)
-                    orderingComparator = orderingComparator.reverse();
+                    orderingComparator = orderingComparator == null ? null : orderingComparator.reverse();
             }
             else
             {
@@ -1473,6 +1473,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             return new ReversedColumnComparator<>(this);
         }
 
+        public boolean isAnn()
+        {
+            return false;
+        }
+
         public ColumnComparator<T> comparatorFor(QueryOptions options)
         {
             return this;
@@ -1552,6 +1557,12 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             float[] right = type.compose(b.get(index).duplicate());
             double scoreRight = function.compare(right, target);
             return Double.compare(scoreRight, scoreLeft); // descending order
+        }
+
+        @Override
+        public boolean isAnn()
+        {
+            return true;
         }
 
         @Override
