@@ -114,22 +114,22 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public ByteSource asComparableBytes(ByteComparable.Version version)
         {
-            return asComparableBytes(version == ByteComparable.Version.LEGACY ? ByteSource.END_OF_STREAM : ByteSource.TERMINATOR, version, true);
+            return asComparableBytes(version == ByteComparable.Version.LEGACY ? ByteSource.END_OF_STREAM : ByteSource.TERMINATOR, version, false);
         }
 
         @Override
         public ByteSource asComparableBytesMinPrefix(ByteComparable.Version version)
         {
-            return asComparableBytes(ByteSource.LT_NEXT_COMPONENT, version, false);
+            return asComparableBytes(ByteSource.LT_NEXT_COMPONENT, version, true);
         }
 
         @Override
         public ByteSource asComparableBytesMaxPrefix(ByteComparable.Version version)
         {
-            return asComparableBytes(ByteSource.GT_NEXT_COMPONENT, version, false);
+            return asComparableBytes(ByteSource.GT_NEXT_COMPONENT, version, true);
         }
 
-        private ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean includeNullComponents)
+        private ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean excludeNullComponents)
         {
             // We need to make sure that the key is loaded before returning a
             // byte comparable representation. If we don't we won't get a correct
@@ -149,7 +149,8 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
                                                                    : clusteringComparator.asByteComparable(clustering)
                                                                                          .asComparableBytes(version);
 
-            if (!includeNullComponents)
+            // prefix doesn't include null components
+            if (excludeNullComponents)
             {
                 if (keyComparable == null)
                     return ByteSource.withTerminator(terminator, tokenComparable);
