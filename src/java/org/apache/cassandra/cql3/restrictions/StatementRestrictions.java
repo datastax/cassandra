@@ -832,14 +832,14 @@ public class StatementRestrictions
                            .anyMatch(p -> ((SingleRestriction) p).isEQ());
     }
 
-    public List<SingleRestriction> getAnnRestrictions()
+    public List<SingleRestriction> getPostQueryOrderingRestrictions()
     {
         List<SingleRestriction> annRestrictions = null;
         if (partitionKeyRestrictions instanceof PartitionKeySingleRestrictionSet)
         {
             for (SingleRestriction restriction : ((PartitionKeySingleRestrictionSet) partitionKeyRestrictions).restrictions())
             {
-                if (restriction.isAnn())
+                if (restriction.needsPostQueryOrdering())
                 {
                     annRestrictions = new ArrayList<>();
                     annRestrictions.add(restriction);
@@ -849,7 +849,7 @@ public class StatementRestrictions
 
         for (SingleRestriction restriction : clusteringColumnsRestrictions.restrictions())
         {
-            if (restriction.isAnn())
+            if (restriction.needsPostQueryOrdering())
             {
                 annRestrictions = new ArrayList<>();
                 annRestrictions.add(restriction);
@@ -858,7 +858,7 @@ public class StatementRestrictions
 
         for (SingleRestriction restriction : nonPrimaryKeyRestrictions.restrictions())
         {
-            if (restriction.isAnn())
+            if (restriction.needsPostQueryOrdering())
             {
                 annRestrictions = new ArrayList<>();
                 annRestrictions.add(restriction);

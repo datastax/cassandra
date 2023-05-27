@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -40,6 +41,7 @@ import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
@@ -50,6 +52,9 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.restrictions.Restriction;
+import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.CassandraWriteContext;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -64,6 +69,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
@@ -97,6 +103,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
+import org.apache.lucene.index.VectorSimilarityFunction;
 
 import static org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig.MAX_TOP_K;
 
@@ -524,6 +531,31 @@ public class StorageAttachedIndex implements Index
     {
         // it should be executed from the SAI query plan, this is only used by the singleton index query plan
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Comparator<List<ByteBuffer>> getPostQueryOrdering(Restriction restriction, int columnIndex, QueryOptions options)
+    {
+        // For now, only support ANN
+        if (!(restriction instanceof SingleColumnRestriction.AnnRestriction))
+            return null;
+
+        Preconditions.checkState(indexContext.isVector());
+
+        SingleColumnRestriction.AnnRestriction annRestriction = (SingleColumnRestriction.AnnRestriction) restriction;
+        VectorSimilarityFunction function = indexContext.getIndexWriterConfig().getSimilarityFunction();
+
+        VectorType type = (VectorType) indexContext.getValidator();
+        float[] target = type.compose(annRestriction.value(options).duplicate());
+
+        return (leftBuf, rightBuf) -> {
+            float[] left = type.compose(leftBuf.get(columnIndex).duplicate());
+            double scoreLeft = function.compare(left, target);
+
+            float[] right = type.compose(rightBuf.get(columnIndex).duplicate());
+            double scoreRight = function.compare(right, target);
+            return Double.compare(scoreRight, scoreLeft); // descending order
+        };
     }
 
     @Override

@@ -274,6 +274,8 @@ public class VectorLocalTest extends SAITester
 
             float[] queryVector = randomVector();
             List<float[]> resultVectors = searchWithRange(queryVector, minToken, maxToken, expected.size());
+            assertDescendingScore(queryVector, resultVectors);
+
             double recall = getRecall(resultVectors, queryVector, expected);
             assertThat(recall).isGreaterThanOrEqualTo(0.8);
         }
@@ -297,6 +299,8 @@ public class VectorLocalTest extends SAITester
 
             float[] queryVector = randomVector();
             List<float[]> resultVectors = searchWithRange(queryVector, minToken, maxToken, expected.size());
+            assertDescendingScore(queryVector, resultVectors);
+
             double recall = getRecall(resultVectors, queryVector, expected);
             assertThat(recall).isGreaterThanOrEqualTo(0.8);
         }

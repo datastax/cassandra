@@ -34,11 +34,9 @@ import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
-import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.SingleRestriction;
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -79,7 +77,6 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.lucene.index.VectorSimilarityFunction;
 
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
@@ -1004,18 +1001,18 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     private boolean needsToSkipUserLimit()
     {
         // if post query ordering is required, and it's not ANN
-        return needsPostQueryOrdering() && !needAnnOrdering();
+        return needsPostQueryOrdering() && !needIndexOrdering();
     }
 
     private boolean needsPostQueryOrdering()
     {
-        // We need post-query ordering only for queries with IN on the partition key and an ORDER BY or ANN
-        return restrictions.keyIsInRelation() && !parameters.orderings.isEmpty() || needAnnOrdering();
+        // We need post-query ordering only for queries with IN on the partition key and an ORDER BY or index restriction reordering
+        return restrictions.keyIsInRelation() && !parameters.orderings.isEmpty() || needIndexOrdering();
     }
 
-    private boolean needAnnOrdering()
+    private boolean needIndexOrdering()
     {
-        return orderingComparator != null && orderingComparator.isAnn();
+        return orderingComparator != null && orderingComparator.indexOrdering();
     }
 
     /**
@@ -1026,7 +1023,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (cqlRows.size() == 0 || !needsPostQueryOrdering())
             return;
 
-        Collections.sort(cqlRows.rows, orderingComparator.comparatorFor(options));
+        Comparator<List<ByteBuffer>> comparator = orderingComparator.prepareFor(table, options);
+        if (comparator != null)
+            Collections.sort(cqlRows.rows, comparator);
     }
 
     public static class RawStatement extends QualifiedStatement<SelectStatement>
@@ -1098,7 +1097,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             ColumnComparator<List<ByteBuffer>> orderingComparator = null;
             boolean isReversed = false;
 
-            if (!orderingColumns.isEmpty())
+            if (!orderingColumns.isEmpty()) // ORDER BY syntax
             {
                 assert !forView;
                 verifyOrderingIsAllowed(restrictions);
@@ -1107,13 +1106,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 if (isReversed)
                     orderingComparator = orderingComparator == null ? null : orderingComparator.reverse();
             }
-            else
+            else // for reorder with index restrictions
             {
-                List<SingleRestriction> annRestrictions = restrictions.getAnnRestrictions();
-                if (restrictions.usesSecondaryIndexing() && !annRestrictions.isEmpty())
+                List<SingleRestriction> postQueryOrderingRestrictions = restrictions.getPostQueryOrderingRestrictions();
+                if (restrictions.usesSecondaryIndexing() && !postQueryOrderingRestrictions.isEmpty())
                 {
-                    Preconditions.checkState(annRestrictions.size() == 1);
-                    orderingComparator = getOrderingComparator(selection, (SingleColumnRestriction.AnnRestriction) annRestrictions.get(0));
+                    Preconditions.checkState(postQueryOrderingRestrictions.size() == 1);
+                    orderingComparator = getIndexRestrictinOrderingComparable(selection, postQueryOrderingRestrictions.get(0));
                 }
             }
 
@@ -1338,18 +1337,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                     : new CompositeComparator(sorters, idToSort);
         }
 
-        private ColumnComparator<List<ByteBuffer>> getOrderingComparator(Selection selection,
-                                                                         SingleColumnRestriction.AnnRestriction annRestriction) throws InvalidRequestException
+        private ColumnComparator<List<ByteBuffer>> getIndexRestrictinOrderingComparable(Selection selection, SingleRestriction restriction)
+        throws InvalidRequestException
         {
-            List<Integer> idToSort = new ArrayList<>(1);
-            List<AbstractType<?>> sorters = new ArrayList<>(1);
-
-            ColumnMetadata orderingColumn = annRestriction.getFirstColumn();
-
-            idToSort.add(selection.getOrderingIndex(orderingColumn));
-            sorters.add(orderingColumn.type);
-
-            return new AnnColumnComparator<>(annRestriction, idToSort.get(0), (VectorType) sorters.get(0));
+            ColumnMetadata orderingColumn = restriction.getFirstColumn();
+            return new IndexColumnComparator<>(restriction, selection.getOrderingIndex(orderingColumn));
         }
 
         private boolean isReversed(TableMetadata table, Map<ColumnMetadata, Boolean> orderingColumns, StatementRestrictions restrictions) throws InvalidRequestException
@@ -1478,12 +1470,18 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             return new ReversedColumnComparator<>(this);
         }
 
-        public boolean isAnn()
+        /**
+         * @return true if ordering is performed by index
+         */
+        public boolean indexOrdering()
         {
             return false;
         }
 
-        public ColumnComparator<T> comparatorFor(QueryOptions options)
+        /**
+         * Produces a prepared {@link ColumnComparator} for current table and query-options
+         */
+        public Comparator<T> prepareFor(TableMetadata table, QueryOptions options)
         {
             return this;
         }
@@ -1524,57 +1522,38 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
     }
 
-    private static class AnnColumnComparator<T> extends ColumnComparator<List<ByteBuffer>>
+    private static class IndexColumnComparator<T> extends ColumnComparator<List<ByteBuffer>>
     {
-        private final SingleColumnRestriction.AnnRestriction restriction;
-        private final int index;
-        private final VectorType type;
-
-        private final float[] target;
+        private final SingleRestriction restriction;
+        private final int columnIndex;
 
         // maybe cached in prepared statement
-        public AnnColumnComparator(SingleColumnRestriction.AnnRestriction restriction, int columnIndex, VectorType type)
+        public IndexColumnComparator(SingleRestriction restriction, int columnIndex)
         {
             this.restriction = restriction;
-            this.index = columnIndex;
-            this.type = type;
-            this.target = null;
-        }
-
-        // for actual re-ordering
-        private AnnColumnComparator(SingleColumnRestriction.AnnRestriction restriction, float[] target, int columnIndex, VectorType type)
-        {
-            this.restriction = restriction;
-            this.target = target;
-            this.index = columnIndex;
-            this.type = type;
+            this.columnIndex = columnIndex;
         }
 
         @Override
-        public int compare(List<ByteBuffer> a, List<ByteBuffer> b)
-        {
-            Preconditions.checkNotNull(target);
-
-            VectorSimilarityFunction function = VectorSimilarityFunction.COSINE;
-            float[] left = type.compose(a.get(index).duplicate());
-            double scoreLeft = function.compare(left, target);
-
-            float[] right = type.compose(b.get(index).duplicate());
-            double scoreRight = function.compare(right, target);
-            return Double.compare(scoreRight, scoreLeft); // descending order
-        }
-
-        @Override
-        public boolean isAnn()
+        public boolean indexOrdering()
         {
             return true;
         }
 
         @Override
-        public ColumnComparator<List<ByteBuffer>> comparatorFor(QueryOptions options)
+        public Comparator<List<ByteBuffer>> prepareFor(TableMetadata table, QueryOptions options)
         {
-            float[] target = type.compose(restriction.value(options).duplicate());
-            return new AnnColumnComparator<>(restriction, target, index, type);
+            Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
+            if (index == null)
+                return null;
+
+            return index.getPostQueryOrdering(restriction, columnIndex, options);
+        }
+
+        @Override
+        public int compare(List<ByteBuffer> o1, List<ByteBuffer> o2)
+        {
+            throw new UnsupportedOperationException();
         }
     }
 
