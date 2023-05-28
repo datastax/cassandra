@@ -116,7 +116,7 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
             return asComparableBytes(ByteSource.GT_NEXT_COMPONENT, version, true);
         }
 
-        private ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean excludeNullComponent)
+        private ByteSource asComparableBytes(int terminator, ByteComparable.Version version, boolean isPrefix)
         {
             // Note: Unlike row-aware primary keys the asComparable method in for
             // partition aware keys is only used on the write side so we do not need
@@ -126,7 +126,7 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
                                                             :ByteSource.of(partitionKey.getKey(), version);
 
             // prefix doesn't include null components
-            if (excludeNullComponent)
+            if (isPrefix)
             {
                 if (keyComparable == null)
                     return ByteSource.withTerminator(terminator, tokenComparable);
