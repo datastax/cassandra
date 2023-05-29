@@ -74,7 +74,7 @@ public class VectorTypeTest extends SAITester
         assertContainsInt(result, "pk", 2);
     }
 
-    private void assertContainsInt(UntypedResultSet result, String pkName, int pk)
+    public static void assertContainsInt(UntypedResultSet result, String pkName, int pk)
     {
         for (UntypedResultSet.Row row : result)
         {
@@ -332,9 +332,9 @@ public class VectorTypeTest extends SAITester
         waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vector(1.0f, 2.0f ,3.0f));
-        execute("INSERT INTO %s (pk, str_val) VALUES (1, 'B')");
+        execute("INSERT INTO %s (pk, str_val) VALUES (1, 'B')"); // no vector
         execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', ?)", vector(3.0f, 4.0f, 5.0f));
-        execute("INSERT INTO %s (pk, str_val) VALUES (3, 'D')");
+        execute("INSERT INTO %s (pk, str_val) VALUES (3, 'D')"); // no vector
         execute("INSERT INTO %s (pk, str_val, val) VALUES (4, 'E', ?)", vector(5.0f, 6.0f, 7.0f));
 
         UntypedResultSet result = execute("SELECT * FROM %s WHERE str_val = 'B' AND val ann of [2.5, 3.5, 4.5] LIMIT 2");
@@ -350,5 +350,25 @@ public class VectorTypeTest extends SAITester
 
         result = execute("SELECT * FROM %s WHERE str_val = 'A' AND val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).hasSize(1);
+    }
+
+    @Test
+    public void deleteEntireRowInMemoryTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
+
+        UntypedResultSet result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 2");
+        assertThat(result).hasSize(2);
+
+        execute("DELETE FROM %s WHERE pk = 0");
+
+        result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 2");
+        assertThat(result).hasSize(1);
+        assertContainsInt(result, "pk", 1);
     }
 }
