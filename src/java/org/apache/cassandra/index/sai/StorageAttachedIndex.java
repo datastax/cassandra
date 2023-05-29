@@ -69,7 +69,6 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
@@ -87,10 +86,10 @@ import org.apache.cassandra.index.TargetParser;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.NonTokenizingOptions;
-import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.index.transactions.IndexTransaction;
@@ -545,14 +544,13 @@ public class StorageAttachedIndex implements Index
         SingleColumnRestriction.AnnRestriction annRestriction = (SingleColumnRestriction.AnnRestriction) restriction;
         VectorSimilarityFunction function = indexContext.getIndexWriterConfig().getSimilarityFunction();
 
-        VectorType type = (VectorType) indexContext.getValidator();
-        float[] target = type.compose(annRestriction.value(options).duplicate());
+        float[] target = TypeUtil.decomposeVector(indexContext, annRestriction.value(options).duplicate());
 
         return (leftBuf, rightBuf) -> {
-            float[] left = type.compose(leftBuf.get(columnIndex).duplicate());
+            float[] left = TypeUtil.decomposeVector(indexContext, leftBuf.get(columnIndex).duplicate());
             double scoreLeft = function.compare(left, target);
 
-            float[] right = type.compose(rightBuf.get(columnIndex).duplicate());
+            float[] right = TypeUtil.decomposeVector(indexContext, rightBuf.get(columnIndex).duplicate());
             double scoreRight = function.compare(right, target);
             return Double.compare(scoreRight, scoreLeft); // descending order
         };
