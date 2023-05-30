@@ -33,6 +33,9 @@ import com.google.common.collect.Ordering;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.agrona.collections.IntArrayList;
+
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 
 public class OverlapsTest
@@ -255,29 +258,36 @@ public class OverlapsTest
         "NPQ",
         "RST",
         };
+        int[] noneUnselected = new int[]{2, 3, 4, 5};
         String[] single3 = new String[]{
         "ABCDE",
         "LNOPQ",
         "RST",
         };
+        int[] singleUnselected = new int[]{2, 3};
         String[] transitive3 = new String[]{
         "ABCDEF",
         "LNOPQ",
         "RST",
         };
+        int[] transitiveUnselected = new int[]{3};
 
         List<Set<Character>> input = Arrays.stream(sets).map(OverlapsTest::asSet).collect(Collectors.toList());
+
+        verifyAssignment(Overlaps.InclusionMethod.NONE, input, none3, noneUnselected);
+
+        verifyAssignment(Overlaps.InclusionMethod.SINGLE, input, single3, singleUnselected);
+
+        verifyAssignment(Overlaps.InclusionMethod.TRANSITIVE, input, transitive3, transitiveUnselected);
+    }
+
+    private void verifyAssignment(Overlaps.InclusionMethod method, List<Set<Character>> input, String[] expected, int[] expectedUnselected)
+    {
         List<String> actual;
-
-        actual = Overlaps.assignOverlapsIntoBuckets(3, Overlaps.InclusionMethod.NONE, input, this::makeBucket);
-        assertEquals(Arrays.asList(none3), actual);
-
-        actual = Overlaps.assignOverlapsIntoBuckets(3, Overlaps.InclusionMethod.SINGLE, input, this::makeBucket);
-        assertEquals(Arrays.asList(single3), actual);
-
-        actual = Overlaps.assignOverlapsIntoBuckets(3, Overlaps.InclusionMethod.TRANSITIVE, input, this::makeBucket);
-        assertEquals(Arrays.asList(transitive3), actual);
-
+        IntArrayList unselected = new IntArrayList();
+        actual = Overlaps.assignOverlapsIntoBuckets(3, method, input, this::makeBucket, s -> unselected.add(input.indexOf(s)));
+        assertEquals(Arrays.asList(expected), actual);
+        assertArrayEquals(expectedUnselected, unselected.toIntArray());
     }
 
     private String makeBucket(List<Set<Character>> sets, int startIndex, int endIndex)
