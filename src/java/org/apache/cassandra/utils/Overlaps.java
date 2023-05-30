@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 
 public class Overlaps
 {
@@ -91,6 +92,7 @@ public class Overlaps
 
         return overlaps;
     }
+
     public enum InclusionMethod
     {
         NONE, SINGLE, TRANSITIVE;
@@ -114,15 +116,17 @@ public class Overlaps
      *                        all sets that have an overlap chain to a selected bucket.
      * @param overlaps        An ordered list of overlap sets as returned by {@link #constructOverlapSets}.
      * @param bucketer        Method used to create a bucket out of the supplied set indexes.
+     * @param unselectedHandler Action to take on sets that are below the threshold and not included in any bucket.
      */
     public static <E, B> List<B> assignOverlapsIntoBuckets(int threshold,
                                                            InclusionMethod inclusionMethod,
                                                            List<Set<E>> overlaps,
-                                                           BucketMaker<E, B> bucketer)
+                                                           BucketMaker<E, B> bucketer,
+                                                           Consumer<Set<E>> unselectedHandler)
     {
         List<B> buckets = new ArrayList<>();
         int regionCount = overlaps.size();
-        int lastEnd = -1;
+        int lastEnd = 0;
         for (int i = 0; i < regionCount; ++i)
         {
             Set<E> bucket = overlaps.get(i);
@@ -139,7 +143,7 @@ public class Overlaps
                                        ? allOverlapping
                                        : bucket;
                 int j;
-                for (j = i - 1; j > lastEnd; --j)
+                for (j = i - 1; j >= lastEnd; --j)
                 {
                     Set<E> next = overlaps.get(j);
                     if (!setsIntersect(next, overlapTarget))
@@ -158,8 +162,12 @@ public class Overlaps
                 endIndex = j;
             }
             buckets.add(bucketer.makeBucket(overlaps, startIndex, endIndex));
-            lastEnd = i;
+            for (int k = lastEnd; k < startIndex; ++k)
+                unselectedHandler.accept(overlaps.get(k));
+            lastEnd = endIndex;
         }
+        for (int k = lastEnd; k < regionCount; ++k)
+            unselectedHandler.accept(overlaps.get(k));
         return buckets;
     }
 
