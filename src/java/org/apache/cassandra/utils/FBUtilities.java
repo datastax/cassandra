@@ -1060,6 +1060,17 @@ public class FBUtilities
     }
 
     /**
+     * Parse an integer value, allowing the string "max" to mean Integer.MAX_VALUE.
+     */
+    public static int parseIntAllowingMax(String value)
+    {
+        if (value.equalsIgnoreCase("max"))
+            return Integer.MAX_VALUE;
+        else
+            return Integer.parseInt(value);
+    }
+
+    /**
      * Starts and waits for the given @param pb to finish.
      * @throws java.io.IOException on non-zero exit code
      */
