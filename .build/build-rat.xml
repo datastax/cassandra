@@ -80,6 +80,7 @@
                  <exclude NAME="CASSANDRA-14092.txt"/>
                  <exclude NAME="debian/TODO"/>
                  <exclude NAME="doc/unified_compaction_level_formula.svg"/>
+                 <exclude NAME="src/java/org/apache/cassandra/db/compaction/unified/*.svg"/>
                  <!-- legal files -->
                  <exclude NAME="NOTICE.txt"/>
                  <exclude NAME="LICENSE.txt"/>
