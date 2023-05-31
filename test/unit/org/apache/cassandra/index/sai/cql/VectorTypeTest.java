@@ -390,4 +390,16 @@ public class VectorTypeTest extends SAITester
         assertInvalidMessage("ANN ordering does not support secondary ordering",
                              "SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5], ck ASC LIMIT 2");
     }
+
+    @Test
+    public void annOrderingMustHaveLimit() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, val vector<float, 3>, PRIMARY KEY(pk, ck))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        assertInvalidMessage("ANN ordering does not support secondary ordering",
+                             "SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5]");
+
+    }
 }

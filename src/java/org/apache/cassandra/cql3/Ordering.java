@@ -43,7 +43,7 @@ public class Ordering
 
     public interface Expression
     {
-        default boolean isAnn()
+        default boolean hasNonClusteredOrdering()
         {
             return false;
         }
@@ -84,7 +84,7 @@ public class Ordering
         }
 
         @Override
-        public boolean isAnn()
+        public boolean hasNonClusteredOrdering()
         {
             return true;
         }

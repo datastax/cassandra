@@ -607,7 +607,7 @@ public class StatementRestrictions
          */
         private void addOrderingRestrictions(List<Ordering> orderings, RestrictionSet.Builder receiver)
         {
-            List<Ordering> annOrderings = orderings.stream().filter(o -> o.expression.isAnn()).collect(Collectors.toList());
+            List<Ordering> annOrderings = orderings.stream().filter(o -> o.expression.hasNonClusteredOrdering()).collect(Collectors.toList());
 
             if (annOrderings.size() > 1)
                 throw new InvalidRequestException("Cannot specify more than one ANN ordering");
