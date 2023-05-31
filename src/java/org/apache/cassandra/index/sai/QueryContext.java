@@ -18,11 +18,10 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.NavigableSet;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -70,7 +69,7 @@ public class QueryContext
 
     private final Map<SSTableReader, SSTableQueryContext> sstableQueryContexts = new HashMap<>();
 
-    private final ConcurrentSkipListSet<PrimaryKey> shadowedPrimaryKeys = new ConcurrentSkipListSet<>();
+    private final TreeSet<PrimaryKey> shadowedPrimaryKeys = new TreeSet<>();
 
     @VisibleForTesting
     public QueryContext()
@@ -113,7 +112,10 @@ public class QueryContext
         shadowedPrimaryKeys.add(primaryKey);
     }
 
-    public Set<PrimaryKey> getShadowedPrimaryKeys()
+    /**
+     * @return shadowed primary keys, in ascending order
+     */
+    public NavigableSet<PrimaryKey> getShadowedPrimaryKeys()
     {
         return shadowedPrimaryKeys;
     }

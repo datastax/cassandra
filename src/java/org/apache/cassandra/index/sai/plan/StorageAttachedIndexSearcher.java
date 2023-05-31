@@ -115,12 +115,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         //  First time to find out there are shawdow keys, second time to find out there are no more shadow keys.
         while (true)
         {
-            long lastShadowedPrimaryKeys = queryContext.getShadowedPrimaryKeys().size();
+            long lastShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
             ResultRetriever result = queryIndexes.get();
             UnfilteredPartitionIterator topK = (UnfilteredPartitionIterator) new VectorTopKProcessor(command).filter(result);
 
-            long currentShadowedPrimaryKeys = queryContext.getShadowedPrimaryKeys().size();
-            if (lastShadowedPrimaryKeys == currentShadowedPrimaryKeys)
+            long currentShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
+            if (lastShadowedKeysCount == currentShadowedKeysCount)
                 return topK;
         }
     }
