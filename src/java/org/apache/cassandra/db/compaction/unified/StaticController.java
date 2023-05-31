@@ -64,8 +64,7 @@ public class StaticController extends Controller
                             boolean l0ShardsEnabled,
                             int baseShardCount,
                             double targetSStableSize,
-                            OverlapInclusionMethod overlapInclusionMethod)
-                            boolean l0ShardsEnabled,
+                            OverlapInclusionMethod overlapInclusionMethod,
                             String keyspaceName,
                             String tableName)
     {
@@ -145,21 +144,9 @@ public class StaticController extends Controller
                                     l0ShardsEnabled,
                                     baseShardCount,
                                     targetSStableSize,
-                                    overlapInclusionMethod);
-                                    l0ShardsEnabled,
+                                    overlapInclusionMethod,
                                     keyspaceName,
                                     tableName);
-    }
-
-    @VisibleForTesting
-    static int[] parseScalingParameters(String str)
-    {
-        String[] vals = str.split(",");
-        int[] ret = new int[vals.length];
-        for (int i = 0; i < vals.length; i++)
-            ret[i] = Integer.parseInt(vals[i].trim());
-
-        return ret;
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException

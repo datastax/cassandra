@@ -430,8 +430,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                        l0ShardsEnabled,
                                                        baseShardCount,
                                                        Math.scalb(targetSSTableSizeMB, 20),
-                                                       overlapInclusionMethod);
-                                                       l0ShardsEnabled,
+                                                       overlapInclusionMethod,
                                                        "ks",
                                                        "tbl");
 

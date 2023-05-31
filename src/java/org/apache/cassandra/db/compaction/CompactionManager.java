@@ -113,6 +113,7 @@ import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
@@ -209,10 +210,21 @@ public class CompactionManager implements CompactionManagerMBean
     {
         for (String keyspace : Schema.instance.getKeyspaces())
         {
+            //don't store config files for system tables
+            if (keyspace.equals(SchemaConstants.SYSTEM_KEYSPACE_NAME)
+                    || keyspace.equals(SchemaConstants.AUTH_KEYSPACE_NAME)
+                    || keyspace.equals(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME)
+                    || keyspace.equals(SchemaConstants.SCHEMA_KEYSPACE_NAME)
+                    || keyspace.equals(SchemaConstants.TRACE_KEYSPACE_NAME)
+                    || keyspace.equals(SchemaConstants.SCHEMA_VIRTUAL_KEYSPACE_NAME)
+                    || keyspace.equals(SchemaConstants.SYSTEM_VIEWS_KEYSPACE_NAME))
+            {
+                continue;
+            }
             for ( ColumnFamilyStore cfs : Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStores())
             {
                 CompactionStrategy strat = cfs.getCompactionStrategy();
-                if (strat instanceof UnifiedCompactionContainer && !keyspace.equals("system_schema") && !keyspace.equals("system") && !keyspace.equals("system_auth") && !keyspace.equals("system_traces") && !keyspace.equals("system_distributed"))
+                if (strat instanceof UnifiedCompactionContainer)
                 {
                     UnifiedCompactionStrategy ucs = (UnifiedCompactionStrategy) ((UnifiedCompactionContainer) strat).getStrategies().get(0);
                     ucs.storeControllerConfig();

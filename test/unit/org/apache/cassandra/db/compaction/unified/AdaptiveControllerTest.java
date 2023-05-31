@@ -50,8 +50,6 @@ public class AdaptiveControllerTest extends ControllerTest
     private final int maxAdaptiveCompactions = 2;
     private final double baseCost = minCost * 5;
     private final double threshold = 0.15;
-    private final String keyspaceName = "ks";
-    private final String tableName = "tbl";
 
     @Before
     public void setup()
