@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.ConcurrentSkipListSet;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -56,10 +57,11 @@ public class SSTableQueryContext
      */
     public boolean shouldInclude(Long sstableRowId, PrimaryKeyMap primaryKeyMap)
     {
-        if (queryContext.shadowedPrimaryKeys.isEmpty())
+        var shadowedPrimaryKeys = queryContext.getShadowedPrimaryKeys();
+        if (shadowedPrimaryKeys.isEmpty())
             return true;
 
-        return !queryContext.shadowedPrimaryKeys.contains(primaryKeyMap.primaryKeyFromRowId(sstableRowId));
+        return !shadowedPrimaryKeys.contains(primaryKeyMap.primaryKeyFromRowId(sstableRowId));
     }
 
     /**
@@ -68,7 +70,7 @@ public class SSTableQueryContext
     public Bits bitsetForShadowedPrimaryKeys(SegmentMetadata metadata, PrimaryKeyMap primaryKeyMap, CheckedFunction<Integer, Integer, IOException> segmentRowIdToOrdinal) throws IOException
     {
         Set<Integer> ignoredOrdinals = new HashSet<>();
-        for (PrimaryKey primaryKey : queryContext.shadowedPrimaryKeys)
+        for (PrimaryKey primaryKey : queryContext.getShadowedPrimaryKeys())
         {
             long sstableRowId = primaryKeyMap.rowIdFromPrimaryKey(primaryKey);
             int segmentRowId = metadata.segmentedRowId(sstableRowId);
