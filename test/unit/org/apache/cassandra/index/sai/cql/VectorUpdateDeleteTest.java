@@ -25,7 +25,6 @@ import org.apache.cassandra.index.sai.SAITester;
 
 import static org.apache.cassandra.index.sai.cql.VectorTypeTest.assertContainsInt;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class VectorUpdateDeleteTest extends SAITester
 {
@@ -39,17 +38,17 @@ public class VectorUpdateDeleteTest extends SAITester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
 
-        UntypedResultSet result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 2");
+        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).hasSize(2);
 
         execute("UPDATE %s SET val = null WHERE pk = 0");
 
-        result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 2");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).hasSize(1);
         assertContainsInt(result, "pk", 1);
 
         execute("DELETE from %s WHERE pk = 1");
-        result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 2");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).isEmpty();
     }
 
@@ -63,21 +62,21 @@ public class VectorUpdateDeleteTest extends SAITester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
 
-        UntypedResultSet result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 2");
+        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).hasSize(2);
         flush();
 
         execute("UPDATE %s SET val = null WHERE pk = 0");
-        result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 2");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).hasSize(1);
         assertContainsInt(result, "pk", 1);
 
         execute("DELETE from %s WHERE pk = 1");
-        result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 2");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).isEmpty();
         flush();
 
-        result = execute("SELECT * FROM %s WHERE val ann of [2.5, 3.5, 4.5] LIMIT 2");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).isEmpty();
     }
 
@@ -92,14 +91,14 @@ public class VectorUpdateDeleteTest extends SAITester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'C', [3.0, 4.0, 5.0])");
 
-        UntypedResultSet result = execute("SELECT * FROM %s WHERE val ann of [0.5, 1.5, 2.5] LIMIT 1");
+        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 1");
         assertThat(result).hasSize(1);
         assertContainsInt(result, "pk", 0);
         flush();
 
         execute("DELETE from %s WHERE pk = 0");
         execute("DELETE from %s WHERE pk = 1");
-        result = execute("SELECT * FROM %s WHERE val ann of [0.5, 1.5, 2.5] LIMIT 1");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 1");
         assertThat(result).hasSize(1);
         assertContainsInt(result, "pk", 2);
     }
@@ -118,7 +117,7 @@ public class VectorUpdateDeleteTest extends SAITester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
 
-        UntypedResultSet result = execute("SELECT * FROM %s WHERE val ann of [0.5, 1.5, 2.5] LIMIT 2");
+        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
         assertThat(result).hasSize(2);
         assertContainsInt(result, "pk", 0);
         assertContainsInt(result, "pk", 1);
@@ -129,13 +128,13 @@ public class VectorUpdateDeleteTest extends SAITester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
-        result = execute("SELECT * FROM %s WHERE val ann of [0.5, 1.5, 2.5] LIMIT 2");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
         assertThat(result).hasSize(2);
         assertContainsInt(result, "pk", 0);
         assertContainsInt(result, "pk", 1);
         flush();
 
-        result = execute("SELECT * FROM %s WHERE val ann of [0.5, 1.5, 2.5] LIMIT 2");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
         assertThat(result).hasSize(2);
         assertContainsInt(result, "pk", 0);
         assertContainsInt(result, "pk", 1);
@@ -155,10 +154,10 @@ public class VectorUpdateDeleteTest extends SAITester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [5.0, 6.0, 7.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
 
-        UntypedResultSet result = execute("SELECT * FROM %s WHERE val ann of [4.5, 5.5, 6.5] LIMIT 1");
+        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [4.5, 5.5, 6.5] LIMIT 1");
         assertThat(result).hasSize(1);
         assertContainsInt(result, "pk", 0);
-        result = execute("SELECT * FROM %s WHERE val ann of [0.5, 1.5, 2.5] LIMIT 1");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 1");
         assertThat(result).hasSize(1);
         assertContainsInt(result, "pk", 1);
 
@@ -170,19 +169,19 @@ public class VectorUpdateDeleteTest extends SAITester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [9.0, 10.0, 11.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [10.0, 11.0, 12.0])");
 
-        result = execute("SELECT * FROM %s WHERE val ann of [9.5, 10.5, 11.5] LIMIT 1");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [9.5, 10.5, 11.5] LIMIT 1");
         assertThat(result).hasSize(1);
         assertContainsInt(result, "pk", 0);
-        result = execute("SELECT * FROM %s WHERE val ann of [0.5, 1.5, 2.5] LIMIT 1");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 1");
         assertThat(result).hasSize(1);
         assertContainsInt(result, "pk", 1);
 
         flush();
 
-        result = execute("SELECT * FROM %s WHERE val ann of [9.5, 10.5, 11.5] LIMIT 1");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [9.5, 10.5, 11.5] LIMIT 1");
         assertThat(result).hasSize(1);
         assertContainsInt(result, "pk", 0);
-        result = execute("SELECT * FROM %s WHERE val ann of [0.5, 1.5, 2.5] LIMIT 1");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 1");
         assertThat(result).hasSize(1);
         assertContainsInt(result, "pk", 1);
     }
@@ -198,7 +197,7 @@ public class VectorUpdateDeleteTest extends SAITester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
         execute("UPDATE %s SET str_val='C' WHERE pk=0");
 
-        var result = execute("SELECT * FROM %s WHERE val ann of [0.5, 1.5, 2.5] LIMIT 2");
+        var result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2");
         assertThat(result).hasSize(2);
     }
 
@@ -232,10 +231,10 @@ public class VectorUpdateDeleteTest extends SAITester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
         flush();
 
-        var result = execute("SELECT * FROM %s WHERE val ann of [9.5, 10.5, 11.5] LIMIT 1");
+        var result = execute("SELECT * FROM %s ORDER BY val ann of [9.5, 10.5, 11.5] LIMIT 1");
         assertThat(result).hasSize(1);
         assertContainsInt(result, "pk", 0);
-        result = execute("SELECT * FROM %s WHERE val ann of [0.5, 1.5, 2.5] LIMIT 1");
+        result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 1");
         assertThat(result).hasSize(1);
         assertContainsInt(result, "pk", 1);
     }
