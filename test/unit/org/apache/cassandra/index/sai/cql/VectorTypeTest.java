@@ -78,20 +78,20 @@ public class VectorTypeTest extends SAITester
         assertContainsInt(result, "pk", 2);
     }
 
-    public static void assertContainsInt(UntypedResultSet result, String pkName, int pk)
+    public static void assertContainsInt(UntypedResultSet result, String columnName, int columnValue)
     {
         for (UntypedResultSet.Row row : result)
         {
-            if (row.has(pkName)) // assuming 'pk' is the name of your primary key column
+            if (row.has(columnName))
             {
-                int value = row.getInt("pk");
-                if (value == pk)
+                int value = row.getInt(columnName);
+                if (value == columnValue)
                 {
                     return;
                 }
             }
         }
-        throw new AssertionError("Result set does not contain a row with pk = " + pk);
+        throw new AssertionError("Result set does not contain a row with " + columnName + " = " + columnValue);
     }
 
     @Test

@@ -18,8 +18,10 @@
 
 package org.apache.cassandra.index.sai;
 
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -27,6 +29,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 /**
@@ -66,6 +69,8 @@ public class QueryContext
 
     private final Map<SSTableReader, SSTableQueryContext> sstableQueryContexts = new HashMap<>();
 
+    public final ConcurrentSkipListSet<PrimaryKey> shadowedPrimaryKeys = new ConcurrentSkipListSet<>();
+
     @VisibleForTesting
     public QueryContext()
     {
@@ -100,5 +105,15 @@ public class QueryContext
             queryTimeouts++;
             throw new AbortedOperationException();
         }
+    }
+
+    public void recordShadowedPrimaryKey(PrimaryKey primaryKey)
+    {
+        shadowedPrimaryKeys.add(primaryKey);
+    }
+
+    public Collection<PrimaryKey> shadowedPrimaryKeys()
+    {
+        return shadowedPrimaryKeys;
     }
 }
