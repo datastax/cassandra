@@ -35,6 +35,8 @@ import org.apache.cassandra.transport.Compressor;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.ProductType;
 
 /**
  * Message to indicate that the server is ready to receive requests.
@@ -83,6 +85,8 @@ public class OptionsMessage extends Message.Request
         supported.put(StartupMessage.PROTOCOL_VERSIONS, ProtocolVersion.supportedVersions());
         supported.put(StartupMessage.EMULATE_DBAAS_DEFAULTS, Collections.singletonList(String.valueOf(DatabaseDescriptor.isEmulateDbaasDefaults())));
         supported.put(StartupMessage.PAGE_UNIT, supportedPageUnits);
+        supported.put(StartupMessage.SERVER_VERSION, Collections.singletonList(FBUtilities.getReleaseVersionString()));
+        supported.put(StartupMessage.PRODUCT_TYPE, Collections.singletonList(ProductType.getProduct().toString()));
 
         return new SupportedMessage(supported);
     }
