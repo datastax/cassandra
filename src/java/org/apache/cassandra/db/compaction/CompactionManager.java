@@ -239,21 +239,24 @@ public class CompactionManager implements CompactionManagerMBean
         Pattern fileNamePattern = Pattern.compile("-controller-config.JSON", Pattern.LITERAL);
         Pattern keyspaceNameSeparator = Pattern.compile("\\.");
         File dir = DatabaseDescriptor.getMetadataDirectory();
-        for (File file : dir.tryList())
+        if (dir != null)
         {
-            if (file.name().contains("-controller-config.JSON"))
+            for (File file : dir.tryList())
             {
-                String[] names = keyspaceNameSeparator.split(fileNamePattern.matcher(file.name()).replaceAll(""));
-                try
+                if (file.name().contains("-controller-config.JSON"))
                 {
-                    //table exists so keep the file
-                    Schema.instance.getKeyspaceInstance(names[0]).getColumnFamilyStore(names[1]);
-                }
-                catch(NullPointerException e)
-                {
-                    //table does not exist so delete the file
-                    logger.debug("Removing " + file + " because it does not correspond to an existing table");
-                    file.delete();
+                    String[] names = keyspaceNameSeparator.split(fileNamePattern.matcher(file.name()).replaceAll(""));
+                    try
+                    {
+                        //table exists so keep the file
+                        Schema.instance.getKeyspaceInstance(names[0]).getColumnFamilyStore(names[1]);
+                    }
+                    catch(NullPointerException e)
+                    {
+                        //table does not exist so delete the file
+                        logger.debug("Removing " + file + " because it does not correspond to an existing table");
+                        file.delete();
+                    }
                 }
             }
         }
