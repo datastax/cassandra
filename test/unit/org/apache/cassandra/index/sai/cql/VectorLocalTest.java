@@ -429,7 +429,7 @@ public class VectorLocalTest extends SAITester
         float prevScore = -1;
         for (float[] current : resultVectors)
         {
-            float score = function.compare(current, queryVector);
+            float score = VectorSimilarityFunction.COSINE.compare(current, queryVector);
             if (prevScore >= 0)
                 assertThat(score).isLessThanOrEqualTo(prevScore);
 

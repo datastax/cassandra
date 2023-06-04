@@ -1106,7 +1106,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 verifyOrderingIsAllowed(restrictions, orderingColumns);
                 orderingComparator = getOrderingComparator(selection, restrictions, orderingColumns);
                 isReversed = isReversed(table, orderingColumns, restrictions);
-                if (isReversed)
+                if (isReversed && orderingComparator != null)
                     orderingComparator = orderingComparator.reverse();
             }
 
@@ -1179,14 +1179,21 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
 
         /**
-         * Returns the columns used to order the data.
-         * @return the columns used to order the data.
+         * Returns the columns in the same order as given list used to order the data.
+         * @return the columns in the same order as given list used to order the data.
          */
         private Map<ColumnMetadata, Ordering> getOrderingColumns(List<Ordering> orderings)
         {
-            return orderings.stream()
-                            .collect(Collectors.toMap(o -> o.expression.getColumn(),
-                                                      java.util.function.Function.identity()));
+            if (orderings.isEmpty())
+                return Collections.emptyMap();
+
+            Map<ColumnMetadata, Ordering> orderingColumns = new LinkedHashMap<>();
+            for (Ordering ordering : orderings)
+            {
+                ColumnMetadata column = ordering.expression.getColumn();
+                orderingColumns.put(column, ordering);
+            }
+            return orderingColumns;
         }
 
         private List<Ordering> getOrderings(TableMetadata table)
