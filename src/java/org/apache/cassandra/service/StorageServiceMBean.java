@@ -1173,19 +1173,6 @@ public interface StorageServiceMBean extends NotificationEmitter
     public void setAutoOptimisePreviewRepairStreams(boolean enabled);
 
     // warning thresholds will be replaced by equivalent guardrails
-    /** @deprecated See CASSANDRA-17195 */
-    @Deprecated(since = "4.1")
-    int getTableCountWarnThreshold();
-    /** @deprecated See CASSANDRA-17195 */
-    @Deprecated(since = "4.1")
-    void setTableCountWarnThreshold(int value);
-    /** @deprecated See CASSANDRA-17195 */
-    @Deprecated(since = "4.1")
-    int getKeyspaceCountWarnThreshold();
-    /** @deprecated See CASSANDRA-17195 */
-    @Deprecated(since = "4.1")
-    void setKeyspaceCountWarnThreshold(int value);
-
     /** @deprecated See CASSANDRA-17194 */
     @Deprecated(since = "5.0")
     void setCompactionTombstoneWarningThreshold(int count);
