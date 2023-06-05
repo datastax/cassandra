@@ -105,7 +105,6 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.Config.PaxosStatePurging;
-import org.apache.cassandra.config.Converters;
 import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.DurationSpec;
@@ -6947,42 +6946,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public void setAutoOptimisePreviewRepairStreams(boolean enabled)
     {
         DatabaseDescriptor.setAutoOptimisePreviewRepairStreams(enabled);
-    }
-
-    /** @deprecated See CASSANDRA-17195 */
-    @Deprecated(since = "4.1")
-    public int getTableCountWarnThreshold()
-    {
-        return (int) Converters.TABLE_COUNT_THRESHOLD_TO_GUARDRAIL.unconvert(Guardrails.instance.getTablesWarnThreshold());
-    }
-
-    /** @deprecated See CASSANDRA-17195 */
-    @Deprecated(since = "4.1")
-    public void setTableCountWarnThreshold(int value)
-    {
-        if (value < 0)
-            throw new IllegalStateException("Table count warn threshold should be positive, not "+value);
-        logger.info("Changing table count warn threshold from {} to {}", getTableCountWarnThreshold(), value);
-        Guardrails.instance.setTablesThreshold((int) Converters.TABLE_COUNT_THRESHOLD_TO_GUARDRAIL.convert(value),
-                                               Guardrails.instance.getTablesFailThreshold());
-    }
-
-    /** @deprecated See CASSANDRA-17195 */
-    @Deprecated(since = "4.1")
-    public int getKeyspaceCountWarnThreshold()
-    {
-        return (int) Converters.KEYSPACE_COUNT_THRESHOLD_TO_GUARDRAIL.unconvert(Guardrails.instance.getKeyspacesWarnThreshold());
-    }
-
-    /** @deprecated See CASSANDRA-17195 */
-    @Deprecated(since = "4.1")
-    public void setKeyspaceCountWarnThreshold(int value)
-    {
-        if (value < 0)
-            throw new IllegalStateException("Keyspace count warn threshold should be positive, not "+value);
-        logger.info("Changing keyspace count warn threshold from {} to {}", getKeyspaceCountWarnThreshold(), value);
-        Guardrails.instance.setKeyspacesThreshold((int) Converters.KEYSPACE_COUNT_THRESHOLD_TO_GUARDRAIL.convert(value),
-                                                  Guardrails.instance.getKeyspacesFailThreshold());
     }
 
     @Override
