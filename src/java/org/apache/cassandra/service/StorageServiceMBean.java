@@ -1138,15 +1138,6 @@ public interface StorageServiceMBean extends NotificationEmitter
 
     // warning thresholds will be replaced by equivalent guardrails
     @Deprecated
-    int getTableCountWarnThreshold();
-    @Deprecated
-    void setTableCountWarnThreshold(int value);
-    @Deprecated
-    int getKeyspaceCountWarnThreshold();
-    @Deprecated
-    void setKeyspaceCountWarnThreshold(int value);
-
-    @Deprecated
     void setCompactionTombstoneWarningThreshold(int count);
     @Deprecated
     int getCompactionTombstoneWarningThreshold();
