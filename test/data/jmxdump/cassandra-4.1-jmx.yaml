@@ -3359,7 +3359,6 @@ org.apache.cassandra.db:type=StorageService:
   - {access: read-only, name: Joined, type: boolean}
   - {access: read-only, name: JoiningNodes, type: java.util.List}
   - {access: read-only, name: JoiningNodesWithPort, type: java.util.List}
-  - {access: read/write, name: KeyspaceCountWarnThreshold, type: int}
   - {access: read-only, name: Keyspaces, type: java.util.List}
   - {access: read-only, name: LeavingNodes, type: java.util.List}
   - {access: read-only, name: LeavingNodesWithPort, type: java.util.List}
@@ -3401,7 +3400,6 @@ org.apache.cassandra.db:type=StorageService:
   - {access: read/write, name: SnapshotLinksPerSecond, type: long}
   - {access: read-only, name: Starting, type: boolean}
   - {access: read/write, name: StreamThroughputMbPerSec, type: int}
-  - {access: read/write, name: TableCountWarnThreshold, type: int}
   - {access: read-only, name: TokenToEndpointMap, type: java.util.Map}
   - {access: read-only, name: TokenToEndpointWithPortMap, type: java.util.Map}
   - {access: read-only, name: Tokens, type: java.util.List}
