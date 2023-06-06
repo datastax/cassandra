@@ -16,6 +16,7 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Map;
 
@@ -23,7 +24,12 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileReader;
 import org.apache.cassandra.utils.MonotonicClock;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_STATIC_SCALING_PARAMETERS_OPTION;
 
@@ -51,6 +57,7 @@ public class StaticController extends Controller
                             int numShards,
                             long minSSTableSizeMB,
                             long flushSizeOverrideMB,
+                            long currentFlushSize,
                             double maxSpaceOverhead,
                             int maxSSTablesToCompact,
                             long expiredSSTableCheckFrequency,
@@ -58,7 +65,9 @@ public class StaticController extends Controller
                             boolean l0ShardsEnabled,
                             int baseShardCount,
                             double targetSStableSize,
-                            OverlapInclusionMethod overlapInclusionMethod)
+                            OverlapInclusionMethod overlapInclusionMethod,
+                            String keyspaceName,
+                            String tableName)
     {
         super(MonotonicClock.Global.preciseTime,
               env,
@@ -67,6 +76,7 @@ public class StaticController extends Controller
               numShards,
               minSSTableSizeMB,
               flushSizeOverrideMB,
+              currentFlushSize,
               maxSpaceOverhead,
               maxSSTablesToCompact,
               expiredSSTableCheckFrequency,
@@ -76,6 +86,8 @@ public class StaticController extends Controller
               targetSStableSize,
               overlapInclusionMethod);
         this.scalingParameters = scalingParameters;
+        this.keyspaceName = keyspaceName;
+        this.tableName = tableName;
     }
 
     static Controller fromOptions(Environment env,
@@ -92,6 +104,8 @@ public class StaticController extends Controller
                                   int baseShardCount,
                                   double targetSStableSize,
                                   OverlapInclusionMethod overlapInclusionMethod,
+                                  String keyspaceName,
+                                  String tableName,
                                   Map<String, String> options)
     {
         int[] scalingParameters;
@@ -99,6 +113,23 @@ public class StaticController extends Controller
             scalingParameters = parseScalingParameters(options.get(STATIC_SCALING_FACTORS_OPTION));
         else
             scalingParameters = parseScalingParameters(options.getOrDefault(STATIC_SCALING_PARAMETERS_OPTION, DEFAULT_STATIC_SCALING_PARAMETERS));
+        long currentFlushSize = flushSizeOverrideMB << 20;
+
+        File f = getControllerConfigPath(keyspaceName, tableName);
+        try
+        {
+            JSONParser jsonParser = new JSONParser();
+            JSONObject jsonObject = (JSONObject) jsonParser.parse(new FileReader(f));
+            if (jsonObject.get("current_flush_size") != null && flushSizeOverrideMB == 0)
+            {
+                currentFlushSize = (long) jsonObject.get("current_flush_size");
+                logger.debug("Successfully read stored current_flush_size from disk");
+            }
+        }
+        catch (IOException | ParseException e)
+        {
+            logger.warn("Unable to read saved flush size. Using starting value instead: ", e);
+        }
         return new StaticController(env,
                                     scalingParameters,
                                     survivalFactors,
@@ -106,6 +137,7 @@ public class StaticController extends Controller
                                     numShards,
                                     minSSTableSizeMB,
                                     flushSizeOverrideMB,
+                                    currentFlushSize,
                                     maxSpaceOverhead,
                                     maxSSTablesToCompact,
                                     expiredSSTableCheckFrequency,
@@ -113,7 +145,9 @@ public class StaticController extends Controller
                                     l0ShardsEnabled,
                                     baseShardCount,
                                     targetSStableSize,
-                                    overlapInclusionMethod);
+                                    overlapInclusionMethod,
+                                    keyspaceName,
+                                    tableName);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
@@ -149,6 +183,12 @@ public class StaticController extends Controller
     public int getMaxAdaptiveCompactions()
     {
         return Integer.MAX_VALUE;
+    }
+
+    @Override
+    public void storeControllerConfig()
+    {
+        storeOptions(keyspaceName, tableName, scalingParameters, getFlushSizeBytes());
     }
 
     @Override
