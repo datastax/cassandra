@@ -25,8 +25,8 @@ import java.util.stream.Collectors;
 import com.google.common.collect.ImmutableList;
 import org.junit.Test;
 
-import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.ReplicationFactor;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -143,7 +143,7 @@ public class StaticControllerTest extends ControllerTest
             final int rf = 3;
             when(replicationStrategy.getReplicationFactor()).thenReturn(ReplicationFactor.fullOnly(rf));
 
-            Controller controller = Controller.fromOptions(cfs,  new HashMap<>());
+            Controller controller = Controller.fromOptions(cfs,  new HashMap<>(), keyspaceName, tableName);
             assertNotNull(controller);
             assertNotNull(controller.toString());
 
@@ -166,6 +166,7 @@ public class StaticControllerTest extends ControllerTest
                                                            numShards,
                                                            sstableSizeMB,
                                                            0,
+                                                           0,
                                                            Controller.DEFAULT_MAX_SPACE_OVERHEAD,
                                                            0,
                                                            Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS,
@@ -173,7 +174,9 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_L0_SHARDS_ENABLED,
                                                            Controller.DEFAULT_BASE_SHARD_COUNT,
                                                            Controller.DEFAULT_TARGET_SSTABLE_SIZE,
-                                                           Controller.DEFAULT_OVERLAP_INCLUSION_METHOD);
+                                                           Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
+                                                           keyspaceName,
+                                                           tableName);
         super.testStartShutdown(controller);
     }
 
@@ -187,6 +190,7 @@ public class StaticControllerTest extends ControllerTest
                                                            numShards,
                                                            sstableSizeMB,
                                                            0,
+                                                           0,
                                                            Controller.DEFAULT_MAX_SPACE_OVERHEAD,
                                                            0,
                                                            Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS,
@@ -194,7 +198,9 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_L0_SHARDS_ENABLED,
                                                            Controller.DEFAULT_BASE_SHARD_COUNT,
                                                            Controller.DEFAULT_TARGET_SSTABLE_SIZE,
-                                                           Controller.DEFAULT_OVERLAP_INCLUSION_METHOD);
+                                                           Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
+                                                           keyspaceName,
+                                                           tableName);
         super.testShutdownNotStarted(controller);
     }
 
@@ -208,6 +214,7 @@ public class StaticControllerTest extends ControllerTest
                                                            numShards,
                                                            sstableSizeMB,
                                                            0,
+                                                           0,
                                                            Controller.DEFAULT_MAX_SPACE_OVERHEAD,
                                                            0,
                                                            Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS,
@@ -215,7 +222,9 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_L0_SHARDS_ENABLED,
                                                            Controller.DEFAULT_BASE_SHARD_COUNT,
                                                            Controller.DEFAULT_TARGET_SSTABLE_SIZE,
-                                                           Controller.DEFAULT_OVERLAP_INCLUSION_METHOD);
+                                                           Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
+                                                           keyspaceName,
+                                                           tableName);
         super.testStartAlreadyStarted(controller);
     }
 
@@ -328,14 +337,14 @@ public class StaticControllerTest extends ControllerTest
     public void testBaseShardCountDefault()
     {
         Map<String, String> options = new HashMap<>();
-        Controller controller = Controller.fromOptions(cfs, options);
+        Controller controller = Controller.fromOptions(cfs, options, keyspaceName, tableName);
         assertEquals(Controller.DEFAULT_BASE_SHARD_COUNT, controller.baseShardCount);
 
         String prevKS = keyspaceName;
         try
         {
             keyspaceName = SchemaConstants.SYSTEM_KEYSPACE_NAME;
-            controller = controller.fromOptions(cfs, options);
+            controller = controller.fromOptions(cfs, options, keyspaceName, tableName);
             assertEquals(1, controller.baseShardCount);
         }
         finally
@@ -344,11 +353,11 @@ public class StaticControllerTest extends ControllerTest
         }
 
         numDirectories = 3;
-        controller = controller.fromOptions(cfs, options);
+        controller = controller.fromOptions(cfs, options, keyspaceName, tableName);
         assertEquals(1, controller.baseShardCount);
 
         numDirectories = 1;
-        controller = controller.fromOptions(cfs, options);
+        controller = controller.fromOptions(cfs, options, keyspaceName, tableName);
         assertEquals(Controller.DEFAULT_BASE_SHARD_COUNT, controller.baseShardCount);
     }
 }
