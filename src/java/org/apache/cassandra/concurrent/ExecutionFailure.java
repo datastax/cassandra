@@ -125,6 +125,8 @@ public class ExecutionFailure
     {
         return new Runnable()
         {
+            Throwable callStack = new Throwable();
+
             @Override
             public void run()
             {
