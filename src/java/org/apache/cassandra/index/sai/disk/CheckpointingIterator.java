@@ -35,13 +35,15 @@ public class CheckpointingIterator<T extends Comparable<T>> extends RangeIterato
     private final QueryContext context;
     private final RangeIterator<T> union;
     private final Collection<SSTableIndex> referencedIndexes;
+    private final Collection<SSTableIndex> referencedAnnIndexesInHybridSearch;
 
-    public CheckpointingIterator(RangeIterator<T> wrapped, Collection<SSTableIndex> referencedIndexes, QueryContext queryContext)
+    public CheckpointingIterator(RangeIterator<T> wrapped, Collection<SSTableIndex> referencedIndexes, Collection<SSTableIndex> referencedAnnIndexesInHybridSearch, QueryContext queryContext)
     {
         super(wrapped.getMinimum(), wrapped.getMaximum(), wrapped.getCount());
 
         this.union = wrapped;
         this.referencedIndexes = referencedIndexes;
+        this.referencedAnnIndexesInHybridSearch = referencedAnnIndexesInHybridSearch;
         this.context = queryContext;
     }
 
@@ -74,6 +76,9 @@ public class CheckpointingIterator<T extends Comparable<T>> extends RangeIterato
         FileUtils.closeQuietly(union);
         referencedIndexes.forEach(CheckpointingIterator::releaseQuietly);
         referencedIndexes.clear();
+
+        referencedAnnIndexesInHybridSearch.forEach(CheckpointingIterator::releaseQuietly);
+        referencedAnnIndexesInHybridSearch.clear();
     }
 
     private static void releaseQuietly(SSTableIndex index)
