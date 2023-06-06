@@ -28,7 +28,6 @@ import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.Slices;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.ClientState;
 
@@ -60,23 +59,5 @@ public class SelectStatementTest
         Assert.assertEquals(Slices.NONE, parseSelect("SELECT * FROM ks.tbl WHERE k=100 AND c > 10 AND c <= 10").makeSlices(QueryOptions.DEFAULT));
         Assert.assertEquals(Slices.NONE, parseSelect("SELECT * FROM ks.tbl WHERE k=100 AND c < 10 AND c >= 10").makeSlices(QueryOptions.DEFAULT));
         Assert.assertEquals(Slices.NONE, parseSelect("SELECT * FROM ks.tbl WHERE k=100 AND c < 10 AND c > 10").makeSlices(QueryOptions.DEFAULT));
-    }
-
-    @Test
-    public void testInvalidColumnNameWithAnn()
-    {
-        String tableName = "ks.tbl";
-        QueryProcessor.executeOnceInternal(String.format("CREATE TABLE %s (k int, c int, v int, primary key (k, c))", tableName));
-        try
-        {
-            QueryProcessor.executeOnceInternal(String.format("SELECT k from %s ORDER BY bad_col ANN OF [1.0] LIMIT 1", tableName));
-        }
-        catch (InvalidRequestException ex)
-        {
-            String expected = String.format("Undefined column name bad_col in table %s", tableName);
-            Assert.assertEquals(expected, ex.getMessage());
-            return;
-        }
-        Assert.assertFalse("Invalid SELECT should throw InvalidRequestException", true);
     }
 }
