@@ -29,11 +29,17 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture; // checkstyle: permit this import
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.management.openmbean.OpenDataException;
 import javax.management.openmbean.TabularData;
@@ -56,8 +62,8 @@ import org.slf4j.LoggerFactory;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.concurrent.ExecutorFactory;
-import org.apache.cassandra.concurrent.WrappedExecutorPlus;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.WrappedExecutorPlus;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -101,6 +107,7 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.repair.NoSuchRepairSessionException;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
@@ -165,8 +172,10 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
 
         /*Schedule periodic reports to run every minute*/
         ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(CompactionManager::periodicReports, 1, 1, TimeUnit.MINUTES);
-    }
 
+        /*Store Controller Config for UCS every hour*/
+        ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(CompactionManager::storeControllerConfig, 10, 60, TimeUnit.MINUTES);
+    }
     private final CompactionExecutor executor = new CompactionExecutor();
     private final ValidationExecutor validationExecutor = new ValidationExecutor();
     private final CompactionExecutor cacheCleanupExecutor = new CacheCleanupExecutor();
@@ -190,12 +199,78 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
 
     protected static void periodicReports()
     {
+        if (!Keyspace.isInitialized())
+            return;
+
         for (String keyspace : Schema.instance.getKeyspaces())
         {
             for ( ColumnFamilyStore cfs : Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStores())
             {
                 CompactionStrategy strat = cfs.getCompactionStrategy();
                 strat.periodicReport();
+            }
+        }
+    }
+
+    @VisibleForTesting
+    public static void storeControllerConfig()
+    {
+        /*Delete any controller-config.JSON files that correspond to a table that no longer exists*/
+        if (!Keyspace.isInitialized())
+            return;
+
+        cleanupControllerConfig();
+
+        for (String keyspace : Schema.instance.getKeyspaces())
+        {
+            //don't store config files for system tables
+            if (keyspace.equals(SchemaConstants.SYSTEM_KEYSPACE_NAME)
+                    || keyspace.equals(SchemaConstants.AUTH_KEYSPACE_NAME)
+                    || keyspace.equals(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME)
+                    || keyspace.equals(SchemaConstants.SCHEMA_KEYSPACE_NAME)
+                    || keyspace.equals(SchemaConstants.TRACE_KEYSPACE_NAME)
+                    || keyspace.equals(SchemaConstants.SCHEMA_VIRTUAL_KEYSPACE_NAME)
+                    || keyspace.equals(SchemaConstants.SYSTEM_VIEWS_KEYSPACE_NAME))
+            {
+                continue;
+            }
+            for ( ColumnFamilyStore cfs : Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStores())
+            {
+                CompactionStrategy strat = cfs.getCompactionStrategy();
+                if (strat instanceof UnifiedCompactionContainer)
+                {
+                    UnifiedCompactionStrategy ucs = (UnifiedCompactionStrategy) ((UnifiedCompactionContainer) strat).getStrategies().get(0);
+                    ucs.storeControllerConfig();
+                }
+            }
+        }
+    }
+
+    @VisibleForTesting
+    public static void cleanupControllerConfig()
+    {
+        Pattern fileNamePattern = Pattern.compile("-controller-config.JSON", Pattern.LITERAL);
+        Pattern keyspaceNameSeparator = Pattern.compile("\\.");
+        File dir = DatabaseDescriptor.getMetadataDirectory();
+        if (dir != null)
+        {
+            for (File file : dir.tryList())
+            {
+                if (file.name().contains("-controller-config.JSON"))
+                {
+                    String[] names = keyspaceNameSeparator.split(fileNamePattern.matcher(file.name()).replaceAll(""));
+                    try
+                    {
+                        //table exists so keep the file
+                        Schema.instance.getKeyspaceInstance(names[0]).getColumnFamilyStore(names[1]);
+                    }
+                    catch(NullPointerException e)
+                    {
+                        //table does not exist so delete the file
+                        logger.debug("Removing " + file + " because it does not correspond to an existing table");
+                        file.delete();
+                    }
+                }
             }
         }
     }
@@ -1341,7 +1416,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         try (SSTableRewriter writer = SSTableRewriter.construct(cfs, txn, false, sstable.maxDataAge);
              ISSTableScanner scanner = cleanupStrategy.getScanner(sstable);
              CompactionController controller = new CompactionController(cfs, txn.originals(), getDefaultGcBefore(cfs, nowInSec));
-             Refs<SSTableReader> refs = Refs.ref(Collections.singleton(sstable));
+             Refs<SSTableReader> refs = Refs.ref(singleton(sstable));
              CompactionIterator ci = new CompactionIterator(OperationType.CLEANUP, Collections.singletonList(scanner), controller, nowInSec, nextTimeUUID()))
         {
             StatsMetadata metadata = sstable.getSSTableMetadata();
@@ -1587,7 +1662,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
      * @param cfs
      * @param txn a transaction over the repaired sstables to anticompact
      * @param ranges full and transient ranges to be placed into one of the new sstables. The repaired table will be tracked via
-     *   the {@link org.apache.cassandra.io.sstable.metadata.StatsMetadata#pendingRepair} field.
+     *   the {@link StatsMetadata#pendingRepair} field.
      * @param pendingRepair the repair session we're anti-compacting for
      * @param isCancelled function that indicates if active anti-compaction should be canceled
      */
