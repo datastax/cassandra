@@ -55,8 +55,7 @@ public class AdaptiveController extends Controller
     private static final Logger logger = LoggerFactory.getLogger(AdaptiveController.class);
 
     /** The starting value for the scaling parameter */
-    static final String STARTING_SCALING_PARAMETER = "adaptive_starting_scaling_parameter";
-    private static final int DEFAULT_STARTING_SCALING_PARAMETER = Integer.getInteger(PREFIX + STARTING_SCALING_PARAMETER, 0);
+    private static final int DEFAULT_STARTING_SCALING_PARAMETER = 0;
 
     /** The minimum valid value for the scaling parameter */
     static final String MIN_SCALING_PARAMETER = "adaptive_min_scaling_parameter";
@@ -168,7 +167,6 @@ public class AdaptiveController extends Controller
                                   String tableName,
                                   Map<String, String> options)
     {
-        int scalingParameter = options.containsKey(STARTING_SCALING_PARAMETER) ? Integer.parseInt(options.get(STARTING_SCALING_PARAMETER)) : DEFAULT_STARTING_SCALING_PARAMETER;
         int[] scalingParameters = null;
         long currentFlushSize = flushSizeOverrideMB << 20;
 
@@ -193,7 +191,33 @@ public class AdaptiveController extends Controller
         {
             logger.warn("Unable to read scaling_parameters. Using starting value instead.");
             scalingParameters = new int[UnifiedCompactionStrategy.MAX_LEVELS];
-            Arrays.fill(scalingParameters, scalingParameter);
+            String staticScalingParameters = options.remove(SCALING_PARAMETERS_OPTION);
+            String staticScalingFactors = options.remove(STATIC_SCALING_FACTORS_OPTION);
+
+            if (staticScalingParameters != null)
+            {
+                int[] parameters = parseScalingParameters(staticScalingParameters);
+                for (int i = 0; i < scalingParameters.length; i++)
+                {
+                    if (i < parameters.length)
+                        scalingParameters[i] = parameters[i];
+                    else
+                        scalingParameters[i] = scalingParameters[i-1];
+                }
+            }
+            else if (staticScalingFactors != null)
+            {
+                int[] factors = parseScalingParameters(staticScalingFactors);
+                for (int i = 0; i < scalingParameters.length; i++)
+                {
+                    if (i < factors.length)
+                        scalingParameters[i] = factors[i];
+                    else
+                        scalingParameters[i] = scalingParameters[i-1];
+                }
+            }
+            else
+                Arrays.fill(scalingParameters, DEFAULT_STARTING_SCALING_PARAMETER);
         }
         else
             logger.debug("Successfully read stored scaling parameters from disk.");
@@ -263,9 +287,14 @@ public class AdaptiveController extends Controller
         int maxScalingParameter = DEFAULT_MAX_SCALING_PARAMETER;
 
         String s;
-        s = options.remove(STARTING_SCALING_PARAMETER);
-        if (s != null)
-            scalingParameter = Integer.parseInt(s);
+        String staticScalingFactors = options.remove(STATIC_SCALING_FACTORS_OPTION);
+        String staticScalingParameters = options.remove(SCALING_PARAMETERS_OPTION);
+        if (staticScalingFactors != null && staticScalingParameters != null)
+            throw new ConfigurationException(String.format("Either '%s' or '%s' should be used, not both", SCALING_PARAMETERS_OPTION, STATIC_SCALING_FACTORS_OPTION));
+        else if (staticScalingFactors != null)
+            parseScalingParameters(staticScalingFactors);
+        else if (staticScalingParameters != null)
+            parseScalingParameters(staticScalingParameters);
         s = options.remove(MIN_SCALING_PARAMETER);
         if (s != null)
             minScalingParameter = Integer.parseInt(s);
