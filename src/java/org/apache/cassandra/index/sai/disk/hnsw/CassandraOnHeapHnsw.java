@@ -81,11 +81,7 @@ public class CassandraOnHeapHnsw<T>
         serializer = (VectorType.VectorSerializer)termComparator.getSerializer();
         vectorValues = new ConcurrentVectorValues(((VectorType)termComparator).dimension);
         similarityFunction = indexWriterConfig.getSimilarityFunction();
-        // We need to be able to inexpensively distinguish different vectors, with a slower path
-        // that identifies vectors that are equal but not the same reference.  A comparison-
-        // based Map (which only needs to look at vector elements until a difference is found)
-        // is thus a better option than hash-based (which has to look at all elements to compute the hash).
-        postingsMap = new ConcurrentSkipListMap<>(Arrays::compare);
+        postingsMap = new ConcurrentHashMap<>();
 
         builder = concurrent
                   ? new CassandraHnswGraphBuilder.ConcurrentBuilder<>(vectorValues,
