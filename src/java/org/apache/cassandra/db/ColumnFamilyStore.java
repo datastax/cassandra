@@ -1112,11 +1112,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         synchronized (data)
         {
-            Memtable current = data.getView().getCurrentMemtable();
-            for (ColumnFamilyStore cfs : concatWithIndexes())
-                if (!cfs.data.getView().getCurrentMemtable().isClean())
-                    return flushMemtable(current, reason);
-            return waitForFlushes();
+            if (!data.getView().liveMemtables.isEmpty())
+            {
+                Memtable current = data.getView().getCurrentMemtable();
+                for (ColumnFamilyStore cfs : concatWithIndexes())
+                    if (!cfs.data.getView().getCurrentMemtable().isClean())
+                        return flushMemtable(current, reason);
+                return waitForFlushes();
+            }
+            else
+            {
+                return ListenableFutureTask.create(() -> CommitLogPosition.NONE);
+            }
         }
     }
 
