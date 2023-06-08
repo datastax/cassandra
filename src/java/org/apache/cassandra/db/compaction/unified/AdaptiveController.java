@@ -215,12 +215,19 @@ public class AdaptiveController extends Controller
                     else
                         scalingParameters[i] = scalingParameters[i-1];
                 }
+                logger.info("Option: '{}' used to initialize scaling parameters for Adaptive Controller", STATIC_SCALING_FACTORS_OPTION);
             }
             else
                 Arrays.fill(scalingParameters, DEFAULT_STARTING_SCALING_PARAMETER);
         }
         else
+        {
             logger.debug("Successfully read stored scaling parameters from disk.");
+            if (options.containsKey(SCALING_PARAMETERS_OPTION))
+                logger.warn("Option: '{}' is defined but not used.  Stored configuration was used instead", SCALING_PARAMETERS_OPTION);
+            if (options.containsKey(STATIC_SCALING_FACTORS_OPTION))
+                logger.warn("Option: '{}' is defined but not used.  Stored configuration was used instead", STATIC_SCALING_FACTORS_OPTION);
+        }
         int[] previousScalingParameters = scalingParameters.clone();
 
         int minScalingParameter = options.containsKey(MIN_SCALING_PARAMETER) ? Integer.parseInt(options.get(MIN_SCALING_PARAMETER)) : DEFAULT_MIN_SCALING_PARAMETER;
