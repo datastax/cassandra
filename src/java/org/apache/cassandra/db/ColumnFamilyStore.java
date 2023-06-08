@@ -56,6 +56,7 @@ import com.google.common.base.Predicates;
 import com.google.common.base.Throwables;
 import com.google.common.collect.*;
 import com.google.common.primitives.Longs;
+import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListenableFutureTask;
 import com.google.common.util.concurrent.RateLimiter;
@@ -1122,7 +1123,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             }
             else
             {
-                return ListenableFutureTask.create(() -> CommitLogPosition.NONE);
+                return Futures.immediateFuture(CommitLogPosition.NONE);
             }
         }
     }
