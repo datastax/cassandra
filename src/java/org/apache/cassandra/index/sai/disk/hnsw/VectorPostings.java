@@ -53,13 +53,17 @@ public class VectorPostings<T>
     }
 
     /**
-     * @return true if current ordinal is removed by partition/range deletion
+     * @return true if current ordinal is removed by partition/range deletion.
+     * Must be called after computeRowIds.
      */
     public boolean shouldAppendDeletedOrdinal()
     {
         return !postings.isEmpty() && (rowIds != null && rowIds.isEmpty());
     }
 
+    /**
+     * Compute the rowIds corresponding to the <T> keys in this postings list.
+     */
     public void computeRowIds(Function<T, Integer> postingTransformer)
     {
         Preconditions.checkState(rowIds == null);
@@ -76,6 +80,10 @@ public class VectorPostings<T>
         rowIds = ids;
     }
 
+    /**
+     * @return rowIds corresponding to the <T> keys in this postings list.
+     * Must be called after computeRowIds.
+     */
     public IntArrayList getRowIds()
     {
         Preconditions.checkNotNull(rowIds);
