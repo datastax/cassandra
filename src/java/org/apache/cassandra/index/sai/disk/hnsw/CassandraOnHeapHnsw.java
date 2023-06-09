@@ -48,7 +48,6 @@ import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.StringHelper;
 import org.apache.lucene.util.hnsw.HnswGraphSearcher;
 import org.apache.lucene.util.hnsw.NeighborQueue;
-import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
 public class CassandraOnHeapHnsw<T>
 {
@@ -225,8 +224,16 @@ public class CassandraOnHeapHnsw<T>
             long vectorPosition = vectorValues.write(vectorsOutput.asSequentialWriter());
             long vectorLength = vectorPosition - vectorOffset;
 
+            // remove ordinals that don't have corresponding row ids due to partition/range deletion
+            for (VectorPostings<T> vectorPostings : postingsMap.values())
+            {
+                vectorPostings.computeRowIds(postingTransformer);
+                if (vectorPostings.shouldAppendDeletedOrdinal())
+                    deletedOrdinals.add(vectorPostings.getOrdinal());
+            }
+
             long postingsOffset = postingsOutput.getFilePointer();
-            long postingsPosition = new VectorPostingsWriter<T>().writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap, postingTransformer, deletedOrdinals);
+            long postingsPosition = new VectorPostingsWriter<T>().writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap, deletedOrdinals);
             long postingsLength = postingsPosition - postingsOffset;
 
             long termsOffset = indexOutputWriter.getFilePointer();
