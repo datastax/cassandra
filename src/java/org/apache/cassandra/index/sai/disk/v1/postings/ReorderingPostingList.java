@@ -35,8 +35,7 @@ public class ReorderingPostingList implements PostingList
         int n = 0;
         while (source.hasNext())
         {
-            int segmentRowId = source.nextInt();
-            segmentRowIds.push(segmentRowId);
+            segmentRowIds.push(source.nextInt());
             n++;
         }
         this.size = n;
@@ -47,8 +46,7 @@ public class ReorderingPostingList implements PostingList
     {
         if (segmentRowIds.size() == 0)
             return PostingList.END_OF_STREAM;
-        long segmentRowId = segmentRowIds.pop();
-        return segmentRowId;
+        return segmentRowIds.pop();
     }
 
     @Override
