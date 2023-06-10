@@ -62,7 +62,7 @@ public class SSTableQueryContext
     /**
      * Create a bitset to ignore ordinals corresponding to shadowed primary keys
      */
-    public Bits bitsetForShadowedPrimaryKeys(SegmentMetadata metadata, PrimaryKeyMap primaryKeyMap, CassandraOnDiskHnsw graph) throws IOException
+    public Bits bitsForShadowedPrimaryKeys(SegmentMetadata metadata, PrimaryKeyMap primaryKeyMap, CassandraOnDiskHnsw graph) throws IOException
     {
         Set<Integer> ignoredOrdinals = null;
         try (var ordinalsView = graph.getOrdinalsView())
