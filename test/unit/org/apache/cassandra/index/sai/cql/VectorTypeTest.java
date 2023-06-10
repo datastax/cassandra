@@ -18,19 +18,9 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
 
-import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.inject.ActionBuilder;
-import org.apache.cassandra.inject.Expression;
-import org.apache.cassandra.inject.Injection;
-import org.apache.cassandra.inject.Injections;
-import org.apache.cassandra.inject.InvokePointBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -51,12 +41,10 @@ public class VectorTypeTest extends VectorTester
 
         UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
         assertThat(result).hasSize(3);
-        System.out.println(makeRowStrings(result));
 
         flush();
         result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
         assertThat(result).hasSize(3);
-        System.out.println(makeRowStrings(result));
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (4, 'E', [5.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (5, 'F', [6.0, 3.0, 4.0])");
@@ -166,7 +154,6 @@ public class VectorTypeTest extends VectorTester
 
         result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
         assertThat(result).hasSize(3);
-        System.out.println(makeRowStrings(result));
     }
 
     @Test
@@ -241,12 +228,10 @@ public class VectorTypeTest extends VectorTester
 
         UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
         assertThat(result).hasSize(3);
-        System.out.println(makeRowStrings(result));
 
         flush();
         result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
         assertThat(result).hasSize(3);
-        System.out.println(makeRowStrings(result));
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (4, 'E', [5.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (5, 'F', [6.0, 3.0, 4.0])");
@@ -258,7 +243,6 @@ public class VectorTypeTest extends VectorTester
 
         result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 5");
         assertThat(result).hasSize(5);
-        System.out.println(makeRowStrings(result));
     }
 
     @Test
@@ -275,7 +259,6 @@ public class VectorTypeTest extends VectorTester
 
         UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of ? LIMIT 3", vector(2.5f, 3.5f, 4.5f));
         assertThat(result).hasSize(3);
-        System.out.println(makeRowStrings(result));
     }
 
     @Test
@@ -296,12 +279,10 @@ public class VectorTypeTest extends VectorTester
 
         UntypedResultSet result = execute("SELECT * FROM %s WHERE str_val = 'B' ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).hasSize(2);
-        System.out.println(makeRowStrings(result));
 
         flush();
         result = execute("SELECT * FROM %s WHERE str_val = 'B' ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).hasSize(2);
-        System.out.println(makeRowStrings(result));
     }
 
     @Test
@@ -331,6 +312,71 @@ public class VectorTypeTest extends VectorTester
 
         result = execute("SELECT * FROM %s WHERE str_val = 'A' ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).hasSize(1);
+    }
+
+    @Test
+    public void primaryKeySearchTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, val vector<float, 3>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        var N = 5;
+        for (int i = 0; i < N; i++)
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, vector(1.0f + i, 2.0f + i, 3.0f + i));
+
+        for (int i = 0; i < N; i++)
+        {
+            UntypedResultSet result = execute("SELECT * FROM %s WHERE pk = ? ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2", i);
+            assertThat(result).hasSize(1);
+            assertRows(result, row(i));
+        }
+
+        flush();
+        for (int i = 0; i < N; i++)
+        {
+            UntypedResultSet result = execute("SELECT * FROM %s WHERE pk = ? ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 2", i);
+            assertThat(result).hasSize(1);
+            assertRows(result, row(i));
+        }
+    }
+
+    @Test
+    public void partitionKeySearchTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (partition int, row int, val vector<float, 2>, PRIMARY KEY(partition, row))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        var nPartitions = 5;
+        var rowsPerPartition = 10;
+        for (int i = 1; i < nPartitions; i++)
+        {
+            for (int j = 1; j < rowsPerPartition; j++)
+            {
+                logger.debug("Inserting partition {} row {}", i, j);
+                execute("INSERT INTO %s (partition, row, val) VALUES (?, ?, ?)", i, j, vector((float) i, (float) j));
+            }
+        }
+
+        for (int i = 0; i < nPartitions; i++)
+        {
+            UntypedResultSet result = execute("SELECT partition, row FROM %s WHERE partition = ? ORDER BY val ann of [1.5, 1.5] LIMIT 2", i);
+            assertThat(result).hasSize(2);
+            assertRowsIgnoringOrder(result,
+                                    row(i, 0),
+                                    row(i, 1));
+        }
+
+        flush();
+        for (int i = 0; i < nPartitions; i++)
+        {
+            UntypedResultSet result = execute("SELECT partition, row FROM %s WHERE partition = ? ORDER BY val ann of [1.5, 1.5] LIMIT 2", i);
+            assertThat(result).hasSize(2);
+            assertRowsIgnoringOrder(result,
+                                    row(i, 0),
+                                    row(i, 1));
+        }
     }
 
     @Test
@@ -405,14 +451,5 @@ public class VectorTypeTest extends VectorTester
                              "SELECT similarity_cosine([1, 2, 3], value) FROM %s WHERE pk=0");
         assertInvalidMessage("Required 2 elements, but saw 3",
                              "SELECT similarity_cosine([1, 2], [3, 4, 5]) FROM %s WHERE pk=0");
-    }
-
-
-    @Test
-    public void testInvalidColumnNameWithAnn() throws Throwable
-    {
-        String table = createTable(KEYSPACE, "CREATE TABLE %s (k int, c int, v int, primary key (k, c))");
-        assertInvalidMessage(String.format("Undefined column name bad_col in table %s", KEYSPACE + "." + table),
-                             "SELECT k from %s ORDER BY bad_col ANN OF [1.0] LIMIT 1");
     }
 }

@@ -34,6 +34,7 @@ import java.util.function.Function;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.VectorType;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -112,11 +113,16 @@ public class CassandraOnHeapHnsw<T>
         return size() == 0;
     }
 
+    /**
+     * @return the incremental bytes ysed by adding the given vector to the index
+     */
     public long add(ByteBuffer term, T key)
     {
         assert term != null && term.remaining() != 0;
 
         var vector = serializer.deserializeFloatArray(term);
+        verifyIndexable(vector);
+
         var bytesUsed = new AtomicLong();
         var newVector = new AtomicBoolean();
         // if the vector is already in the graph, all that happens is that the postings list is updated
@@ -153,6 +159,17 @@ public class CassandraOnHeapHnsw<T>
             }
         }
         return bytesUsed.get();
+    }
+
+    private void verifyIndexable(float[] vector)
+    {
+        for (int i = 0; i < vector.length; i++)
+        {
+            if (vector[i] != 0)
+                return;
+        }
+
+        throw new InvalidRequestException("Zero vectors cannot be indexed");
     }
 
     public Collection<T> keysFromOrdinal(int node)

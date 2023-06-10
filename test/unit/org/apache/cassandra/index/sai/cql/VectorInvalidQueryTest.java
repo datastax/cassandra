@@ -24,7 +24,6 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class VectorInvalidQueryTest extends SAITester
@@ -127,5 +126,13 @@ public class VectorInvalidQueryTest extends SAITester
         assertInvalidMessage("Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than 1000. LIMIT was NO LIMIT",
                              "SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5]");
 
+    }
+
+    @Test
+    public void testInvalidColumnNameWithAnn() throws Throwable
+    {
+        String table = createTable(KEYSPACE, "CREATE TABLE %s (k int, c int, v int, primary key (k, c))");
+        assertInvalidMessage(String.format("Undefined column name bad_col in table %s", KEYSPACE + "." + table),
+                             "SELECT k from %s ORDER BY bad_col ANN OF [1.0] LIMIT 1");
     }
 }
