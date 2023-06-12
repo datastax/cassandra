@@ -153,8 +153,11 @@ public class VectorMemtableIndex implements MemtableIndex
         Bits bits = null;
         if (!graph.isEmpty() && !RangeUtil.coversFullRing(keyRange))
         {
+            // if left bound is MIN_BOUND or KEY_BOUND, we need to include all token-only PrimaryKeys with same token
             boolean leftInclusive = keyRange.left.kind() != PartitionPosition.Kind.MAX_BOUND;
+            // if right bound is MAX_BOUND or KEY_BOUND, we need to include all token-only PrimaryKeys with same token
             boolean rightInclusive = keyRange.right.kind() != PartitionPosition.Kind.MIN_BOUND;
+            // if right token is MAX (Long.MIN_VALUE), there is no upper bound
             boolean isMaxToken = keyRange.right.getToken().isMinimum(); // max token
 
             PrimaryKey left = indexContext.keyFactory().createTokenOnly(keyRange.left.getToken()); // lower bound
