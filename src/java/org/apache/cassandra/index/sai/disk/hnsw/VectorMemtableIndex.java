@@ -65,8 +65,6 @@ public class VectorMemtableIndex implements MemtableIndex
     private final CassandraOnHeapHnsw<PrimaryKey> graph;
     private final LongAdder writeCount = new LongAdder();
 
-    private final int bruteForceRows;
-
     private PrimaryKey minimumKey;
     private PrimaryKey maximumKey;
 
@@ -76,7 +74,6 @@ public class VectorMemtableIndex implements MemtableIndex
     {
         this.indexContext = indexContext;
         this.graph = new CassandraOnHeapHnsw<>(indexContext.getValidator(), indexContext.getIndexWriterConfig());
-        this.bruteForceRows = (int)(indexContext.getIndexWriterConfig().getMaximumNodeConnections() * Math.log(graph.size()));
     }
 
     @Override
@@ -170,6 +167,7 @@ public class VectorMemtableIndex implements MemtableIndex
             if (resultKeys.isEmpty())
                 return RangeIterator.emptyKeys();
 
+            int bruteForceRows = (int)(indexContext.getIndexWriterConfig().getMaximumNodeConnections() * Math.log(graph.size()));
             if (resultKeys.size() < Math.max(limit, bruteForceRows))
                 return new ReorderingRangeIterator(new PriorityQueue<>(resultKeys));
             else
@@ -198,7 +196,7 @@ public class VectorMemtableIndex implements MemtableIndex
                 results.add(key);
         }
 
-        int maxBruteForceRows = Math.max(limit, bruteForceRows);
+        int maxBruteForceRows = Math.max(limit, (int)(indexContext.getIndexWriterConfig().getMaximumNodeConnections() * Math.log(graph.size())));
         if (results.size() <= maxBruteForceRows)
         {
             if (results.isEmpty())

@@ -473,23 +473,23 @@ public class VectorTypeTest extends VectorTester
 
     private Collection<Integer> keysWithLowerBound(Collection<Integer> keys, int leftKey, boolean leftInclusive)
     {
-        return countKeysInTokenRange(keys, partitioner.getToken(Int32Type.instance.decompose(leftKey)), leftInclusive,
-                                     partitioner.getMaximumToken().getToken(), true);
+        return keysInTokenRange(keys, partitioner.getToken(Int32Type.instance.decompose(leftKey)), leftInclusive,
+                                partitioner.getMaximumToken().getToken(), true);
     }
 
     private Collection<Integer> keysWithUpperBound(Collection<Integer> keys, int rightKey, boolean rightInclusive)
     {
-        return countKeysInTokenRange(keys, partitioner.getMinimumToken().getToken(), true,
-                                     partitioner.getToken(Int32Type.instance.decompose(rightKey)), rightInclusive);
+        return keysInTokenRange(keys, partitioner.getMinimumToken().getToken(), true,
+                                partitioner.getToken(Int32Type.instance.decompose(rightKey)), rightInclusive);
     }
 
     private Collection<Integer> keysInBounds(Collection<Integer> keys, int leftKey, boolean leftInclusive, int rightKey, boolean rightInclusive)
     {
-        return countKeysInTokenRange(keys, partitioner.getToken(Int32Type.instance.decompose(leftKey)), leftInclusive,
-                                     partitioner.getToken(Int32Type.instance.decompose(rightKey)), rightInclusive);
+        return keysInTokenRange(keys, partitioner.getToken(Int32Type.instance.decompose(leftKey)), leftInclusive,
+                                partitioner.getToken(Int32Type.instance.decompose(rightKey)), rightInclusive);
     }
 
-    private Collection<Integer> countKeysInTokenRange(Collection<Integer> keys, Token leftToken, boolean leftInclusive, Token rightToken, boolean rightInclusive)
+    private Collection<Integer> keysInTokenRange(Collection<Integer> keys, Token leftToken, boolean leftInclusive, Token rightToken, boolean rightInclusive)
     {
         long left = leftToken.getLongValue();
         long right = rightToken.getLongValue();
