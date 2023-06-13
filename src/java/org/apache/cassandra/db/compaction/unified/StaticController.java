@@ -43,7 +43,6 @@ public class StaticController extends Controller
      * The scaling parameters W, one per bucket index and separated by a comma.
      * Higher indexes will use the value of the last index with a W specified.
      */
-    static final String STATIC_SCALING_PARAMETERS_OPTION = "scaling_parameters";
     static final String STATIC_SCALING_FACTORS_OPTION = "static_scaling_factors";
     private final static String DEFAULT_STATIC_SCALING_PARAMETERS = UCS_STATIC_SCALING_PARAMETERS_OPTION.getString();
 
@@ -112,7 +111,7 @@ public class StaticController extends Controller
         if (options.containsKey(STATIC_SCALING_FACTORS_OPTION))
             scalingParameters = parseScalingParameters(options.get(STATIC_SCALING_FACTORS_OPTION));
         else
-            scalingParameters = parseScalingParameters(options.getOrDefault(STATIC_SCALING_PARAMETERS_OPTION, DEFAULT_STATIC_SCALING_PARAMETERS));
+            scalingParameters = parseScalingParameters(options.getOrDefault(SCALING_PARAMETERS_OPTION, DEFAULT_STATIC_SCALING_PARAMETERS));
         long currentFlushSize = flushSizeOverrideMB << 20;
 
         File f = getControllerConfigPath(keyspaceName, tableName);
@@ -152,14 +151,14 @@ public class StaticController extends Controller
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
     {
-        String parameters = options.remove(STATIC_SCALING_PARAMETERS_OPTION);
+        String parameters = options.remove(SCALING_PARAMETERS_OPTION);
         if (parameters != null)
             parseScalingParameters(parameters);
         String factors = options.remove(STATIC_SCALING_FACTORS_OPTION);
         if (factors != null)
             parseScalingParameters(factors);
         if (parameters != null && factors != null)
-            throw new ConfigurationException(String.format("Either '%s' or '%s' should be used, not both", STATIC_SCALING_PARAMETERS_OPTION, STATIC_SCALING_FACTORS_OPTION));
+            throw new ConfigurationException(String.format("Either '%s' or '%s' should be used, not both", SCALING_PARAMETERS_OPTION, STATIC_SCALING_FACTORS_OPTION));
         return options;
     }
 
