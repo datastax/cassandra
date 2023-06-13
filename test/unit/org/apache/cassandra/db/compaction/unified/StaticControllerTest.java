@@ -63,7 +63,7 @@ public class StaticControllerTest extends ControllerTest
         String wStr = Arrays.stream(Ws)
                             .mapToObj(useIntegers ? Integer::toString : UnifiedCompactionStrategy::printScalingParameter)
                             .collect(Collectors.joining(","));
-        options.put(StaticController.STATIC_SCALING_PARAMETERS_OPTION, wStr);
+        options.put(StaticController.SCALING_PARAMETERS_OPTION, wStr);
     }
 
     @Test
@@ -88,7 +88,7 @@ public class StaticControllerTest extends ControllerTest
         Map<String, String> options = new HashMap<>();
         addOptions(true, options);
         options.put(StaticController.STATIC_SCALING_FACTORS_OPTION,
-                    options.remove(StaticController.STATIC_SCALING_PARAMETERS_OPTION));
+                    options.remove(StaticController.SCALING_PARAMETERS_OPTION));
 
         Controller controller = testFromOptions(false, options);
         assertTrue(controller instanceof StaticController);
@@ -124,7 +124,7 @@ public class StaticControllerTest extends ControllerTest
         Map<String, String> options = new HashMap<>();
         addOptions(true, options);
         options.put(StaticController.STATIC_SCALING_FACTORS_OPTION,
-                    options.remove(StaticController.STATIC_SCALING_PARAMETERS_OPTION));
+                    options.remove(StaticController.SCALING_PARAMETERS_OPTION));
 
         super.testValidateOptions(options, false);
     }
