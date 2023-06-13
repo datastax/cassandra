@@ -185,6 +185,7 @@ import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.concurrent.CountDownLatch;
 import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Refs;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
@@ -1231,11 +1232,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         synchronized (data)
         {
-            Memtable current = data.getView().getCurrentMemtable();
-            for (ColumnFamilyStore cfs : concatWithIndexes())
-                if (!cfs.data.getView().getCurrentMemtable().isClean())
-                    return flushMemtable(current, reason);
-            return waitForFlushes();
+            if (!data.getView().liveMemtables.isEmpty())
+            {
+                Memtable current = data.getView().getCurrentMemtable();
+                for (ColumnFamilyStore cfs : concatWithIndexes())
+                    if (!cfs.data.getView().getCurrentMemtable().isClean())
+                        return flushMemtable(current, reason);
+                return waitForFlushes();
+            }
+            else
+            {
+                return ImmediateFuture.success(CommitLogPosition.NONE);
+            }
         }
     }
 
