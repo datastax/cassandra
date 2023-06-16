@@ -123,7 +123,7 @@ public class StaticController extends Controller
         }
         catch (IOException | ParseException e)
         {
-            logger.warn("Unable to read saved flush size. Using starting value instead: ", e);
+            logger.info("Unable to read saved flush size. Using starting value instead.");
         }
         return new StaticController(env,
                                     scalingParameters,

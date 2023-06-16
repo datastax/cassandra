@@ -184,12 +184,12 @@ public class AdaptiveController extends Controller
         }
         catch (IOException | ParseException e)
         {
-            logger.warn("Unable to read saved options. Using starting value instead: ", e);
+            logger.info("Unable to read saved options. Using starting value instead.");
         }
 
         if (scalingParameters == null)
         {
-            logger.warn("Unable to read scaling_parameters. Using starting value instead.");
+            logger.info("Unable to read scaling_parameters. Using starting value instead.");
             scalingParameters = new int[UnifiedCompactionStrategy.MAX_LEVELS];
             String staticScalingParameters = options.remove(SCALING_PARAMETERS_OPTION);
             String staticScalingFactors = options.remove(STATIC_SCALING_FACTORS_OPTION);
