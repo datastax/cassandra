@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.SAITester;
@@ -27,11 +28,18 @@ import static java.lang.String.format;
 
 public class TokenRangeReadTest extends SAITester
 {
+    @Before
+    public void setup()
+    {
+        requireNetwork();
+    }
+
     @Test
     public void testTokenRangeRead() throws Throwable
     {
         createTable("CREATE TABLE %s (k1 int, v1 text, PRIMARY KEY (k1))");
-        createIndex(format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
+        String index = createIndex(format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
+        waitForIndexQueryable(index);
 
         execute("INSERT INTO %S(k1, v1) values(1, '1')");
 
