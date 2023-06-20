@@ -182,9 +182,13 @@ public class AdaptiveController extends Controller
                 logger.debug("Successfully read stored current_flush_size from disk");
             }
         }
-        catch (IOException | ParseException e)
+        catch (IOException e)
         {
-            logger.info("Unable to read saved options. Using starting value instead.");
+            logger.debug("No controller config file found. Using starting value instead.");
+        }
+        catch (ParseException e)
+        {
+            logger.warn("Unable to parse saved options. Using starting value instead:", e);
         }
 
         if (scalingParameters == null)
