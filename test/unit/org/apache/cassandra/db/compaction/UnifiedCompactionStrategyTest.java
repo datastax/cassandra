@@ -47,6 +47,7 @@ import org.junit.runners.Parameterized;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.unified.Controller;
+import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
@@ -196,7 +197,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.maxSSTablesToCompact()).thenReturn(1000);
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
-        when(controller.getReservedThreadsPerLevel()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
 
         when(controller.getScalingParameter(anyInt())).thenAnswer(answer -> {
             int index = answer.getArgument(0);
@@ -435,7 +437,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getMaxSpaceOverhead()).thenReturn(1.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minSstableSizeBytes);
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
-        when(controller.getReservedThreadsPerLevel()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
 
         if (maxSSTablesToCompact >= numSSTables)
             when(controller.maxConcurrentCompactions()).thenReturn(levels * (W < 0 ? 1 : F)); // make sure the work is assigned to different levels
@@ -597,7 +600,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.maxThroughput()).thenReturn(maxThroughput);
         when(controller.maxSSTablesToCompact()).thenReturn(1000);
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
-        when(controller.getReservedThreadsPerLevel()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
         // Calculate the minimum shard size such that the top bucket compactions won't be considered "oversized" and
         // all will be allowed to run. The calculation below assumes (1) that compactions are considered "oversized"
         // if they are more than 1/2 of the max shard size; (2) that mockSSTables uses 15% less than the max SSTable
@@ -1009,7 +1013,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.maxSSTablesToCompact()).thenReturn(1000);
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
-        when(controller.getReservedThreadsPerLevel()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
         when(controller.random()).thenCallRealMethod();
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
@@ -1174,7 +1179,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.maxSSTablesToCompact()).thenReturn(1000);
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
-        when(controller.getReservedThreadsPerLevel()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
         when(controller.getIgnoreOverlapsInExpirationCheck()).thenReturn(false);
         when(controller.random()).thenCallRealMethod();
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
@@ -1380,7 +1386,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getIgnoreOverlapsInExpirationCheck()).thenReturn(false);
         when(controller.random()).thenCallRealMethod();
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
-        when(controller.getReservedThreadsPerLevel()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         strategy.startup();
