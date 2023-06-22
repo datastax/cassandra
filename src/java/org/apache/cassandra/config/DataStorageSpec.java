@@ -620,7 +620,7 @@ public abstract class DataStorageSpec
         /**
          * The unit symbol
          */
-        private final String symbol;
+        public final String symbol;
 
         DataStorageUnit(String symbol)
         {

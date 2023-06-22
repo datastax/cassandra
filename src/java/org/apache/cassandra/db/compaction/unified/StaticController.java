@@ -66,6 +66,7 @@ public class StaticController extends Controller
                             long targetSStableSize,
                             double sstableGrowthModifier,
                             int reservedThreadsPerLevel,
+                            Reservations.Type reservationsType,
                             Overlaps.InclusionMethod overlapInclusionMethod,
                             String keyspaceName,
                             String tableName)
@@ -85,6 +86,7 @@ public class StaticController extends Controller
               targetSStableSize,
               sstableGrowthModifier,
               reservedThreadsPerLevel,
+              reservationsType,
               overlapInclusionMethod);
         this.scalingParameters = scalingParameters;
         this.keyspaceName = keyspaceName;
@@ -104,6 +106,7 @@ public class StaticController extends Controller
                                   long targetSStableSize,
                                   double sstableGrowthModifier,
                                   int reservedThreadsPerLevel,
+                                  Reservations.Type reservationsType,
                                   Overlaps.InclusionMethod overlapInclusionMethod,
                                   String keyspaceName,
                                   String tableName,
@@ -150,6 +153,7 @@ public class StaticController extends Controller
                                     targetSStableSize,
                                     sstableGrowthModifier,
                                     reservedThreadsPerLevel,
+                                    reservationsType,
                                     overlapInclusionMethod,
                                     keyspaceName,
                                     tableName);
