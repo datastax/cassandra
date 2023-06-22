@@ -174,6 +174,7 @@ public class StaticControllerTest extends ControllerTest
                                                            sstableSizeMB << 20,
                                                            Controller.DEFAULT_SSTABLE_GROWTH,
                                                            Controller.DEFAULT_RESERVED_THREADS,
+                                                           Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            keyspaceName,
                                                            tableName);
@@ -198,6 +199,7 @@ public class StaticControllerTest extends ControllerTest
                                                            sstableSizeMB << 20,
                                                            Controller.DEFAULT_SSTABLE_GROWTH,
                                                            Controller.DEFAULT_RESERVED_THREADS,
+                                                           Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            keyspaceName,
                                                            tableName);
@@ -222,6 +224,7 @@ public class StaticControllerTest extends ControllerTest
                                                            sstableSizeMB << 20,
                                                            Controller.DEFAULT_SSTABLE_GROWTH,
                                                            Controller.DEFAULT_RESERVED_THREADS,
+                                                           Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            keyspaceName,
                                                            tableName);
