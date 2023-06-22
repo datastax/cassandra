@@ -118,6 +118,7 @@ public class AdaptiveController extends Controller
                               long targetSStableSize,
                               double sstableGrowthModifier,
                               int reservedThreadsPerLevel,
+                              Reservations.Type reservationsType,
                               Overlaps.InclusionMethod overlapInclusionMethod,
                               int intervalSec,
                               int minScalingParameter,
@@ -143,6 +144,7 @@ public class AdaptiveController extends Controller
               targetSStableSize,
               sstableGrowthModifier,
               reservedThreadsPerLevel,
+              reservationsType,
               overlapInclusionMethod);
 
         this.scalingParameters = scalingParameters;
@@ -170,6 +172,7 @@ public class AdaptiveController extends Controller
                                   long targetSSTableSize,
                                   double sstableGrowthModifier,
                                   int reservedThreadsPerLevel,
+                                  Reservations.Type reservationsType,
                                   Overlaps.InclusionMethod overlapInclusionMethod,
                                   String keyspaceName,
                                   String tableName,
@@ -266,6 +269,7 @@ public class AdaptiveController extends Controller
                                       targetSSTableSize,
                                       sstableGrowthModifier,
                                       reservedThreadsPerLevel,
+                                      reservationsType,
                                       overlapInclusionMethod,
                                       intervalSec,
                                       minScalingParameter,
