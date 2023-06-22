@@ -67,6 +67,7 @@ import org.apache.cassandra.db.compaction.unified.AdaptiveController;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.CostsCalculator;
 import org.apache.cassandra.db.compaction.unified.Environment;
+import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.compaction.unified.StaticController;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.IPartitioner;
@@ -79,8 +80,8 @@ import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.MovingAverage;
-import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.Overlaps;
+import org.apache.cassandra.utils.TimeUUID;
 import org.mockito.Mockito;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.LOG_DIR;
@@ -404,6 +405,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                          targetSSTableSizeMB << 20,
                                                          0,
                                                          0,
+                                                         Reservations.Type.PER_LEVEL,
                                                          overlapInclusionMethod,
                                                          updateTimeSec,
                                                          minW,
@@ -428,6 +430,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                        targetSSTableSizeMB << 20,
                                                        0,
                                                        0,
+                                                       Reservations.Type.PER_LEVEL,
                                                        overlapInclusionMethod,
                                                        "ks",
                                                        "tbl");
