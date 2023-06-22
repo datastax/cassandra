@@ -25,6 +25,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.primitives.Ints;
 
+import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.virtual.LogMessagesTable;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -667,6 +668,7 @@ public enum CassandraRelevantProperties
     UCS_MIN_SSTABLE_SIZE("unified_compaction.min_sstable_size", "0B"),
     UCS_NUM_SHARDS("unified_compaction.num_shards"),
     UCS_OVERLAP_INCLUSION_METHOD("unified_compaction.overlap_inclusion_method"),
+    UCS_RESERVATIONS_TYPE_OPTION("unified_compaction.reservations_type_option", Reservations.Type.LEVEL_OR_BELOW.name()),
     UCS_RESERVED_THREADS_PER_LEVEL("reserved_threads_per_level", "0"),
     UCS_SHARED_STORAGE("unified_compaction.shared_storage", "false"),
     UCS_SSTABLE_GROWTH("unified_compaction.sstable_growth", "0"),
@@ -945,6 +947,31 @@ public enum CassandraRelevantProperties
     }
 
     /**
+     * Gets the value of a system property, given as a human-readable size in bytes (e.g. 100MiB, 10GB, 500B).
+     * @return System property value if it exists, defaultValue otherwise. Throws an exception if no default value is set.
+     */
+    public double getPercentage()
+    {
+        String value = System.getProperty(key);
+        if (value == null && defaultVal == null)
+            throw new ConfigurationException("Missing property value or default value is not set: " + key);
+        return PERCENT_CONVERTER.convert(value == null ? defaultVal : value);
+    }
+
+    /**
+     * Gets the value of a system property, given as a percentage (e.g. 50%, 0.5).
+     * @return System property value if it exists, defaultValue otherwise.
+     */
+    public double getPercentage(double overrideDefaultValue)
+    {
+        String value = System.getProperty(key);
+        if (value == null)
+            return overrideDefaultValue;
+
+        return PERCENT_CONVERTER.convert(value);
+    }
+
+    /**
      * Gets the value of a system property as an int.
      * @return system property int value if it exists, overrideDefaultValue otherwise.
      */
@@ -1072,10 +1099,22 @@ public enum CassandraRelevantProperties
         {
             return FBUtilities.parseHumanReadableBytes(value);
         }
-        catch (ConfigurationException e)
+        catch (IllegalArgumentException e)
         {
             throw new ConfigurationException(String.format("Invalid value for system property: " +
                                                            "expected size in bytes with unit but got '%s'\n%s", value, e));
+        }
+    };
+
+    private static final PropertyConverter<Double> PERCENT_CONVERTER = value -> {
+        try
+        {
+            return FBUtilities.parsePercent(value);
+        }
+        catch (IllegalArgumentException e)
+        {
+            throw new ConfigurationException(String.format("Invalid value for system property: " +
+                                                           "expected percentage but got '%s'\n%s", value, e));
         }
     };
 
