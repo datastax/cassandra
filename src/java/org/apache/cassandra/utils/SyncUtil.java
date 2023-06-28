@@ -24,12 +24,10 @@ import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.SyncFailedException;
-import java.lang.reflect.Field;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.FileChannel;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
@@ -39,60 +37,20 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.io.util.File;
 
 /*
- * A wrapper around various mechanisms for syncing files that makes it possible it intercept
+ * A wrapper around various mechanisms for syncing files that makes it possible to intercept
  * and skip syncing. Useful for unit tests in certain environments where syncs can have outliers
- * bad enough to causes tests to run 10s of seconds longer.
+ * bad enough to cause tests to run 10s of seconds longer.
  */
 public class SyncUtil
 {
     public static final boolean SKIP_SYNC;
-
-    private static final Field mbbFDField;
-    private static final Field fdClosedField;
-    private static final Field fdUseCountField;
-
     private static final Logger logger = LoggerFactory.getLogger(SyncUtil.class);
 
     static
     {
-        Field mbbFDFieldTemp = null;
-        try
-        {
-            mbbFDFieldTemp = MappedByteBuffer.class.getDeclaredField("fd");
-            mbbFDFieldTemp.setAccessible(true);
-        }
-        catch (NoSuchFieldException e)
-        {
-        }
-        mbbFDField = mbbFDFieldTemp;
-
-        //Java 8
-        Field fdClosedFieldTemp = null;
-        try
-        {
-            fdClosedFieldTemp = FileDescriptor.class.getDeclaredField("closed");
-            fdClosedFieldTemp.setAccessible(true);
-        }
-        catch (NoSuchFieldException e)
-        {
-        }
-        fdClosedField = fdClosedFieldTemp;
-
-        //Java 7
-        Field fdUseCountTemp = null;
-        try
-        {
-            fdUseCountTemp = FileDescriptor.class.getDeclaredField("useCount");
-            fdUseCountTemp.setAccessible(true);
-        }
-        catch (NoSuchFieldException e)
-        {
-        }
-        fdUseCountField = fdUseCountTemp;
-
         //If skipping syncing is requested by any means then skip them.
         boolean skipSyncProperty = Boolean.getBoolean(Config.PROPERTY_PREFIX + "skip_sync");
-        boolean skipSyncEnv = Boolean.valueOf(System.getenv().getOrDefault("CASSANDRA_SKIP_SYNC", "false"));
+        boolean skipSyncEnv = Boolean.parseBoolean(System.getenv().getOrDefault("CASSANDRA_SKIP_SYNC", "false"));
         SKIP_SYNC = skipSyncProperty || skipSyncEnv;
         if (SKIP_SYNC)
         {
@@ -105,21 +63,6 @@ public class SyncUtil
         Preconditions.checkNotNull(buf);
         if (SKIP_SYNC)
         {
-            Object fd = null;
-            try
-            {
-                if (mbbFDField != null)
-                {
-                    fd = mbbFDField.get(buf);
-                }
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-            //This is what MappedByteBuffer.force() throws if a you call force() on an umapped buffer
-            if (mbbFDField != null && fd == null)
-                throw new UnsupportedOperationException();
             return buf;
         }
         else
@@ -127,40 +70,12 @@ public class SyncUtil
             return buf.force();
         }
     }
-
+    
     public static void sync(FileDescriptor fd) throws SyncFailedException
     {
         Preconditions.checkNotNull(fd);
-        if (SKIP_SYNC)
-        {
-            boolean closed = false;
-            try
-            {
-                if (fdClosedField != null)
-                    closed = fdClosedField.getBoolean(fd);
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-
-            int useCount = 1;
-            try
-            {
-                if (fdUseCountField != null)
-                    useCount = ((AtomicInteger)fdUseCountField.get(fd)).get();
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-            if (closed || !fd.valid() || useCount < 0)
-                throw new SyncFailedException("Closed " + closed + " valid " + fd.valid() + " useCount " + useCount);
-        }
-        else
-        {
+        if (!SKIP_SYNC)
             fd.sync();
-        }
     }
 
     public static void force(FileChannel fc, boolean metaData) throws IOException
@@ -193,8 +108,8 @@ public class SyncUtil
     {
         if (SKIP_SYNC)
             return;
-        else
-            INativeLibrary.instance.trySync(fd);
+
+        INativeLibrary.instance.trySync(fd);
     }
 
     public static void trySyncDir(File dir)
