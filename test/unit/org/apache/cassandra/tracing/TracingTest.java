@@ -29,7 +29,6 @@ import java.util.Map;
 import java.util.Queue;
 
 import com.google.common.collect.ImmutableList;
-import org.apache.commons.lang3.StringUtils;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -67,7 +66,7 @@ public final class TracingTest extends CQLTester
     public void test()
     {
         List<String> traces = new ArrayList<>();
-        Tracing tracing = new TracingImpl(traces);
+        Tracing tracing = new TracingTestImpl(traces);
         tracing.newSession(ClientState.forInternalCalls(), Tracing.TraceType.NONE);
         TraceState state = tracing.begin("test-request", Collections.<String,String>emptyMap());
         state.trace("test-1");
@@ -87,7 +86,7 @@ public final class TracingTest extends CQLTester
     public void test_get()
     {
         List<String> traces = new ArrayList<>();
-        Tracing tracing = new TracingImpl(traces);
+        Tracing tracing = new TracingTestImpl(traces);
         tracing.newSession(ClientState.forInternalCalls(), Tracing.TraceType.NONE);
         tracing.begin("test-request", Collections.<String,String>emptyMap());
         tracing.get().trace("test-1");
@@ -107,7 +106,7 @@ public final class TracingTest extends CQLTester
     public void test_get_uuid()
     {
         List<String> traces = new ArrayList<>();
-        Tracing tracing = new TracingImpl(traces);
+        Tracing tracing = new TracingTestImpl(traces);
         TimeUUID uuid = tracing.newSession(ClientState.forInternalCalls(), Tracing.TraceType.NONE);
         tracing.begin("test-request", Collections.<String,String>emptyMap());
         tracing.get(uuid).trace("test-1");
@@ -131,7 +130,7 @@ public final class TracingTest extends CQLTester
 
         Map<String,ByteBuffer> customPayload = Collections.singletonMap("test-key", customPayloadValue);
 
-        TracingImpl tracing = new TracingImpl(traces);
+        TracingTestImpl tracing = new TracingTestImpl(traces);
         tracing.newSession(ClientState.forInternalCalls(), customPayload);
         TraceState state = tracing.begin("test-custom_payload", Collections.<String,String>emptyMap());
         state.trace("test-1");
@@ -145,15 +144,15 @@ public final class TracingTest extends CQLTester
         assert "test-1".equals(traces.get(1));
         assert "test-2".equals(traces.get(2));
         assert "test-3".equals(traces.get(3));
-        assert tracing.payloads.containsKey("test-key");
-        assert customPayloadValue.equals(tracing.payloads.get("test-key"));
+        assert tracing.getPayloads().containsKey("test-key");
+        assert customPayloadValue.equals(tracing.getPayloads().get("test-key"));
     }
 
     @Test
     public void test_states()
     {
         List<String> traces = new ArrayList<>();
-        Tracing tracing = new TracingImpl(traces);
+        Tracing tracing = new TracingTestImpl(traces);
         tracing.newSession(ClientState.forInternalCalls(), Tracing.TraceType.REPAIR);
         tracing.begin("test-request", Collections.<String,String>emptyMap());
         tracing.get().enableActivityNotification("test-tag");
@@ -170,7 +169,7 @@ public final class TracingTest extends CQLTester
     public void test_progress_listener()
     {
         List<String> traces = new ArrayList<>();
-        Tracing tracing = new TracingImpl(traces);
+        Tracing tracing = new TracingTestImpl(traces);
         tracing.newSession(ClientState.forInternalCalls(), Tracing.TraceType.REPAIR);
         tracing.begin("test-request", Collections.<String,String>emptyMap());
         tracing.get().enableActivityNotification("test-tag");
@@ -330,63 +329,6 @@ public final class TracingTest extends CQLTester
         public void trace(ClientState clientState, ByteBuffer sessionId, String message, int ttl)
         {
             states.add(clientState);
-        }
-    }
-
-    private static final class TracingImpl extends Tracing
-    {
-        private final List<String> traces;
-        private final Map<String,ByteBuffer> payloads = new HashMap<>();
-
-        public TracingImpl()
-        {
-            this(new ArrayList<>());
-        }
-
-        public TracingImpl(List<String> traces)
-        {
-            this.traces = traces;
-        }
-
-        public void stopSessionImpl()
-        {}
-
-        public TraceState begin(String request, InetAddress ia, Map<String, String> map)
-        {
-            traces.add(request);
-            return get();
-        }
-
-        @Override
-        protected TimeUUID newSession(ClientState state, TimeUUID sessionId, TraceType traceType, Map<String,ByteBuffer> customPayload)
-        {
-            if (!customPayload.isEmpty())
-                logger.info("adding custom payload items {}", StringUtils.join(customPayload.keySet(), ','));
-
-            payloads.putAll(customPayload);
-            return super.newSession(state, sessionId, traceType, customPayload);
-        }
-
-        @Override
-        protected TraceState newTraceState(ClientState state, InetAddressAndPort ia, TimeUUID uuid, Tracing.TraceType tt)
-        {
-            return new TraceState(state, ia, uuid, tt)
-            {
-                protected void traceImpl(String string)
-                {
-                    traces.add(string);
-                }
-
-                protected void waitForPendingEvents()
-                {
-                }
-            };
-        }
-
-        @Override
-        public void trace(ClientState state, ByteBuffer bb, String string, int i)
-        {
-            throw new UnsupportedOperationException("Not supported yet.");
         }
     }
 }
