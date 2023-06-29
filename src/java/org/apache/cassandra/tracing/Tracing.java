@@ -151,6 +151,17 @@ public abstract class Tracing extends ExecutorLocals.Impl
         return get().ttl;
     }
 
+    public static boolean traceSinglePartitions()
+    {
+        return instance.get() != null && !instance.get().isRangeQuery();
+    }
+
+    public void setRangeQuery(boolean rangeQuery)
+    {
+        assert isTracing();
+        get().setRangeQuery(rangeQuery);
+    }
+
     /**
      * set traced keyspace into trace state which is later used to for billing to track source tenant at replicas.
      */
