@@ -870,7 +870,8 @@ public class FBUtilities
     /**
      * Convert the given size in bytes to a human-readable value using binary (i.e. 2^10-based) modifiers.
      * For example, 1.000KiB, 2.100GiB etc., up to 8.000 EiB.
-     * @param size      Number to convert.
+     *
+     * @param size Number to convert.
      */
     public static String prettyPrintMemory(long size)
     {
