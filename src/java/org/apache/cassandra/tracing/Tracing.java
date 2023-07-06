@@ -130,7 +130,7 @@ public abstract class Tracing extends ExecutorLocals.Impl
                 logger.error(String.format("Cannot use class %s for tracing, ignoring by defaulting to normal tracing", customTracingClass), e);
             }
         }
-        instance = null != tracing ? tracing : new TracingImpl();
+        instance = tracing == null ? new TracingImpl() : tracing;
     }
 
     public TimeUUID getSessionId()
