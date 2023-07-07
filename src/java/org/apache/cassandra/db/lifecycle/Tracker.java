@@ -604,6 +604,21 @@ public class Tracker
             subscriber.handleNotification(notification, this);
     }
 
+    public void publishMetrics()
+    {
+        long bytesInserted = cfstore.metrics().bytesInserted.getCount();
+        long partitionsRead = cfstore.metrics().readRequests.getCount();
+        double flushSize = cfstore.metrics().flushSizeOnDisk().get();
+        double sstablePartitionReadLatencyNanos = cfstore.metrics().sstablePartitionReadLatency.get();
+        double flushTimePerKbNanos = cfstore.metrics().flushTimePerKb.get();
+
+        INotification notification = new MetricsNotification(bytesInserted, partitionsRead, flushSize, sstablePartitionReadLatencyNanos, flushTimePerKbNanos);
+        for (INotificationConsumer subscriber : subscribers)
+        {
+            subscriber.handleNotification(notification, this);
+        }
+    }
+
     public boolean isDummy()
     {
         return cfstore == null || !DatabaseDescriptor.enableMemtableAndCommitLog();

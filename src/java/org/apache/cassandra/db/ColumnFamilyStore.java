@@ -1028,6 +1028,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return keyspace.metric;
     }
 
+    public void publishMetrics()
+    {
+        data.publishMetrics();
+    }
+
     public Descriptor newSSTableDescriptor(File directory)
     {
         return newSSTableDescriptor(directory, SSTableFormat.Type.current().info.getLatestVersion(), SSTableFormat.Type.current());
