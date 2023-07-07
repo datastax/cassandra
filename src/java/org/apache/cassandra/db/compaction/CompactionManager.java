@@ -175,6 +175,9 @@ public class CompactionManager implements CompactionManagerMBean
 
         /*Store Controller Config for UCS every hour*/
         ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(CompactionManager::storeControllerConfig, 10, 60, TimeUnit.MINUTES);
+
+        /*publish metrics used by AdaptiveController for each cfs every 5 minutes. This is needed for Adaptive Compaction to work in CNDB*/
+        ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(CompactionManager::publishMetrics, 5, 5, TimeUnit.MINUTES);
     }
 
     private final CompactionExecutor executor = new CompactionExecutor();
@@ -221,6 +224,22 @@ public class CompactionManager implements CompactionManagerMBean
                     UnifiedCompactionStrategy ucs = (UnifiedCompactionStrategy) ((UnifiedCompactionContainer) strat).getStrategies().get(0);
                     ucs.storeControllerConfig();
                 }
+            }
+        }
+    }
+
+    public static void publishMetrics()
+    {
+        for (String keyspace : Schema.instance.getKeyspaces())
+        {
+            // don't publish metrics for system tables
+            if (SchemaConstants.isSystemKeyspace(keyspace))
+            {
+                continue;
+            }
+            for ( ColumnFamilyStore cfs : Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStores())
+            {
+                cfs.publishMetrics();
             }
         }
     }
