@@ -38,7 +38,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -207,7 +206,7 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         ByteBuffer buffer = exp.lower.value.raw;
-        float[] qv = ((VectorType<?>.VectorSerializer)indexContext.getValidator().getSerializer()).deserializeFloatArray(buffer.duplicate());
+        float[] qv = TypeUtil.decomposeVector(indexContext, buffer);
         var bits = new KeyFilteringBits(results);
         var keyQueue = graph.search(qv, limit, bits, Integer.MAX_VALUE);
         if (keyQueue.isEmpty())
