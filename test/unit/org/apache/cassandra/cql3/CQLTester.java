@@ -2119,6 +2119,12 @@ public abstract class CQLTester
         return Arrays.asList(values);
     }
 
+    @SafeVarargs
+    protected final <T> Vector<T> vector(T... values)
+    {
+        return new Vector<>(values);
+    }
+
     protected Vector<Float> vector(Float... values)
     {
         return new Vector<>(values);
