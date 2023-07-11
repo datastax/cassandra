@@ -466,4 +466,15 @@ public class TrackerTest
         listener.received.clear();
     }
 
+    @Test
+    public void testPublishMetrics()
+    {
+        ColumnFamilyStore cfs = MockSchema.newCFS();
+        Tracker tracker = Tracker.newDummyTracker(cfs.metadata);
+        MockListener listener = new MockListener(false);
+        tracker.subscribe(listener);
+        tracker.publishMetrics(1, 1, 1, 1, 1);
+        assert(listener.received.get(0) instanceof MetricsNotification);
+    }
+
 }

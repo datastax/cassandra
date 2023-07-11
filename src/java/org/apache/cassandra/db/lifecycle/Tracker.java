@@ -604,14 +604,8 @@ public class Tracker
             subscriber.handleNotification(notification, this);
     }
 
-    public void publishMetrics()
+    public void publishMetrics(long bytesInserted, long partitionsRead, double flushSize, double sstablePartitionReadLatencyNanos, double flushTimePerKbNanos)
     {
-        long bytesInserted = cfstore.metrics().bytesInserted.getCount();
-        long partitionsRead = cfstore.metrics().readRequests.getCount();
-        double flushSize = cfstore.metrics().flushSizeOnDisk().get();
-        double sstablePartitionReadLatencyNanos = cfstore.metrics().sstablePartitionReadLatency.get();
-        double flushTimePerKbNanos = cfstore.metrics().flushTimePerKb.get();
-
         INotification notification = new MetricsNotification(bytesInserted, partitionsRead, flushSize, sstablePartitionReadLatencyNanos, flushTimePerKbNanos);
         for (INotificationConsumer subscriber : subscribers)
         {
