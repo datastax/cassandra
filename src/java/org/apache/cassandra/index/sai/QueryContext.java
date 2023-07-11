@@ -20,14 +20,11 @@ package org.apache.cassandra.index.sai;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -40,7 +37,6 @@ import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnHeapHnsw;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.lucene.util.Bits;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
@@ -80,7 +76,6 @@ public class QueryContext
 
     public long queryTimeouts = 0;
 
-    private final Map<SSTableReader, SSTableQueryContext> sstableQueryContexts = new HashMap<>();
     public int hnswVectorsAccessed;
     public int hnswVectorCacheHits;
 
@@ -108,11 +103,6 @@ public class QueryContext
         sstablesHit++;
     }
 
-    public SSTableQueryContext getSSTableQueryContext(SSTableReader reader)
-    {
-        return sstableQueryContexts.computeIfAbsent(reader, k -> new SSTableQueryContext(this));
-    }
-
     public void checkpoint()
     {
         if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
@@ -129,9 +119,10 @@ public class QueryContext
         shadowedPrimaryKeys.add(primaryKey);
     }
 
-    public boolean containsShadowedPrimaryKey(Supplier<PrimaryKey> supplier)
+    // Returns true if the row ID will be included or false if the row ID will be shadowed
+    public boolean shouldInclude(long sstableRowId, PrimaryKeyMap primaryKeyMap)
     {
-        return shadowedPrimaryKeys != null && shadowedPrimaryKeys.contains(supplier.get());
+        return shadowedPrimaryKeys == null || !shadowedPrimaryKeys.contains(primaryKeyMap.primaryKeyFromRowId(sstableRowId));
     }
 
     public boolean containsShadowedPrimaryKey(PrimaryKey primaryKey)
@@ -172,7 +163,7 @@ public class QueryContext
                 if (sstableRowId == Long.MAX_VALUE) // not found
                     continue;
 
-                int segmentRowId = metadata.segmentedRowId(sstableRowId);
+                int segmentRowId = metadata.toSegmentRowId(sstableRowId);
                 // not in segment yet
                 if (segmentRowId < 0)
                     continue;
@@ -206,7 +197,7 @@ public class QueryContext
         {
             this.graph = graph;
             this.ignoredOrdinals = ignoredOrdinals;
-            this.length = 1 + metadata.segmentedRowId(metadata.maxSSTableRowId);
+            this.length = 1 + metadata.toSegmentRowId(metadata.maxSSTableRowId);
         }
 
         @Override
@@ -246,5 +237,4 @@ public class QueryContext
             return graph.size();
         }
     }
-
 }
