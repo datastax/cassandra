@@ -146,7 +146,7 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
             for (long sstableRowId = minSSTableRowId; sstableRowId <= maxSSTableRowId; sstableRowId++)
             {
                 if (context.shouldInclude(sstableRowId, primaryKeyMap))
-                    postings.addInt(metadata.castToSegmentRowId(sstableRowId));
+                    postings.addInt(metadata.toSegmentRowId(sstableRowId));
             }
             return new BitsOrPostingList(new ArrayPostingList(postings.toIntArray()));
         }
@@ -160,7 +160,7 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
             {
                 if (context.shouldInclude(sstableRowId, primaryKeyMap))
                 {
-                    int segmentRowId = metadata.castToSegmentRowId(sstableRowId);
+                    int segmentRowId = metadata.toSegmentRowId(sstableRowId);
                     int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
                     if (ordinal >= 0)
                     {
@@ -193,7 +193,7 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
     {
         // the iterator represents keys from all the segments in our sstable -- we'll only pull of those that
         // are from our own token range so we can use row ids to order the results by vector similarity.
-        var maxSegmentRowId = metadata.castToSegmentRowId(metadata.maxSSTableRowId);
+        var maxSegmentRowId = metadata.toSegmentRowId(metadata.maxSSTableRowId);
         SparseFixedBitSet bits = bitSetForSearch();
         int[] bruteForceRows = new int[Math.max(limit, this.maxBruteForceRows)];
         int n = 0;
@@ -211,7 +211,7 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
                 if (sstableRowId < metadata.minSSTableRowId)
                     continue;
 
-                int segmentRowId = metadata.castToSegmentRowId(sstableRowId);
+                int segmentRowId = metadata.toSegmentRowId(sstableRowId);
                 if (n < bruteForceRows.length)
                     bruteForceRows[n] = segmentRowId;
                 n++;

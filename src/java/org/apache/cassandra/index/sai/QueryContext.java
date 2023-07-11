@@ -25,7 +25,6 @@ import java.util.NavigableSet;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -34,7 +33,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw;
 import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnHeapHnsw;
-import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -162,7 +160,7 @@ public class QueryContext
                 if (sstableRowId == Long.MAX_VALUE) // not found
                     continue;
 
-                int segmentRowId = metadata.castToSegmentRowId(sstableRowId);
+                int segmentRowId = metadata.toSegmentRowId(sstableRowId);
                 // not in segment yet
                 if (segmentRowId < 0)
                     continue;
@@ -196,7 +194,7 @@ public class QueryContext
         {
             this.graph = graph;
             this.ignoredOrdinals = ignoredOrdinals;
-            this.length = 1 + metadata.castToSegmentRowId(metadata.maxSSTableRowId);
+            this.length = 1 + metadata.toSegmentRowId(metadata.maxSSTableRowId);
         }
 
         @Override

@@ -216,7 +216,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         return componentMetadatas.get(indexComponent).root;
     }
 
-    public int castToSegmentRowId(long sstableRowId)
+    public int toSegmentRowId(long sstableRowId)
     {
         int segmentRowId = Math.toIntExact(sstableRowId - segmentRowIdOffset);
 
