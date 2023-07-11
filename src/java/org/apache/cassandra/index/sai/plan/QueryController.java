@@ -49,7 +49,6 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.CheckpointingIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
@@ -305,10 +304,9 @@ public class QueryController
         assert annIndexExpressions.size() == 1 : "only one index is expected in ANN expression, found " + annIndexExpressions.size() + " in " + annIndexExpressions;
         QueryViewBuilder.IndexExpression annIndexExpression = annIndexExpressions.get(0);
 
-        SSTableQueryContext sstContext = queryContext.getSSTableQueryContext(sstable);
         try
         {
-            return annIndexExpression.index.limitToTopResults(sstContext, original, annIndexExpression.expression, getLimit());
+            return annIndexExpression.index.limitToTopResults(queryContext, original, annIndexExpression.expression, getLimit());
         }
         catch (IOException e)
         {
@@ -341,8 +339,7 @@ public class QueryController
                                     {
                                         try
                                         {
-                                            SSTableQueryContext sstContext = queryContext.getSSTableQueryContext(ie.index.getSSTable());
-                                            List<RangeIterator<Long>> iterators = ie.index.searchSSTableRowIds(ie.expression, mergeRange, sstContext, defer, getLimit());
+                                            List<RangeIterator<Long>> iterators = ie.index.searchSSTableRowIds(ie.expression, mergeRange, queryContext, defer, getLimit());
                                             // concat the result from multiple segments for the same index
                                             return RangeConcatIterator.build(iterators);
                                         }
