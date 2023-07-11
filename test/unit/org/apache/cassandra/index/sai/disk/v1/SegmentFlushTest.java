@@ -375,6 +375,16 @@ public class SegmentFlushTest
         assertEquals(minSegmentRowId == maxSegmentRowId ? 1 : 2, postings.size());
     }
 
+    private void verifySegmentMetadata(SegmentMetadata segmentMetadata)
+    {
+        assertEquals(segmentRowIdOffset, segmentMetadata.minSSTableRowId);
+        assertEquals(minKey, segmentMetadata.minKey);
+        assertEquals(maxKey, segmentMetadata.maxKey);
+        assertEquals(minTerm, segmentMetadata.minTerm);
+        assertEquals(maxTerm, segmentMetadata.maxTerm);
+        assertEquals(numRowsPerSegment, segmentMetadata.numRows);
+    }
+
     private Row createRow(ColumnMetadata column, ByteBuffer value)
     {
         Row.Builder builder1 = BTreeRow.sortedBuilder();
