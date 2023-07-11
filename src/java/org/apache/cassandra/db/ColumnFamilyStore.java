@@ -1023,6 +1023,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return keyspace.getName();
     }
 
+    public Tracker getData()
+    {
+        return data;
+    }
+
     public KeyspaceMetrics getKeyspaceMetrics()
     {
         return keyspace.metric;
@@ -1030,7 +1035,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public void publishMetrics()
     {
-        data.publishMetrics();
+        getData().publishMetrics(getBytesInserted(), getReadRequests(), getFlushSize(), getSstablePartitionReadLatency(), getFlushTimePerKb());
     }
 
     public Descriptor newSSTableDescriptor(File directory)
@@ -3100,6 +3105,21 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public long getBytesInserted()
     {
         return metric == null ? 0 : metric.bytesInserted.getCount();
+    }
+
+    public double getFlushSize()
+    {
+        return metric == null ? 0 : metric.flushSizeOnDisk().get();
+    }
+
+    public double getSstablePartitionReadLatency()
+    {
+        return metric == null ? 0 : metric.sstablePartitionReadLatency.get();
+    }
+
+    public double getFlushTimePerKb()
+    {
+        return metric == null ? 0 : metric.flushTimePerKb.get();
     }
 
     /** true if this CFS contains secondary index data */

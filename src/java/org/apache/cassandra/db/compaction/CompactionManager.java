@@ -237,7 +237,7 @@ public class CompactionManager implements CompactionManagerMBean
             {
                 continue;
             }
-            for ( ColumnFamilyStore cfs : Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStores())
+            for (ColumnFamilyStore cfs : Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStores())
             {
                 cfs.publishMetrics();
             }
