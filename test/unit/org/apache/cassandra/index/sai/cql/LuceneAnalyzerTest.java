@@ -55,6 +55,44 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
+    public void testStandardAnalyzer() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'The quick brown fox jumps over the lazy DOG.')");
+
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+
+        flush();
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+    }
+
+    @Test
+    public void testStandardAnalyzerInPrimaryKey() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int, val text, PRIMARY KEY (id, val))");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES (1, 'The quick brown fox jumps over the lazy DOG.')");
+
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+
+        flush();
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+    }
+
+    @Test
     public void testBogusAnalyzer() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
@@ -99,10 +137,11 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'[\n" +
-                    "\t{\"tokenizer\":\"ngram\", \"minGramSize\":\"2\", \"maxGramSize\":\"3\"},\n" +
-                    "\t{\"filter\":\"lowercase\"}\n" +
-                    "]'}");
+        String ddl = "CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'[\n" +
+                       "\t{\"tokenizer\":\"ngram\", \"minGramSize\":\"2\", \"maxGramSize\":\"3\"},\n" +
+                       "\t{\"filter\":\"lowercase\"}\n" +
+                       "]'}";
+        createIndex(ddl);
 
         waitForIndexQueryable();
 
