@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -779,36 +780,25 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
      * configured in the arena selector of this strategy.
      *
      * @param sstables a collection of the sstables to be assigned to arenas
-     * @param compactionFilter a filter to exclude CompactionSSTables,
+     * @param compactionFilter a bifilter (sstable, isCompacting) to exclude CompactionSSTables,
      *                         e.g., {@link CompactionSSTable#isSuitableForCompaction()}
-     * @param filterUnsuitable true if sstable should be non-compacting and filtered by {@code compactionFilter}
      * @return a list of arenas, where each arena contains sstables that belong to that arena
      */
     public Collection<Arena> getCompactionArenas(Collection<? extends CompactionSSTable> sstables,
-                                                 Predicate<CompactionSSTable> compactionFilter,
-                                                 boolean filterUnsuitable)
+                                                 BiPredicate<CompactionSSTable, Boolean> compactionFilter)
     {
-        return getCompactionArenas(sstables, compactionFilter, this.arenaSelector, filterUnsuitable);
-    }
-
-    Collection<Arena> getCompactionArenas(Collection<? extends CompactionSSTable> sstables, boolean filterUnsuitable)
-    {
-        return getCompactionArenas(sstables,
-                                   CompactionSSTable::isSuitableForCompaction,
-                                   this.arenaSelector,
-                                   filterUnsuitable);
+        return getCompactionArenas(sstables, compactionFilter, this.arenaSelector);
     }
 
     Collection<Arena> getCompactionArenas(Collection<? extends CompactionSSTable> sstables,
-                                          Predicate<CompactionSSTable> compactionFilter,
-                                          ArenaSelector arenaSelector,
-                                          boolean filterUnsuitable)
+                                          BiPredicate<CompactionSSTable, Boolean> compactionFilter,
+                                          ArenaSelector arenaSelector)
     {
         maybeUpdateSelector();
         Map<CompactionSSTable, Arena> arenasBySSTables = new TreeMap<>(arenaSelector);
         Set<? extends CompactionSSTable> compacting = realm.getCompactingSSTables();
         for (CompactionSSTable sstable : sstables)
-            if (!filterUnsuitable || compactionFilter.test(sstable) && !compacting.contains(sstable))
+            if (compactionFilter.test(sstable, compacting.contains(sstable)))
                 arenasBySSTables.computeIfAbsent(sstable, t -> new Arena(arenaSelector, realm))
                       .add(sstable);
 
@@ -847,13 +837,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
      * new compactions, and by external tools in CNDB to analyze the strategy decisions.
      *
      * @param sstables a collection of the sstables to be assigned to arenas
-     * @param compactionFilter a filter to exclude CompactionSSTables,
+     * @param compactionFilter a bifilter(sstable, isCompacting) to exclude CompactionSSTables,
      *                         e.g., {@link CompactionSSTable#isSuitableForCompaction()}
      *
      * @return a map of arenas to their buckets
      */
     public Map<Arena, List<Level>> getLevels(Collection<? extends CompactionSSTable> sstables,
-                                             Predicate<CompactionSSTable> compactionFilter)
+                                             BiPredicate<CompactionSSTable, Boolean> compactionFilter)
     {
         return getLevels(sstables, compactionFilter, true);
     }
@@ -863,18 +853,16 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
      * new compactions, and by external tools in CNDB to analyze the strategy decisions.
      *
      * @param sstables a collection of the sstables to be assigned to arenas
-     * @param compactionFilter a filter to exclude CompactionSSTables,
+     * @param compactionFilter a bifilter(sstable, isCompacting) to exclude CompactionSSTables,
      *                         e.g., {@link CompactionSSTable#isSuitableForCompaction()}
-     * @param filterUnsuitable true if sstable should be non-compacting and filtered by {@code compactionFilter}
      *
      * @return a map of arenas to their buckets
      */
     public Map<Arena, List<Level>> getLevels(Collection<? extends CompactionSSTable> sstables,
-                                             Predicate<CompactionSSTable> compactionFilter,
-                                             boolean filterUnsuitable)
+                                             BiPredicate<CompactionSSTable, Boolean> compactionFilter)
     {
         maybeUpdateSelector();
-        Collection<Arena> arenas = getCompactionArenas(sstables, compactionFilter, filterUnsuitable);
+        Collection<Arena> arenas = getCompactionArenas(sstables, compactionFilter);
         Map<Arena, List<Level>> ret = new LinkedHashMap<>(); // should preserve the order of arenas
 
         for (Arena arena : arenas)
