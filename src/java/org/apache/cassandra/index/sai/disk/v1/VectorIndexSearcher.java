@@ -19,7 +19,6 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 import javax.annotation.Nullable;
@@ -47,7 +46,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.SparseFixedBitSet;
 
@@ -108,8 +106,7 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
         if (bitsOrPostingList.skipANN())
             return bitsOrPostingList.postingList();
 
-        ByteBuffer buffer = exp.lower.value.raw;
-        float[] queryVector = TypeUtil.decomposeVector(indexContext, buffer.duplicate());
+        float[] queryVector = exp.lower.value.vector;
         return graph.search(queryVector, limit, bitsOrPostingList.getBits(), Integer.MAX_VALUE, context);
     }
 
@@ -235,8 +232,7 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
         }
 
         // else ask hnsw to perform a search limited to the bits we created
-        ByteBuffer buffer = exp.lower.value.raw;
-        float[] queryVector = type.getSerializer().deserializeFloatArray(buffer);
+        float[] queryVector = exp.lower.value.vector;
         ReorderingPostingList results = graph.search(queryVector, limit, bits, Integer.MAX_VALUE, context);
         return toPrimaryKeyIterator(results, context);
     }
