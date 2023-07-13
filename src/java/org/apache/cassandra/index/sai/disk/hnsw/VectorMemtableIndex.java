@@ -50,7 +50,6 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -154,8 +153,7 @@ public class VectorMemtableIndex implements MemtableIndex
     {
         assert expr.getOp() == Expression.Op.ANN : "Only ANN is supported for vector search, received " + expr.getOp();
 
-        ByteBuffer buffer = expr.lower.value.raw;
-        float[] qv = TypeUtil.decomposeVector(indexContext, buffer);
+        float[] qv = expr.lower.value.vector;
 
         Bits bits = null;
         if (!RangeUtil.coversFullRing(keyRange))
@@ -214,8 +212,7 @@ public class VectorMemtableIndex implements MemtableIndex
             return new ReorderingRangeIterator(new PriorityQueue<>(results));
         }
 
-        ByteBuffer buffer = exp.lower.value.raw;
-        float[] qv = TypeUtil.decomposeVector(indexContext, buffer);
+        float[] qv = exp.lower.value.vector;
         KeyFilteringBits bits = new KeyFilteringBits(results);
         PriorityQueue<PrimaryKey> keyQueue = graph.search(qv, limit, bits, Integer.MAX_VALUE);
         if (keyQueue.isEmpty())

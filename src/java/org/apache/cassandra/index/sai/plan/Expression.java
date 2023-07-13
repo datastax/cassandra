@@ -390,10 +390,17 @@ public class Expression
         public final ByteBuffer raw;
         public final ByteBuffer encoded;
 
+        /**
+         * The native representation of our vector indexes is float[], so we cache that here as well
+         * to avoid repeated expensive conversions.  Always null for non-vector types.
+         */
+        public final float[] vector;
+
         public Value(ByteBuffer value, AbstractType<?> type)
         {
             this.raw = value;
             this.encoded = TypeUtil.asIndexBytes(value, type);
+            this.vector = type.isVector() ? TypeUtil.decomposeVector(type, raw.duplicate()) : null;
         }
 
         @Override
