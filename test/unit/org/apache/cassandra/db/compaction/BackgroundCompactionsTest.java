@@ -36,6 +36,8 @@ import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.StaticController;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.notifications.MetricsNotification;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Pair;
 import org.mockito.Mock;
@@ -487,25 +489,18 @@ public class BackgroundCompactionsTest
     @Test
     public void testPublishMetrics()
     {
-        long bytesInserted = 1;
-        long partitionsRead = 1;
-        double flushSize = 1;
-        double sstablePartitionReadLatency = 1;
-        double flushTimePerKb = 1;
-
         ColumnFamilyStore cfs = mock(ColumnFamilyStore.class);
         Tracker data = mock(Tracker.class);
+        TableMetrics tableMetrics = mock(TableMetrics.class);
+        MetricsNotification metricsNotification = mock(MetricsNotification.class);
 
-        when(cfs.getData()).thenReturn(data);
-        when(cfs.getBytesInserted()).thenReturn(bytesInserted);
-        when(cfs.getReadRequests()).thenReturn(partitionsRead);
-        when(cfs.getFlushSize()).thenReturn(flushSize);
-        when(cfs.getSstablePartitionReadLatency()).thenReturn(sstablePartitionReadLatency);
-        when(cfs.getFlushTimePerKb()).thenReturn(flushTimePerKb);
+        when(cfs.metrics()).thenReturn(tableMetrics);
+        when(tableMetrics.createMetricsNotification()).thenReturn(metricsNotification);
+        when(cfs.getSSTableTracker()).thenReturn(data);
         doCallRealMethod().when(cfs).publishMetrics();
 
         cfs.publishMetrics();
-        Mockito.verify(data, times(1)).publishMetrics(bytesInserted, partitionsRead, flushSize, sstablePartitionReadLatency, flushTimePerKb);
+        Mockito.verify(data, times(1)).publishMetrics(metricsNotification);
 
     }
 }

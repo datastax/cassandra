@@ -53,6 +53,7 @@ import org.mockito.Mockito;
 
 import static com.google.common.collect.ImmutableSet.copyOf;
 import static java.util.Collections.singleton;
+import static org.mockito.Mockito.mock;
 
 @RunWith(BMUnitRunner.class)
 public class TrackerTest
@@ -470,10 +471,11 @@ public class TrackerTest
     public void testPublishMetrics()
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
+        MetricsNotification metricsNotification = mock(MetricsNotification.class);
         Tracker tracker = Tracker.newDummyTracker(cfs.metadata);
         MockListener listener = new MockListener(false);
         tracker.subscribe(listener);
-        tracker.publishMetrics(1, 1, 1, 1, 1);
+        tracker.publishMetrics(metricsNotification);
         assert(listener.received.get(0) instanceof MetricsNotification);
     }
 

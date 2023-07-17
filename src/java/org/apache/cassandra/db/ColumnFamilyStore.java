@@ -1023,7 +1023,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return keyspace.getName();
     }
 
-    public Tracker getData()
+    @VisibleForTesting
+    public Tracker getSSTableTracker()
     {
         return data;
     }
@@ -1035,7 +1036,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public void publishMetrics()
     {
-        getData().publishMetrics(getBytesInserted(), getReadRequests(), getFlushSize(), getSstablePartitionReadLatency(), getFlushTimePerKb());
+        getSSTableTracker().publishMetrics(metrics().createMetricsNotification());
     }
 
     public Descriptor newSSTableDescriptor(File directory)

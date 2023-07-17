@@ -604,12 +604,11 @@ public class Tracker
             subscriber.handleNotification(notification, this);
     }
 
-    public void publishMetrics(long bytesInserted, long partitionsRead, double flushSize, double sstablePartitionReadLatencyNanos, double flushTimePerKbNanos)
+    public void publishMetrics(MetricsNotification metricsNotification)
     {
-        INotification notification = new MetricsNotification(bytesInserted, partitionsRead, flushSize, sstablePartitionReadLatencyNanos, flushTimePerKbNanos);
         for (INotificationConsumer subscriber : subscribers)
         {
-            subscriber.handleNotification(notification, this);
+            subscriber.handleNotification(metricsNotification, this);
         }
     }
 
