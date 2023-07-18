@@ -122,6 +122,8 @@ public class VectorMemtableIndex implements MemtableIndex
         if (different)
         {
             var primaryKey = indexContext.keyFactory().create(key, clustering);
+            // update bounds because only rows with vectors are included in the key bounds,
+            // so if the vector was null before, we won't have included it
             updateKeyBounds(primaryKey);
 
             // make the changes in this order so we don't have a window where the row is not in the index at all
