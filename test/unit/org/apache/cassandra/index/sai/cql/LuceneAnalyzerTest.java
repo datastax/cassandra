@@ -74,7 +74,25 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void testStandardAnalyzerInPrimaryKey() throws Throwable
+    public void testNoopAnalyzerOnClusteredColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int, val text, PRIMARY KEY (id, val))");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES (1, 'dog')");
+
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+
+        flush();
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+    }
+
+    @Test
+    public void testStandardAnalyzerInClusteringColumn() throws Throwable
     {
         createTable("CREATE TABLE %s (id int, val text, PRIMARY KEY (id, val))");
 
