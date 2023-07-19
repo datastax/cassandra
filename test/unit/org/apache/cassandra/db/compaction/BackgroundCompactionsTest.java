@@ -496,7 +496,7 @@ public class BackgroundCompactionsTest
 
         when(cfs.metrics()).thenReturn(tableMetrics);
         when(tableMetrics.createMetricsNotification()).thenReturn(metricsNotification);
-        when(cfs.getSSTableTracker()).thenReturn(data);
+        when(cfs.getTracker()).thenReturn(data);
         doCallRealMethod().when(cfs).publishMetrics();
 
         cfs.publishMetrics();

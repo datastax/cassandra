@@ -606,10 +606,7 @@ public class Tracker
 
     public void publishMetrics(MetricsNotification metricsNotification)
     {
-        for (INotificationConsumer subscriber : subscribers)
-        {
-            subscriber.handleNotification(metricsNotification, this);
-        }
+        notify(metricsNotification);
     }
 
     public boolean isDummy()
