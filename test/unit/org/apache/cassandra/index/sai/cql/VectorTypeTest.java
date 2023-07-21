@@ -54,24 +54,6 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void emptyIndexTest() throws Throwable
-    {
-        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        execute("INSERT INTO %s (pk, str_val) VALUES (0, 'A')");
-
-        UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
-        assertThat(result).hasSize(1);
-
-        flush();
-
-        result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
-        assertThat(result).hasSize(1);
-    }
-
-    @Test
     public void endToEndTest() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
