@@ -232,6 +232,7 @@ public class CompactionManager implements CompactionManagerMBean
         }
     }
 
+    @VisibleForTesting
     public static void publishMetrics()
     {
         for (String keyspace : Schema.instance.getKeyspaces())

@@ -489,10 +489,22 @@ public class BackgroundCompactionsTest
     @Test
     public void testPublishMetrics()
     {
+        long bytesInserted = 10;
+        long partitionsRead = 5;
+        double flushSize = 1024;
+        double readLatency = 20;
+        double flushTime = 15;
+
         ColumnFamilyStore cfs = mock(ColumnFamilyStore.class);
         Tracker data = mock(Tracker.class);
         TableMetrics tableMetrics = mock(TableMetrics.class);
-        MetricsNotification metricsNotification = mock(MetricsNotification.class);
+        MetricsNotification metricsNotification = new MetricsNotification(bytesInserted, partitionsRead, flushSize, readLatency, flushTime);
+
+        assertEquals(bytesInserted, metricsNotification.getBytesInserted());
+        assertEquals(partitionsRead, metricsNotification.getPartitionsRead());
+        assertEquals(flushSize, metricsNotification.getFlushSize(), 0.01);
+        assertEquals(readLatency, metricsNotification.getSstablePartitionReadLatencyNanos(), 0.01);
+        assertEquals(flushTime, metricsNotification.getFlushTimePerKbNanos(), 0.01);
 
         when(cfs.metrics()).thenReturn(tableMetrics);
         when(tableMetrics.createMetricsNotification()).thenReturn(metricsNotification);
