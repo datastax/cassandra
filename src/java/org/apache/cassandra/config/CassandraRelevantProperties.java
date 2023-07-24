@@ -466,6 +466,8 @@ public enum CassandraRelevantProperties
     PAXOS_REPAIR_RETRY_TIMEOUT_IN_MS("cassandra.paxos_repair_retry_timeout_millis", "60000"),
     PAXOS_USE_SELF_EXECUTION("cassandra.paxos.use_self_execution", "true"),
     PRINT_HEAP_HISTOGRAM_ON_OUT_OF_MEMORY_ERROR("cassandra.printHeapHistogramOnOutOfMemoryError"),
+    PUBLISH_METRICS_INTERVAL_MINUTES("cassandra.publish_metrics_interval_minutes", "0"),
+
     READS_THRESHOLDS_COORDINATOR_DEFENSIVE_CHECKS_ENABLED("cassandra.reads.thresholds.coordinator.defensive_checks_enabled"),
     RELEASE_VERSION("cassandra.releaseVersion"),
     RELOCATED_SHADED_IO_NETTY_TRANSPORT_NONATIVE("relocated.shaded.io.netty.transport.noNative"),

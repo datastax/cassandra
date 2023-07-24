@@ -54,6 +54,7 @@ import org.apache.cassandra.notifications.InitialSSTableAddedNotification;
 import org.apache.cassandra.notifications.MemtableDiscardedNotification;
 import org.apache.cassandra.notifications.MemtableRenewedNotification;
 import org.apache.cassandra.notifications.MemtableSwitchedNotification;
+import org.apache.cassandra.notifications.MetricsNotification;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
 import org.apache.cassandra.notifications.SSTableListChangedNotification;
@@ -633,6 +634,11 @@ public class Tracker
     {
         for (INotificationConsumer subscriber : subscribers)
             subscriber.handleNotification(notification, this);
+    }
+
+    public void publishMetrics(MetricsNotification metricsNotification)
+    {
+        notify(metricsNotification);
     }
 
     public boolean isDummy()
