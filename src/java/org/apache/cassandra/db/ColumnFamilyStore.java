@@ -3102,21 +3102,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return metric == null ? 0 : metric.bytesInserted.getCount();
     }
 
-    public double getFlushSize()
-    {
-        return metric == null ? 0 : metric.flushSizeOnDisk().get();
-    }
-
-    public double getSstablePartitionReadLatency()
-    {
-        return metric == null ? 0 : metric.sstablePartitionReadLatency.get();
-    }
-
-    public double getFlushTimePerKb()
-    {
-        return metric == null ? 0 : metric.flushTimePerKb.get();
-    }
-
     /** true if this CFS contains secondary index data */
     public boolean isIndex()
     {
