@@ -31,8 +31,11 @@ import org.apache.cassandra.db.compaction.unified.AdaptiveController;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.StaticController;
 import org.apache.cassandra.distributed.Cluster;
+import org.apache.cassandra.notifications.CompactorMetricsNotification;
+import org.apache.cassandra.notifications.WriterMetricsNotification;
 
 import static org.apache.cassandra.distributed.shared.FutureUtils.waitOn;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertEquals;
 
@@ -172,6 +175,31 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                              //verify that the file was deleted
                                              assert !Controller.getControllerConfigPath("does_not", "exist").exists();
 
+                                         });
+
+        }
+    }
+
+    @Test
+    public void testPublishMetrics() throws Throwable
+    {
+        try(Cluster cluster = init(Cluster.build(1).start()))
+        {
+            cluster.schemaChange(withKeyspace("CREATE KEYSPACE ks WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 2};"));
+            cluster.schemaChange(withKeyspace("CREATE TABLE ks.tbl (pk int, ck int, v int, PRIMARY KEY (pk, ck)) WITH compaction = " +
+                                              "{'class': 'UnifiedCompactionStrategy', " +
+                                              "'adaptive': 'false', " +
+                                              "'scaling_parameters': '0'};"));
+
+            cluster.get(1).runOnInstance(() ->
+                                         {
+                                             CompactionManager.publishWriterMetrics();
+                                             CompactionManager.publishCompactorMetrics();
+                                             ColumnFamilyStore cfs = Keyspace.open("ks").getColumnFamilyStore("tbl");
+                                             WriterMetricsNotification metricsNotification = cfs.metrics().createWriterMetricsNotification();
+                                             assertNotNull(metricsNotification);
+                                             CompactorMetricsNotification compactorMetricsNotification = cfs.metrics().createCompactorMetricsNotification();
+                                             assertNotNull(compactorMetricsNotification);
                                          });
 
         }

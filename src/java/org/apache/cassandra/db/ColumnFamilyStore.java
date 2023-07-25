@@ -1031,6 +1031,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return keyspace.metric;
     }
 
+    public void publishWriterMetrics()
+    {
+        getTracker().publishWriterMetrics(metrics().createWriterMetricsNotification());
+    }
+
+    public void publishCompactorMetrics()
+    {
+        getTracker().publishCompactorMetrics(metrics().createCompactorMetricsNotification());
+    }
+
     public Descriptor newSSTableDescriptor(File directory)
     {
         return newSSTableDescriptor(directory, SSTableFormat.Type.current().info.getLatestVersion(), SSTableFormat.Type.current());
@@ -3654,7 +3664,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 close();
             collectOverlaps();
         }
-        
+
         private void collectOverlaps()
         {
             if (compacting == null)

@@ -148,6 +148,12 @@ public class CompactionManager implements CompactionManagerMBean
     public static final int NO_GC = Integer.MIN_VALUE;
     public static final int GC_ALL = Integer.MAX_VALUE;
 
+    //This needs to be set on CNDB writers for Adaptive Compaction to work
+    public static final int PUBLISH_WRITER_METRICS_INTERVAL = Integer.getInteger(Config.PROPERTY_PREFIX + "publish_writer_metrics_interval_minutes", 0);
+
+    //This needs to be set on CNDB compactors for Adaptive Compaction to work
+    public static final int PUBLISH_COMPACTOR_METRICS_INTERVAL = Integer.getInteger(Config.PROPERTY_PREFIX + "publish_compactor_metrics_interval_minutes", 0);
+
     // A thread local that tells us if the current thread is owned by the compaction manager. Used
     // by CounterContext to figure out if it should log a warning for invalid counter shards.
     public static final FastThreadLocal<Boolean> isCompactionManager = new FastThreadLocal<Boolean>()
@@ -175,6 +181,14 @@ public class CompactionManager implements CompactionManagerMBean
 
         /*Store Controller Config for UCS every hour*/
         ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(CompactionManager::storeControllerConfig, 10, 60, TimeUnit.MINUTES);
+
+        /*publish writer metrics used by AdaptiveController for each cfs. This is needed for Adaptive Compaction to work in CNDB*/
+        if (PUBLISH_WRITER_METRICS_INTERVAL > 0)
+            ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(CompactionManager::publishWriterMetrics, 1, PUBLISH_WRITER_METRICS_INTERVAL, TimeUnit.MINUTES);
+
+        /* publish compactor metrics used by AdaptiveController for each cfs.  This is needed for Adaptive Compaction to work in CNDB*/
+        if (PUBLISH_COMPACTOR_METRICS_INTERVAL > 0)
+            ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(CompactionManager::publishCompactorMetrics, 1, PUBLISH_COMPACTOR_METRICS_INTERVAL, TimeUnit.MINUTES);
     }
 
     private final CompactionExecutor executor = new CompactionExecutor();
@@ -221,6 +235,40 @@ public class CompactionManager implements CompactionManagerMBean
                     UnifiedCompactionStrategy ucs = (UnifiedCompactionStrategy) ((UnifiedCompactionContainer) strat).getStrategies().get(0);
                     ucs.storeControllerConfig();
                 }
+            }
+        }
+    }
+
+    @VisibleForTesting
+    public static void publishWriterMetrics()
+    {
+        for (String keyspace : Schema.instance.getKeyspaces())
+        {
+            // don't publish metrics for system tables
+            if (SchemaConstants.isSystemKeyspace(keyspace))
+            {
+                continue;
+            }
+            for (ColumnFamilyStore cfs : Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStores())
+            {
+                cfs.publishWriterMetrics();
+            }
+        }
+    }
+
+    @VisibleForTesting
+    public static void publishCompactorMetrics()
+    {
+        for (String keyspace : Schema.instance.getKeyspaces())
+        {
+            // don't publish metrics for system tables
+            if (SchemaConstants.isSystemKeyspace(keyspace))
+            {
+                continue;
+            }
+            for (ColumnFamilyStore cfs : Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStores())
+            {
+                cfs.publishCompactorMetrics();
             }
         }
     }

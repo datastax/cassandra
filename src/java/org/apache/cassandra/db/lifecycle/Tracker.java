@@ -611,6 +611,16 @@ public class Tracker
             subscriber.handleNotification(notification, this);
     }
 
+    public void publishWriterMetrics(WriterMetricsNotification writerMetricsNotification)
+    {
+        notify(writerMetricsNotification);
+    }
+
+    public void publishCompactorMetrics(CompactorMetricsNotification compactorMetricsNotification)
+    {
+        notify(compactorMetricsNotification);
+    }
+
     public boolean isDummy()
     {
         return cfstore == null || !DatabaseDescriptor.enableMemtableAndCommitLog();
