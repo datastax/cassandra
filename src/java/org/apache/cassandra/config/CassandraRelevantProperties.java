@@ -313,6 +313,7 @@ public enum CassandraRelevantProperties
     /** @deprecated See CASSANDRA-17797 */
     @Deprecated(since = "4.1")
     FILE_SYSTEM_CHECK_OWNERSHIP_TOKEN(FileSystemOwnershipCheck.FILE_SYSTEM_CHECK_OWNERSHIP_TOKEN),
+    FLOAT_ONLY_VECTORS("cassandra.float_only_vectors", "true"),
     FORCE_DEFAULT_INDEXING_PAGE_SIZE("cassandra.force_default_indexing_page_size"),
     /** Used when running in Client mode and the system and schema keyspaces need to be initialized outside of their normal initialization path **/
     FORCE_LOAD_LOCAL_KEYSPACES("cassandra.schema.force_load_local_keyspaces"),
