@@ -75,6 +75,8 @@ public final class VectorType<T> extends AbstractType<List<T>>
             return Objects.hash(type, dimension);
         }
     }
+
+    private static final boolean FLOAT_ONLY = Boolean.parseBoolean(System.getProperty("cassandra.float_only_vectors", "true"));
     @SuppressWarnings("rawtypes")
     private static final ConcurrentHashMap<Key, VectorType> instances = new ConcurrentHashMap<>();
 
@@ -87,6 +89,8 @@ public final class VectorType<T> extends AbstractType<List<T>>
     private VectorType(AbstractType<T> elementType, int dimension)
     {
         super(ComparisonType.CUSTOM);
+        if (FLOAT_ONLY && !(elementType instanceof FloatType))
+            throw new InvalidRequestException(String.format("vectors may only use float. given %s", elementType.asCQL3Type()));
         if (dimension <= 0)
             throw new InvalidRequestException(String.format("vectors may only have positive dimensions; given %d", dimension));
         this.elementType = elementType;
