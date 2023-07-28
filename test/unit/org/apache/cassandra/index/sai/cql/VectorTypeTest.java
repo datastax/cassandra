@@ -419,7 +419,7 @@ public class VectorTypeTest extends VectorTester
     {
         createTable("CREATE TABLE %s (p int, c int, v text, vec vector<float, 2>, PRIMARY KEY(p, c))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (p, c, v) VALUES (?, ?, ?)", 0, 0, "test");
         execute("INSERT INTO %s (p, c, v) VALUES (?, ?, ?)", 0, 1, "00112233445566");

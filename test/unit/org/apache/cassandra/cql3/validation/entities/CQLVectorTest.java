@@ -20,13 +20,22 @@ package org.apache.cassandra.cql3.validation.entities;
 
 import java.math.BigInteger;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.FLOAT_ONLY_VECTORS;
+
 public class CQLVectorTest extends CQLTester
 {
+    @BeforeClass
+    public static void setupClass()
+    {
+        FLOAT_ONLY_VECTORS.setBoolean(false);
+    }
+
     @Test
     public void invalidNumberOfDimensionsFixedWidth() throws Throwable
     {
