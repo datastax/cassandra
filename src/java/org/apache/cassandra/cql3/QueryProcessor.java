@@ -656,7 +656,7 @@ public class QueryProcessor implements QueryHandler
         CQLStatement statement = parseStatement(query, queryState.getClientState());
         statement.validate(queryState.getClientState());
 
-        return executeInternalWithPaging(statement, PageSize.inRows(pageSize), values);
+        return executeInternalWithPaging(statement, pageSize, values);
     }
 
     private static UntypedResultSet executeInternalWithPaging(CQLStatement statement, PageSize pageSize, Object... values)
