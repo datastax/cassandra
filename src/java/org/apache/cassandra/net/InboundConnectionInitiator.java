@@ -290,6 +290,7 @@ public class InboundConnectionInitiator
                 {
                     assert initiate.type.isMessaging();
 
+                    // Second message to DSE is sent with version 10 (oss 3.0)
                     ByteBuf response = HandshakeProtocol.Accept.respondPre40(settings.acceptMessaging.min, ctx.alloc());
                     AsyncChannelPromise.writeAndFlush(ctx, response,
                                                       (ChannelFutureListener) future -> {
