@@ -26,12 +26,14 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.FLOAT_ONLY_VECTORS;
+
 public class CQLVectorTest extends CQLTester
 {
     @BeforeClass
     public static void setupClass()
     {
-        System.setProperty("cassandra.float_only_vectors", "false");
+        FLOAT_ONLY_VECTORS.setBoolean(false);
     }
 
     @Test

@@ -42,6 +42,8 @@ import org.apache.cassandra.utils.JsonUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.FLOAT_ONLY_VECTORS;
+
 public final class VectorType<T> extends AbstractType<List<T>>
 {
     private static class Key
@@ -76,7 +78,7 @@ public final class VectorType<T> extends AbstractType<List<T>>
         }
     }
 
-    private static final boolean FLOAT_ONLY = Boolean.parseBoolean(System.getProperty("cassandra.float_only_vectors", "true"));
+    private static final boolean FLOAT_ONLY = FLOAT_ONLY_VECTORS.getBoolean();
     @SuppressWarnings("rawtypes")
     private static final ConcurrentHashMap<Key, VectorType> instances = new ConcurrentHashMap<>();
 
