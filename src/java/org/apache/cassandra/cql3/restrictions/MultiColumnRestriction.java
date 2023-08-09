@@ -33,7 +33,7 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.cql3.MarkerOrList;
+import org.apache.cassandra.cql3.MarkerOrTerms;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Term;
@@ -262,10 +262,10 @@ public abstract class MultiColumnRestriction implements SingleRestriction
 
     public static class INRestriction extends MultiColumnRestriction
     {
-        private final MarkerOrList terms;
+        private final MarkerOrTerms terms;
         private final Collection<ColumnIdentifier> columnIdentifiers;
 
-        public INRestriction(List<ColumnMetadata> columnDefs, MarkerOrList terms)
+        public INRestriction(List<ColumnMetadata> columnDefs, MarkerOrTerms terms)
         {
             super(columnDefs);
             this.terms = terms;
@@ -350,10 +350,10 @@ public abstract class MultiColumnRestriction implements SingleRestriction
     {
         private final TermSlice slice;
 
-        private final List<MarkerOrList> skippedValues; // values passed in NOT IN
+        private final List<MarkerOrTerms> skippedValues; // values passed in NOT IN
 
 
-        SliceRestriction(List<ColumnMetadata> columnDefs, TermSlice slice, List<MarkerOrList> skippedValues)
+        SliceRestriction(List<ColumnMetadata> columnDefs, TermSlice slice, List<MarkerOrTerms> skippedValues)
         {
             super(columnDefs);
             assert slice != null;
@@ -368,7 +368,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
             return new MultiColumnRestriction.SliceRestriction(columnDefs, slice, Collections.emptyList());
         }
 
-        public static MultiColumnRestriction.SliceRestriction fromSkippedValues(List<ColumnMetadata> columnDefs, MarkerOrList skippedValues)
+        public static MultiColumnRestriction.SliceRestriction fromSkippedValues(List<ColumnMetadata> columnDefs, MarkerOrTerms skippedValues)
         {
             return new MultiColumnRestriction.SliceRestriction(columnDefs, TermSlice.UNBOUNDED, Collections.singletonList(skippedValues));
         }
@@ -507,9 +507,9 @@ public abstract class MultiColumnRestriction implements SingleRestriction
          */
         private void addSkippedValues(Bound bound, QueryOptions options, List<MultiCBuilder.Element> toAdd)
         {
-            for (MarkerOrList markerOrList: skippedValues)
+            for (MarkerOrTerms markerOrTerms : skippedValues)
             {
-                for (List<ByteBuffer> tuple: markerOrList.bindAndGetTuples(options, ColumnMetadata.toIdentifiers(columnDefs)))
+                for (List<ByteBuffer> tuple: markerOrTerms.bindAndGetTuples(options, ColumnMetadata.toIdentifiers(columnDefs)))
                 {
                     MultiCBuilder.Element element = MultiCBuilder.Element.bound(tuple, bound, false);
                     toAdd.add(element);
@@ -568,7 +568,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
             List<ColumnMetadata> newColumnDefs = columnDefs.size() >= otherSlice.columnDefs.size() ? columnDefs : otherSlice.columnDefs;
 
             int sizeHint = skippedValues.size() + otherSlice.skippedValues.size();
-            List<MarkerOrList> newSkippedValues = new ArrayList<>(sizeHint);
+            List<MarkerOrTerms> newSkippedValues = new ArrayList<>(sizeHint);
             newSkippedValues.addAll(skippedValues);
             newSkippedValues.addAll(otherSlice.skippedValues);
             TermSlice newSlice = slice.merge(otherSlice.slice);
