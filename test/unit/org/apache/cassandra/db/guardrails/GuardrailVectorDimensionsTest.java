@@ -21,7 +21,10 @@ package org.apache.cassandra.db.guardrails;
 import java.util.List;
 import java.util.function.Supplier;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
 
 import static java.lang.String.format;
 
@@ -68,6 +71,12 @@ public class GuardrailVectorDimensionsTest extends ThresholdTester
         "CREATE TABLE %s (k int PRIMARY KEY, v map<frozen<set<vector<int, %%d>>>, int>)",
         "CREATE TABLE %s (k int PRIMARY KEY, v tuple<frozen<tuple<vector<int, %%d>, int>>, int>)"
     );
+
+    @BeforeClass
+    public static void setupClass()
+    {
+        CassandraRelevantProperties.FLOAT_ONLY_VECTORS.setBoolean(false);
+    }
 
     @Test
     public void testCreateTable() throws Throwable
