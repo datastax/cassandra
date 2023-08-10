@@ -115,7 +115,7 @@ public abstract class Guardrails
     public static final Threshold vectorDimensions =
             factory.threshold("vector_dimensions",
                     () -> config.vector_dimensions_warn_threshold,
-                    () -> config.vector_dimensions_failure_threshold, // not needed so far
+                    () -> config.vector_dimensions_failure_threshold,
                     (isWarning, what, value, threshold) ->
                     format("%s has a vector of %s dimensions, this exceeds the %s threshold of %s.",
                           what, value, isWarning ? "warning" : "failure", threshold));
