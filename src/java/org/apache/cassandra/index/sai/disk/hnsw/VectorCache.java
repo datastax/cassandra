@@ -30,7 +30,7 @@ import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 /**
  * Caches vectors intelligently, preferring vectors that occur in higher levels of the graph
- * and vectors that are closer to the level's entry points.
+ * and vectors that are closer (in the edge-wise, not similarity, sense) to the level's entry points.
  */
 public abstract class VectorCache
 {
@@ -68,70 +68,50 @@ public abstract class VectorCache
         public NBHMVectorCache(HnswGraph hnsw, OnDiskVectors vectors, int capacityRemaining) throws IOException
         {
             dimension = vectors.dimension();
+            var totalNodes = vectors.size();
             var topLevel = hnsw.numLevels() - 1;
-            capacityRemaining = populateCache(hnsw, topLevel, hnsw.entryNode(), vectors, capacityRemaining);
             var visitedNodes = new HashSet<>(List.of(hnsw.entryNode())); // resets between levels
-            var cachedNodes = new HashSet<>(visitedNodes); // does not reset between levels
 
             // we deliberately don't cache level 0 since that's going to have the worst efficiency
-            for (int level = topLevel; level > 0 && capacityRemaining > 0; level--)
+            for (int level = topLevel; level > 0 && capacityRemaining > 0 && cache.size() < totalNodes; level--)
             {
                 // start with the visited set from the previous level
                 var nodeQueue = new LinkedList<>(visitedNodes);
                 visitedNodes.clear();
-
-                // for each node in the queue, add its neighbors to the queue, and cache it if not yet cached
-                while (!nodeQueue.isEmpty() && capacityRemaining > 0)
+                while (!nodeQueue.isEmpty() && capacityRemaining > 0 && cache.size() < totalNodes)
                 {
                     var node = nodeQueue.poll();
                     if (visitedNodes.contains(node))
                         continue;
                     visitedNodes.add(node);
-
-                    if (!cachedNodes.contains(node))
+                    if (!cache.containsKey(node))
                     {
                         try
                         {
-                            capacityRemaining = populateCache(hnsw, level, node, vectors, capacityRemaining);
+                            var vector = new float[dimension];
+                            vectors.readVector(node, vector);
+                            cache.put(node, vector);
+                            capacityRemaining -= dimension * Float.BYTES;
+                            if (capacityRemaining <= 0)
+                                break;
                         }
                         catch (IOException e)
                         {
                             throw new RuntimeException(e);
                         }
-                        cachedNodes.add(node);
                     }
 
                     // add neighbors of current node to queue
                     hnsw.seek(level, node);
-                    while (true)
+                    var neighbor = hnsw.nextNeighbor();
+                    while (neighbor != NO_MORE_DOCS)
                     {
-                        var neighbor = hnsw.nextNeighbor();
-                        if (neighbor == NO_MORE_DOCS)
-                            break;
                         if (!visitedNodes.contains(neighbor))
                             nodeQueue.add(neighbor);
+                        neighbor = hnsw.nextNeighbor();
                     }
                 }
             }
-        }
-
-        private int populateCache(HnswGraph hnsw, int level, int node, OnDiskVectors vectors, int capacityRemaining) throws IOException
-        {
-            hnsw.seek(level, node);
-            while (capacityRemaining > 0)
-            {
-                var next = hnsw.nextNeighbor();
-                if (next == NO_MORE_DOCS)
-                    break;
-                if (cache.containsKey(next))
-                    continue;
-
-                var vector = new float[dimension];
-                vectors.readVector(next, vector);
-                cache.put(next, vector);
-                capacityRemaining -= vector.length * Float.BYTES;
-            }
-            return capacityRemaining;
         }
 
         @Override
