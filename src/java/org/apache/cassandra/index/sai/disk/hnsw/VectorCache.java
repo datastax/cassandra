@@ -72,7 +72,7 @@ public abstract class VectorCache
             var topLevel = hnsw.numLevels() - 1;
             var visitedNodes = new HashSet<>(List.of(hnsw.entryNode())); // resets between levels
 
-            // we deliberately don't cache level 0 since that's going to have the worst efficiency
+            // we deliberately don't run BFS for level 0 since that's going to have the worst efficiency
             for (int level = topLevel; level > 0 && capacityRemaining > 0 && cache.size() < totalNodes; level--)
             {
                 // start with the visited set from the previous level
@@ -109,6 +109,25 @@ public abstract class VectorCache
                         if (!visitedNodes.contains(neighbor))
                             nodeQueue.add(neighbor);
                         neighbor = hnsw.nextNeighbor();
+                    }
+                }
+            }
+
+            // naively exhaust rest of cache capacity with as many non-cached vectors as possible from level 0
+            for (int node = 0; node < totalNodes && capacityRemaining > 0 && cache.size() < totalNodes; node++)
+            {
+                if (!cache.containsKey(node))
+                {
+                    try
+                    {
+                        var vector = new float[dimension];
+                        vectors.readVector(node, vector);
+                        cache.put(node, vector);
+                        capacityRemaining -= dimension * Float.BYTES;
+                    }
+                    catch (IOException e)
+                    {
+                        throw new RuntimeException(e);
                     }
                 }
             }
