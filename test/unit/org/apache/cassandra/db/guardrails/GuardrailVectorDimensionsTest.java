@@ -20,7 +20,10 @@ package org.apache.cassandra.db.guardrails;
 
 import java.util.function.Supplier;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
 
 import static java.lang.String.format;
 
@@ -40,6 +43,12 @@ public class GuardrailVectorDimensionsTest extends ThresholdTester
               Guardrails::setVectorDimensionsThreshold,
               Guardrails::getVectorDimensionsWarnThreshold,
               Guardrails::getVectorDimensionsFailThreshold);
+    }
+
+    @BeforeClass
+    public static void setupClass()
+    {
+        CassandraRelevantProperties.FLOAT_ONLY_VECTORS.setBoolean(false);
     }
 
     @Test
