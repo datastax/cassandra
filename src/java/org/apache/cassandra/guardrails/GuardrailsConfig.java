@@ -185,7 +185,7 @@ public class GuardrailsConfig
         enforceDefault(items_per_collection_warn_threshold, v -> items_per_collection_warn_threshold = v, -1L, 20L);
 
         enforceDefault(vector_dimensions_warn_threshold, v -> vector_dimensions_warn_threshold = v, -1, -1);
-        enforceDefault(vector_dimensions_failure_threshold, v -> vector_dimensions_failure_threshold = v, 8000, 8000);
+        enforceDefault(vector_dimensions_failure_threshold, v -> vector_dimensions_failure_threshold = v, 8192, 8192);
 
         enforceDefault(columns_per_table_failure_threshold, v -> columns_per_table_failure_threshold = v, -1L, 50L);
         enforceDefault(secondary_index_per_table_failure_threshold, v -> secondary_index_per_table_failure_threshold = v, NO_LIMIT, 1);
