@@ -94,7 +94,7 @@ public class ReadQueryTrackingTest extends CQLTester
                 expect(reads(1), rows(2 * 5), partitions(2))),
             scenario(
                 SEVEN_REGULAR_VALUES, NO_STATIC_ROW, FIVE_ROWS_PER_PARTITION, READ_THREE_PARTITIONS_AND_TWO_ROWS_WITHIN_EACH,
-                expect(reads(1), rows(3 * 2), partitions(3))),
+                expect(reads(3), rows(3 * 2), partitions(3))),
             scenario(
                 SEVEN_REGULAR_VALUES, STATIC_ROW, FIVE_ROWS_PER_PARTITION, SINGLE_PARTITION_READ,
                 expect(reads(1), rows(1 + 5), partitions(1))),
@@ -103,7 +103,7 @@ public class ReadQueryTrackingTest extends CQLTester
                 expect(reads(1), rows(2 * (1 + 5)), partitions(2))),
             scenario(
                 SEVEN_REGULAR_VALUES, STATIC_ROW, FIVE_ROWS_PER_PARTITION, READ_THREE_PARTITIONS_AND_TWO_ROWS_WITHIN_EACH,
-                expect(reads(1), rows(3 * (1 + 2)), partitions(3))),
+                expect(reads(3), rows(3 * (1 + 2)), partitions(3))),
             scenario(
                 NO_REGULAR_COLUMNS, STATIC_ROW, FIVE_ROWS_PER_PARTITION, SINGLE_PARTITION_READ,
                 expect(reads(1), rows(1 + 5), partitions(1))),
@@ -112,7 +112,7 @@ public class ReadQueryTrackingTest extends CQLTester
                 expect(reads(1), rows(2 * (1 + 5)), partitions(2))),
             scenario(
                 NO_REGULAR_COLUMNS, STATIC_ROW, FIVE_ROWS_PER_PARTITION, READ_THREE_PARTITIONS_AND_TWO_ROWS_WITHIN_EACH,
-                expect(reads(1), rows(3 * (1 + 2)), partitions(3))),
+                expect(reads(3), rows(3 * (1 + 2)), partitions(3))),
             scenario(
                 NO_REGULAR_COLUMNS, NO_STATIC_ROW, FIVE_ROWS_PER_PARTITION, SINGLE_PARTITION_READ,
                 expect(reads(1), rows(5), partitions(1))),
@@ -121,7 +121,7 @@ public class ReadQueryTrackingTest extends CQLTester
                 expect(reads(1), rows(2 * 5), partitions(2))),
             scenario(
                 NO_REGULAR_COLUMNS, NO_STATIC_ROW, FIVE_ROWS_PER_PARTITION, READ_THREE_PARTITIONS_AND_TWO_ROWS_WITHIN_EACH,
-                expect(reads(1), rows(2 * 5), partitions(2))));
+                expect(reads(3), rows(2 * 3), partitions(3))));
     };
 
     @Parameterized.Parameter
@@ -178,7 +178,7 @@ public class ReadQueryTrackingTest extends CQLTester
         else if (scenario.filtering.equals(FILTERING_FOR_TWO_PARTITIONS))
             session.execute("SELECT * FROM " + table + " WHERE k < ? ALLOW FILTERING", 2);
         else if (scenario.filtering.equals(READ_THREE_PARTITIONS_AND_TWO_ROWS_WITHIN_EACH))
-            session.execute("SELECT * FROM " + table + " WHERE k IN (1, 2, 3) AND c IN (3, 5)");
+            session.execute("SELECT * FROM " + table + " WHERE k IN (1, 2, 3) AND c IN (3, 1)");
         else
             fail("Unknown filtering scenario: " + scenario.filtering);
 
@@ -186,23 +186,23 @@ public class ReadQueryTrackingTest extends CQLTester
         if (scenario.filtering.equals(SINGLE_PARTITION_READ))
         {
             // single partition read
-            assertEquals(1, tracker.reads.get());
+            assertEquals(scenario.expectation.reads, tracker.reads.get());
         }
         else if (scenario.filtering.equals(FILTERING_FOR_TWO_PARTITIONS))
         {
             // range read
-            assertEquals(1, tracker.rangeReads.get());
+            assertEquals(scenario.expectation.reads, tracker.rangeReads.get());
         }
         else if (scenario.filtering.equals(READ_THREE_PARTITIONS_AND_TWO_ROWS_WITHIN_EACH))
         {
             // multi-partition read
-            assertEquals(3, tracker.reads.get());
+            assertEquals(scenario.expectation.reads, tracker.reads.get());
         }
         else fail("Unknown filtering scenario: " + scenario.filtering);
 
         assertEquals(scenario.expectation.rows, tracker.readRows.get());
         assertEquals(scenario.expectation.partitions, tracker.readPartitions.get());
-        assertEquals(1, tracker.replicaPlans.get());
+        assertEquals(scenario.expectation.reads, tracker.replicaPlans.get());
     }
 
     private void dumpTable(String table)
