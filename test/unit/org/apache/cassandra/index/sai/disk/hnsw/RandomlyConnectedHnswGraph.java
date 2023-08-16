@@ -122,8 +122,8 @@ public class RandomlyConnectedHnswGraph extends ExtendedHnswGraph {
             int maxNeighbors = Math.min(M, n - 1);
             for (int i = 0; i < n; i++)
             {
+                // staging in a Set first cleans up duplicate neighbors
                 Set<Integer> neighborSet = new HashSet<>();
-                // need to avoid duplicate neighbors
                 while (neighborSet.size() < maxNeighbors)
                 {
                     int neighborIdx = random.nextInt(n);

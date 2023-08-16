@@ -72,9 +72,10 @@ public class VectorCacheTest
         var vectorFile = new File(testDirectory, "vectors");
         generateVectors(totalOrdinals);
         var offset = writeVectorsToDisk(vectorFile);
-        var fh = new FileHandle.Builder(vectorFile).mmapped(true).complete();
-        onDiskVectors = new OnDiskVectors(fh, offset);
-        cache = VectorCache.load(hnsw, onDiskVectors, cacheCapacity);
+        try (var fh = new FileHandle.Builder(vectorFile).mmapped(true).complete()) {
+            onDiskVectors = new OnDiskVectors(fh, offset);
+            cache = VectorCache.load(hnsw, onDiskVectors, cacheCapacity);
+        }
     }
 
     private void generateVectors(int totalOrdinals)
@@ -112,7 +113,7 @@ public class VectorCacheTest
         int topLevel = hnsw.numLevels() - 1;
         int entryNode = hnsw.entryNode();
 
-        Set<Integer> expectedCachedNeighbors = new HashSet<>();
+        Set<Integer> expectedCachedNeighbors = new HashSet<>(Set.of(entryNode));
         hnsw.seek(topLevel, entryNode);
         for (int i = 0; i < expectedCached - 1; i++)
         {
@@ -125,7 +126,7 @@ public class VectorCacheTest
         {
             var raw = cache.get(i);
             // we only expect entry node and first expectedCached - 1 neighbors to be visited by BFS and cached
-            if (i == entryNode || expectedCachedNeighbors.contains(i))
+            if (expectedCachedNeighbors.contains(i))
             {
                 assertThat(raw).isNotEqualTo(null);
                 var expectedRaw = vectorValues.vectorValue(i);

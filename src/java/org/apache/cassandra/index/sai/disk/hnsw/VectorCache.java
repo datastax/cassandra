@@ -68,23 +68,24 @@ public abstract class VectorCache
         public NBHMVectorCache(HnswGraph hnsw, OnDiskVectors vectors, int capacityRemaining) throws IOException
         {
             dimension = vectors.dimension();
-            var totalNodes = vectors.size();
             var topLevel = hnsw.numLevels() - 1;
             var visitedNodes = new HashSet<>(List.of(hnsw.entryNode())); // resets between levels
 
-            // we deliberately don't run BFS for level 0 since that's going to have the worst efficiency
-            for (int level = topLevel; level > 0 && capacityRemaining > 0 && cache.size() < totalNodes; level--)
+            // we deliberately don't cache level 0 since that's going to have the worst efficiency
+            for (int level = topLevel; level > 0 && capacityRemaining > 0; level--)
             {
                 // start with the visited set from the previous level
                 var nodeQueue = new LinkedList<>(visitedNodes);
                 visitedNodes.clear();
-                while (!nodeQueue.isEmpty() && capacityRemaining > 0 && cache.size() < totalNodes)
+
+                // for each node in the queue, add its neighbors to the queue, and cache it if not yet cached
+                while (!nodeQueue.isEmpty() && capacityRemaining > 0)
                 {
                     var node = nodeQueue.poll();
-                    if (visitedNodes.contains(node))
+                    if (!visitedNodes.add(node))
                         continue;
-                    visitedNodes.add(node);
-                    if (!cache.containsKey(node))
+
+                    if (!cache.containsKey((long) node))
                     {
                         try
                         {
@@ -92,8 +93,6 @@ public abstract class VectorCache
                             vectors.readVector(node, vector);
                             cache.put(node, vector);
                             capacityRemaining -= dimension * Float.BYTES;
-                            if (capacityRemaining <= 0)
-                                break;
                         }
                         catch (IOException e)
                         {
@@ -103,31 +102,13 @@ public abstract class VectorCache
 
                     // add neighbors of current node to queue
                     hnsw.seek(level, node);
-                    var neighbor = hnsw.nextNeighbor();
-                    while (neighbor != NO_MORE_DOCS)
+                    while (true)
                     {
+                        var neighbor = hnsw.nextNeighbor();
+                        if (neighbor == NO_MORE_DOCS)
+                            break;
                         if (!visitedNodes.contains(neighbor))
                             nodeQueue.add(neighbor);
-                        neighbor = hnsw.nextNeighbor();
-                    }
-                }
-            }
-
-            // naively exhaust rest of cache capacity with as many non-cached vectors as possible from level 0
-            for (int node = 0; node < totalNodes && capacityRemaining > 0 && cache.size() < totalNodes; node++)
-            {
-                if (!cache.containsKey(node))
-                {
-                    try
-                    {
-                        var vector = new float[dimension];
-                        vectors.readVector(node, vector);
-                        cache.put(node, vector);
-                        capacityRemaining -= dimension * Float.BYTES;
-                    }
-                    catch (IOException e)
-                    {
-                        throw new RuntimeException(e);
                     }
                 }
             }
@@ -143,8 +124,7 @@ public abstract class VectorCache
         public long ramBytesUsed()
         {
             return RamEstimation.concurrentHashMapRamUsed(cache.size())
-                           + (long) cache.size() * Float.BYTES * dimension;
-
+                   + (long) cache.size() * Float.BYTES * dimension;
         }
     }
 }
