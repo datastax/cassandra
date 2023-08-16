@@ -25,7 +25,6 @@
 package org.apache.cassandra.index.sai.memory;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.PriorityQueue;
@@ -33,7 +32,6 @@ import java.util.SortedSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongConsumer;
 
-import com.google.common.base.Charsets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,7 +50,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -105,14 +102,6 @@ public class TrieMemoryIndex extends MemoryIndex
             while (analyzer.hasNext())
             {
                 final ByteBuffer term = analyzer.next();
-                try
-                {
-                    logger.debug(ByteBufferUtil.string(term, Charsets.UTF_8));
-                }
-                catch (CharacterCodingException e)
-                {
-                    throw new RuntimeException(e);
-                }
 
                 setMinMaxTerm(term.duplicate());
 
