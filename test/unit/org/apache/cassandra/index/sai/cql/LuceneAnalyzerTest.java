@@ -20,8 +20,8 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
-import com.datastax.driver.core.exceptions.InvalidConfigurationInQueryException;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -92,22 +92,14 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void testStandardAnalyzerInClusteringColumn() throws Throwable
+    public void testStandardAnalyzerInClusteringColumnFailsAtCreateIndex() throws Throwable
     {
         createTable("CREATE TABLE %s (id int, val text, PRIMARY KEY (id, val))");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                    "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-
-        waitForIndexQueryable();
-
-        execute("INSERT INTO %s (id, val) VALUES (1, 'The quick brown fox jumps over the lazy DOG.')");
-
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
-
-        flush();
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+                    "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }"
+        )).isInstanceOf(InvalidRequestException.class);
     }
 
     @Test
