@@ -261,18 +261,14 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("Cannot create more than one storage-attached index on the same column: " + target.left);
         }
 
+        // Analyzer is not supported against PK columns
         String indexAnalyzer = options.get(LuceneAnalyzer.INDEX_ANALYZER);
-
         if (indexAnalyzer != null)
         {
-            Iterator<ColumnMetadata> primaryKeyColumns = metadata.primaryKeyColumns().iterator();
-            while (primaryKeyColumns.hasNext())
+            for (ColumnMetadata column : metadata.primaryKeyColumns())
             {
-                ColumnMetadata column = primaryKeyColumns.next();
                 if (column.name.equals(target.left.name))
-                {
                     throw new InvalidRequestException("Cannot specify index analyzer on primary key column: " + target.left);
-                }
             }
         }
 
