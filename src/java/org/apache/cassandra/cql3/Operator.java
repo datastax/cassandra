@@ -271,6 +271,19 @@ public enum Operator
         {
             return true;
         }
+    },
+    ANALYZER_MATCHES(16)
+    {
+        @Override
+        public String toString()
+        {
+            return ": '<term>'";
+        }
+
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            throw new UnsupportedOperationException();
+        }
     };
 
     /**

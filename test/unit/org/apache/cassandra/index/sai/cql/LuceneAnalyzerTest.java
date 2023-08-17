@@ -67,10 +67,10 @@ public class LuceneAnalyzerTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'The quick brown fox jumps over the lazy DOG.')");
 
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog'").size());
 
         flush();
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog'").size());
     }
 
     // Technically, the NoopAnalyzer is applied, but that maps each field without modification, so any operator
@@ -87,9 +87,10 @@ public class LuceneAnalyzerTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES (1, 'dog')");
 
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val : 'dog'"))
+        .isInstanceOf(InvalidRequestException.class);;
 
-        flush();
+        // Equality still works
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
     }
 
@@ -153,7 +154,7 @@ public class LuceneAnalyzerTest extends SAITester
 
         flush();
 
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'hello'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'hello'").size());
     }
 
     @Test
@@ -173,9 +174,9 @@ public class LuceneAnalyzerTest extends SAITester
 
         flush();
 
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'do'").size());
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'og'").size());
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'do'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'og'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog'").size());
     }
 
     @Test
@@ -192,9 +193,9 @@ public class LuceneAnalyzerTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'DoG')");
 
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'do'").size());
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'og'").size());
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'do'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'og'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog'").size());
     }
 
     @Test
@@ -212,10 +213,10 @@ public class LuceneAnalyzerTest extends SAITester
 
         flush();
 
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'hello'").size());
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'twice'").size());
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'the'").size()); // test stop word
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'and'").size()); // test stop word
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'hello'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'twice'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'the'").size()); // test stop word
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'and'").size()); // test stop word
     }
 
     @Test
@@ -234,10 +235,10 @@ public class LuceneAnalyzerTest extends SAITester
 
         flush();
 
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'hello'").size());
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'twice'").size());
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'the'").size()); // test stop word
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'and'").size()); // test stop word
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'hello'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'twice'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'the'").size()); // test stop word
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'and'").size()); // test stop word
     }
 
     @Test
@@ -256,8 +257,8 @@ public class LuceneAnalyzerTest extends SAITester
 
         flush();
 
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'the'").size()); // stop word test
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'query'").size());
-        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'queries'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'the'").size()); // stop word test
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'query'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'queries'").size());
     }
 }
