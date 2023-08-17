@@ -262,8 +262,7 @@ public class StorageAttachedIndex implements Index
         }
 
         // Analyzer is not supported against PK columns
-        String indexAnalyzer = options.get(LuceneAnalyzer.INDEX_ANALYZER);
-        if (indexAnalyzer != null)
+        if (AbstractAnalyzer.isAnalyzed(options))
         {
             for (ColumnMetadata column : metadata.primaryKeyColumns())
             {
