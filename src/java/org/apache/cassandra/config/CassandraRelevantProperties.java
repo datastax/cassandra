@@ -538,7 +538,7 @@ public enum CassandraRelevantProperties
     SAI_HNSW_ALLOW_CUSTOM_PARAMETERS("cassandra.sai.hnsw.allow_custom_parameters", "false"),
 
     /** Controls the hnsw vector cache size, in bytes, per index segment. 0 to disable */
-    SAI_HNSW_VECTOR_CACHE_BYTES("cassandra.sai.vector_search.vector_cache_bytes", String.valueOf(1 * 1024 * 1024)),
+    SAI_HNSW_VECTOR_CACHE_BYTES("cassandra.sai.vector_search.vector_cache_bytes", String.valueOf(4 * 1024 * 1024)),
 
     /** Controls the maximum number of index query intersections that will take part in a query */
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection_clause_limit", "2"),
