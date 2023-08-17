@@ -206,42 +206,21 @@ public class SlicedTrie<T> extends Trie<T>
         @Override
         public int advance()
         {
-            int newDepth = source.advance();
-            int transition = source.incomingTransition();
+            int newDepth;
+            int transition;
 
             switch (state)
             {
                 case COMMON_PREFIX:
                 case START_PREFIX:
                     // Skip any transitions before the start bound
-                    while (newDepth == startNextDepth && direction.lt(transition, startNext))
-                    {
-                        newDepth = source.skipChildren();
-                        transition = source.incomingTransition();
-                    }
-
-                    // Check if we are still following the start bound
-                    if (newDepth == startNextDepth && transition == startNext)
-                    {
-                        assert startNext != ByteSource.END_OF_STREAM;
-                        startNext = start.next();
-                        ++startNextDepth;
-                        State currState = state;
-                        // In the forward direction the exact match for the left bound and all descendant states are
-                        // included in the set.
-                        // In the reverse direction we will instead use the -1 as target transition and thus ascend on
-                        // the next advance (skipping the exact right bound and all its descendants).
-                        if (startNext == ByteSource.END_OF_STREAM && direction.isForward())
-                            state = State.INSIDE; // checkEndBound may adjust this to END_PREFIX
-                        if (currState == State.START_PREFIX)
-                            return newDepth;   // there is no need to check the end bound as we descended along a
-                                               // strictly earlier path
-                    }
-                    else // otherwise we are beyond the start bound
-                        state = State.INSIDE; // checkEndBound may adjust this to END_PREFIX
-                    // pass through
+                    newDepth = source.skipTo(startNextDepth, startNext);
+                    transition = source.incomingTransition();
+                    return checkBothBounds(newDepth, transition);
                 case INSIDE:
                 case END_PREFIX:
+                    newDepth = source.advance();
+                    transition = source.incomingTransition();
                     return checkEndBound(newDepth, transition);
                 default:
                     throw new AssertionError();
@@ -252,6 +231,31 @@ public class SlicedTrie<T> extends Trie<T>
         {
             state = State.EXHAUSTED;
             return -1;
+        }
+
+        int checkBothBounds(int newDepth, int transition)
+        {
+            // Check if we are still following the start bound
+            if (newDepth == startNextDepth && transition == startNext)
+            {
+                assert startNext != ByteSource.END_OF_STREAM;
+                startNext = start.next();
+                ++startNextDepth;
+                State currState = state;
+                // In the forward direction the exact match for the left bound and all descendant states are
+                // included in the set.
+                // In the reverse direction we will instead use the -1 as target transition and thus ascend on
+                // the next advance (skipping the exact right bound and all its descendants).
+                if (startNext == ByteSource.END_OF_STREAM && direction.isForward())
+                    state = State.INSIDE; // checkEndBound may adjust this to END_PREFIX
+                if (currState == State.START_PREFIX)
+                    return newDepth;   // there is no need to check the end bound as we descended along a
+                                       // strictly earlier path
+            }
+            else // otherwise we are beyond the start bound
+                state = State.INSIDE; // checkEndBound may adjust this to END_PREFIX
+
+            return checkEndBound(newDepth, transition);
         }
 
         private int checkEndBound(int newDepth, int transition)
@@ -340,22 +344,25 @@ public class SlicedTrie<T> extends Trie<T>
         }
 
         @Override
-        public int skipChildren()
+        public int skipTo(int skipDepth, int skipTransition)
         {
+            // if skipping beyond end, we are done
+            if (skipDepth < endNextDepth || skipDepth == endNextDepth && direction.gt(skipTransition, endNext))
+                return markDone();
+            // if skipping before start, adjust request to skip to start
+            if (skipDepth == startNextDepth && direction.lt(skipTransition, startNext))
+                skipTransition = startNext;
+
             switch (state)
             {
                 case START_PREFIX:
-                    // Skipping children takes us beyond the start path.
-                    state = State.INSIDE;
-                case INSIDE:
-                    // Check that we are still inside after we skip.
-                    return checkEndBound(source.skipChildren(), source.incomingTransition());
                 case COMMON_PREFIX:
+                    return checkBothBounds(source.skipTo(skipDepth, skipTransition), source.incomingTransition());
+                case INSIDE:
                 case END_PREFIX:
-                    // The skip takes us beyond the end bound; we are done.
-                    return markDone();
+                    return checkEndBound(source.skipTo(skipDepth, skipTransition), source.incomingTransition());
                 default:
-                    throw new AssertionError();
+                    throw new AssertionError("Cursor already exhaused.");
             }
         }
 

@@ -36,15 +36,21 @@ class SingletonTrie<T> extends Trie<T>
 
     public Cursor cursor(Direction direction)
     {
-        return new Cursor();
+        return new Cursor(direction);
     }
 
     class Cursor implements Trie.Cursor<T>
     {
+        private final Direction direction;
         private final ByteSource src = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
         private int currentDepth = 0;
         private int currentTransition = -1;
         private int nextTransition = src.next();
+
+        public Cursor(Direction direction)
+        {
+            this.direction = direction;
+        }
 
         @Override
         public int advance()
@@ -83,9 +89,17 @@ class SingletonTrie<T> extends Trie<T>
         }
 
         @Override
-        public int skipChildren()
+        public int skipTo(int skipDepth, int skipTransition)
         {
-            return currentDepth = -1;  // no alternatives
+            if (skipDepth <= currentDepth)
+            {
+                assert skipDepth < currentDepth || direction.gt(skipTransition, currentTransition);
+                return currentDepth = -1;  // no alternatives
+            }
+            if (direction.gt(skipTransition, nextTransition))
+                return currentDepth = -1;   // request is skipping over our path
+
+            return advance();
         }
 
         @Override

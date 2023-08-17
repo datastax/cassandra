@@ -213,10 +213,24 @@ public abstract class InMemoryTrieTestBase
             return ++depth;
         }
 
-        public int skipChildren()
+        public int skipTo(int skipDepth, int skipTransition)
         {
-            --depth;
-            stack = stack.parent;
+            assert skipDepth <= depth + 1 : "skipTo descends more than one level";
+
+            while (skipDepth < depth)
+            {
+                --depth;
+                stack = stack.parent;
+            }
+            int index = skipTransition - 0x30;
+            assert direction.gt(index, stack.curChild) : "Backwards skipTo";
+            if (direction.gt(index, direction.select(stack.children.length - 1, 0)))
+            {
+                --depth;
+                stack = stack.parent;
+                return advance();
+            }
+            stack.curChild = index - direction.increase;
             return advance();
         }
 
@@ -441,10 +455,12 @@ public abstract class InMemoryTrieTestBase
         }
     }
 
-    static void checkGet(InMemoryTrie<ByteBuffer> trie, Map<ByteComparable, ByteBuffer> items)
+    static void checkGet(Trie<ByteBuffer> trie, Map<ByteComparable, ByteBuffer> items)
     {
         for (Map.Entry<ByteComparable, ByteBuffer> en : items.entrySet())
         {
+            if (VERBOSE)
+                System.out.println("Checking " + asString(en.getKey()) + ": " + ByteBufferUtil.bytesToHex(en.getValue()));
             assertEquals(en.getValue(), trie.get(en.getKey()));
         }
     }
@@ -458,6 +474,7 @@ public abstract class InMemoryTrieTestBase
         assertUnorderedValuesEqual(trie, map);
         assertMapEquals(trie, map, Direction.REVERSE);
         assertForEachEntryEquals(trie, map, Direction.REVERSE);
+        checkGet(trie, map);
     }
 
     private static void assertValuesEqual(Trie<ByteBuffer> trie, SortedMap<ByteComparable, ByteBuffer> map)

@@ -157,11 +157,16 @@ class CollectionMergeTrie<T> extends Trie<T>
         }
 
         /**
-         * Interface for internal operations that can be applied to the equal top elements of the heap.
+         * Interface for internal operations that can be applied to selected top elements of the heap.
          */
         interface HeapOp<T>
         {
             void apply(CollectionMergeCursor<T> self, Cursor<T> cursor, int index);
+
+            default boolean shouldContinueWithChild(Cursor<T> child, Cursor<T> head)
+            {
+                return equalCursor(child, head);
+            }
         }
 
         /**
@@ -171,7 +176,7 @@ class CollectionMergeTrie<T> extends Trie<T>
          */
         private void applyToEqualOnHeap(HeapOp<T> action)
         {
-            applyToEqualElementsInHeap(action, 0);
+            applyToSelectedElementsInHeap(action, 0);
         }
 
         /**
@@ -202,30 +207,31 @@ class CollectionMergeTrie<T> extends Trie<T>
          */
         private void advanceEqualAndRestoreHeap(AdvancingHeapOp<T> action)
         {
-            applyToEqualElementsInHeap(action, 0);
+            applyToSelectedElementsInHeap(action, 0);
         }
 
         /**
-         * Apply an operation to all elements on the heap that are equal to the head. Descends recursively in the heap
-         * structure to all equal children and applies the operation on the way back.
-         *
+         * Apply an operation to all elements on the heap that satisfy, recursively through the heap hierarchy, the
+         * {@code shouldContinueWithChild} condition (being equal to the head by default). Descends recursively in the
+         * heap structure to all selected children and applies the operation on the way back.
+         * <p>
          * This operation can be something that does not change the cursor state (see {@link #content}) or an operation
          * that advances the cursor to a new state, wrapped in a {@link AdvancingHeapOp} ({@link #advance} or
-         * {@link #skipChildren}). The latter interface takes care of pushing elements down in the heap after advancing
+         * {@link #skipTo}). The latter interface takes care of pushing elements down in the heap after advancing
          * and restores the subheap state on return from each level of the recursion.
          */
-        private void applyToEqualElementsInHeap(HeapOp<T> action, int index)
+        private void applyToSelectedElementsInHeap(HeapOp<T> action, int index)
         {
             if (index >= heap.length)
                 return;
             Cursor<T> item = heap[index];
-            if (!equalCursor(item, head))
+            if (!action.shouldContinueWithChild(item, head))
                 return;
 
             // If the children are at the same position, they also need advancing and their subheap
             // invariant to be restored.
-            applyToEqualElementsInHeap(action, index * 2 + 1);
-            applyToEqualElementsInHeap(action, index * 2 + 2);
+            applyToSelectedElementsInHeap(action, index * 2 + 1);
+            applyToSelectedElementsInHeap(action, index * 2 + 2);
 
             // Apply the action. This is done on the reverse direction to give the action a chance to form proper
             // subheaps and combine them on processing the parent.
@@ -296,10 +302,36 @@ class CollectionMergeTrie<T> extends Trie<T>
         }
 
         @Override
-        public int skipChildren()
+        public int skipTo(int skipDepth, int skipTransition)
         {
-            advanceEqualAndRestoreHeap(Cursor::skipChildren);
-            return maybeSwapHead(head.skipChildren());
+            // We need to advance all cursors that stand before the requested position.
+            // If a child cursor does not need to advance as it is greater than the skip position, neither of the ones
+            // below it in the heap hierarchy do as they can't have an earlier position.
+            class SkipTo implements AdvancingHeapOp<T>
+            {
+                @Override
+                public boolean shouldContinueWithChild(Cursor<T> child, Cursor<T> head)
+                {
+                    // When the requested position descends, the inplicit prefix bytes are those of the head cursor,
+                    // and thus we need to check against that if it is a match.
+                    if (equalCursor(child, head))
+                        return true;
+                    // Otherwise we can compare the child's position against a cursor advanced as requested, and need
+                    // to skip only if it would be before it.
+                    int childDepth = child.depth();
+                    return childDepth > skipDepth ||
+                           childDepth == skipDepth && direction.lt(child.incomingTransition(), skipTransition);
+                }
+
+                @Override
+                public void apply(Cursor<T> cursor)
+                {
+                    cursor.skipTo(skipDepth, skipTransition);
+                }
+            }
+
+            applyToSelectedElementsInHeap(new SkipTo(), 0);
+            return maybeSwapHead(head.skipTo(skipDepth, skipTransition));
         }
 
         @Override

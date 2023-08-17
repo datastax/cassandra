@@ -78,10 +78,17 @@ class MergeTrie<T> extends Trie<T>
         }
 
         @Override
-        public int skipChildren()
+        public int skipTo(int skipDepth, int skipTransition)
         {
-            return checkOrder(atC1 ? c1.skipChildren() : c1.depth(),
-                              atC2 ? c2.skipChildren() : c2.depth());
+            int c1depth = c1.depth();
+            int c2depth = c2.depth();
+            assert skipDepth <= c1depth + 1 || skipDepth <= c2depth + 1;
+            if (atC1 || skipDepth < c1depth || skipDepth == c1depth && direction.gt(skipTransition, c1.incomingTransition()))
+                c1depth = c1.skipTo(skipDepth, skipTransition);
+            if (atC2 || skipDepth < c2depth || skipDepth == c2depth && direction.gt(skipTransition, c2.incomingTransition()))
+                c2depth = c2.skipTo(skipDepth, skipTransition);
+
+            return checkOrder(c1depth, c2depth);
         }
 
         @Override

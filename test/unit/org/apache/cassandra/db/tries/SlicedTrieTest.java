@@ -318,9 +318,19 @@ public class SlicedTrieTest
                 }
 
                 @Override
-                public int skipChildren()
+                public int skipTo(int depth, int transition)
                 {
-                    return advance();
+                    if (depth > 1)
+                        return advance();
+                    if (depth < 1)
+                        transition = direction.select(childs, -1);
+
+                    if (direction.isForward())
+                        current = Math.max(0, transition);
+                    else
+                        current = Math.min(childs - 1, transition);
+
+                    return depth();
                 }
 
                 @Override
@@ -336,13 +346,13 @@ public class SlicedTrieTest
                 @Override
                 public int incomingTransition()
                 {
-                    return current;
+                    return current >= childs ? -1 : current;
                 }
 
                 @Override
                 public Integer content()
                 {
-                    return current;
+                    return current == direction.select(-1, childs) ? -1 : current;
                 }
             }
         };

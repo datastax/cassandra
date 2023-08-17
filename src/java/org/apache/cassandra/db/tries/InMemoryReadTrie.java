@@ -585,9 +585,37 @@ public class InMemoryReadTrie<T> extends Trie<T>
         }
 
         @Override
-        public int skipChildren()
+        public int skipTo(int skipDepth, int skipTransition)
         {
-            return backtrack();
+            if (skipDepth > depth)
+            {
+                // Descent requested. Jump to the given child transition or greater, and backtrack if there's no such.
+                assert skipDepth == depth + 1;
+                int advancedDepth = advanceToChildWithTarget(currentNode, skipTransition);
+                if (advancedDepth < 0)
+                    return backtrack();
+
+                assert advancedDepth == skipDepth;
+                return advancedDepth;
+            }
+
+            // Backtrack until we reach the requested depth. Note that we may have more than one entry for a given
+            // depth (split sublevels) and we ascend through them individually.
+            while (--backtrackDepth >= 0)
+            {
+                depth = depth(backtrackDepth);
+
+                if (depth < skipDepth - 1)
+                    return advanceToNextChild(node(backtrackDepth), data(backtrackDepth));
+
+                if (depth == skipDepth - 1)
+                {
+                    int advancedDepth = advanceToNextChildWithTarget(node(backtrackDepth), data(backtrackDepth), skipTransition);
+                    if (advancedDepth >= 0)
+                        return advancedDepth;
+                }
+            }
+            return depth = -1;
         }
 
         @Override
@@ -632,6 +660,22 @@ public class InMemoryReadTrie<T> extends Trie<T>
             }
         }
 
+        private int advanceToChildWithTarget(int node, int skipTransition)
+        {
+            if (isNullOrLeaf(node))
+                return -1;
+
+            switch (offset(node))
+            {
+                case SPLIT_OFFSET:
+                    return descendInSplitSublevelWithTarget(node, SPLIT_START_LEVEL_LIMIT, 0, SPLIT_LEVEL_SHIFT * 2, skipTransition);
+                case SPARSE_OFFSET:
+                    return advanceToSparseTransition(node, prepareOrderWord(node), skipTransition);
+                default:
+                    return advanceToChainTransition(node, skipTransition);
+            }
+        }
+
         private int advanceToNextChild(int node, int data)
         {
             assert (!isNullOrLeaf(node));
@@ -642,6 +686,21 @@ public class InMemoryReadTrie<T> extends Trie<T>
                     return nextValidSplitTransition(node, data);
                 case SPARSE_OFFSET:
                     return nextValidSparseTransition(node, data);
+                default:
+                    throw new AssertionError("Unexpected node type in backtrack state.");
+            }
+        }
+
+        private int advanceToNextChildWithTarget(int node, int data, int transition)
+        {
+            assert (!isNullOrLeaf(node));
+
+            switch (offset(node))
+            {
+                case SPLIT_OFFSET:
+                    return advanceToSplitTransition(node, data, transition);
+                case SPARSE_OFFSET:
+                    return advanceToSparseTransition(node, data, transition);
                 default:
                     throw new AssertionError("Unexpected node type in backtrack state.");
             }
@@ -695,37 +754,89 @@ public class InMemoryReadTrie<T> extends Trie<T>
         }
 
         /**
-         * Backtrack to a split sub-level. The level is identified by the lowest non-0 bits in trans.
+         * As above, but also makes sure that the descend selects a value at least as big as the given
+         * {@code minTransition}.
          */
-        int nextValidSplitTransition(int node, int trans)
+        private int descendInSplitSublevelWithTarget(int node, int limit, int collected, int shift, int minTransition)
         {
-            assert trans >= 0 && trans <= 0xFF;
-            int childIndex = splitNodeChildIndex(trans);
+            minTransition -= collected;
+            if (minTransition >= limit << shift || minTransition < 0)
+                return -1;
+
+            while (true)
+            {
+                assert offset(node) == SPLIT_OFFSET;
+                int childIndex;
+                int child = NONE;
+                boolean isExact = true;
+                // find the first non-null child beyond minTransition
+                for (childIndex = minTransition >> shift;
+                     direction.inLoop(childIndex, 0, limit - 1);
+                     childIndex += direction.increase)
+                {
+                    child = getSplitBlockPointer(node, childIndex, limit);
+                    if (!isNull(child))
+                        break;
+                    isExact = false;
+                }
+                if (!isExact && (childIndex == limit || childIndex == -1))
+                    return -1;
+
+                // look for any more valid transitions and add backtracking if found
+                maybeAddSplitBacktrack(node, childIndex, limit, collected, shift);
+
+                // add the bits just found
+                collected |= childIndex << shift;
+                // descend to next sub-level or child
+                if (shift == 0)
+                    return descendInto(child, collected);
+
+                if (isExact)
+                    minTransition -= childIndex << shift;
+                else
+                    minTransition = direction.select(0, (1 << shift) - 1);
+
+                // continue with next sublevel; same as
+                // return descendInSplitSublevelWithTarget(child + SPLIT_OFFSET, 8, collected, shift - 3, minTransition)
+                node = child;
+                limit = SPLIT_OTHER_LEVEL_LIMIT;
+                shift -= SPLIT_LEVEL_SHIFT;
+            }
+        }
+
+        /**
+         * Backtrack to a split sub-level. The level is identified by the lowest non-0 bits in data.
+         */
+        int nextValidSplitTransition(int node, int data)
+        {
+            // Note: This is equivalent to return advanceToSplitTransition(node, data, data) but quicker.
+            assert data >= 0 && data <= 0xFF;
+            int childIndex = splitNodeChildIndex(data);
             if (childIndex != direction.select(0, SPLIT_OTHER_LEVEL_LIMIT - 1))
             {
                 maybeAddSplitBacktrack(node,
                                        childIndex,
                                        SPLIT_OTHER_LEVEL_LIMIT,
-                                       trans & -(1 << (SPLIT_LEVEL_SHIFT * 1)),
+                                       data & -(1 << (SPLIT_LEVEL_SHIFT * 1)),
                                        SPLIT_LEVEL_SHIFT * 0);
                 int child = getSplitBlockPointer(node, childIndex, SPLIT_OTHER_LEVEL_LIMIT);
-                return descendInto(child, trans);
+                return descendInto(child, data);
             }
-            int tailIndex = splitNodeTailIndex(trans);
+            int tailIndex = splitNodeTailIndex(data);
             if (tailIndex != direction.select(0, SPLIT_OTHER_LEVEL_LIMIT - 1))
             {
                 maybeAddSplitBacktrack(node,
                                        tailIndex,
                                        SPLIT_OTHER_LEVEL_LIMIT,
-                                       trans & -(1 << (SPLIT_LEVEL_SHIFT * 2)),
+                                       data & -(1 << (SPLIT_LEVEL_SHIFT * 2)),
                                        SPLIT_LEVEL_SHIFT * 1);
                 int tail = getSplitBlockPointer(node, tailIndex, SPLIT_OTHER_LEVEL_LIMIT);
                 return descendInSplitSublevel(tail,
                                               SPLIT_OTHER_LEVEL_LIMIT,
-                                              trans & -(1 << SPLIT_LEVEL_SHIFT * 1),
+                                              data & -(1 << SPLIT_LEVEL_SHIFT * 1),
                                               SPLIT_LEVEL_SHIFT * 0);
             }
-            int midIndex = splitNodeMidIndex(trans);
+            int midIndex = splitNodeMidIndex(data);
             assert midIndex != direction.select(0, SPLIT_START_LEVEL_LIMIT - 1);
             maybeAddSplitBacktrack(node,
                                    midIndex,
@@ -735,8 +846,40 @@ public class InMemoryReadTrie<T> extends Trie<T>
             int mid = getSplitBlockPointer(node, midIndex, SPLIT_START_LEVEL_LIMIT);
             return descendInSplitSublevel(mid,
                                           SPLIT_OTHER_LEVEL_LIMIT,
-                                          trans & -(1 << SPLIT_LEVEL_SHIFT * 2),
+                                          data & -(1 << SPLIT_LEVEL_SHIFT * 2),
                                           SPLIT_LEVEL_SHIFT * 1);
+        }
+
+        /**
+         * Backtrack to a split sub-level and advance to given transition if it fits within the sublevel.
+         * The level is identified by the lowest non-0 bits in data as above.
+         */
+        private int advanceToSplitTransition(int node, int data, int skipTransition)
+        {
+            assert data >= 0 && data <= 0xFF;
+            if (direction.lt(skipTransition, data))
+                return nextValidSplitTransition(node, data); // already went over the target in lower sublevel, just advance
+
+            int childIndex = splitNodeChildIndex(data);
+            if (childIndex != direction.select(0, SPLIT_OTHER_LEVEL_LIMIT - 1))
+            {
+                int sublevelMask = -(1 << (SPLIT_LEVEL_SHIFT * 1));
+                int sublevelShift = SPLIT_LEVEL_SHIFT * 0;
+                int sublevelLimit = SPLIT_OTHER_LEVEL_LIMIT;
+                return descendInSplitSublevelWithTarget(node, sublevelLimit, data & sublevelMask, sublevelShift, skipTransition);
+            }
+            int tailIndex = splitNodeTailIndex(data);
+            if (tailIndex != direction.select(0, SPLIT_OTHER_LEVEL_LIMIT - 1))
+            {
+                int sublevelMask = -(1 << (SPLIT_LEVEL_SHIFT * 2));
+                int sublevelShift = SPLIT_LEVEL_SHIFT * 1;
+                int sublevelLimit = SPLIT_OTHER_LEVEL_LIMIT;
+                return descendInSplitSublevelWithTarget(node, sublevelLimit, data & sublevelMask, sublevelShift, skipTransition);
+            }
+            int sublevelMask = -(1 << 8);
+            int sublevelShift = SPLIT_LEVEL_SHIFT * 2;
+            int sublevelLimit = SPLIT_START_LEVEL_LIMIT;
+            return descendInSplitSublevelWithTarget(node, sublevelLimit, data & sublevelMask, sublevelShift, skipTransition);
         }
 
         /**
@@ -767,12 +910,12 @@ public class InMemoryReadTrie<T> extends Trie<T>
 
         private int nextValidSparseTransition(int node, int data)
         {
-            UnsafeBuffer chunk = getChunk(node);
-            int inChunkNode = inChunkPointer(node);
-
             // Peel off the next index.
             int index = data % SPARSE_CHILD_COUNT;
             data = data / SPARSE_CHILD_COUNT;
+
+            UnsafeBuffer chunk = getChunk(node);
+            int inChunkNode = inChunkPointer(node);
 
             // If there are remaining transitions, add backtracking entry.
             if (data != exhaustedOrderWord())
@@ -831,12 +974,54 @@ public class InMemoryReadTrie<T> extends Trie<T>
             return direction.select(0, 1);
         }
 
+        private int advanceToSparseTransition(int node, int data, int skipTransition)
+        {
+            UnsafeBuffer chunk = getChunk(node);
+            int inChunkNode = inChunkPointer(node);
+            int index;
+            int transition;
+            do
+            {
+                // Peel off the next index.
+                index = data % SPARSE_CHILD_COUNT;
+                data = data / SPARSE_CHILD_COUNT;
+                transition = chunk.getByte(inChunkNode + SPARSE_BYTES_OFFSET + index) & 0xFF;
+            }
+            while (direction.lt(transition, skipTransition) && data != exhaustedOrderWord());
+            if (direction.lt(transition, skipTransition))
+                return -1;
+
+            // If there are remaining transitions, add backtracking entry.
+            if (data != exhaustedOrderWord())
+                addBacktrack(node, data, depth);
+
+            // Follow the transition.
+            int child = chunk.getInt(inChunkNode + SPARSE_CHILDREN_OFFSET + index * 4);
+            return descendInto(child, transition);
+        }
+
         private int getChainTransition(int node)
         {
             // No backtracking needed.
             UnsafeBuffer chunk = getChunk(node);
             int inChunkNode = inChunkPointer(node);
             int transition = chunk.getByte(inChunkNode) & 0xFF;
+            int next = node + 1;
+            if (offset(next) <= CHAIN_MAX_OFFSET)
+                return descendIntoChain(next, transition);
+            else
+                return descendInto(chunk.getInt(inChunkNode + 1), transition);
+        }
+
+        private int advanceToChainTransition(int node, int skipTransition)
+        {
+            // No backtracking needed.
+            UnsafeBuffer chunk = getChunk(node);
+            int inChunkNode = inChunkPointer(node);
+            int transition = chunk.getByte(inChunkNode) & 0xFF;
+            if (direction.gt(skipTransition, transition))
+                return -1;
+
             int next = node + 1;
             if (offset(next) <= CHAIN_MAX_OFFSET)
                 return descendIntoChain(next, transition);
@@ -881,6 +1066,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
      * Get the content mapped by the specified key.
      * Fast implementation using integer node addresses.
      */
+    @Override
     public T get(ByteComparable path)
     {
         int n = root;
@@ -926,9 +1112,9 @@ public class InMemoryReadTrie<T> extends Trie<T>
             }
 
             @Override
-            public int skipChildren()
+            public int skipTo(int skipDepth, int skipTransition)
             {
-                return source.skipChildren();
+                return source.skipTo(skipDepth, skipTransition);
             }
 
             @Override
