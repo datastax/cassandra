@@ -73,8 +73,10 @@ public class LuceneAnalyzerTest extends SAITester
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
     }
 
+    // Technically, the NoopAnalyzer is applied, but that maps each field without modification, so any operator
+    // that matches the SAI field will also match the PK field when compared later in the search (there are two phases).
     @Test
-    public void testNoopAnalyzerOnClusteredColumn() throws Throwable
+    public void testNoAnalyzerOnClusteredColumn() throws Throwable
     {
         createTable("CREATE TABLE %s (id int, val text, PRIMARY KEY (id, val))");
 
