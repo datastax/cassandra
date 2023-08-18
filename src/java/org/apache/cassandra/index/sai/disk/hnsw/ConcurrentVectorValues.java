@@ -65,6 +65,7 @@ public class ConcurrentVectorValues implements RamAwareVectorValues
     @Override
     public RandomAccessVectorValues<float[]> copy()
     {
+        // no actual copy required because we always return distinct float[] for distinct vector ordinals
         return this;
     }
 
