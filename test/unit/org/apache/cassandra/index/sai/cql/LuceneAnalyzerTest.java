@@ -67,10 +67,16 @@ public class LuceneAnalyzerTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'The quick brown fox jumps over the lazy DOG.')");
 
-        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'The quick brown fox jumps over the lazy DOG.' ALLOW FILTERING").size());
 
         flush();
         assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog'").size());
+
+        // EQ operator is not supported for analyzed columns unless ALLOW FILTERING is used
+        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val = 'dog'")).isInstanceOf(InvalidRequestException.class);
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = 'The quick brown fox jumps over the lazy DOG.' ALLOW FILTERING").size());
+        // EQ is a raw equality check, so a token like 'dog' should not return any results
+        assertEquals(0, execute("SELECT * FROM %s WHERE val = 'dog' ALLOW FILTERING").size());
     }
 
     // Technically, the NoopAnalyzer is applied, but that maps each field without modification, so any operator
