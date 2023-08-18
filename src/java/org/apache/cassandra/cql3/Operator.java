@@ -272,7 +272,10 @@ public enum Operator
             return true;
         }
     },
-    ANALYZER_MATCHES(16)
+    /**
+     * An operator that only performs matching against analyzed columns.
+     */
+    ANALYZER_MATCHES(100)
     {
         @Override
         public String toString()
