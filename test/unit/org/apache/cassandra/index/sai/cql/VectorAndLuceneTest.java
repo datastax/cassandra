@@ -88,7 +88,7 @@ public class VectorAndLuceneTest extends VectorTester
 
         execute("UPDATE %s SET val = null WHERE pk = 0");
 
-        assertEquals(1, execute("SELECT * FROM %s WHERE str_val : 'tokens' ORDER BY val ann of [1.1, 2.1, 3.1] LIMIT 2").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE str_val : 'tokens' ORDER BY val ann of [1.1, 2.1, 3.1] LIMIT 2").size());
         assertEquals(1, execute("SELECT * FROM %s WHERE str_val : 'token'").size());
         assertEquals(2, execute("SELECT * FROM %s WHERE str_val : 'test'").size());
 
