@@ -411,12 +411,9 @@ public class IndexContext
     public boolean supports(Operator op)
     {
         if (op.isLike() || op == Operator.LIKE) return false;
-        if (isAnalyzed)
-        {
-            if (op == Operator.ANALYZER_MATCHES) return true;
-            // Analyzed columns store the indexed result and are unable to compute raw equality
-            if (op == Operator.EQ) return false;
-        }
+        // Analyzed columns store the indexed result, so we are unable to compute raw equality.
+        // The only supported operator is ANALYZER_MATCHES.
+        if (isAnalyzed) return op == Operator.ANALYZER_MATCHES;
 
         // ANN is only supported against vectors, and vector indexes only support ANN
         if (column.type instanceof VectorType)

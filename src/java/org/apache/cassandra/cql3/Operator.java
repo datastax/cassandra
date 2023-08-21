@@ -283,6 +283,11 @@ public enum Operator
             return ": '<term>'";
         }
 
+        /**
+         * This method is not supported for this operator. The operator itself does not have the context to know
+         * the correct result because an analyzed column can be analyzed in different ways. Therefore, this operator
+         * relies on the index implementation to perform to determine satisfaction.
+         */
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             throw new UnsupportedOperationException();

@@ -96,7 +96,8 @@ public class LuceneAnalyzerTest extends SAITester
         assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val : 'dog'"))
         .isInstanceOf(InvalidRequestException.class);;
 
-        // Equality still works
+        // Equality still works because indexed value is not analyzed, and so the search can be performed without
+        // filtering.
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'dog'").size());
     }
 
