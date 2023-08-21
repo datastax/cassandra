@@ -51,7 +51,7 @@ public class LuceneAnalyzerTest extends SAITester
         // TODO: randomize flushing... not sure how
         flush();
 
-        assertEquals(0, execute("SELECT * FROM %s WHERE val = 'query'").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'query'").size());
     }
 
     @Test
