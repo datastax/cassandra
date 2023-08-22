@@ -202,6 +202,8 @@ public abstract class Relation
                 return newLikeRestriction(table, boundNames, relationType);
             case ANN:
                 return newAnnRestriction(table, boundNames);
+            case ANALYZER_MATCHES:
+                return newAnalyzerMatchesRestriction(table, boundNames);
             default: throw invalidRequest("Unsupported \"!=\" relation: %s", this);
         }
     }
@@ -282,6 +284,11 @@ public abstract class Relation
      * Creates a new ANN restriction instance.
      */
     protected abstract Restriction newAnnRestriction(TableMetadata table, VariableSpecifications boundNames);
+
+    /**
+     * Creates a new Analyzer Matches restriction instance.
+     */
+    protected abstract Restriction newAnalyzerMatchesRestriction(TableMetadata table, VariableSpecifications boundNames);
 
     /**
      * Converts the specified <code>Raw</code> into a <code>Term</code>.
