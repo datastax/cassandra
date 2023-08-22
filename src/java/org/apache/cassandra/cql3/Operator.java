@@ -280,7 +280,7 @@ public enum Operator
         @Override
         public String toString()
         {
-            return ": '<term>'";
+            return ":";
         }
 
         /**

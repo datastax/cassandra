@@ -921,6 +921,10 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                         ByteBuffer foundValue = getValue(metadata, partitionKey, row);
                         return foundValue != null && mapType.getSerializer().getSerializedValue(foundValue, value, mapType.getKeysType()) != null;
                     }
+                case ANALYZER_MATCHES:
+                    // The analyzer is unable to filter raw rows. It can only match analyzed columns.
+                    // Building the query restrictions should prevent reaching this code block.
+                    throw new UnsupportedOperationException("The analyzer is unable to filter raw rows. It can only match analyzed columns.");
             }
             throw new AssertionError();
         }

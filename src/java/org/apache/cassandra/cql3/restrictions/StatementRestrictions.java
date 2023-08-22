@@ -66,6 +66,8 @@ public class StatementRestrictions
 
     public static final String INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE = "Index on column %s does not support LIKE restrictions.";
 
+    public static final String INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE = "Index on column %s does not support ':' restrictions.";
+
     public static final String INDEX_DOES_NOT_SUPPORT_DISJUNCTION =
     "An index involved in this query does not support disjunctive queries using the OR operator";
 
@@ -369,15 +371,29 @@ public class StatementRestrictions
                 {
                     Restriction restriction = relation.toRestriction(table, boundNames);
 
-                    if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry)))
+                    if (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry))
                     {
-                        if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
+                        if (relation.isLIKE())
                         {
-                            throw invalidRequest("LIKE restriction is only supported on properly indexed columns. %s is not valid.", relation.toString());
+                            if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
+                            {
+                                throw invalidRequest("LIKE restriction is only supported on properly indexed columns. %s is not valid.", relation.toString());
+                            }
+                            else
+                            {
+                                throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, restriction.getFirstColumn());
+                            }
                         }
-                        else
+                        if (relation.operator() == Operator.ANALYZER_MATCHES)
                         {
-                            throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, restriction.getFirstColumn());
+                            if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
+                            {
+                                throw invalidRequest(": restriction is only supported on properly indexed columns. %s is not valid.", relation.toString());
+                            }
+                            else
+                            {
+                                throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, restriction.getFirstColumn());
+                            }
                         }
                     }
 
