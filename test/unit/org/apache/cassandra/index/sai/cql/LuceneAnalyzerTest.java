@@ -71,6 +71,12 @@ public class LuceneAnalyzerTest extends SAITester
 
         flush();
         assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' OR val : 'missing'").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'missing1' OR val : 'missing2'").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'dog' AND val : 'missing'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' AND val : 'lazy'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' AND val : 'quick' AND val : 'fox'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' AND val : 'quick' OR val : 'missing'").size());
 
         // EQ operator is not supported for analyzed columns unless ALLOW FILTERING is used
         assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val = 'dog'")).isInstanceOf(InvalidRequestException.class);
@@ -260,12 +266,33 @@ public class LuceneAnalyzerTest extends SAITester
 
         waitForIndexQueryable();
 
-        execute("INSERT INTO %s (id, val) VALUES ('1', 'the queries')");
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'the queries test')");
 
         flush();
 
         assertEquals(1, execute("SELECT * FROM %s WHERE val : 'the'").size()); // stop word test
         assertEquals(1, execute("SELECT * FROM %s WHERE val : 'query'").size());
-        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'queries'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'query' OR val : 'missing'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'queries' AND val : 'the' AND val : 'test'").size());
+    }
+
+    @Test
+    public void testAnalyzerMatchesAndEqualityFailForConjunction() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'[\n" +
+                    "\t{\"tokenizer\":\"whitespace\"},\n" +
+                    "\t{\"filter\":\"porterstem\"}\n" +
+                    "]'}");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'the queries test')");
+
+        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val : 'queries' AND val : 'the' AND val = 'the queries test'"))
+        .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val : 'queries' AND val : 'the' AND val = 'the queries test' ALLOW FILTERING"))
+        .isInstanceOf(UnsupportedOperationException.class);
     }
 }
