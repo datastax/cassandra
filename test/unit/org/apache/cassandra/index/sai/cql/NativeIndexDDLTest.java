@@ -303,9 +303,9 @@ public class NativeIndexDDLTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Camel')");
 
-        assertEquals(1, execute("SELECT id FROM %s WHERE val = 'Camel'").size());
+        assertEquals(1, execute("SELECT id FROM %s WHERE val : 'Camel'").size());
 
-        assertEquals(0, execute("SELECT id FROM %s WHERE val = 'camel'").size());
+        assertEquals(0, execute("SELECT id FROM %s WHERE val : 'camel'").size());
     }
 
     @Test
@@ -317,7 +317,7 @@ public class NativeIndexDDLTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Camel')");
 
-        assertEquals(1, execute("SELECT id FROM %s WHERE val = 'camel'").size());
+        assertEquals(1, execute("SELECT id FROM %s WHERE val : 'camel'").size());
     }
 
     @Test
@@ -344,10 +344,10 @@ public class NativeIndexDDLTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
-        assertEquals(1, execute("SELECT id FROM %s WHERE val = 'Cam\u00E1l'").size());
+        assertEquals(1, execute("SELECT id FROM %s WHERE val : 'Cam\u00E1l'").size());
 
         // Both \u00E1 and \u0061\u0301 are visible as the character á, but without NFC normalization, they won't match.
-        assertEquals(0, execute("SELECT id FROM %s WHERE val = 'Cam\u0061\u0301l'").size());
+        assertEquals(0, execute("SELECT id FROM %s WHERE val : 'Cam\u0061\u0301l'").size());
     }
 
     @Test
@@ -359,7 +359,7 @@ public class NativeIndexDDLTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
-        assertEquals(1, execute("SELECT id FROM %s WHERE val = 'Cam\u0061\u0301l'").size());
+        assertEquals(1, execute("SELECT id FROM %s WHERE val : 'Cam\u0061\u0301l'").size());
     }
 
     @Test
@@ -371,7 +371,7 @@ public class NativeIndexDDLTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
-        assertEquals(1, execute("SELECT id FROM %s WHERE val = 'cam\u0061\u0301l'").size());
+        assertEquals(1, execute("SELECT id FROM %s WHERE val : 'cam\u0061\u0301l'").size());
     }
 
     @Test
@@ -383,7 +383,7 @@ public class NativeIndexDDLTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Éppinger')");
 
-        assertEquals(1, execute("SELECT id FROM %s WHERE val = 'eppinger'").size());
+        assertEquals(1, execute("SELECT id FROM %s WHERE val : 'eppinger'").size());
     }
 
     @Test
