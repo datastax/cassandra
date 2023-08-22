@@ -295,4 +295,41 @@ public class LuceneAnalyzerTest extends SAITester
         assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val : 'queries' AND val : 'the' AND val = 'the queries test' ALLOW FILTERING"))
         .isInstanceOf(UnsupportedOperationException.class);
     }
+
+    @Test
+    public void testAnalyzerMatchesIndexCreationFormating() throws Throwable
+    {
+        // The format for index_analyzer is a JSON array. Because it is embedded in the OPTIONS map, which is
+        // a map literal (assuming my reading of the Parser.g is correct), it is parsed as a string literal. That leaves
+        // users with two configuration options. They can escape double quotes for any JSON strings, or they can use
+        // th CQL $$ string literal syntax matched with single quotes to avoid the need to escape any characters.
+        testAnalyzerCreationAndQuery("{'index_analyzer':$$[{tokenizer:'whitespace'},{filter:'lowercase'}]$$}");
+        testAnalyzerCreationAndQuery("{'index_analyzer':$$[{'tokenizer':'whitespace'},{'filter':'lowercase'}]$$}");
+        testAnalyzerCreationAndQuery("{'index_analyzer':\n$$[{'tokenizer':'whitespace'},{'filter':'lowercase'}]$$\n}");
+        testAnalyzerCreationAndQuery("{'index_analyzer':'[{\"tokenizer\":\"whitespace\"},{\"filter\":\"lowercase\"}]'}");
+        testAnalyzerCreationAndQuery("{'index_analyzer':$$[{\"tokenizer\":\"whitespace\"},{\"filter\":\"lowercase\"}]$$}");
+
+        // Neither of these formattings work becuase ' is interpreted in CQL as a string literal
+        assertThatThrownBy(() -> testAnalyzerCreationAndQuery("{'index_analyzer':'[{\'tokenize\':\'whitespace\'},{\'filter\':\'lowercase\'}]'}"))
+        .isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> testAnalyzerCreationAndQuery("{'index_analyzer':'[{\\'tokenize\\':\\'whitespace\\'},{\\'filter\\':\\'lowercase\\'}]'}"))
+        .isInstanceOf(RuntimeException.class);
+    }
+
+    private void testAnalyzerCreationAndQuery(String options) throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = " + options);
+        waitForIndexQueryable();
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'THE queries tEsT')");
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'the'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'queries'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'test'").size());
+
+        // The index analyzer is applied to the query if the SAI does not have a query analyzer configured,
+        // so the first matches because the 'the queries test' is analyzed and each term is in the row,
+        // but the second does not becuase 'tester' is not indexed
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'the queries test'").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'the queries tester'").size());
+    }
 }

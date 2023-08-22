@@ -43,7 +43,7 @@ public class JSONAnalyzerParser
 
     public static Analyzer parse(String json) throws IOException
     {
-        List<Map<String,String>> list = (List<Map<String,String>>) Json.decodeJson(json);
+        List<Map<String,String>> list = (List<Map<String,String>>) Json.decodeJson(json, false);
         CustomAnalyzer.Builder builder = CustomAnalyzer.builder();
         for (int x = 0; x < list.size(); x++)
         {
