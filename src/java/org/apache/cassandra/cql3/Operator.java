@@ -290,7 +290,7 @@ public enum Operator
          */
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            throw new UnsupportedOperationException();
+            throw new UnsupportedOperationException(": operation can only be computed by an indexed column with a configured analyzer");
         }
     };
 

@@ -55,6 +55,11 @@ public class LuceneUpdateDeleteTest extends SAITester
         assertThatThrownBy(() -> execute("UPDATE %s SET val = 'something new' WHERE val : 'dog'"))
         .isInstanceOf(RuntimeException.class)
         .hasMessageContaining("Invalid query. UPDATE does not support use of secondary indices, but val : 'dog' restriction requires a secondary index.");
+
+        // UPDATE with LWT fails (different error message because it fails at a different point)
+        assertThatThrownBy(() -> execute("UPDATE %s SET val = 'something new' WHERE id = 0 IF val : 'dog'"))
+        .isInstanceOf(UnsupportedOperationException.class)
+        .hasMessageContaining(": operation can only be computed by an indexed column with a configured analyzer");
     }
 
     // No flushes
