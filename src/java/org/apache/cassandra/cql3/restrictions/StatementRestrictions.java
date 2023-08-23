@@ -371,20 +371,24 @@ public class StatementRestrictions
                 {
                     Restriction restriction = relation.toRestriction(table, boundNames);
 
-                    if (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry))
+                    if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry)))
                     {
-                        if (relation.isLIKE())
+                        if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
                         {
-                            if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
-                            {
-                                throw invalidRequest("LIKE restriction is only supported on properly indexed columns. %s is not valid.", relation.toString());
-                            }
-                            else
-                            {
-                                throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, restriction.getFirstColumn());
-                            }
+                            throw invalidRequest("LIKE restriction is only supported on properly indexed columns. %s is not valid.", relation.toString());
                         }
-                        if (relation.operator() == Operator.ANALYZER_MATCHES)
+                        else
+                        {
+                            throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, restriction.getFirstColumn());
+                        }
+                    }
+                    if (relation.operator() == Operator.ANALYZER_MATCHES)
+                    {
+                        if (!type.allowUseOfSecondaryIndices())
+                        {
+                            throw invalidRequest("Invalid query. %s does not support use of secondary indices, but %s restriction requires a secondary index.", type.name(), relation.toString());
+                        }
+                        if (!restriction.hasSupportingIndex(indexRegistry))
                         {
                             if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
                             {
