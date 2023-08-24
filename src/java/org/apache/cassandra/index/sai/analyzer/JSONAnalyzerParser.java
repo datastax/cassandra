@@ -36,7 +36,7 @@ import org.apache.lucene.analysis.custom.CustomAnalyzer;
 
 public class JSONAnalyzerParser
 {
-    public static final ObjectMapper PERMISSIVE_JSON_OBJECT_MAPPER = new ObjectMapper();
+    private static final ObjectMapper PERMISSIVE_JSON_OBJECT_MAPPER = new ObjectMapper();
 
     static {
         PERMISSIVE_JSON_OBJECT_MAPPER.configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
