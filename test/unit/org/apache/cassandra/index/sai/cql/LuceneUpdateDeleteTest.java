@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.cql;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 
 import static org.apache.cassandra.index.sai.cql.VectorTypeTest.assertContainsInt;
@@ -48,17 +49,17 @@ public class LuceneUpdateDeleteTest extends SAITester
 
         // DELETE fails
         assertThatThrownBy(() -> execute("DELETE FROM %s WHERE val : 'dog'"))
-        .isInstanceOf(RuntimeException.class)
+        .isInstanceOf(InvalidRequestException.class)
         .hasMessageContaining("Invalid query. DELETE does not support use of secondary indices, but val : 'dog' restriction requires a secondary index.");
 
         // UPDATE fails
         assertThatThrownBy(() -> execute("UPDATE %s SET val = 'something new' WHERE val : 'dog'"))
-        .isInstanceOf(RuntimeException.class)
+        .isInstanceOf(InvalidRequestException.class)
         .hasMessageContaining("Invalid query. UPDATE does not support use of secondary indices, but val : 'dog' restriction requires a secondary index.");
 
         // UPDATE with LWT fails (different error message because it fails at a different point)
         assertThatThrownBy(() -> execute("UPDATE %s SET val = 'something new' WHERE id = 0 IF val : 'dog'"))
-        .isInstanceOf(UnsupportedOperationException.class)
+        .isInstanceOf(InvalidRequestException.class)
         .hasMessageContaining(": operation can only be computed by an indexed column with a configured analyzer");
     }
 

@@ -781,6 +781,10 @@ public abstract class ColumnCondition
             if (receiver.type instanceof CounterColumnType)
                 throw invalidRequest("Conditions on counters are not supported");
 
+            // Analyzer matches operator is only supported on SAI indexes for now
+            if (operator == Operator.ANALYZER_MATCHES)
+                throw invalidRequest(": operation can only be computed by an indexed column with a configured analyzer");
+
             if (collectionElement != null)
             {
                 if (!(receiver.type.isCollection()))
