@@ -26,13 +26,35 @@ import java.util.Set;
 
 import com.google.common.collect.Sets;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.custom.CustomAnalyzer;
 
 public class JSONAnalyzerParser
 {
+    public static final ObjectMapper PERMISSIVE_JSON_OBJECT_MAPPER = new ObjectMapper();
+
+    static {
+        PERMISSIVE_JSON_OBJECT_MAPPER.configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
+        PERMISSIVE_JSON_OBJECT_MAPPER.configure(JsonParser.Feature.ALLOW_SINGLE_QUOTES, true);
+    }
+
+    private static Object decodeJson(String json)
+    {
+        try
+        {
+            return PERMISSIVE_JSON_OBJECT_MAPPER.readValue(json, Object.class);
+        }
+        catch (IOException exc)
+        {
+            throw new MarshalException("Error decoding JSON string: " + exc.getMessage());
+        }
+    }
+
     // unsupported because these filters open external files such as stop words
     public static final Set<String> unsupportedFilters =
     Sets.newHashSet("synonymgraph", // same as synonym
@@ -43,7 +65,7 @@ public class JSONAnalyzerParser
 
     public static Analyzer parse(String json) throws IOException
     {
-        List<Map<String,String>> list = (List<Map<String,String>>) Json.decodeJson(json, false);
+        List<Map<String,String>> list = (List<Map<String,String>>) decodeJson(json);
         CustomAnalyzer.Builder builder = CustomAnalyzer.builder();
         for (int x = 0; x < list.size(); x++)
         {

@@ -20,7 +20,6 @@ package org.apache.cassandra.cql3;
 import java.io.IOException;
 import java.util.*;
 
-import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -35,12 +34,6 @@ import org.apache.cassandra.serializers.MarshalException;
 public class Json
 {
     public static final ObjectMapper JSON_OBJECT_MAPPER = new ObjectMapper();
-    public static final ObjectMapper PERMISSIVE_JSON_OBJECT_MAPPER = new ObjectMapper();
-
-    static {
-        PERMISSIVE_JSON_OBJECT_MAPPER.configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
-        PERMISSIVE_JSON_OBJECT_MAPPER.configure(JsonParser.Feature.ALLOW_SINGLE_QUOTES, true);
-    }
 
     public static final ColumnIdentifier JSON_COLUMN_ID = new ColumnIdentifier("[json]", true);
 
@@ -51,23 +44,6 @@ public class Json
     {
         // In future should update to directly use `JsonStringEncoder.getInstance()` but for now:
         return new String(JsonStringEncoder.getInstance().quoteAsString(s));
-    }
-
-    public static Object decodeJson(String json, boolean isStrict)
-    {
-        if (isStrict)
-            return decodeJson(json);
-        else
-        {
-            try
-            {
-                return PERMISSIVE_JSON_OBJECT_MAPPER.readValue(json, Object.class);
-            }
-            catch (IOException exc)
-            {
-                throw new MarshalException("Error decoding JSON string: " + exc.getMessage());
-            }
-        }
     }
 
     public static Object decodeJson(String json)
