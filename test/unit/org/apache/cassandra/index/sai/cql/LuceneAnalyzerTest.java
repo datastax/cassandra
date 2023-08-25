@@ -35,14 +35,14 @@ public class LuceneAnalyzerTest extends SAITester
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
-                    "'index_analyzer': '[\n" +
-                    "\t{\"tokenizer\":\"ngram\", \"minGramSize\":\"2\", \"maxGramSize\":\"3\"},\n" +
-                    "\t{\"filter\":\"lowercase\"}\n" +
+                    "'index_analyzer': '{\n" +
+                    "\t{\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
+                    "\t{\"filters\":\"[{\"name\":\"lowercase\"}]\n" +
                     "]'," +
                     "'query_analyzer': '[\n" +
                     "\t{\"tokenizer\":\"whitespace\"},\n" +
                     "\t{\"filter\":\"porterstem\"}\n" +
-                    "]'};");
+                    "}'};");
 
         waitForIndexQueryable();
 
@@ -55,16 +55,32 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void testStandardAnalyzer() throws Throwable
+    public void testStandardAnalyzerWithFullConfig() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                    "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
+                    "WITH OPTIONS = { 'index_analyzer': '{" +
+                    "    \"tokenizer\" : {\"name\" : \"standard\"}," +
+                    "    \"filters\" : [ {\"name\" : \"lowercase\"}] \n" +
+                    "  }'}");
+        standardAnalyzerTest();
+    }
 
+    @Test
+    public void testStandardAnalyzerWithBuiltInName() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard'}");
+        standardAnalyzerTest();
+    }
+
+    private void standardAnalyzerTest() throws Throwable {
         waitForIndexQueryable();
-
         execute("INSERT INTO %s (id, val) VALUES ('1', 'The quick brown fox jumps over the lazy DOG.')");
 
         assertEquals(1, execute("SELECT * FROM %s WHERE val = 'The quick brown fox jumps over the lazy DOG.' ALLOW FILTERING").size());
@@ -115,7 +131,7 @@ public class LuceneAnalyzerTest extends SAITester
 
         assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                    "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }"
+                    "WITH OPTIONS = { 'index_analyzer': 'standard' }"
         )).isInstanceOf(InvalidRequestException.class);
 
         assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) WITH OPTIONS = { 'ascii': true }"
@@ -135,9 +151,14 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'[\n" +
-                                            "\t{\"tokenizer\":\"lalalalaal\"}\n" +
-                                            "]'}")).isInstanceOf(InvalidQueryException.class);
+        assertThatThrownBy(
+        () -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'lalalalaal'}"
+        )).isInstanceOf(InvalidQueryException.class);
+
+        assertThatThrownBy(
+        () -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = " +
+                         "{'index_analyzer':'{\"tokenizer\" : {\"name\" : \"lalala\"}}'}"
+        )).isInstanceOf(InvalidQueryException.class);
     }
 
     @Test
@@ -145,10 +166,11 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'[\n" +
-                                            "\t{\"tokenizer\":\"whitespace\"},\n" +
-                                            "\t{\"filter\":\"stop\"}\n" +
-                                            "]'}")).isInstanceOf(InvalidQueryException.class);
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                                            "\t{\"tokenizer\":{\"name\" : \"whitespace\"},\n" +
+                                            "\t \"filters\":[{\"name\":\"stop\"}]}'}"))
+        .isInstanceOf(InvalidQueryException.class)
+        .hasMessageContaining("filter=stop is unsupported.");
     }
 
     @Test
@@ -156,10 +178,10 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'[\n" +
-                    "\t{\"tokenizer\":\"keyword\"},\n" +
-                    "\t{\"charfilter\":\"htmlstrip\"}\n" +
-                    "]'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'{\n" +
+                    "\t\"tokenizer\":{\"name\":\"keyword\"},\n" +
+                    "\t\"charFilters\":[{\"name\":\"htmlstrip\"}]\n" +
+                    "}'}");
 
         waitForIndexQueryable();
 
@@ -175,10 +197,9 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        String ddl = "CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'[\n" +
-                       "\t{\"tokenizer\":\"ngram\", \"minGramSize\":\"2\", \"maxGramSize\":\"3\"},\n" +
-                       "\t{\"filter\":\"lowercase\"}\n" +
-                       "]'}";
+        String ddl = "CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                     "\t{\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
+                     "\t\"filters\":[{\"name\":\"lowercase\"}]}'}";
         createIndex(ddl);
 
         waitForIndexQueryable();
@@ -197,10 +218,9 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'[\n" +
-                    "\t{\"tokenizer\":\"ngram\", \"minGramSize\":\"2\", \"maxGramSize\":\"3\"},\n" +
-                    "\t{\"filter\":\"lowercase\"}\n" +
-                    "]'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                    "\t{\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
+                    "\t\"filters\":[{\"name\":\"lowercase\"}]}'}");
 
         waitForIndexQueryable();
 
@@ -216,9 +236,8 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'[\n" +
-                    "{\"tokenizer\":\"whitespace\"}\n" +
-                    "]'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS =" +
+                    "{'index_analyzer':'whitespace'}");
 
         waitForIndexQueryable();
 
@@ -237,10 +256,9 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'[\n" +
-                    "\t{\"tokenizer\":\"whitespace\"},\n" +
-                    "\t{\"filter\":\"lowercase\"}\n" +
-                    "]'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                    "\t{\"tokenizer\":{\"name\":\"whitespace\"}," +
+                    "\t\"filters\":[{\"name\":\"lowercase\"}]}'}");
 
         waitForIndexQueryable();
 
@@ -259,10 +277,9 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'[\n" +
-                    "\t{\"tokenizer\":\"whitespace\"},\n" +
-                    "\t{\"filter\":\"porterstem\"}\n" +
-                    "]'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                    "\t{\"tokenizer\":{\"name\":\"whitespace\"}," +
+                    "\t\"filters\":[{\"name\":\"porterstem\"}]}'}");
 
         waitForIndexQueryable();
 
@@ -281,10 +298,9 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'[\n" +
-                    "\t{\"tokenizer\":\"whitespace\"},\n" +
-                    "\t{\"filter\":\"porterstem\"}\n" +
-                    "]'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                    "\t{\"tokenizer\":{\"name\":\"whitespace\"}," +
+                    "\t\"filters\":[{\"name\":\"porterstem\"}]}'}");
 
         waitForIndexQueryable();
 

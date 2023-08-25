@@ -105,14 +105,7 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
     public static AnalyzerFactory fromOptionsQueryAnalyzer(final AbstractType<?> type, final Map<String, String> options)
     {
         final String json = options.get(LuceneAnalyzer.QUERY_ANALYZER);
-        try
-        {
-            return toAnalyzerFactory(json, type, options);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidRequestException("CQL type " + type.asCQL3Type() + " cannot be analyzed json="+json, ex);
-        }
+        return toAnalyzerFactory(json, type, options);
     }
 
     public static AnalyzerFactory toAnalyzerFactory(String json, final AbstractType<?> type, final Map<String, String> options) //throws Exception
@@ -149,14 +142,7 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
         if (options.containsKey(LuceneAnalyzer.INDEX_ANALYZER))
         {
             String json = options.get(LuceneAnalyzer.INDEX_ANALYZER);
-            try
-            {
-                return toAnalyzerFactory(json, type, options);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidRequestException("CQL type " + type.asCQL3Type() + " cannot be analyzed json="+json, ex);
-            }
+            return toAnalyzerFactory(json, type, options);
         }
 
         if (NonTokenizingOptions.hasNonDefaultOptions(options))
