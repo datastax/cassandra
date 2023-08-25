@@ -22,6 +22,7 @@ import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.index.sai.SAITester;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -311,9 +312,13 @@ public class LuceneAnalyzerTest extends SAITester
 
         // Neither of these formattings work becuase ' is interpreted in CQL as a string literal
         assertThatThrownBy(() -> testAnalyzerCreationAndQuery("{'index_analyzer':'[{\'tokenize\':\'whitespace\'},{\'filter\':\'lowercase\'}]'}"))
-        .isInstanceOf(RuntimeException.class);
+        .hasCauseInstanceOf(SyntaxException.class);
         assertThatThrownBy(() -> testAnalyzerCreationAndQuery("{'index_analyzer':'[{\\'tokenize\\':\\'whitespace\\'},{\\'filter\\':\\'lowercase\\'}]'}"))
-        .isInstanceOf(RuntimeException.class);
+        .hasCauseInstanceOf(SyntaxException.class);
+
+        // Verify incorrect JSON is rejected
+        assertThatThrownBy(() -> testAnalyzerCreationAndQuery("{'index_analyzer':'[{{]'}"))
+        .isInstanceOf(InvalidRequestException.class);
     }
 
     private void testAnalyzerCreationAndQuery(String options) throws Throwable
