@@ -783,7 +783,7 @@ public abstract class ColumnCondition
 
             // Analyzer matches operator is only supported on SAI indexes for now
             if (operator == Operator.ANALYZER_MATCHES)
-                throw invalidRequest(": operation can only be computed by an indexed column with a configured analyzer");
+                throw invalidRequest("LWT Conditions do not support the : operator");
 
             if (collectionElement != null)
             {

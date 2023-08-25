@@ -60,7 +60,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         // UPDATE with LWT fails (different error message because it fails at a different point)
         assertThatThrownBy(() -> execute("UPDATE %s SET val = 'something new' WHERE id = 0 IF val : 'dog'"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining(": operation can only be computed by an indexed column with a configured analyzer");
+        .hasMessageContaining("LWT Conditions do not support the : operator");
     }
 
     // No flushes
