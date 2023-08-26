@@ -48,15 +48,13 @@ public class DefaultFSErrorHandler implements FSErrorHandler
 
         switch (DatabaseDescriptor.getDiskFailurePolicy())
         {
+            case die:
             case stop_paranoid:
                 // exception not logged here on purpose as it is already logged
                 logger.error("Stopping transports as disk_failure_policy is " + DatabaseDescriptor.getDiskFailurePolicy());
                 StorageService.instance.stopTransports();
                 break;
 
-            case die:
-                JVMStabilityInspector.killCurrentJVM(e, false);
-                break;
         }
     }
 
@@ -68,6 +66,7 @@ public class DefaultFSErrorHandler implements FSErrorHandler
 
         switch (DatabaseDescriptor.getDiskFailurePolicy())
         {
+            case die:
             case stop_paranoid:
             case stop:
                 // exception not logged here on purpose as it is already logged
@@ -95,9 +94,6 @@ public class DefaultFSErrorHandler implements FSErrorHandler
                     if (directory != null)
                         Keyspace.removeUnreadableSSTables(directory);
                 }
-                break;
-            case die:
-                JVMStabilityInspector.killCurrentJVM(e, false);
                 break;
             case ignore:
                 // already logged, so left nothing to do
