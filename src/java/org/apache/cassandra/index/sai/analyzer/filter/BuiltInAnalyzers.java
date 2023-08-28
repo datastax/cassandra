@@ -52,13 +52,6 @@ public enum BuiltInAnalyzers
             return new WhitespaceAnalyzer();
         }
     },
-    CLASSIC
-    {
-        public Analyzer getNewAnalyzer()
-        {
-            return new ClassicAnalyzer();
-        }
-    },
     LOWERCASE
     {
         public Analyzer getNewAnalyzer()
