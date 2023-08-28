@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai.analyzer.filter;
 
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.classic.ClassicAnalyzer;
 import org.apache.lucene.analysis.core.SimpleAnalyzer;
 import org.apache.lucene.analysis.core.WhitespaceAnalyzer;
 import org.apache.lucene.analysis.custom.CustomAnalyzer;
