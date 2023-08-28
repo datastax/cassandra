@@ -56,6 +56,10 @@ public class JSONAnalyzerParser
         // An ommitted tokenizer maps directly to the keyword tokenizer, which is an identity map on input terms
         if (analyzerModel.getTokenizer() == null)
         {
+            if (analyzerModel.getFilters().isEmpty() && analyzerModel.getCharFilters().isEmpty())
+            {
+                throw new InvalidRequestException("Analzyer config requires at least a tokenizer, a filter, or a charFilter, but none found. config=" + json);
+            }
             builder.withTokenizer("keyword");
         }
         else

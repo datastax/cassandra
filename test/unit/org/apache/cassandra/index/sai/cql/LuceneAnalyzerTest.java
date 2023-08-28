@@ -101,6 +101,17 @@ public class LuceneAnalyzerTest extends SAITester
         assertEquals(0, execute("SELECT * FROM %s WHERE val = 'dog' ALLOW FILTERING").size());
     }
 
+    @Test
+    public void testEmptyAnalyzerFailsAtCreation() {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                                             "WITH OPTIONS = { 'index_analyzer': '{}'}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasRootCauseMessage("Analzyer config requires at least a tokenizer, a filter, or a charFilter, but none found. config={}");
+    }
+
     // Technically, the NoopAnalyzer is applied, but that maps each field without modification, so any operator
     // that matches the SAI field will also match the PK field when compared later in the search (there are two phases).
     @Test

@@ -24,8 +24,6 @@ Analyzers are built on the Lucene Java Analyzer API. The SAI uses the Lucene Jav
 
 Analyzers have one `tokenizer`, a list of `filters`, and a list of `charFilters`. The `tokenizer` splits the input text into tokens. The `filters` and `charFilters` transform the tokens into a form that is suitable for indexing and querying. The `filters` and `charFilters` are applied in the order they are defined in the configuration. The `filters` and the `charFilters` are optional.
 
-The `tokenizer` is required. It is possible to configure a "no-op" tokenizer that maps the input text to a single token by using the `keyword` tokenizer. It is only recommended to use the `keyword` tokenizer when applying at least one `filter` or `charFilter`.
-
 ## Configuration Formatting
 
 The `OPTIONS` configuration argument is formatted as a JSON object:
