@@ -22,9 +22,6 @@ import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-// analyzer type
-// the custom one allows for more things
-// the standard one is more limited
 public class LuceneCustomAnalyzerConfig
 {
     private final LuceneClassNameAndArgs tokenizer;
