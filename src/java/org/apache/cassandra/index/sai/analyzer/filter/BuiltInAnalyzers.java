@@ -188,13 +188,13 @@ public enum BuiltInAnalyzers
              return new DutchAnalyzer();
          }
      },
-    ENGLISH
-    {
-        public Analyzer getNewAnalyzer()
-        {
-            return new StandardAnalyzer();
-        }
-    },
+     ENGLISH
+     {
+         public Analyzer getNewAnalyzer()
+         {
+             return new StandardAnalyzer();
+         }
+     },
      ESTONIAN
      {
          public Analyzer getNewAnalyzer()
