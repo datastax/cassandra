@@ -88,30 +88,12 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
         resetInternal(input);
     }
 
-    public static boolean hasQueryAnalyzer(Map<String, String> options)
-    {
-       return options.containsKey(LuceneAnalyzer.QUERY_ANALYZER);
-    }
-
     public interface AnalyzerFactory extends Closeable
     {
         AbstractAnalyzer create();
 
         default void close()
         {
-        }
-    }
-
-    public static AnalyzerFactory fromOptionsQueryAnalyzer(final AbstractType<?> type, final Map<String, String> options)
-    {
-        final String json = options.get(LuceneAnalyzer.QUERY_ANALYZER);
-        try
-        {
-            return toAnalyzerFactory(json, type, options);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidRequestException("CQL type " + type.asCQL3Type() + " cannot be analyzed json="+json, ex);
         }
     }
 
