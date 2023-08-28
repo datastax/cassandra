@@ -49,7 +49,7 @@ public class JSONAnalyzerParser
             return analyzer;
         }
 
-        // Don't have built in operator, parse JSON
+        // Don't have built in analyzer, parse JSON
         LuceneCustomAnalyzerConfig analyzerModel = JSON_MAPPER.readValue(json, LuceneCustomAnalyzerConfig.class);
 
         CustomAnalyzer.Builder builder = CustomAnalyzer.builder();
