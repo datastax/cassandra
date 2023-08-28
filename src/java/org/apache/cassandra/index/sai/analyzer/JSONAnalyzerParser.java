@@ -66,7 +66,7 @@ public class JSONAnalyzerParser
         {
             if (filter.getName() == null)
             {
-                throw new InvalidRequestException("filter 'name' field is required.");
+                throw new InvalidRequestException("filter 'name' field is required for options=" + json);
             }
             if (unsupportedFilters.contains(filter.getName()))
             {
@@ -79,7 +79,7 @@ public class JSONAnalyzerParser
         {
             if (charFilter.getName() == null)
             {
-                throw new InvalidRequestException("charFilter 'name' field is required.");
+                throw new InvalidRequestException("charFilter 'name' field is required for options=" + json);
             }
             builder.addCharFilter(charFilter.getName(), charFilter.getArgs());
         }

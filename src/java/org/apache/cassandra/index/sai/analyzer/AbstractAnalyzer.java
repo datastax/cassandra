@@ -127,6 +127,10 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
                 }
             };
         }
+        catch (InvalidRequestException ex)
+        {
+            throw ex;
+        }
         catch (Exception ex)
         {
             throw new InvalidRequestException("CQL type " + type.asCQL3Type() + " cannot be analyzed options="+options, ex);

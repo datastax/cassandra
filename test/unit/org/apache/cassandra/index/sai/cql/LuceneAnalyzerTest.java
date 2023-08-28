@@ -36,12 +36,12 @@ public class LuceneAnalyzerTest extends SAITester
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
                     "'index_analyzer': '{\n" +
-                    "\t{\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
-                    "\t{\"filters\":\"[{\"name\":\"lowercase\"}]\n" +
-                    "]'," +
-                    "'query_analyzer': '[\n" +
-                    "\t{\"tokenizer\":\"whitespace\"},\n" +
-                    "\t{\"filter\":\"porterstem\"}\n" +
+                    "\t\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
+                    "\t\"filters\":[{\"name\":\"lowercase\"}]\n" +
+                    "}'," +
+                    "'query_analyzer': '{\n" +
+                    "\t\"tokenizer\":{\"name\":\"whitespace\"},\n" +
+                    "\t\"filters\":[{\"name\":\"porterstem\"}]\n" +
                     "}'};");
 
         waitForIndexQueryable();
