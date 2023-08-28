@@ -1069,7 +1069,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
                 case NOT_CONTAINS_KEY:
                     return !containsKey(metadata, partitionKey, row, nowInSec);
             }
-            throw new AssertionError();
+            throw new AssertionError("Unsupported operator: " + operator);
         }
 
         private boolean contains(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
