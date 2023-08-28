@@ -38,7 +38,7 @@ public class LuceneUpdateDeleteTest extends SAITester
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                    "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
+                    "WITH OPTIONS = { 'index_analyzer': 'standard' }");
 
         waitForIndexQueryable();
 
