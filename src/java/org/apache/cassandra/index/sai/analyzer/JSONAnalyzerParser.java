@@ -38,7 +38,8 @@ public class JSONAnalyzerParser
     Sets.newHashSet("synonymgraph", // same as synonym
                     "synonym", // replaces words, loads external file, could be implemented
                     "commongrams", // loads external file terms, search feature
-                    "stop", // stop words remove terms which doens't make sense for a database index
+                    "stop", // the stop words opens an arbitrary file and reads as stop words, so we don't yet support
+                    // arbitrary stop words. We do allow Lucene's built-in stop words, though.
                     "snowballporter"); // bug in reflection instantiation
 
     public static Analyzer parse(String json) throws IOException

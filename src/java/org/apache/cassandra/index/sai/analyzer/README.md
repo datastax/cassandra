@@ -62,12 +62,14 @@ OPTIONS = {
 
 The following built-in analyzers are available:
 
-| Analyzer Name       | Description from Lucene Java Docs                                                         |
-|---------------------|-------------------------------------------------------------------------------------------|
-| `standard`          | Filters `StandardTokenizer` output with `LowerCaseFilter`                                 |
-| `simple`            | Filters `LetterTokenizer` output with `LowerCaseFilter`                                   |
-| `whitespace`        | Analyzer that uses `WhitespaceTokenizer`.                                                 |
-| `lowercase`         | Normalizes input by applying `LowerCaseFilter` (no additional tokenization is performed). |
+| Analyzer Name | Description from Lucene Java Docs                                                                        |
+|---------------|----------------------------------------------------------------------------------------------------------|
+| `standard`    | Filters `StandardTokenizer` output with `LowerCaseFilter`                                                |
+| `simple`      | Filters `LetterTokenizer` output with `LowerCaseFilter`                                                  |
+| `whitespace`  | Analyzer that uses `WhitespaceTokenizer`.                                                                |
+| `stop`        | Filters `LetterTokenizer` output with `LowerCaseFilter` and removes Lucene's default English stop words. |
+| `lowercase`   | Normalizes input by applying `LowerCaseFilter` (no additional tokenization is performed).                |
+| `<language>`  | Analyzers for specific languages. For example, `english` and `french`.                                   |
 
 ### Standard Analyzer
 

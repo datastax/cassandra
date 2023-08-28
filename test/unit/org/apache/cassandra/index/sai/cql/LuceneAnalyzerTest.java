@@ -23,6 +23,7 @@ import org.junit.Test;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.analyzer.filter.BuiltInAnalyzers;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
@@ -321,5 +322,22 @@ public class LuceneAnalyzerTest extends SAITester
         .isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val : 'queries' AND val : 'the' AND val = 'the queries test' ALLOW FILTERING"))
         .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    public void testBuiltInAlyzerIndexCreation() throws Throwable
+    {
+        for (BuiltInAnalyzers builtInAnalyzer : BuiltInAnalyzers.values())
+            testBuiltInAlyzerIndexCreationFor(builtInAnalyzer.name());
+    }
+
+    private void testBuiltInAlyzerIndexCreationFor(String builtInAnalyzerName) throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = " +
+                    "{'index_analyzer':'" + builtInAnalyzerName + "'}");
+
+        waitForIndexQueryable();
     }
 }
