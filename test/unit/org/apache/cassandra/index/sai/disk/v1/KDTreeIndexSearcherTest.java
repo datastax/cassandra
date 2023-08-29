@@ -19,12 +19,12 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
+import com.google.common.collect.Lists;
 import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.DecimalType;
@@ -211,11 +211,7 @@ public class KDTreeIndexSearcherTest extends SaiRandomizedTest
             assertEquals(results.getMinimum(), results.getCurrent());
             assertTrue(results.hasNext());
 
-            var actualTokenList = new ArrayList<>();
-            for (RangeIterator<Long> it = results; it.hasNext(); )
-            {
-                actualTokenList.add(it.next());
-            }
+            var actualTokenList = Lists.newArrayList(results);
             assertEquals(expectedTokenList, actualTokenList);
         }
 
