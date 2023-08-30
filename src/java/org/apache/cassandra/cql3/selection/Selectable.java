@@ -858,11 +858,13 @@ public interface Selectable extends AssignmentTestable
                 validateType(cfm, type);
             }
 
-            ListType<?> listType = (ListType<?>) type;
+            AbstractType<?> elementsType = type.isVector()
+                                           ? ((VectorType<?>) type).getElementsType()
+                                           : ((ListType<?>) type).getElementsType();
 
             List<AbstractType<?>> expectedTypes = new ArrayList<>(selectables.size());
             for (int i = 0, m = selectables.size(); i < m; i++)
-                expectedTypes.add(listType.getElementsType());
+                expectedTypes.add(elementsType);
 
             SelectorFactories factories = createFactoriesAndCollectColumnDefinitions(selectables,
                                                                                      expectedTypes,

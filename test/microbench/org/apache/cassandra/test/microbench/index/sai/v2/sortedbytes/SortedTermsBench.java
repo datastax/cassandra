@@ -25,7 +25,6 @@ import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
@@ -222,7 +221,7 @@ public class SortedTermsBench extends AbstractOnDiskBench
     @BenchmarkMode({ Mode.Throughput})
     public void advance(Blackhole bh) throws IOException
     {
-        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor(SSTableQueryContext.forTest()))
+        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor())
         {
             for (int i = 0; i < NUM_INVOCATIONS; i++)
             {
@@ -237,7 +236,7 @@ public class SortedTermsBench extends AbstractOnDiskBench
     @BenchmarkMode({ Mode.Throughput})
     public void seekToPointID(Blackhole bh) throws IOException
     {
-        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor(SSTableQueryContext.forTest()))
+        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor())
         {
             for (int i = 0; i < NUM_INVOCATIONS; i++)
             {

@@ -167,7 +167,7 @@ public class View
         if (null == select)
         {
             SelectStatement.Parameters parameters =
-                new SelectStatement.Parameters(Collections.emptyMap(),
+                new SelectStatement.Parameters(Collections.emptyList(),
                                                Collections.emptyList(),
                                                false,
                                                true,
