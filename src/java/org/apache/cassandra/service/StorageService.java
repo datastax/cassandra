@@ -958,7 +958,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         if (LOAD_RING_STATE.getBoolean())
         {
-            logger.info("Loading persisted ring state");
+            logger.debug("Loading persisted ring state");
             populatePeerTokenMetadata();
             for (InetAddressAndPort endpoint : getTokenMetadata().getAllEndpoints())
                 Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.addSavedEndpoint(endpoint));
@@ -1057,7 +1057,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private void populatePeerTokenMetadata()
     {
-        logger.info("Populating token metadata from system tables");
+        logger.debug("Populating token metadata from system tables");
         Multimap<InetAddressAndPort, Token> loadedTokens = SystemKeyspace.loadTokens();
 
         // entry has been mistakenly added, delete it
@@ -1184,7 +1184,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             appStates.put(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
             appStates.put(ApplicationState.SSTABLE_VERSIONS, valueFactory.sstableVersions(sstablesTracker.versionsInUse()));
 
-            logger.info("Starting up server gossip");
+            logger.debug("Starting up server gossip");
             Gossiper.instance.register(this);
             Gossiper.instance.start(SystemKeyspace.incrementAndGetGeneration(), appStates); // needed for node-ring gathering.
             gossipActive = true;
@@ -1284,7 +1284,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 if (bootstrapTokens.size() != DatabaseDescriptor.getNumTokens())
                     throw new ConfigurationException("Cannot change the number of tokens from " + bootstrapTokens.size() + " to " + DatabaseDescriptor.getNumTokens());
                 else
-                    logger.info("Using saved tokens {}", bootstrapTokens);
+                    logger.debug("Using saved tokens {}", bootstrapTokens);
             }
         }
 
