@@ -219,7 +219,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
     private void delete(Descriptor desc, List<Component> components)
     {
-        logger.info("Deleting sstable: {}", desc);
+        logger.debug("Deleting sstable: {}", desc);
 
         if (components.remove(SSTableFormat.Components.DATA))
             components.add(0, SSTableFormat.Components.DATA); // DATA component should be first

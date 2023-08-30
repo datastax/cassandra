@@ -523,7 +523,7 @@ public class Tracker
         // TODO: if we're invalidated, should we notifyadded AND removed, or just skip both?
         fail = notifyAdded(sstables, OperationType.FLUSH, operationId, false, memtable, fail);
 
-        // make sure index sees flushed index files before dicarding memtable index
+        // make sure SAI sees newly flushed index files before discarding memtable index
         notifyDiscarded(memtable);
 
         fail = dropOrUnloadSSTablesIfInvalid("during flush", fail);
