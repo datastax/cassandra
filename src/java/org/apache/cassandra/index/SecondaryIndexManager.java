@@ -690,9 +690,10 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         List<ListenableFuture<?>> futures = new ArrayList<>(byType.size());
         byType.forEach((buildingSupport, groupedIndexes) ->
                        {
-                           SecondaryIndexBuilder builder = buildingSupport.getIndexBuildTask(baseCfs, groupedIndexes, sstables, isFullRebuild);
+                           List<SecondaryIndexBuilder> builders = buildingSupport.getParallelIndexBuildTasks(baseCfs, groupedIndexes, sstables, isFullRebuild);
+                           List<ListenableFuture<?>> builderFutures = builders.stream().map(CompactionManager.instance::submitIndexBuild).collect(Collectors.toList());
                            final SettableFuture build = SettableFuture.create();
-                           CompactionManager.instance.submitIndexBuild(builder).addCallback(new FutureCallback<Object>()
+                           Futures.addCallback(Futures.allAsList(builderFutures), new FutureCallback()
                            {
                                @Override
                                public void onFailure(Throwable t)
