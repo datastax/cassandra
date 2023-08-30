@@ -155,7 +155,7 @@ public class QueryProcessor implements QueryHandler
                             DatabaseDescriptor.getPreparedStatementsCacheSizeMiB());
         }, 1, 1, TimeUnit.MINUTES);
 
-        logger.info("Initialized prepared statement caches with {} MiB",
+        logger.debug("Initialized prepared statement caches with {} MiB",
                     DatabaseDescriptor.getPreparedStatementsCacheSizeMiB());
     }
 

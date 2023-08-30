@@ -25,11 +25,12 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.tartarus.snowball.SnowballStemmer;
+
 import com.github.benmanes.caffeine.cache.CacheLoader;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import org.apache.cassandra.concurrent.ImmediateExecutor;
-import org.tartarus.snowball.SnowballProgram;
 import org.tartarus.snowball.ext.DanishStemmer;
 import org.tartarus.snowball.ext.DutchStemmer;
 import org.tartarus.snowball.ext.EnglishStemmer;
@@ -93,7 +94,7 @@ public class StemmerFactory
         SUPPORTED_LANGUAGES.put("tr", TurkishStemmer.class);
     }
 
-    public static SnowballProgram getStemmer(Locale locale)
+    public static SnowballStemmer getStemmer(Locale locale)
     {
         if (locale == null)
             return null;
@@ -105,7 +106,7 @@ public class StemmerFactory
             if(clazz == null)
                 return null;
             Constructor<?> ctor = STEMMER_CONSTRUCTOR_CACHE.get(clazz);
-            return (SnowballProgram) ctor.newInstance();
+            return (SnowballStemmer) ctor.newInstance();
         }
         catch (Exception e)
         {
