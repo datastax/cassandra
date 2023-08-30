@@ -228,7 +228,7 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
 
     private void delete(Descriptor desc, List<Component> components)
     {
-        logger.info("Deleting sstable: {}", desc);
+        logger.debug("Deleting sstable: {}", desc);
 
         if (components.remove(DATA))
             components.add(0, DATA); // DATA component should be first

@@ -156,7 +156,8 @@ public class SegmentTest
 
     private static AbstractBounds<PartitionPosition> keyRange(Token left, boolean inclusiveLeft, Token right, boolean inclusiveRight)
     {
+        // See StatementRestrictions#getPartitionKeyBoundsForTokenRestrictions
         return Bounds.bounds(inclusiveLeft ? left.minKeyBound() : left.maxKeyBound(), inclusiveLeft,
-                inclusiveRight ? right.maxKeyBound() : right.minKeyBound(), inclusiveRight);
+                             inclusiveRight ? right.maxKeyBound() : right.minKeyBound(), inclusiveRight);
     }
 }

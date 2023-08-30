@@ -271,4 +271,9 @@ public class ListType<T> extends CollectionType<List<T>>
     {
         return decompose(Collections.emptyList());
     }
+
+    public boolean isList()
+    {
+        return true;
+    }
 }
