@@ -139,6 +139,8 @@ public final class JVMStabilityInspector
 
     public static void inspectThrowable(Throwable t, Consumer<Throwable> fn, boolean isUncaughtException) throws OutOfMemoryError
     {
+        if (t == null)
+            return;
         globalHandler.accept(t, isUncaughtException);
         fn.accept(t);
 
