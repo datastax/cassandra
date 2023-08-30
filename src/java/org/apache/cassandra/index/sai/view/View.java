@@ -24,7 +24,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -57,7 +56,9 @@ public class View implements Iterable<SSTableIndex>
         for (SSTableIndex sstableIndex : indexes)
         {
             this.view.put(sstableIndex.getSSTable().descriptor, sstableIndex);
-            termTreeBuilder.add(sstableIndex);
+            if (!sstableIndex.getIndexContext().isVector())
+                termTreeBuilder.add(sstableIndex);
+
             keyIntervals.add(Interval.create(new Key(sstableIndex.minKey()),
                                              new Key(sstableIndex.maxKey()),
                                              sstableIndex));
@@ -67,8 +68,14 @@ public class View implements Iterable<SSTableIndex>
         this.keyIntervalTree = IntervalTree.build(keyIntervals);
     }
 
-    public Set<SSTableIndex> match(Expression expression)
+    /**
+     * Search for a list of {@link SSTableIndex}es that contain values within
+     * the value range requested in the {@link Expression}
+     */
+    public Collection<SSTableIndex> match(Expression expression)
     {
+        if (expression.getOp() == Expression.Op.ANN)
+            return getIndexes();
         return termTree.search(expression);
     }
 
