@@ -24,10 +24,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
+import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -89,6 +91,14 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     {
         assertFilterIsNotATree();
         return root.expressions;
+    }
+
+    /**
+     * @return *all* the expressions from the RowFilter tree in pre-order.
+     */
+    public Stream<Expression> getExpressionsPreOrder()
+    {
+        return root.getExpressionsPreOrder();
     }
 
     /**
@@ -440,6 +450,12 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 sb.append(")");
             }
             return sb.toString();
+        }
+
+        public Stream<Expression> getExpressionsPreOrder()
+        {
+            return Stream.concat(expressions.stream(),
+                                 children.stream().flatMap(FilterElement::getExpressionsPreOrder));
         }
 
         public static class Builder
