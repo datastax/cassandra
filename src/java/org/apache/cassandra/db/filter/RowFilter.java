@@ -26,13 +26,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.CustomIndexExpression;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
@@ -87,6 +87,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
     public List<Expression> getExpressions()
     {
+        assertFilterIsNotATree();
         return root.expressions;
     }
 
@@ -96,6 +97,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean hasExpressionOnClusteringOrRegularColumns()
     {
+        assertFilterIsNotATree();
         for (Expression expression : root)
         {
             ColumnMetadata column = expression.column();
@@ -158,6 +160,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean partitionKeyRestrictionsAreSatisfiedBy(DecoratedKey key, AbstractType<?> keyValidator)
     {
+        assertFilterIsNotATree();
         for (Expression e : root)
         {
             if (!e.column.isPartitionKey())
@@ -178,6 +181,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean clusteringKeyRestrictionsAreSatisfiedBy(Clustering<?> clustering)
     {
+        assertFilterIsNotATree();
         for (Expression e : root)
         {
             if (!e.column.isClusteringColumn())
@@ -197,6 +201,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      */
     public RowFilter without(Expression expression)
     {
+        assertFilterIsNotATree();
         assert root.contains(expression);
         if (root.size() == 1)
             return RowFilter.NONE;
@@ -221,6 +226,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
     public Iterator<Expression> iterator()
     {
+        assertFilterIsNotATree();
         return root.iterator();
     }
 
@@ -228,6 +234,13 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     public String toString()
     {
         return root.toString();
+    }
+
+    private void assertFilterIsNotATree()
+    {
+        Preconditions.checkState(root.children.isEmpty(),
+                                 "RowFilter must be a flat list of Expressions to be used in any iterative context like " +
+                                 "iterator() or getExpressions()");
     }
 
     public static Builder builder()
@@ -326,10 +339,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
         public Iterator<Expression> iterator()
         {
-            List<Expression> allExpressions = new ArrayList<>(expressions);
-            for (FilterElement child : children)
-                allExpressions.addAll(child.expressions);
-            return allExpressions.iterator();
+            return expressions.iterator();
         }
 
         public FilterElement filter(Predicate<Expression> filter)
