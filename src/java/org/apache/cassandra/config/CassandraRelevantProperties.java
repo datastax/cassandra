@@ -200,6 +200,7 @@ public enum CassandraRelevantProperties
     CUSTOM_GUARDRAILS_CONFIG_PROVIDER_CLASS("cassandra.custom_guardrails_config_provider_class"),
     CUSTOM_HINTS_ENDPOINT_PROVIDER("cassandra.custom_hints_endpoint_provider"),
     CUSTOM_HINTS_HANDLER("cassandra.custom_hints_handler"),
+    CUSTOM_HINTS_RATE_LIMITER_FACTORY("cassandra.custom_hints_rate_limiter_factory"),
     /**
      * Which class to use for messaging metrics for {@link org.apache.cassandra.net.MessagingService}.
      * The provided class name must point to an implementation of {@link org.apache.cassandra.metrics.MessagingMetrics}.
