@@ -309,6 +309,11 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return isReversed() ? ((ReversedType<T>) this).baseType.unwrap() : this;
     }
 
+    public boolean isList()
+    {
+        return false;
+    }
+
     public static AbstractType<?> parseDefaultParameters(AbstractType<?> baseType, TypeParser parser) throws SyntaxException
     {
         Map<String, String> parameters = parser.getKeyValueParameters();

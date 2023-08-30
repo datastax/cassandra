@@ -53,6 +53,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.IncludingExcludingBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -75,7 +76,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-public class MemtableIndexTest extends SAITester
+public class TrieMemtableIndexTest extends SAITester
 {
     private static final Injections.Counter indexSearchCounter = Injections.newCounter("IndexSearchCounter")
                                                                            .add(InvokePointBuilder.newInvokePoint()
@@ -85,7 +86,7 @@ public class MemtableIndexTest extends SAITester
 
     private ColumnFamilyStore cfs;
     private IndexContext indexContext;
-    private MemtableIndex memtableIndex;
+    private TrieMemtableIndex memtableIndex;
     private AbstractAllocatorMemtable memtable;
     private IPartitioner partitioner;
     private Map<DecoratedKey, Integer> keyMap;
@@ -130,7 +131,7 @@ public class MemtableIndexTest extends SAITester
     public void onHeapAllocation() throws Exception
     {
         setTrieMemtableBufferType(BufferType.ON_HEAP);
-        memtableIndex = new MemtableIndex(indexContext);
+        memtableIndex = new TrieMemtableIndex(indexContext);
         assertEquals(AbstractShardedMemtable.getDefaultShardCount(), memtableIndex.shardCount());
 
         assertTrue(memtable.getAllocator().onHeap().owns() == 0);
@@ -149,7 +150,7 @@ public class MemtableIndexTest extends SAITester
     public void offHeapAllocation() throws Exception
     {
         setTrieMemtableBufferType(BufferType.OFF_HEAP);
-        memtableIndex = new MemtableIndex(indexContext);
+        memtableIndex = new TrieMemtableIndex(indexContext);
         assertEquals(AbstractShardedMemtable.getDefaultShardCount(), memtableIndex.shardCount());
 
         assertTrue(memtable.getAllocator().onHeap().owns() == 0);
@@ -167,7 +168,7 @@ public class MemtableIndexTest extends SAITester
     @Test
     public void randomQueryTest() throws Exception
     {
-        memtableIndex = new MemtableIndex(indexContext);
+        memtableIndex = new TrieMemtableIndex(indexContext);
         assertEquals(AbstractShardedMemtable.getDefaultShardCount(), memtableIndex.shardCount());
 
         for (int row = 0; row < getRandom().nextIntBetween(1000, 5000); row++)
@@ -197,7 +198,7 @@ public class MemtableIndexTest extends SAITester
 
             Set<Integer> foundKeys = new HashSet<>();
 
-            try (RangeIterator iterator = memtableIndex.search(expression, keyRange))
+            try (RangeIterator<PrimaryKey> iterator = memtableIndex.search(new QueryContext(), expression, keyRange, 0))
             {
                 while (iterator.hasNext())
                 {
@@ -214,7 +215,7 @@ public class MemtableIndexTest extends SAITester
     @Test
     public void indexIteratorTest()
     {
-        memtableIndex = new MemtableIndex(indexContext);
+        memtableIndex = new TrieMemtableIndex(indexContext);
 
         Map<Integer, Set<DecoratedKey>> terms = buildTermMap();
 

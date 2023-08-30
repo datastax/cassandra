@@ -155,7 +155,7 @@ public class QueryProcessor implements QueryHandler
                             DatabaseDescriptor.getPreparedStatementsCacheSizeMiB());
         }, 1, 1, TimeUnit.MINUTES);
 
-        logger.info("Initialized prepared statement caches with {} MiB",
+        logger.debug("Initialized prepared statement caches with {} MiB",
                     DatabaseDescriptor.getPreparedStatementsCacheSizeMiB());
     }
 
@@ -650,7 +650,7 @@ public class QueryProcessor implements QueryHandler
      * {@link SystemKeyspace#loadPreparedStatement(MD5Digest, SystemKeyspace.TriFunction)} where prepared statements are
      * being loaded into {@link #preparedStatements} so it doesn't make sense to prepare a statement in this context.
      */
-    public static UntypedResultSet executeOnceInternalWithPaging(String query, int pageSize, Object... values)
+    public static UntypedResultSet executeOnceInternalWithPaging(String query, PageSize pageSize, Object... values)
     {
         QueryState queryState = internalQueryState();
         CQLStatement statement = parseStatement(query, queryState.getClientState());

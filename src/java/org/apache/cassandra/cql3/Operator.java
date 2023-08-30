@@ -264,6 +264,20 @@ public enum Operator
             throw new UnsupportedOperationException();
         }
     },
+    ANN(15)
+    {
+        @Override
+        public String toString()
+        {
+            return "ANN";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return true;
+        }
+    },
     NOT_IN(16)
     {
         @Override
