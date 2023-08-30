@@ -82,6 +82,17 @@ public class IndexFileUtils
         return new IndexOutputWriter(new IncrementalChecksumSequentialWriter(file, writerOption, version));
     }
 
+    public IndexOutputWriter openOutput(File file, boolean append, Version version) throws IOException
+    {
+        assert writerOption.finishOnClose() : "IndexOutputWriter relies on close() to sync with disk.";
+
+        IndexOutputWriter indexOutputWriter = new IndexOutputWriter(new IncrementalChecksumSequentialWriter(file, writerOption, version));
+        if (append)
+            indexOutputWriter.skipBytes(file.length());
+
+        return indexOutputWriter;
+    }
+
     public IndexInput openInput(FileHandle handle)
     {
         return IndexInputReader.create(handle);

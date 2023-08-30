@@ -1238,12 +1238,12 @@
       <dependency>
         <groupId>org.apache.lucene</groupId>
         <artifactId>lucene-core</artifactId>
-        <version>7.5.0</version>
+        <version>9.8.0-1adfb2f77f</version>
       </dependency>
       <dependency>
         <groupId>org.apache.lucene</groupId>
-        <artifactId>lucene-analyzers-common</artifactId>
-        <version>7.5.0</version>
+        <artifactId>lucene-analysis-common</artifactId>
+        <version>9.8.0-1adfb2f77f</version>
       </dependency>
       <dependency>
         <groupId>io.github.jbellis</groupId>
@@ -1261,6 +1261,11 @@
             <artifactId>junit</artifactId>
           </exclusion>
         </exclusions>
+      </dependency>
+      <dependency>
+        <groupId>com.github.haifengl</groupId>
+        <artifactId>smile-nlp</artifactId>
+        <version>3.0.1</version>
       </dependency>
       <dependency>
         <groupId>ch.obermuhlner</groupId>

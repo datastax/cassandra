@@ -263,4 +263,12 @@ public interface ReadQuery
     default void trackWarnings()
     {
     }
+
+    /**
+     * @return true given read query is a top-k request
+     */
+    default boolean isTopK()
+    {
+        return false;
+    }
 }
