@@ -41,6 +41,7 @@ import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.CELL_COUNT;
@@ -69,6 +70,8 @@ public class V1SearchableIndex implements SearchableIndex
     private final ByteBuffer maxTerm;
     private final long minSSTableRowId, maxSSTableRowId;
     private final long numRows;
+
+    private final IFilter filter;
 
     private PerIndexFiles indexFiles;
 
@@ -103,6 +106,8 @@ public class V1SearchableIndex implements SearchableIndex
 
             this.minSSTableRowId = metadatas.get(0).minSSTableRowId;
             this.maxSSTableRowId = metadatas.get(metadatas.size() - 1).maxSSTableRowId;
+
+            this.filter = sstableContext.sstable().getBloomFilter();
         }
         catch (Throwable t)
         {
@@ -168,6 +173,8 @@ public class V1SearchableIndex implements SearchableIndex
                                             int limit) throws IOException
     {
         List<RangeIterator<Long>> iterators = new ArrayList<>();
+
+//        if(keyRange instanceof)
 
         for (Segment segment : segments)
         {
