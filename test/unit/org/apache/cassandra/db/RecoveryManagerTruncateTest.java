@@ -48,7 +48,7 @@ import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.EncryptionContextGenerator;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -113,7 +113,8 @@ public class RecoveryManagerTruncateTest
         // and now truncate it
         cfs.truncateBlocking();
         Map<Keyspace, Integer> replayed = CommitLog.instance.resetUnsafe(false);
-        assertFalse("Expected mutations to be replayed, but got " + replayed, replayed.isEmpty());
+        assertNull("Expected no mutations to be replayed for " + keyspace + " keyspace, but got " + replayed,
+                     replayed.get(keyspace));
 
         // and validate truncation.
         Util.assertEmptyUnfiltered(Util.cmd(cfs).build());
