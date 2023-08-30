@@ -55,6 +55,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.gms.IFailureDetector;
@@ -84,6 +85,8 @@ public class ReplicaPlans
 
     private static final int REQUIRED_BATCHLOG_REPLICA_COUNT
             = Math.max(1, Math.min(2, CassandraRelevantProperties.REQUIRED_BATCHLOG_REPLICA_COUNT.getInt()));
+
+    private static final Range<Token> FULL_TOKEN_RANGE = new Range<>(DatabaseDescriptor.getPartitioner().getMinimumToken(), DatabaseDescriptor.getPartitioner().getMinimumToken());
 
     static
     {
@@ -751,6 +754,26 @@ public class ReplicaPlans
 
         assureSufficientLiveReplicasForRead(replicationStrategy, consistencyLevel, contacts);
         return new ReplicaPlan.ForRangeRead(keyspace, replicationStrategy, consistencyLevel, range, candidates, contacts, vnodeCount);
+    }
+
+    /**
+     * Construct a plan for reading the provided range at the provided consistency level on given endpoints.
+     *
+     * Note that:
+     *   - given range may span multiple vnodes
+     *   - endpoints should be alive and satifies consistency requirement.
+     *   - each endpoint will be considered as replica of entire token ring, so coordinator can execute request with given range
+     */
+    public static ReplicaPlan.ForRangeRead forFullRangeRead(Keyspace keyspace, ConsistencyLevel consistencyLevel, AbstractBounds<PartitionPosition> range, Set<InetAddressAndPort> endpointsToContact, int vnodeCount)
+    {
+        AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
+        EndpointsForRange.Builder builder = EndpointsForRange.Builder.builder(FULL_TOKEN_RANGE);
+        for (InetAddressAndPort endpoint : endpointsToContact)
+            builder.add(Replica.fullReplica(endpoint, FULL_TOKEN_RANGE), ReplicaCollection.Builder.Conflict.NONE);
+
+        EndpointsForRange contacts = builder.build();
+
+        return new ReplicaPlan.ForFullRangeRead(keyspace, replicationStrategy, consistencyLevel, range, contacts, contacts, vnodeCount);
     }
 
     /**
