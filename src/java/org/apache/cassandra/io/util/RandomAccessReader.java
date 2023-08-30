@@ -18,7 +18,10 @@
 package org.apache.cassandra.io.util;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.primitives.Ints;
@@ -78,6 +81,60 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
 
         assert buffer.order() == ByteOrder.BIG_ENDIAN : "Buffer must have BIG ENDIAN byte ordering";
+    }
+
+    /**
+     * Read a vector at the given (absolute) position.
+     *
+     * @param position the position to read from, in bytes
+     * @param dest the array to read into (always the entire array will be filled)
+     *
+     * May change the buffer position.
+     */
+    public void readFloatsAt(long position, float[] dest) throws IOException
+    {
+        assert position % Float.BYTES == 0 : "Position must be aligned to multiple of " + Float.BYTES;
+        BufferHolder bh = rebufferer.rebuffer(position);
+        FloatBuffer floatBuffer = bh.floatBuffer();
+        floatBuffer.position(Ints.checkedCast((position - bh.offset()) / Float.BYTES));
+
+        if (dest.length > floatBuffer.remaining())
+        {
+            // slow path -- desired slice is across region boundaries
+            ByteBuffer bb = ByteBuffer.allocate(Float.BYTES * dest.length);
+            reBufferAt(position);
+            readFully(bb);
+            floatBuffer = bb.asFloatBuffer();
+        }
+
+        floatBuffer.get(dest);
+    }
+
+    /**
+     * Read a vector at the given (absolute) position.
+     *
+     * @param position the position to read from, in bytes
+     * @param dest the array to read into (always the entire array will be filled)
+     *
+     * May change the buffer position.
+     */
+    public void readIntsAt(long position, int[] dest) throws IOException
+    {
+        assert position % Integer.BYTES == 0 : "Position must be aligned to multiple of " + Integer.BYTES;
+        BufferHolder bh = rebufferer.rebuffer(position);
+        IntBuffer intBuffer = bh.intBuffer();
+        intBuffer.position(Ints.checkedCast((position - bh.offset()) / Float.BYTES));
+
+        if (dest.length > intBuffer.remaining())
+        {
+            // slow path -- desired slice is across region boundaries
+            ByteBuffer bb = ByteBuffer.allocate(Float.BYTES * dest.length);
+            reBufferAt(position);
+            readFully(bb);
+            intBuffer = bb.asIntBuffer();
+        }
+
+        intBuffer.get(dest);
     }
 
     @Override

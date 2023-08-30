@@ -155,7 +155,7 @@ public class QueryProcessor implements QueryHandler
                             DatabaseDescriptor.getPreparedStatementsCacheSizeMiB());
         }, 1, 1, TimeUnit.MINUTES);
 
-        logger.info("Initialized prepared statement caches with {} MiB",
+        logger.debug("Initialized prepared statement caches with {} MiB",
                     DatabaseDescriptor.getPreparedStatementsCacheSizeMiB());
     }
 
@@ -641,7 +641,7 @@ public class QueryProcessor implements QueryHandler
     {
         Prepared prepared = prepareInternal(query);
 
-        return executeInternalWithPaging(prepared.statement, pageSize.rows(), values);
+        return executeInternalWithPaging(prepared.statement, pageSize, values);
     }
 
     /**
@@ -650,7 +650,7 @@ public class QueryProcessor implements QueryHandler
      * {@link SystemKeyspace#loadPreparedStatement(MD5Digest, SystemKeyspace.TriFunction)} where prepared statements are
      * being loaded into {@link #preparedStatements} so it doesn't make sense to prepare a statement in this context.
      */
-    public static UntypedResultSet executeOnceInternalWithPaging(String query, int pageSize, Object... values)
+    public static UntypedResultSet executeOnceInternalWithPaging(String query, PageSize pageSize, Object... values)
     {
         QueryState queryState = internalQueryState();
         CQLStatement statement = parseStatement(query, queryState.getClientState());
@@ -659,7 +659,7 @@ public class QueryProcessor implements QueryHandler
         return executeInternalWithPaging(statement, pageSize, values);
     }
 
-    private static UntypedResultSet executeInternalWithPaging(CQLStatement statement, int pageSize, Object... values)
+    private static UntypedResultSet executeInternalWithPaging(CQLStatement statement, PageSize pageSize, Object... values)
     {
         if (!(statement instanceof SelectStatement))
             throw new IllegalArgumentException("Only SELECTs can be paged");
@@ -667,7 +667,7 @@ public class QueryProcessor implements QueryHandler
         SelectStatement select = (SelectStatement) statement;
         long nowInSec = FBUtilities.nowInSeconds();
         QueryPager pager = select.getQuery(makeInternalOptionsWithNowInSec(select, nowInSec, values), nowInSec).getPager(null, ProtocolVersion.CURRENT);
-        return UntypedResultSet.create(select, pager, PageSize.inRows(pageSize));
+        return UntypedResultSet.create(select, pager, pageSize);
     }
 
     /**
