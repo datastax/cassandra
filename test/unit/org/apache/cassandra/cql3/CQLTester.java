@@ -1598,7 +1598,7 @@ public abstract class CQLTester
             logger.info("Error performing schema change", e);
             if (e instanceof InvalidRequestException)
                 throw new InvalidRequestException(String.format("Error setting schema for test (query was: %s)", query), e);
-            throw new RuntimeException("Error setting schema for test (query was: " + query + ")", e);
+            throw new RuntimeException(String.format("Error setting schema for test (query was: %s)", query), e);
         }
     }
 

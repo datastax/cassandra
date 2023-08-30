@@ -37,6 +37,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -71,7 +72,10 @@ public abstract class Lists
 
     private static AbstractType<?> elementsType(AbstractType<?> type)
     {
-        return ((ListType<?>) unwrap(type)).getElementsType();
+        AbstractType<?> unwrapped = unwrap(type);
+        return type.isVector()
+               ? ((VectorType<?>) unwrapped).getElementsType()
+               : ((ListType<?>) unwrapped).getElementsType();
     }
 
     /**
@@ -83,10 +87,10 @@ public abstract class Lists
     public static AssignmentTestable.TestResult testListAssignment(ColumnSpecification receiver,
                                                                    List<? extends AssignmentTestable> elements)
     {
-        if (!(receiver.type instanceof ListType))
+        if (!(receiver.type instanceof ListType || receiver.type instanceof VectorType))
             return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
 
-        // If there is no elements, we can't say it's an exact match (an empty list if fundamentally polymorphic).
+        // If there is no elements, we can't say it's an exact match (an empty list is fundamentally polymorphic).
         if (elements.isEmpty())
             return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
 
