@@ -26,6 +26,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Objects;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -181,11 +182,16 @@ public interface Index
 
     /**
      * Provider of {@code SecondaryIndexBuilder} instances. See {@code getBuildTaskSupport} and
-     * {@code SecondaryIndexManager.buildIndexesBlocking} for more detail.
+     * {@code SecondaryIndexManager} for more detail.
      */
     interface IndexBuildingSupport
     {
         SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs, Set<Index> indexes, Collection<SSTableReader> sstables, boolean isFullRebuild);
+
+        default List<SecondaryIndexBuilder> getParallelIndexBuildTasks(ColumnFamilyStore cfs, Set<Index> indexes, Collection<SSTableReader> sstables, boolean isFullRebuild)
+        {
+            return Collections.singletonList(getIndexBuildTask(cfs, indexes, sstables, isFullRebuild));
+        }
     }
 
     /**
