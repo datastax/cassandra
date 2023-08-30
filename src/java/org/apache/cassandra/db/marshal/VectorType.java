@@ -21,6 +21,7 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.nio.FloatBuffer;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -86,6 +87,8 @@ public final class VectorType<T> extends AbstractType<List<T>>
     private VectorType(AbstractType<T> elementType, int dimension)
     {
         super(ComparisonType.CUSTOM);
+        if (!(elementType instanceof FloatType))
+            throw new InvalidRequestException(String.format("vectors may only use float. given %s", elementType.asCQL3Type()));
         if (dimension <= 0)
             throw new InvalidRequestException(String.format("vectors may only have positive dimensions; given %d", dimension));
         this.elementType = elementType;
@@ -386,6 +389,7 @@ public final class VectorType<T> extends AbstractType<List<T>>
 
         public abstract <V> List<V> split(V buffer, ValueAccessor<V> accessor);
         public abstract <V> V serializeRaw(List<V> elements, ValueAccessor<V> accessor);
+        public abstract float[] deserializeFloatArray(ByteBuffer input);
 
         @Override
         public String toString(List<T> value)
@@ -432,6 +436,8 @@ public final class VectorType<T> extends AbstractType<List<T>>
         {
             if (elementType.isByteOrderComparable)
                 return ValueAccessor.compare(left, accessorL, right, accessorR);
+            if (accessorL.isEmpty(left) || accessorR.isEmpty(right))
+                return Boolean.compare(accessorR.isEmpty(right), accessorL.isEmpty(left));
             int offset = 0;
             int elementLength = elementType.valueLengthIfFixed();
             for (int i = 0; i < dimension; i++)
@@ -517,6 +523,19 @@ public final class VectorType<T> extends AbstractType<List<T>>
         }
 
         @Override
+        public float[] deserializeFloatArray(ByteBuffer input)
+        {
+            if (input == null || input.remaining() == 0)
+                return null;
+
+            FloatBuffer floatBuffer = input.asFloatBuffer();
+            float[] floatArray = new float[floatBuffer.remaining()];
+            floatBuffer.get(floatArray);
+
+            return floatArray;
+        }
+
+        @Override
         public <V> void validate(V input, ValueAccessor<V> accessor) throws MarshalException
         {
             if (accessor.isEmpty(input))
@@ -549,6 +568,9 @@ public final class VectorType<T> extends AbstractType<List<T>>
         public <VL, VR> int compareCustom(VL left, ValueAccessor<VL> accessorL,
                                           VR right, ValueAccessor<VR> accessorR)
         {
+            if (accessorL.isEmpty(left) || accessorR.isEmpty(right))
+                return Boolean.compare(accessorR.isEmpty(right), accessorL.isEmpty(left));
+
             int leftOffset = 0;
             int rightOffset = 0;
             for (int i = 0; i < dimension; i++)
@@ -652,6 +674,11 @@ public final class VectorType<T> extends AbstractType<List<T>>
             checkConsumedFully(input, accessor, offset);
 
             return result;
+        }
+
+        public float[] deserializeFloatArray(ByteBuffer input)
+        {
+            throw new UnsupportedOperationException();
         }
 
         @Override

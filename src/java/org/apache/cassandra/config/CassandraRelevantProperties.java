@@ -300,6 +300,7 @@ public enum CassandraRelevantProperties
     FD_INITIAL_VALUE_MS("cassandra.fd_initial_value_ms"),
     FD_MAX_INTERVAL_MS("cassandra.fd_max_interval_ms"),
     FILE_CACHE_ENABLED("cassandra.file_cache_enabled"),
+    FILE_CACHE_SIZE_IN_MB("cassandra.file_cache_size_in_mb", "2048"),
     /** @deprecated should be removed in favor of enable flag of relevant startup check (FileSystemOwnershipCheck) */
     /** @deprecated See CASSANDRA-17797 */
     @Deprecated(since = "4.1")
@@ -533,6 +534,12 @@ public enum CassandraRelevantProperties
 
     // SAI specific properties
 
+    /** Whether to allow the user to specify custom options to the hnsw index */
+    SAI_HNSW_ALLOW_CUSTOM_PARAMETERS("cassandra.sai.hnsw.allow_custom_parameters", "false"),
+
+    /** Controls the hnsw vector cache size, in bytes, per index segment. 0 to disable */
+    SAI_HNSW_VECTOR_CACHE_BYTES("cassandra.sai.vector_search.vector_cache_bytes", String.valueOf(1 * 1024 * 1024)),
+
     /** Controls the maximum number of index query intersections that will take part in a query */
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection_clause_limit", "2"),
 
@@ -557,6 +564,9 @@ public enum CassandraRelevantProperties
      * build a potential result set for search-then-sort query execution.
      */
     SAI_VECTOR_SEARCH_MAX_MATERIALIZE_KEYS("cassandra.sai.vector_search.max_materialized_keys", "16000"),
+
+    /** Controls the maximum top-k limit for vector search */
+    SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
 
     SCHEMA_PULL_INTERVAL_MS("cassandra.schema_pull_interval_ms", "60000"),
     SCHEMA_UPDATE_HANDLER_FACTORY_CLASS("cassandra.schema.update_handler_factory.class"),
@@ -738,10 +748,10 @@ public enum CassandraRelevantProperties
     UCS_RESERVATIONS_TYPE_OPTION("unified_compaction.reservations_type_option", Reservations.Type.LEVEL_OR_BELOW.name()),
     UCS_RESERVED_THREADS_PER_LEVEL("reserved_threads_per_level", "0"),
     UCS_SHARED_STORAGE("unified_compaction.shared_storage", "false"),
-    UCS_SSTABLE_GROWTH("unified_compaction.sstable_growth", "0.333"),
+    UCS_SSTABLE_GROWTH("unified_compaction.sstable_growth", "0.5"),
     UCS_STATIC_SCALING_PARAMETERS("unified_compaction.scaling_parameters", "T4"),
     UCS_SURVIVAL_FACTOR("unified_compaction.survival_factor", "1"),
-    UCS_TARGET_SSTABLE_SIZE("unified_compaction.target_sstable_size", "1GiB"),
+    UCS_TARGET_SSTABLE_SIZE("unified_compaction.target_sstable_size", "5GiB"),
     UDF_EXECUTOR_THREAD_KEEPALIVE_MS("cassandra.udf_executor_thread_keepalive_ms", "30000"),
     UNSAFE_SYSTEM("cassandra.unsafesystem"),
     /** User's home directory. */

@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.function.ToIntFunction;
 
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -107,6 +108,9 @@ public enum RequestFailureReason
 
         if (t instanceof IncompatibleSchemaException)
             return INCOMPATIBLE_SCHEMA;
+
+        if (t instanceof AbortedOperationException)
+            return TIMEOUT;
 
         return UNKNOWN;
     }
