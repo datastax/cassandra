@@ -1050,6 +1050,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
                 case LIKE_SUFFIX:
                 case LIKE_CONTAINS:
                 case LIKE_MATCHES:
+                case ANN:
                     {
                         assert !column.isComplex() : "Only CONTAINS and CONTAINS_KEY are supported for collection types";
                         ByteBuffer foundValue = getValue(metadata, partitionKey, row, nowInSec);

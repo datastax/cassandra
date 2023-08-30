@@ -33,6 +33,7 @@ import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 
@@ -102,7 +103,9 @@ final class ListSelector extends Selector
         {
             buffers.add(elements.get(i).getOutput(protocolVersion));
         }
-        return CollectionSerializer.pack(buffers, buffers.size());
+        return type.isVector()
+               ? ((VectorType<?>) type).decomposeRaw(buffers)
+               : CollectionSerializer.pack(buffers, buffers.size());
     }
 
     public void reset()

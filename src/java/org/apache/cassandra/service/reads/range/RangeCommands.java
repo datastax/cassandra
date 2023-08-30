@@ -80,6 +80,8 @@ public class RangeCommands
                                                                    command.indexQueryPlan(),
                                                                    keyspace,
                                                                    consistencyLevel);
+        if (command.isTopK())
+            return new ScanAllRangesCommandIterator(keyspace, replicaPlans, command, replicaPlans.size(), requestTime, readTracker);
 
         int maxConcurrencyFactor = Math.min(replicaPlans.size(), MAX_CONCURRENT_RANGE_REQUESTS);
         int concurrencyFactor = maxConcurrencyFactor;

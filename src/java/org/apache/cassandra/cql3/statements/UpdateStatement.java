@@ -197,6 +197,7 @@ public class UpdateStatement extends ModificationStatement
                                                                               metadata,
                                                                               whereClause.build(),
                                                                               bindVariables,
+                                                                              Collections.emptyList(),
                                                                               applyOnlyToStaticColumns,
                                                                               false,
                                                                               false);
@@ -268,6 +269,7 @@ public class UpdateStatement extends ModificationStatement
                                                                               metadata,
                                                                               whereClause.build(),
                                                                               bindVariables,
+                                                                              Collections.emptyList(),
                                                                               applyOnlyToStaticColumns,
                                                                               false,
                                                                               false);
@@ -336,7 +338,8 @@ public class UpdateStatement extends ModificationStatement
                                                                  bindVariables,
                                                                  operations,
                                                                  whereClause,
-                                                                 conditions);
+                                                                 conditions,
+                                                                 Collections.emptyList());
 
             return new UpdateStatement(rawCQLStatement,
                                        type,

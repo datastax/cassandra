@@ -1411,7 +1411,7 @@
     <attribute name="test.file.list" />
     <sequential>
         <testmacrohelper inputdir="${test.unit.src}" filelist="@{test.file.list}"
-                         exclude="**/*.java" timeout="${test.timeout}" testtag="sai-legacy">
+                         exclude="**/*.java" timeout="${test.timeout}" >
             <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
             <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
             <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
@@ -1421,6 +1421,21 @@
             <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
         </testmacrohelper>
     </sequential>
+  </macrodef>
+
+  <macrodef name="testlist-sai">
+      <attribute name="test.file.list" />
+      <sequential>
+          <testmacrohelper inputdir="\${test.unit.src}" filelist="@{test.file.list}"
+                           exclude="**/*.java" timeout="\${test.timeout}" testtag="sai-legacy">
+              <jvmarg value="-Dlegacy-sstable-root=\${test.data}/legacy-sstables"/>
+              <jvmarg value="-Dinvalid-legacy-sstable-root=\${test.data}/invalid-legacy-sstables"/>
+              <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
+              <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
+              <jvmarg value="-Dcassandra.skip_sync=true" />
+              <jvmarg value="-Dlogback.configurationFile=file://\${test.logback.configurationFile}"/>
+          </testmacrohelper>
+      </sequential>
   </macrodef>
 
   <!--
@@ -1539,6 +1554,14 @@
     </path>
     <property name="all-test-classes" refid="all-test-classes-path"/>
     <testhelper testdelegate="testlist-sai-legacy" />
+  </target>
+
+  <target name="test-sai" depends="build-test" description="Execute SAI unit tests">
+      <path id="all-test-classes-path">
+          <fileset dir="${test.unit.src}" includes="**/sai/**/${test.name}.java"/>
+      </path>
+      <property name="all-test-classes" refid="all-test-classes-path"/>
+      <testhelper testdelegate="testlist-sai-legacy" />
   </target>
 
   <target name="msg-ser-gen-test" depends="maybe-build-test" description="Generates message serializations">
