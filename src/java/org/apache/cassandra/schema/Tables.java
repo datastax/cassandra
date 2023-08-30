@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -188,7 +189,21 @@ public final class Tables implements Iterable<TableMetadata>
         Map<String, TableMetadata> updated = new HashMap<>();
         for (TableMetadata table : this)
         {
-            updated.put(table.name, table.withNewKeyspace(newName, udts, tables));
+            updated.put(table.name, table.withNewKeyspace(newName, udts));
+        }
+
+        return builder().add(updated.values()).build();
+    }
+
+    public Tables withTransformedParams(Function<TableParams, TableParams> transformFunction)
+    {
+        Map<String, TableMetadata> updated = new HashMap<>();
+
+        // We order the tables by dependencies so that vertices tables are
+        // processed before edges tables, in case graph constructs are used
+        for (TableMetadata table : this)
+        {
+            updated.put(table.name, table.withTransformedParams(transformFunction));
         }
 
         return builder().add(updated.values()).build();
