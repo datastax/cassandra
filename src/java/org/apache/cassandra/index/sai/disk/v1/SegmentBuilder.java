@@ -31,6 +31,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnHeapHnsw;
 import org.apache.cassandra.index.sai.disk.io.BytesRefUtil;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
@@ -40,6 +41,8 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
+
+import static org.apache.cassandra.index.sai.disk.hnsw.CassandraOnHeapHnsw.InvalidVectorBehavior.IGNORE;
 
 /**
  * Creates an on-heap index data structure to be flushed to an SSTable index.
@@ -158,6 +161,35 @@ public abstract class SegmentBuilder
             {
                 return writer.writeAll(ramIndexer.getTermsWithPostings());
             }
+        }
+    }
+
+    public static class VectorSegmentBuilder extends SegmentBuilder
+    {
+        private final CassandraOnHeapHnsw<Integer> graphIndex;
+
+        public VectorSegmentBuilder(AbstractType<?> termComparator, NamedMemoryLimiter limiter, IndexWriterConfig indexWriterConfig)
+        {
+            super(termComparator, limiter);
+            graphIndex = new CassandraOnHeapHnsw<>(termComparator, indexWriterConfig, false);
+        }
+
+        @Override
+        public boolean isEmpty()
+        {
+            return graphIndex.isEmpty();
+        }
+
+        @Override
+        protected long addInternal(ByteBuffer term, int segmentRowId)
+        {
+            return graphIndex.add(term, segmentRowId, IGNORE);
+        }
+
+        @Override
+        protected SegmentMetadata.ComponentMetadataMap flushInternal(IndexDescriptor indexDescriptor, IndexContext indexContext) throws IOException
+        {
+            return graphIndex.writeData(indexDescriptor, indexContext, p -> p);
         }
     }
 

@@ -89,6 +89,7 @@ public class SegmentMergerTest extends SAITester
         flush();
 
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
+        waitForIndexBuilds(indexName);
 
         // All we are interested in is that before the segment compaction there were more than 1 segment created
         assertTrue(SEGMENT_BUILD_COUNTER.get() > 1);
