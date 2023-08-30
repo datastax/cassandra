@@ -81,7 +81,6 @@ import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -281,9 +280,12 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             try
             {
-                Callable<?> call = DatabaseDescriptor.isDaemonInitialized() ? index.getInitializationTask() : null;
-                if (call != null)
-                    initialBuildTask = new FutureTask<>(call);
+                if (!IndexBuildDecider.instance.onInitialBuild().skipped()) 
+                {
+                    Callable<?> call = index.getInitializationTask();
+                    if (call != null)
+                        initialBuildTask = new FutureTask<>(call);
+                }
             }
             catch (Throwable t)
             {
@@ -292,10 +294,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             }
         }
 
-        // if there's no initialization, just mark as built and return:
+        // if there's no initialization, just mark as built (if not skipped) and return:
         if (initialBuildTask == null)
         {
-            markIndexBuilt(index, true);
+            if (!IndexBuildDecider.instance.onInitialBuild().skipped())
+                markIndexBuilt(index, true);
             return ImmediateFuture.success(null);
         }
 
@@ -1844,42 +1847,43 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             SSTableAddedNotification notice = (SSTableAddedNotification) notification;
 
-            // SSTables asociated to a memtable come from a flush, so their contents have already been indexed
-            if (!notice.memtable().isPresent())
+            // SSTables associated to a memtable come from a flush, so their contents have already been indexed
+            if (notice.memtable().isEmpty())
             {
-                if (notice.operationType == OperationType.REMOTE_RELOAD)
-                {
-                    buildIndexesAsync(Lists.newArrayList(notice.added),
-                                      indexes.values()
-                                             .stream()
-                                             .filter(Index::shouldBuildBlocking)
-                                             .collect(Collectors.toSet()),
-                                      false);
-                }
-                else
-                {
-                    buildIndexesBlocking(Lists.newArrayList(notice.added),
-                                         indexes.values()
-                                                .stream()
-                                                .filter(Index::shouldBuildBlocking)
-                                                .collect(Collectors.toSet()),
-                                         false);
-                }
+                IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableAdded(notice);
+                build(decision, notice.added, false);
             }
         }
         else if (notification instanceof SSTableListChangedNotification)
         {
-            // when reloading remote sstables, index may not be built
             SSTableListChangedNotification notice = (SSTableListChangedNotification) notification;
-            if (notice.operationType == OperationType.REMOTE_RELOAD)
-            {
-                buildIndexesAsync(Lists.newArrayList(notice.added),
-                                     indexes.values()
-                                            .stream()
-                                            .filter(Index::shouldBuildBlocking)
-                                            .collect(Collectors.toSet()),
-                                     false);
-            }
+
+            IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableListChanged(notice);
+            build(decision, notice.added, false);
+        }
+    }
+
+    private void build(IndexBuildDecider.Decision decision, Iterable<SSTableReader> sstables, boolean onlyIndexWithComponents)
+    {
+        if (decision == IndexBuildDecider.Decision.ASYNC)
+        {
+            buildIndexesAsync(Lists.newArrayList(sstables),
+                              indexes.values()
+                                     .stream()
+                                     .filter(Index::shouldBuildBlocking)
+                                     .filter(i -> !onlyIndexWithComponents || !i.getComponents().isEmpty())
+                                     .collect(Collectors.toSet()),
+                              false);
+        }
+        else if (decision == IndexBuildDecider.Decision.SYNC)
+        {
+            buildIndexesBlocking(Lists.newArrayList(sstables),
+                                 indexes.values()
+                                        .stream()
+                                        .filter(Index::shouldBuildBlocking)
+                                        .filter(i -> !onlyIndexWithComponents || !i.getComponents().isEmpty())
+                                        .collect(Collectors.toSet()),
+                                 false);
         }
     }
 
