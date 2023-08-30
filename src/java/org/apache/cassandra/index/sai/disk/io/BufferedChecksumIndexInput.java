@@ -28,7 +28,7 @@ import java.util.zip.Checksum;
  * This implementation of {@link ChecksumIndexInput} is based on {@link org.apache.lucene.store.BufferedChecksumIndexInput}
  * but uses custom checksum algorithm instead of the hardcoded {@code CRC32} in {@code BufferedChecksumIndexInput}.
  *
- * @see org.apache.cassandra.index.sai.disk.io.IndexFileUtils.ChecksummingWriter
+ * @see org.apache.cassandra.index.sai.disk.io.IndexFileUtils.IncrementalChecksumSequentialWriter
  */
 class BufferedChecksumIndexInput extends ChecksumIndexInput
 {

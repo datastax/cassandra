@@ -42,8 +42,10 @@ import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ComplexColumnData;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.MarshalException;
@@ -321,6 +323,13 @@ public class TypeUtil
             return FastByteOperations::compareUnsigned;
 
         return type;
+    }
+
+    public static float[] decomposeVector(IndexContext indexContext, ByteBuffer byteBuffer)
+    {
+        return ((VectorType.VectorSerializer)indexContext.getValidator()
+                                                         .getSerializer())
+               .deserializeFloatArray(byteBuffer);
     }
 
     private static ByteBuffer cellValue(ColumnMetadata columnMetadata, IndexTarget.Type indexType, Cell<?> cell)

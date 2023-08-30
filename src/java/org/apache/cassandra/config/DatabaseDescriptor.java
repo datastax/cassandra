@@ -120,6 +120,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNLI
 import static org.apache.cassandra.config.CassandraRelevantProperties.AUTO_BOOTSTRAP;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CONFIG_LOADER;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLE_STCS_IN_L0;
+import static org.apache.cassandra.config.CassandraRelevantProperties.FILE_CACHE_SIZE_IN_MB;
 import static org.apache.cassandra.config.CassandraRelevantProperties.INITIAL_TOKEN;
 import static org.apache.cassandra.config.CassandraRelevantProperties.IO_NETTY_TRANSPORT_ESTIMATE_SIZE_ON_SUBMIT;
 import static org.apache.cassandra.config.CassandraRelevantProperties.NATIVE_TRANSPORT_PORT;
@@ -640,7 +641,7 @@ public class DatabaseDescriptor
             conf.networking_cache_size = new DataStorageSpec.IntMebibytesBound(Math.min(128, (int) (Runtime.getRuntime().maxMemory() / (16 * 1048576))));
 
         if (conf.file_cache_size == null)
-            conf.file_cache_size = new DataStorageSpec.IntMebibytesBound(Math.min(512, (int) (Runtime.getRuntime().maxMemory() / (4 * 1048576))));
+            conf.file_cache_size = new DataStorageSpec.IntMebibytesBound(Math.min(FILE_CACHE_SIZE_IN_MB.getInt(), (int) (Runtime.getRuntime().maxMemory() / (4 * 1048576))));
 
         // round down for SSDs and round up for spinning disks
         if (conf.file_cache_round_up == null)

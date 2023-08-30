@@ -24,7 +24,6 @@ import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
 
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -92,15 +91,15 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         }
 
         @Override
-        public PrimaryKeyMap newPerSSTablePrimaryKeyMap(SSTableQueryContext context)
+        public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
         {
             LongArray rowIdToToken = null;
             LongArray rowIdToOffset = null;
             IKeyFetcher keyFetcher = null;
             try
             {
-                rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.openTokenReader(0, context));
-                rowIdToOffset = new LongArray.DeferredLongArray(offsetReaderFactory::open);
+                rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open());
+                rowIdToOffset = new LongArray.DeferredLongArray(() -> offsetReaderFactory.open());
                 keyFetcher = sstable.openKeyFetcher(false);
 
                 return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory);
@@ -151,6 +150,18 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     public long rowIdFromPrimaryKey(PrimaryKey key)
     {
         return rowIdToToken.findTokenRowID(key.token().getLongValue());
+    }
+
+    @Override
+    public long firstRowIdFromPrimaryKey(PrimaryKey key)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long lastRowIdFromPrimaryKey(PrimaryKey key)
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override

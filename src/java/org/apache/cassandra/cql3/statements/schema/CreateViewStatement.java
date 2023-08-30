@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -292,6 +293,7 @@ public final class CreateViewStatement extends AlterSchemaStatement
                                                                           table,
                                                                           whereClause,
                                                                           VariableSpecifications.empty(),
+                                                                          Collections.emptyList(),
                                                                           false,
                                                                           false,
                                                                           true,
