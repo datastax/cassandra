@@ -255,4 +255,10 @@ public class JVMStabilityInspectorTest
         
         JVMStabilityInspector.setGlobalErrorHandler(previous);
     }
+
+    @Test
+    public void testInspectingNull()
+    {
+        JVMStabilityInspector.inspectThrowable(null);
+    }
 }
