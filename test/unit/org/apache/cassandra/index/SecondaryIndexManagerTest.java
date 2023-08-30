@@ -29,6 +29,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.collect.Sets;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -49,6 +50,7 @@ import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -189,6 +191,30 @@ public class SecondaryIndexManagerTest extends CQLTester
             cfs.indexManager.handleNotification(new SSTableAddedNotification(sstables, null, OperationType.REMOTE_RELOAD, Optional.empty()), cfs.getTracker());
             waitForIndexBuilds(KEYSPACE, indexName); // this is needed because index build on remote reload is async
             assertMarkedAsBuilt(indexName);
+        }
+    }
+
+    @Test
+    public void flushedSSTableDoesntBuildIndex() throws Throwable
+    {
+        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        String indexName = createIndex("CREATE INDEX ON %s(c)");
+
+        waitForIndexBuilds(KEYSPACE, indexName);
+        assertMarkedAsBuilt(indexName);
+
+        // Mark index removed to later chack the sstable added notification for a flushed sstable
+        // doesn't build the index:
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        cfs.indexManager.markAllIndexesRemoved();
+        assertNotMarkedAsBuilt(indexName);
+
+        try (Refs<SSTableReader> sstables = Refs.ref(cfs.getSSTables(SSTableSet.CANONICAL)))
+        {
+            cfs.indexManager.handleNotification(new SSTableAddedNotification(sstables, Mockito.mock(Memtable.class), OperationType.FLUSH, Optional.empty()), cfs.getTracker());
+            waitForIndexBuilds(KEYSPACE, indexName); // this is needed because index build on remote reload is async
+            assertFalse(isIndexQueryable(KEYSPACE, indexName));
+            assertNotMarkedAsBuilt(indexName);
         }
     }
 
