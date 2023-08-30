@@ -161,10 +161,7 @@ public class IndexContext
             this.indexWriterConfig = IndexWriterConfig.fromOptions(fullIndexName, validator, config.options);
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(config.options);
             this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), config.options);
-
-            this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(config.options)
-                                        ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
-                                        : this.analyzerFactory;
+            this.queryAnalyzerFactory = this.analyzerFactory;
         }
         else
         {
@@ -208,9 +205,7 @@ public class IndexContext
         Map<String, String> options = config != null ? config.options : Collections.emptyMap();
         this.isAnalyzed = AbstractAnalyzer.isAnalyzed(options);
         this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), options);
-        this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(options)
-                                    ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), options)
-                                    : this.analyzerFactory;
+        this.queryAnalyzerFactory = this.analyzerFactory;
         this.primaryKeyFactory = Version.LATEST.onDiskFormat().primaryKeyFactory(clusteringComparator);
     }
 
