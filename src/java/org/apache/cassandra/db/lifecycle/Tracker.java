@@ -551,6 +551,13 @@ public class Tracker
         return view.liveSSTables();
     }
 
+    // used by CNDB
+    @Nullable
+    public SSTableReader getLiveSSTable(String filename)
+    {
+        return view.getLiveSSTable(filename);
+    }
+
     public void maybeIncrementallyBackup(final Iterable<SSTableReader> sstables)
     {
         if (!cfstore.isTableIncrementalBackupsEnabled())
