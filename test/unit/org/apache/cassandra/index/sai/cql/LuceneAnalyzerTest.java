@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.cql;
 import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.InvalidQueryException;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.analyzer.filter.BuiltInAnalyzers;
@@ -35,24 +36,17 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
-                    "'index_analyzer': '{\n" +
-                    "\t\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
-                    "\t\"filters\":[{\"name\":\"lowercase\"}]\n" +
-                    "}'," +
-                    "'query_analyzer': '{\n" +
-                    "\t\"tokenizer\":{\"name\":\"whitespace\"},\n" +
-                    "\t\"filters\":[{\"name\":\"porterstem\"}]\n" +
-                    "}'};");
-
-        waitForIndexQueryable();
-
-        execute("INSERT INTO %s (id, val) VALUES ('1', 'the query')");
-
-        // TODO: randomize flushing... not sure how
-        flush();
-
-        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'query'").size());
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                     "'index_analyzer': '{\n" +
+                     "\t\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
+                     "\t\"filters\":[{\"name\":\"lowercase\"}]\n" +
+                     "}'," +
+                     "'query_analyzer': '{\n" +
+                     "\t\"tokenizer\":{\"name\":\"whitespace\"},\n" +
+                     "\t\"filters\":[{\"name\":\"porterstem\"}]\n" +
+                     "}'};"))
+        .hasCauseInstanceOf(ConfigurationException.class)
+        .hasRootCauseMessage("Properties specified [query_analyzer] are not understood by StorageAttachedIndex");
     }
 
     @Test
@@ -94,6 +88,12 @@ public class LuceneAnalyzerTest extends SAITester
         assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' AND val : 'lazy'").size());
         assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' AND val : 'quick' AND val : 'fox'").size());
         assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' AND val : 'quick' OR val : 'missing'").size());
+
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' AND (val : 'quick' OR val : 'missing')").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'missing' AND (val : 'quick' OR val : 'dog')").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' OR (val : 'quick' AND val : 'missing')").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'missing' OR (val : 'quick' AND val : 'dog')").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'missing' OR (val : 'quick' AND val : 'missing')").size());
 
         // EQ operator is not supported for analyzed columns unless ALLOW FILTERING is used
         assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val = 'dog'")).isInstanceOf(InvalidRequestException.class);

@@ -138,9 +138,9 @@ public class VectorMemtableIndexTest extends SAITester
                                            .collect(Collectors.toSet());
 
             Set<Integer> foundKeys = new HashSet<>();
-            QueryContext queryContext = new QueryContext();
             int limit = getRandom().nextIntBetween(1, 100);
-            try (RangeIterator<PrimaryKey> iterator = memtableIndex.search(queryContext, expression, keyRange, limit))
+
+            try (RangeIterator<PrimaryKey> iterator = memtableIndex.search(new QueryContext(), expression, keyRange, limit))
             {
                 while (iterator.hasNext())
                 {
