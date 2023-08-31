@@ -114,9 +114,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
     private final boolean isReversed;
 
-    private static int columnIndex;
-    private static SingleRestriction restriction;
-
     /**
      * The <code>AggregationSpecification</code> used to make the aggregates.
      */
@@ -1024,9 +1021,23 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (cqlRows.size() == 0 || !needsPostQueryOrdering())
             return;
 
-        Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
-        assert index != null;
-        index.postQuerySort(restriction, columnIndex, options);
+        if (orderingComparator != null)
+        {
+            if (orderingComparator instanceof IndexColumnComparator)
+            {
+                SingleRestriction restriction = ((IndexColumnComparator<?>) orderingComparator).restriction;
+                int columnIndex = ((IndexColumnComparator<?>) orderingComparator).columnIndex;
+
+                Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
+                assert index != null;
+
+                index.postQuerySort(cqlRows, restriction, columnIndex, options);
+            }
+            else
+            {
+                Collections.sort(cqlRows.rows, orderingComparator);
+            }
+        }
     }
 
     public static class RawStatement extends QualifiedStatement<SelectStatement>
