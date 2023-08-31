@@ -109,6 +109,36 @@ public class QueryMetricsTest extends AbstractMetricsTest
     }
 
     @Test
+    public void testIndexQueryWithPartitionKey() throws Throwable
+    {
+        String table = "test_range_key_type_with_index";
+        String index = "test_range_key_type_with_index_index";
+
+        String keyspace = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
+
+        createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace, table));
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, index, keyspace, table, "v1"));
+
+        int rowsWritten = 10;
+
+        for (int i = 0; i < rowsWritten; i++)
+        {
+            execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES (?, ?, '0')", Integer.toString(i), i);
+        }
+
+        flush(keyspace, table);
+        compact(keyspace, table);
+        waitForIndexCompaction(keyspace, table, index);
+
+        waitForIndexQueryable(keyspace, table);
+
+        ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 = '0' and v1 = 3");
+
+        int actualRows = rows.all().size();
+        assertEquals(1, actualRows);
+    }
+
+    @Test
     public void testKDTreeQueryMetricsWithSingleIndex() throws Throwable
     {
         String table = "test_metrics_through_write_lifecycle";
