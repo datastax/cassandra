@@ -29,6 +29,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -174,7 +175,10 @@ public class V1SearchableIndex implements SearchableIndex
     {
         List<RangeIterator<Long>> iterators = new ArrayList<>();
 
-//        if(keyRange instanceof)
+        if(keyRange instanceof Bounds)
+        {
+
+        }
 
         for (Segment segment : segments)
         {
