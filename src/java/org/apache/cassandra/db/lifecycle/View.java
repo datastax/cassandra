@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Functions;
@@ -30,6 +32,7 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 
+import com.google.common.collect.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,6 +82,7 @@ public class View
     public final List<Memtable> flushingMemtables;
     final Set<SSTableReader> compacting;
     final Set<SSTableReader> sstables;
+    final Map<String, SSTableReader> sstablesByFilename;
     // we use a Map here so that we can easily perform identity checks as well as equality checks.
     // When marking compacting, we now  indicate if we expect the sstables to be present (by default we do),
     // and we then check that not only are they all present in the live set, but that the exact instance present is
@@ -104,6 +108,9 @@ public class View
         this.compactingMap = compacting;
         this.compacting = compactingMap.keySet();
         this.intervalTree = intervalTree;
+        this.sstablesByFilename = Maps.newHashMapWithExpectedSize(sstables.size());
+        for (SSTableReader sstable : this.sstables)
+            this.sstablesByFilename.put(sstable.getFilename(), sstable);
     }
 
     public Memtable getCurrentMemtable()
@@ -123,6 +130,12 @@ public class View
     public Set<SSTableReader> liveSSTables()
     {
         return sstables;
+    }
+
+    @Nullable
+    public SSTableReader getLiveSSTable(String filename)
+    {
+        return sstablesByFilename.get(filename);
     }
 
     public Iterable<SSTableReader> sstables(SSTableSet sstableSet, Predicate<SSTableReader> filter)
