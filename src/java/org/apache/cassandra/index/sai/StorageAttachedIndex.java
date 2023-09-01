@@ -560,7 +560,7 @@ public class StorageAttachedIndex implements Index
                                                                             ByteBuffer vectorBuffer = row.get(columnIndex);
                                                                             float[] vector = TypeUtil.decomposeVector(indexContext, vectorBuffer.duplicate());
                                                                             Double score = (double) similarityFunction.compare(vector, targetVector);
-                                                                            return new Pair<>(vectorBuffer.duplicate(), score);
+                                                                            return Pair.create(vectorBuffer.duplicate(), score);
                                                                         })
                                                                         .collect(Collectors.toList());
         listPairsVectorsScores.sort(Comparator.comparing(pair -> pair.right, Comparator.reverseOrder()));
