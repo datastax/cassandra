@@ -62,6 +62,7 @@ import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.api.IIsolatedExecutor.SerializableRunnable;
 import org.apache.cassandra.distributed.impl.InstanceKiller;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
@@ -170,7 +171,14 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
             IInvokableInstance inst = CLUSTER.get(i);
             if (inst.isShutdown())
                 inst.startup();
-            inst.runOnInstance(InstanceKiller::clear);
+            inst.runOnInstance(() -> {
+                InstanceKiller.clear();
+                if (!StorageService.instance.isGossipActive())
+                {
+                    StorageService.instance.startGossiping();
+                    Gossiper.waitToSettle();
+                }
+            });
         }
     }
 
