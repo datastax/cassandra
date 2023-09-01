@@ -543,7 +543,9 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
-    public void postQuerySort(ResultSet cqlRows, Restriction restriction, int columnIndex, QueryOptions options) {
+    public void postQuerySort(ResultSet cqlRows, Restriction restriction, int columnIndex, QueryOptions options)
+    {
+        // For now, only support ANN
         assert restriction instanceof SingleColumnRestriction.AnnRestriction;
 
         Preconditions.checkState(indexContext.isVector());
