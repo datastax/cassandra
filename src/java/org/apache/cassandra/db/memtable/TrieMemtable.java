@@ -53,6 +53,7 @@ import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
@@ -233,6 +234,22 @@ public class TrieMemtable extends AbstractShardedMemtable
         int total = 0;
         for (MemtableShard shard : shards)
             total += shard.size();
+        return total;
+    }
+
+    public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
+    {
+        int total = 0;
+        for (MemtableUnfilteredPartitionIterator iter = partitionIterator(columnFilter, dataRange, SSTableReadsListener.NOOP_LISTENER); iter.hasNext(); )
+        {
+            for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
+            {
+                Unfiltered uRow = it.next();
+                if (uRow.isRow())
+                    total++;
+            }
+        }
+
         return total;
     }
 
