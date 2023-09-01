@@ -557,21 +557,18 @@ public class StorageAttachedIndex implements Index
 
         List<List<ByteBuffer>> buffRows = cqlRows.rows;
         // Decorate-sort-undecorate to optimize sorting of vectors by their similarity scores
-        List<Pair<ByteBuffer, Double>> listPairsVectorsScores = buffRows.stream()
-                                                                        .map(row -> {
-                                                                            ByteBuffer vectorBuffer = row.get(columnIndex);
-                                                                            float[] vector = TypeUtil.decomposeVector(indexContext, vectorBuffer.duplicate());
-                                                                            Double score = (double) similarityFunction.compare(vector, targetVector);
-                                                                            return Pair.create(vectorBuffer.duplicate(), score);
-                                                                        })
-                                                                        .collect(Collectors.toList());
+        List<Pair<List<ByteBuffer>, Double>> listPairsVectorsScores = buffRows.stream()
+                                                                              .map(row -> {
+                                                                                  List<ByteBuffer> vectorRow = new ArrayList<>(row);
+                                                                                  ByteBuffer vectorBuffer = row.get(columnIndex);
+                                                                                  float[] vector = TypeUtil.decomposeVector(indexContext, vectorBuffer.duplicate());
+                                                                                  Double score = (double) similarityFunction.compare(vector, targetVector);
+                                                                                  return Pair.create(vectorRow, score);
+                                                                              })
+                                                                              .collect(Collectors.toList());
         listPairsVectorsScores.sort(Comparator.comparing(pair -> pair.right, Comparator.reverseOrder()));
         List<List<ByteBuffer>> sortedRows = listPairsVectorsScores.stream()
-                                                                  .map(pair -> buffRows.stream()
-                                                                                       .filter(row -> pair.left == row.get(columnIndex))
-                                                                                       .findFirst()
-                                                                                       .orElse(null))
-                                                                  .filter(Objects::nonNull)
+                                                                  .map(pair -> pair.left)
                                                                   .collect(Collectors.toList());
 
         cqlRows.rows = sortedRows;
