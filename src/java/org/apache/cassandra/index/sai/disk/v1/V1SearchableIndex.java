@@ -173,12 +173,12 @@ public class V1SearchableIndex implements SearchableIndex
                                             boolean defer,
                                             int limit) throws IOException
     {
-        List<RangeIterator<Long>> iterators = new ArrayList<>();
-
         if(keyRange instanceof Bounds)
         {
 
         }
+
+        List<RangeIterator<Long>> iterators = new ArrayList<>();
 
         for (Segment segment : segments)
         {

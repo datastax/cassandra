@@ -132,7 +132,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         waitForIndexQueryable(keyspace, table);
 
-        ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 = '0' and v1 = 3");
+        ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 > '1' and v1 = 3 ALLOW FILTERING");
 
         int actualRows = rows.all().size();
         assertEquals(1, actualRows);
