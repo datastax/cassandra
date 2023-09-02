@@ -194,6 +194,8 @@ public class CompactionTask extends AbstractCompactionTask
         if (DatabaseDescriptor.isSnapshotBeforeCompaction())
             realm.snapshotWithoutMemtable(System.currentTimeMillis() + "-compact-" + realm.getTableName());
 
+        // The set of sstables given here may be later modified by buildCompactionCandidatesForAvailableDiskSpace() and
+        // the compaction iterators in CompactionController and OverlapTracker will reflect the updated set of sstables.
         try (CompactionController controller = getCompactionController(transaction.originals());
              CompactionOperation operation = createCompactionOperation(controller, strategy))
         {
@@ -208,7 +210,9 @@ public class CompactionTask extends AbstractCompactionTask
         if (!buildCompactionCandidatesForAvailableDiskSpace(fullyExpiredSSTables))
         {
             // The set of sstables has changed (one or more were excluded due to limited available disk space).
-            // We need to recompute the overlaps between sstables.
+            // We need to recompute the overlaps between sstables. The iterators used in the compaction controller 
+            // and tracker will reflect the changed set of sstables made by LifecycleTransaction.cancel(),
+            // so refreshing the overlaps will be based on the updated set of sstables.
             controller.refreshOverlaps();
         }
 
