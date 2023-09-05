@@ -441,17 +441,25 @@ public class AllowFilteringTest extends SAITester
     @Test
     public void testQueryRequiresFilteringButHasANNRestriction() throws Throwable
     {
-        createTable("CREATE TABLE %s (pk text, i int, vec vector<float, 3>, PRIMARY KEY(pk))");
+        createTable("CREATE TABLE %s (pk text, i int, j int, k int, vec vector<float, 3>, PRIMARY KEY((pk, i), j))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
 
         // Do not recommend ALLOW FILTERING for non primary key, non clustering column restrictions
         assertInvalidMessage(StatementRestrictions.FILTERING_ANN_CONTRADICTION_MESSAGE,
-                             "SELECT * FROM %s WHERE i > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
+                             "SELECT * FROM %s WHERE k > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
 
-        // Do not recommend ALLOW FILTERING for primary key restrictions
+        // Do not recommend ALLOW FILTERING for clustering column restrictions
         assertInvalidMessage(StatementRestrictions.FILTERING_ANN_CONTRADICTION_MESSAGE,
-                             "SELECT * FROM %s WHERE pk > 'A' ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
+                             "SELECT * FROM %s WHERE j > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
+
+        // Do not recommend ALLOW FILTERING for partial partition key restrictions
+        assertInvalidMessage(StatementRestrictions.FILTERING_ANN_CONTRADICTION_MESSAGE,
+                             "SELECT * FROM %s WHERE pk > 'A' AND pk < 'C' ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
+
+        // Do not recommend ALLOW FILTERING for complete partition key restrictions
+        assertInvalidMessage(StatementRestrictions.FILTERING_ANN_CONTRADICTION_MESSAGE,
+                             "SELECT * FROM %s WHERE pk > 'A' AND pk < 'C' AND i > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
 
         // Do not accept ALLOW FILTERING
         assertInvalidMessage(StatementRestrictions.ANN_DOES_NOT_SUPPORT_FILTERING_MESSAGE,
