@@ -68,6 +68,9 @@ public class StatementRestrictions
 
     public static final String INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE = "Index on column %s does not support ':' restrictions.";
 
+    public static final String ANN_DOES_NOT_SUPPORT_FILTERING_MESSAGE = "ANN does not support filtering.";
+    public static final String FILTERING_ANN_CONTRADICTION_MESSAGE = "Invalid query. One or more query predicates require filtering but ANN does not support filtering.";
+
     public static final String INDEX_DOES_NOT_SUPPORT_DISJUNCTION =
     "An index involved in this query does not support disjunctive queries using the OR operator";
 
@@ -431,7 +434,7 @@ public class StatementRestrictions
 
             // ORDER BY clause.
             // Some indexes can be used for ordering.
-            addOrderingRestrictions(orderings, nonPrimaryKeyRestrictionSet);
+            addOrderingRestrictions(orderings, nonPrimaryKeyRestrictionSet, allowFiltering);
 
             PartitionKeyRestrictions partitionKeyRestrictions = partitionKeyRestrictionSet.build();
             ClusteringColumnRestrictions clusteringColumnsRestrictions = clusteringColumnsRestrictionSet.build();
@@ -645,10 +648,12 @@ public class StatementRestrictions
          * @param orderings orderings from the select statement
          * @param receiver target restriction builder to receive the additional restrictions
          */
-        private void addOrderingRestrictions(List<Ordering> orderings, RestrictionSet.Builder receiver)
+        private void addOrderingRestrictions(List<Ordering> orderings, RestrictionSet.Builder receiver, boolean allowFiltering)
         {
             List<Ordering> annOrderings = orderings.stream().filter(o -> o.expression.hasNonClusteredOrdering()).collect(Collectors.toList());
 
+            if (annOrderings.size() != 0 && allowFiltering)
+                throw new InvalidRequestException(StatementRestrictions.ANN_DOES_NOT_SUPPORT_FILTERING_MESSAGE);
             if (annOrderings.size() > 1)
                 throw new InvalidRequestException("Cannot specify more than one ANN ordering");
             else if (annOrderings.size() == 1)
@@ -772,6 +777,9 @@ public class StatementRestrictions
 
     public void throwRequiresAllowFilteringError(TableMetadata table)
     {
+        var hasAnnRestriction = nonPrimaryKeyRestrictions.getColumnDefs().stream().anyMatch(c -> c.type.isVector());
+        if (hasAnnRestriction)
+            throw invalidRequest(StatementRestrictions.FILTERING_ANN_CONTRADICTION_MESSAGE);
         Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table);
         if (unsupported.isEmpty())
         {
