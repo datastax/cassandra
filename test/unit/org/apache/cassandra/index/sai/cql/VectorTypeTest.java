@@ -225,6 +225,29 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
+    public void testNestedPredicates() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, str text, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(str) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, b, v, str) VALUES (0, true, [1.0, 2.0, 3.0], 'A')");
+        execute("INSERT INTO %s (pk, b, v, str) VALUES (1, true, [2.0, 3.0, 4.0], 'B')");
+        execute("INSERT INTO %s (pk, b, v, str) VALUES (2, false, [3.0, 4.0, 5.0], 'C')");
+
+        var result = execute("SELECT * FROM %s WHERE (b=true OR str='C') ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
+        assertThat(result).hasSize(3);
+
+        flush();
+        compact();
+
+        result = execute("SELECT * FROM %s WHERE b=true AND str='B' ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
+        assertThat(result).hasSize(3);
+    }
+
+    @Test
     public void testSameVectorMultipleRows() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
