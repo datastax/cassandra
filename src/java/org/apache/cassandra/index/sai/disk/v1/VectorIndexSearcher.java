@@ -59,7 +59,6 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
 
     private final CassandraOnDiskHnsw graph;
     private final PrimaryKey.Factory keyFactory;
-    private final PrimaryKeyMap primaryKeyMap;
     private final VectorType<float[]> type;
     private int maxBruteForceRows; // not final so test can inject its own setting
     private final ThreadLocal<SparseFixedBitSet> cachedBitSets;
@@ -73,7 +72,6 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
         super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
         graph = new CassandraOnDiskHnsw(segmentMetadata.componentMetadatas, perIndexFiles, indexContext);
         this.keyFactory = PrimaryKey.factory(indexContext.comparator(), indexContext.indexFeatureSet());
-        this.primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
         type = (VectorType<float[]>) indexContext.getValidator();
         cachedBitSets = ThreadLocal.withInitial(() -> new SparseFixedBitSet(graph.size()));
 
@@ -103,18 +101,21 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
         if (exp.getOp() != Expression.Op.ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + exp));
 
-        BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, limit);
-        if (bitsOrPostingList.skipANN())
-            return bitsOrPostingList.postingList();
+        try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
+        {
+            BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(primaryKeyMap, context, keyRange, limit);
+            if (bitsOrPostingList.skipANN())
+                return bitsOrPostingList.postingList();
 
-        float[] queryVector = exp.lower.value.vector;
-        return graph.search(queryVector, limit, bitsOrPostingList.getBits(), Integer.MAX_VALUE, context);
+            float[] queryVector = exp.lower.value.vector;
+            return graph.search(queryVector, limit, bitsOrPostingList.getBits(), Integer.MAX_VALUE, context);
+        }
     }
 
     /**
      * Return bit set if needs to search HNSW; otherwise return posting list to bypass HNSW
      */
-    private BitsOrPostingList bitsOrPostingListForKeyRange(QueryContext context, AbstractBounds<PartitionPosition> keyRange, int limit) throws IOException
+    private BitsOrPostingList bitsOrPostingListForKeyRange(PrimaryKeyMap primaryKeyMap, QueryContext context, AbstractBounds<PartitionPosition> keyRange, int limit) throws IOException
     {
         // not restricted
         if (RangeUtil.coversFullRing(keyRange))
@@ -196,7 +197,7 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
         SparseFixedBitSet bits = bitSetForSearch();
         int[] bruteForceRows = new int[Math.max(limit, this.maxBruteForceRows)];
         int n = 0;
-        try (var ordinalsView = graph.getOrdinalsView())
+        try (var ordinalsView = graph.getOrdinalsView(); var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
         {
             while (iterator.hasNext())
             {
@@ -250,7 +251,6 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
     public void close() throws IOException
     {
         graph.close();
-        primaryKeyMap.close();
     }
 
     private static class BitsOrPostingList
