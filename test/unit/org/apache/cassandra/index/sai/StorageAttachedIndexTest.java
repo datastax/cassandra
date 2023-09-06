@@ -19,7 +19,7 @@
  *
  */
 
-package org.apache.cassandra.index.sai.v1;
+package org.apache.cassandra.index.sai;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
