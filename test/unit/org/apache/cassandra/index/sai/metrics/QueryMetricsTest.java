@@ -19,6 +19,8 @@ package org.apache.cassandra.index.sai.metrics;
 
 import java.util.concurrent.ThreadLocalRandom;
 import javax.management.InstanceNotFoundException;
+import javax.management.JMX;
+import javax.management.ObjectName;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -26,6 +28,7 @@ import org.junit.rules.ExpectedException;
 
 import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 
 import static org.apache.cassandra.index.sai.metrics.TableQueryMetrics.TABLE_QUERY_METRIC_TYPE;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -132,10 +135,26 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         waitForIndexQueryable(keyspace, table);
 
-        ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 > '1' and v1 = 3 ALLOW FILTERING");
 
-        int actualRows = rows.all().size();
-        assertEquals(1, actualRows);
+        ResultSet rows1 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 = 3");
+        assertEquals(1, rows1.all().size());
+
+        ResultSet rows2 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 = '1' and v1 < 3");
+        assertEquals(1, rows2.all().size());
+
+        ResultSet rows3 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 > '1' and v1 = 3 ALLOW FILTERING");
+        assertEquals(1, rows3.all().size());
+
+        ResultSet rows4 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 > '1' and id1 < '4' and v1 = 3 ALLOW FILTERING");
+        assertEquals(1, rows4.all().size());
+
+        ResultSet rows5 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 < 4 and v1 > 1");
+        assertEquals(2, rows5.all().size());
+
+
+        ObjectName oName = objectNameNoIndex("SSTableIndexesHit", keyspace, table, PER_QUERY_METRIC_TYPE);
+        CassandraMetricsRegistry.JmxHistogramMBean o = JMX.newMBeanProxy(jmxConnection, oName, CassandraMetricsRegistry.JmxHistogramMBean.class);
+        assertTrue(o.getMean() < 2);
     }
 
     @Test
