@@ -1052,7 +1052,6 @@ public class SelectGroupByTest extends CQLTester
                    row(2, 2, 1L, 1L));
 
          // Multi-partitions query with ORDER BY
-        // failed here
         assertRows(execute("SELECT a, b, s, count(b), count(s) FROM %s WHERE a IN (1, 2, 4) GROUP BY a, b ORDER BY b DESC, c DESC"),
                    row(4, 8, null, 1L, 0L),
                    row(1, 4, 1, 2L, 2L),

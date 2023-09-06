@@ -288,7 +288,6 @@ public class SelectOrderByTest extends CQLTester
         execute("INSERT INTO %s (pk1, pk2, c, v) VALUES (?, ?, ?, ?)", 1, 3, 3, "C");
         execute("INSERT INTO %s (pk1, pk2, c, v) VALUES (?, ?, ?, ?)", 1, 1, 4, "D");
 
-        // failed here
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT v, ttl(v), c FROM %s where pk1 = ? AND pk2 IN (?, ?) ORDER BY c; ", 1, 1, 2),
                        row("B", null, 1),
@@ -384,7 +383,6 @@ public class SelectOrderByTest extends CQLTester
         execute("INSERT INTO %s (pk, c, v) VALUES (0, {1, 2, 3}, 1)");
         execute("INSERT INTO %s (pk, c, v) VALUES (1, {2, 3}, 2)");
 
-        // failed here
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT c[2], v FROM %s WHERE pk = 0 ORDER BY c"),
                        row(2, 0), row(2, 1));
@@ -554,7 +552,6 @@ public class SelectOrderByTest extends CQLTester
         execute("INSERT INTO %s (k, c1, c2, v) VALUES (1, 1, 1, 4)");
         execute("INSERT INTO %s (k, c1, c2, v) VALUES (1, 1, 2, 5)");
 
-        // failed here
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT * FROM %s WHERE k=0 AND c1 = 0 AND c2 IN (2, 0)"),
                        row(0, 0, 0, 0),
