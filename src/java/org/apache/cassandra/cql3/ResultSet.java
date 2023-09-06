@@ -104,6 +104,25 @@ public class ResultSet
         }
     }
 
+    public void dropMetadataColumns()
+    {
+        int columnsToKeep = metadata.getColumnCount();
+        int columnsToDrop = metadata.names.size() - columnsToKeep;
+        if (columnsToDrop == 0)
+            return;
+
+        // Drop the columns from the rows
+        for (int i = 0; i < rows.size(); i++)
+        {
+            List<ByteBuffer> row = rows.get(i);
+            for (int j = 0; j < columnsToDrop; j++)
+                row.remove(row.size() - 1);
+        }
+        // Drop the metadata references to the columns
+        for (int j = 0; j < columnsToDrop; j++)
+            metadata.names.remove(metadata.names.size() - 1);
+    }
+
     @Override
     public String toString()
     {

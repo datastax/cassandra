@@ -902,6 +902,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         cqlRows.trim(userLimit);
 
+        cqlRows.dropMetadataColumns();
+
         return cqlRows;
     }
 
