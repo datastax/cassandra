@@ -175,7 +175,7 @@ public class V1SearchableIndex implements SearchableIndex
     {
         List<RangeIterator<Long>> iterators = new ArrayList<>();
 
-        if(keyRange instanceof Bounds && keyRange.left == keyRange.right && keyRange.left instanceof DecoratedKey)
+        if(keyRange instanceof Bounds && keyRange.left.equals(keyRange.right) && keyRange.left instanceof DecoratedKey)
         {
             if (!filter.isPresent((DecoratedKey)keyRange.left))
                 return iterators;
