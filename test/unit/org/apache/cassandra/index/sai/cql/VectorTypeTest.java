@@ -225,6 +225,31 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
+    public void testPredicatesAcrossSSTables() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, str text, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(str) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // the setup is slightly fragile, because the query planner will use the term range to
+        // eliminate indexes that are irrelevant for a given sstable.  To force both indexes
+        // to be evaluated for both sstables then, we need to include values from each predicate in each sstable.
+        execute("INSERT INTO %s (pk, b, v) VALUES (0, true, [1.0, 2.0, 3.0])");
+        execute("INSERT INTO %s (pk, v, str) VALUES (1, [2.0, 3.0, 4.0], 'B')");
+        execute("INSERT INTO %s (pk, b, v, str) VALUES (2, false, [3.0, 4.0, 5.0], 'A')");
+        flush();
+        execute("UPDATE %s SET str = 'A' WHERE pk = 0");
+        execute("UPDATE %s SET b = false WHERE pk = 1");
+        execute("UPDATE %s SET b = true WHERE pk = 2");
+        flush();
+
+        var result = execute("SELECT * FROM %s WHERE b=true AND str='A' ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
     public void testNestedPredicates() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, str text, PRIMARY KEY(pk))");
