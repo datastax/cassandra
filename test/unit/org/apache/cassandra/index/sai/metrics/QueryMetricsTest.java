@@ -138,9 +138,6 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         waitForIndexQueryable(keyspace, table);
 
-        ResultSet rows6 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 = 20 and id1 = '20'");
-        assertEquals(1, rows6.all().size());
-
         ResultSet rows1 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 = 3");
         assertEquals(1, rows1.all().size());
 
@@ -155,6 +152,9 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         ResultSet rows5 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 < 24 and v1 > 11");
         assertEquals(12, rows5.all().size());
+
+        ResultSet rows6 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 = 20 and id1 = '20'");
+        assertEquals(1, rows6.all().size());
 
         ObjectName oName = objectNameNoIndex("SSTableIndexesHit", keyspace, table, PER_QUERY_METRIC_TYPE);
         CassandraMetricsRegistry.JmxHistogramMBean o = JMX.newMBeanProxy(jmxConnection, oName, CassandraMetricsRegistry.JmxHistogramMBean.class);
