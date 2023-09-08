@@ -555,6 +555,17 @@ public class StorageAttachedIndex implements Index
 
         float[] targetVector = TypeUtil.decomposeVector(indexContext, annRestriction.value(options).duplicate());
 
+        // The column filtering logic is a quick solution to a problem in stargate that is actively being worked on
+        // See https://github.com/stargate/stargate/pull/2760. Once that is released, we can revert this and use that.
+        final int columnsToKeep = cqlRows.metadata.getColumnCount();
+        final int columnsToDrop = cqlRows.metadata.names.size() - columnsToKeep;
+        if (columnsToDrop > 0)
+        {
+            // Drop the metadata references to the columns
+            for (int j = 0; j < columnsToDrop; j++)
+                cqlRows.metadata.names.remove(cqlRows.metadata.names.size() - 1);
+        }
+
         List<List<ByteBuffer>> buffRows = cqlRows.rows;
         // Decorate-sort-undecorate to optimize sorting of vectors by their similarity scores
         List<Pair<List<ByteBuffer>, Double>> listPairsVectorsScores = buffRows.stream()
@@ -567,9 +578,13 @@ public class StorageAttachedIndex implements Index
                                                                               .collect(Collectors.toList());
         listPairsVectorsScores.sort(Comparator.comparing(pair -> pair.right, Comparator.reverseOrder()));
         List<List<ByteBuffer>> sortedRows = listPairsVectorsScores.stream()
-                                                                  .map(pair -> pair.left)
-                                                                  .collect(Collectors.toList());
-
+                                                                  .map(pair -> {
+                                                                      // Hack to remove the vector column from the row
+                                                                      var result = pair.left;
+                                                                      for (int j = 0; j < columnsToDrop; j++)
+                                                                          result.remove(result.size() - 1);
+                                                                      return result;
+                                                                  }).collect(Collectors.toList());
         cqlRows.rows = sortedRows;
     }
 

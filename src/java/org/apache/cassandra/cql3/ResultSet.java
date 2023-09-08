@@ -249,7 +249,7 @@ public class ResultSet
 
         public ResultMetadata copy()
         {
-            return new ResultMetadata(resultMetadataId, EnumSet.copyOf(flags), names, columnCount, pagingState);
+            return new ResultMetadata(resultMetadataId, EnumSet.copyOf(flags), new ArrayList<>(names), columnCount, pagingState);
         }
 
         /**
