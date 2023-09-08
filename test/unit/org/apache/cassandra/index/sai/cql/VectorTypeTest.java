@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.lang.reflect.Field;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -29,6 +31,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.IPartitioner;
@@ -300,6 +303,32 @@ public class VectorTypeTest extends VectorTester
 
         var result = execute("SELECT * FROM %s ORDER BY val ANN OF [2.5, 3.5, 4.5] LIMIT 2");
         assertThat(result).hasSize(1);
+    }
+
+    // This test verifies the behavior becuase we don't actually serialize the results, which is currently
+    // where column filtering takes place
+    @Test
+    public void testSelectNonVectorColumnDoesNotReturnVector() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
+
+        UntypedResultSet result = execute("SELECT pk FROM %s ORDER BY val ANN OF [2.5, 3.5, 4.5] LIMIT 2");
+        // Hack that is only permissible because we are going to revert this
+        Field f = result.getClass().getDeclaredField("cqlRows");
+        f.setAccessible(true);
+        ResultSet resultSet = (ResultSet) f.get(result);
+        assertThat(resultSet.metadata.names.size()).isEqualTo(1);
+        assertThat(resultSet.metadata.names.get(0).name.toString()).isEqualTo("pk");
+        assertThat(resultSet.rows.size()).isEqualTo(1);
+        for (List<ByteBuffer> row : resultSet.rows)
+        {
+            assertThat(row.size()).isEqualTo(1);
+        }
+
     }
 
     @Test
