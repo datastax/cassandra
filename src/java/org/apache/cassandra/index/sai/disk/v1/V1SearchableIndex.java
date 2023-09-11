@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import com.google.common.collect.ImmutableList;
@@ -71,10 +72,8 @@ public class V1SearchableIndex implements SearchableIndex
     private final ByteBuffer maxTerm;
     private final long minSSTableRowId, maxSSTableRowId;
     private final long numRows;
-
-    private final IFilter filter;
-
     private PerIndexFiles indexFiles;
+    private SSTableReader ssTable;
 
     public V1SearchableIndex(SSTableContext sstableContext, IndexContext indexContext)
     {
@@ -108,7 +107,7 @@ public class V1SearchableIndex implements SearchableIndex
             this.minSSTableRowId = metadatas.get(0).minSSTableRowId;
             this.maxSSTableRowId = metadatas.get(metadatas.size() - 1).maxSSTableRowId;
 
-            this.filter = sstableContext.sstable().getBloomFilter();
+            this.ssTable = sstableContext.sstable();
         }
         catch (Throwable t)
         {
@@ -173,13 +172,13 @@ public class V1SearchableIndex implements SearchableIndex
                                             boolean defer,
                                             int limit) throws IOException
     {
-        List<RangeIterator<Long>> iterators = new ArrayList<>();
-
-        if(keyRange instanceof Bounds && keyRange.left.equals(keyRange.right) && keyRange.left instanceof DecoratedKey)
+        if (keyRange instanceof Bounds && keyRange.left.equals(keyRange.right) && keyRange.left instanceof DecoratedKey)
         {
-            if (!filter.isPresent((DecoratedKey)keyRange.left))
-                return iterators;
+            if (!ssTable.getBloomFilter().isPresent((DecoratedKey)keyRange.left))
+                return Collections.emptyList();
         }
+
+        List<RangeIterator<Long>> iterators = new ArrayList<>();
 
         for (Segment segment : segments)
         {
