@@ -34,7 +34,6 @@ import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -175,7 +174,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public Collection<Collection<CompactionSSTable>> groupSSTablesForAntiCompaction(Collection<? extends CompactionSSTable> sstablesToGroup)
     {
         Collection<Collection<CompactionSSTable>> groups = new ArrayList<>();
-        for (Arena arena : getCompactionArenas(sstablesToGroup, false))
+        for (Arena arena : getCompactionArenas(sstablesToGroup, (i1, i2) -> true)) // take all sstables
         {
             groups.addAll(super.groupSSTablesForAntiCompaction(arena.sstables));
         }
@@ -189,7 +188,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         // The tasks need to be split by repair status and disk, but otherwise we must assume the user knows what they
         // are doing.
         List<AbstractCompactionTask> tasks = new ArrayList<>();
-        for (Arena arena : getCompactionArenas(sstables, true))
+        for (Arena arena : getCompactionArenas(sstables, UnifiedCompactionStrategy::isSuitableForCompaction))
             tasks.addAll(super.getUserDefinedTasks(arena.sstables, gcBefore));
         return CompactionTasks.create(tasks);
     }
@@ -203,7 +202,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         // split across shards according to its density. Depending on the parallelism, the operation may require up to
         // 100% extra space to complete.
         List<AbstractCompactionTask> tasks = new ArrayList<>();
-        for (Arena arena : getCompactionArenas(realm.getLiveSSTables(), true))
+        for (Arena arena : getCompactionArenas(realm.getLiveSSTables(), UnifiedCompactionStrategy::isSuitableForCompaction))
         {
             List<Set<CompactionSSTable>> nonOverlapping = splitInNonOverlappingSets(arena.sstables);
             for (Set<CompactionSSTable> set : nonOverlapping)
@@ -780,8 +779,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
      * configured in the arena selector of this strategy.
      *
      * @param sstables a collection of the sstables to be assigned to arenas
-     * @param compactionFilter a bifilter (sstable, isCompacting) to exclude CompactionSSTables,
-     *                         e.g., {@link CompactionSSTable#isSuitableForCompaction()}
+     * @param compactionFilter a bifilter (sstable, isCompacting) to include CompactionSSTables suitable for compaction
      * @return a list of arenas, where each arena contains sstables that belong to that arena
      */
     public Collection<Arena> getCompactionArenas(Collection<? extends CompactionSSTable> sstables,
@@ -829,23 +827,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     @VisibleForTesting
     Map<Arena, List<Level>> getLevels()
     {
-        return getLevels(realm.getLiveSSTables(), CompactionSSTable::isSuitableForCompaction);
+        return getLevels(realm.getLiveSSTables(), UnifiedCompactionStrategy::isSuitableForCompaction);
     }
 
-    /**
-     * Groups the sstables passed in into arenas and buckets. This is used by the strategy to determine
-     * new compactions, and by external tools in CNDB to analyze the strategy decisions.
-     *
-     * @param sstables a collection of the sstables to be assigned to arenas
-     * @param compactionFilter a bifilter(sstable, isCompacting) to exclude CompactionSSTables,
-     *                         e.g., {@link CompactionSSTable#isSuitableForCompaction()}
-     *
-     * @return a map of arenas to their buckets
-     */
-    public Map<Arena, List<Level>> getLevels(Collection<? extends CompactionSSTable> sstables,
-                                             BiPredicate<CompactionSSTable, Boolean> compactionFilter)
+    private static boolean isSuitableForCompaction(CompactionSSTable sstable, Boolean isCompacting)
     {
-        return getLevels(sstables, compactionFilter, true);
+        return sstable.isSuitableForCompaction() && !isCompacting;
     }
 
     /**
@@ -853,7 +840,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
      * new compactions, and by external tools in CNDB to analyze the strategy decisions.
      *
      * @param sstables a collection of the sstables to be assigned to arenas
-     * @param compactionFilter a bifilter(sstable, isCompacting) to exclude CompactionSSTables,
+     * @param compactionFilter a bifilter(sstable, isCompacting) to include CompactionSSTables,
      *                         e.g., {@link CompactionSSTable#isSuitableForCompaction()}
      *
      * @return a map of arenas to their buckets
