@@ -170,6 +170,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
             final IndexSearcher searcher = IndexSearcher.open(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY,
                                                               indexFiles,
                                                               segmentMetadata,
+                                                              null,
                                                               indexDescriptor,
                                                               SAITester.createIndexContext(index, UTF8Type.instance));
             assertThat(searcher, is(instanceOf(InvertedIndexSearcher.class)));

@@ -20,16 +20,20 @@ package org.apache.cassandra.index.sai;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Set;
 import java.util.PriorityQueue;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import com.carrotsearch.hppc.LongFloatHashMap;
 import com.carrotsearch.hppc.ObjectFloatHashMap;
 import com.carrotsearch.hppc.ObjectFloatMap;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -39,9 +43,9 @@ import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnHeapHnsw;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.lucene.util.Bits;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 /**
  * Tracks state relevant to the execution of a single query, including metrics and timeout monitoring.
@@ -87,6 +91,7 @@ public class QueryContext
      * if the same key has different scored from different sstables, we don't know which is latest, reset it to -1 and compute in-flight
      */
     private final ObjectFloatMap<PrimaryKey> scorePerKey = new ObjectFloatHashMap<>();
+    private final Map<SSTableId, LongFloatHashMap> ssTableScoreMapMap = new HashMap<>();
 
     @VisibleForTesting
     public QueryContext()
@@ -244,6 +249,18 @@ public class QueryContext
             return graph.size();
         }
     }
+
+    public LongFloatHashMap getOrCreateScoreCacheForSSTable(SSTableId ssTableId)
+    {
+        return ssTableScoreMapMap.computeIfAbsent(ssTableId, __ -> new LongFloatHashMap());
+    }
+
+    @Nullable
+    public LongFloatHashMap getScoreCacheForSSTable(SSTableId ssTableId)
+    {
+        return ssTableScoreMapMap.get(ssTableId);
+    }
+
     public void recordScore(PrimaryKey primaryKey, float score)
     {
         boolean exists = scorePerKey.containsKey(primaryKey);

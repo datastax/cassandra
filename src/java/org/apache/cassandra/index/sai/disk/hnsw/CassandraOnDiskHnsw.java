@@ -34,8 +34,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.ReorderingPostingList;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RowIdToPrimaryKeyMapper;
+import org.apache.cassandra.index.sai.utils.SSTableRowIdToScoreCacher;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.util.Bits;
@@ -87,7 +86,7 @@ public class CassandraOnDiskHnsw implements AutoCloseable
      */
     // VSTODO make this return something with a size
     public ReorderingPostingList search(float[] queryVector, int topK, Bits acceptBits, int vistLimit, QueryContext context,
-                                        RowIdToPrimaryKeyMapper rowIdToPrimaryKeyMapper)
+                                        SSTableRowIdToScoreCacher SSTableRowIdToScoreCacher)
     {
         CassandraOnHeapHnsw.validateIndexable(queryVector, similarityFunction);
 
@@ -102,7 +101,7 @@ public class CassandraOnDiskHnsw implements AutoCloseable
                                              view,
                                              ordinalsMap.ignoringDeleted(acceptBits),
                                              vistLimit);
-            return annRowIdsToPostings(queue, context, rowIdToPrimaryKeyMapper);
+            return annRowIdsToPostings(queue, SSTableRowIdToScoreCacher);
         }
         catch (IOException e)
         {
@@ -113,18 +112,15 @@ public class CassandraOnDiskHnsw implements AutoCloseable
     private class RowIdIteratorAndCacher implements PrimitiveIterator.OfInt, AutoCloseable
     {
         private final NeighborQueue queue;
-        private final QueryContext context;
-        private final RowIdToPrimaryKeyMapper mapper;
+        private final SSTableRowIdToScoreCacher cacher;
         private final OnDiskOrdinalsMap.RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
 
         private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
 
-        public RowIdIteratorAndCacher(NeighborQueue queue, QueryContext context, RowIdToPrimaryKeyMapper mapper)
+        public RowIdIteratorAndCacher(NeighborQueue queue, SSTableRowIdToScoreCacher cacher)
         {
-            assert mapper != null;
             this.queue = queue;
-            this.context = context;
-            this.mapper = mapper;
+            this.cacher = cacher;
         }
 
         @Override
@@ -137,9 +133,7 @@ public class CassandraOnDiskHnsw implements AutoCloseable
                     int[] rowIds = rowIdsView.getSegmentRowIdsMatching(ordinal);
                     for (int rowId : rowIds)
                     {
-                        PrimaryKey pk = mapper.getPrimaryKeyForRowId(rowId);
-                        if (pk != null)
-                            context.recordScore(pk, score);
+                        cacher.cacheScoreForRowId(rowId, score);
                     }
                     segmentRowIdIterator = Arrays.stream(rowIds).iterator();
                 }
@@ -162,15 +156,14 @@ public class CassandraOnDiskHnsw implements AutoCloseable
         public void close() throws IOException
         {
             rowIdsView.close();
-            mapper.close();
         }
     }
 
-    private ReorderingPostingList annRowIdsToPostings(NeighborQueue queue, QueryContext context,
-                                                      RowIdToPrimaryKeyMapper rowIdToPrimaryKeyMapper) throws IOException
+    private ReorderingPostingList annRowIdsToPostings(NeighborQueue queue,
+                                                      SSTableRowIdToScoreCacher SSTableRowIdToScoreCacher) throws IOException
     {
         int originalSize = queue.size();
-        try (var iterator = new RowIdIteratorAndCacher(queue, context, rowIdToPrimaryKeyMapper))
+        try (var iterator = new RowIdIteratorAndCacher(queue, SSTableRowIdToScoreCacher))
         {
             return new ReorderingPostingList(iterator, originalSize);
         }

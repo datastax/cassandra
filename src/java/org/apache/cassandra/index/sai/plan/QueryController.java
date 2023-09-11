@@ -63,6 +63,7 @@ import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
@@ -239,9 +240,12 @@ public class QueryController
                                                                                  .map(e -> {
                                                                                      RangeIterator<Long> it = createRowIdIterator(op, e.getValue(), defer, isAnnHybridSearch);
                                                                                      if (isAnnHybridSearch)
+                                                                                         // we only want row id here because we don't yet know how many results we need...
+                                                                                         // would be bad to materialize all of them.
                                                                                          return reorderAndLimitBySSTableRowIds(it, e.getKey(), annQueryViewInHybridSearch);
+                                                                                     var ssTableId = e.getKey().getId();
                                                                                      var pkFactory = e.getValue().iterator().next().index.getSSTableContext().primaryKeyMapFactory;
-                                                                                     return convertToPrimaryKeyIterator(pkFactory, it);
+                                                                                     return convertToPrimaryKeyIterator(ssTableId, pkFactory, it);
                                                                                  })
                                                                                  .collect(Collectors.toList());
 
@@ -280,13 +284,13 @@ public class QueryController
         }
     }
 
-    private RangeIterator<PrimaryKey> convertToPrimaryKeyIterator(PrimaryKeyMap.Factory pkFactory, RangeIterator<Long> sstableRowIdsIterator)
+    private RangeIterator<PrimaryKey> convertToPrimaryKeyIterator(SSTableId ssTableId, PrimaryKeyMap.Factory pkFactory, RangeIterator<Long> sstableRowIdsIterator)
     {
         if (sstableRowIdsIterator.getCount() <= 0)
             return RangeIterator.emptyKeys();
 
         PrimaryKeyMap primaryKeyMap = pkFactory.newPerSSTablePrimaryKeyMap();
-        return SSTableRowIdKeyRangeIterator.create(primaryKeyMap, queryContext, sstableRowIdsIterator);
+        return SSTableRowIdKeyRangeIterator.create(primaryKeyMap, queryContext, ssTableId, sstableRowIdsIterator);
     }
 
     private RangeIterator<PrimaryKey> reorderAndLimitBy(RangeIterator<PrimaryKey> original, Memtable memtable, Expression expression)

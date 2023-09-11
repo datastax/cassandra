@@ -20,17 +20,20 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.carrotsearch.hppc.LongFloatHashMap;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
 
@@ -57,7 +60,8 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
 
     private final Stopwatch timeToExhaust = Stopwatch.createStarted();
     private final QueryContext queryContext;
-
+    @Nullable
+    private final LongFloatHashMap ssTableRowIdToScoreMap;
     private final PostingList postingList;
     private final IndexContext indexContext;
     private final PrimaryKeyMap primaryKeyMap;
@@ -72,6 +76,7 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
      * immediately so the posting list size can be used.
      */
     public PostingListRangeIterator(IndexContext indexContext,
+                                    SSTableId sstableId,
                                     PrimaryKeyMap primaryKeyMap,
                                     IndexSearcherContext searcherContext)
     {
@@ -82,6 +87,8 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
         this.postingList = searcherContext.postingList;
         this.searcherContext = searcherContext;
         this.queryContext = this.searcherContext.context;
+        // Get and store reference to scores map if it exists.
+        this.ssTableRowIdToScoreMap = this.queryContext.getScoreCacheForSSTable(sstableId);
     }
 
     @Override
@@ -109,7 +116,10 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
             if (rowId == PostingList.END_OF_STREAM)
                 return endOfData();
 
-            return primaryKeyMap.primaryKeyFromRowId(rowId);
+            PrimaryKey pk = primaryKeyMap.primaryKeyFromRowId(rowId);
+            if (ssTableRowIdToScoreMap != null)
+                queryContext.recordScore(pk, ssTableRowIdToScoreMap.get(rowId));
+            return pk;
         }
         catch (Throwable t)
         {

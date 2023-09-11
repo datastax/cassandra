@@ -26,16 +26,15 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.PostingListRangeIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.SSTableRowIdPostingList;
 import org.apache.cassandra.index.sai.disk.SSTableRowIdsRangeIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.SSTableId;
 
 /**
  * Abstract reader for individual segments of an on-disk index.
@@ -67,11 +66,12 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
     public static IndexSearcher open(PrimaryKeyMap.Factory primaryKeyMapFactory,
                                      PerIndexFiles indexFiles,
                                      SegmentMetadata segmentMetadata,
+                                     SSTableId sstableId,
                                      IndexDescriptor indexDescriptor,
                                      IndexContext indexContext) throws IOException
     {
         if (indexContext.isVector())
-            return new VectorIndexSearcher(primaryKeyMapFactory, indexFiles, segmentMetadata, indexDescriptor, indexContext);
+            return new VectorIndexSearcher(primaryKeyMapFactory, indexFiles, segmentMetadata, sstableId, indexDescriptor, indexContext);
         if (TypeUtil.isLiteral(indexContext.getValidator()))
             return new InvertedIndexSearcher(primaryKeyMapFactory, indexFiles, segmentMetadata, indexDescriptor, indexContext);
         return new KDTreeIndexSearcher(primaryKeyMapFactory, indexFiles, segmentMetadata, indexDescriptor, indexContext);
@@ -93,22 +93,6 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
      * @return {@link RangeIterator} of sstable row ids that matches given expression
      */
     public abstract RangeIterator<Long> search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit) throws IOException;
-
-    RangeIterator<PrimaryKey> toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext) throws IOException
-    {
-        if (postingList == null || postingList.size() == 0)
-            return RangeIterator.emptyKeys();
-
-        IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
-                                                                        metadata.maxKey,
-                                                                        metadata.minSSTableRowId,
-                                                                        metadata.maxSSTableRowId,
-                                                                        metadata.segmentRowIdOffset,
-                                                                        queryContext,
-                                                                        postingList.peekable());
-
-        return new PostingListRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
-    }
 
     RangeIterator<Long> toSSTableRowIdsIterator(PostingList postingList, QueryContext queryContext) throws IOException
     {
