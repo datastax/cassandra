@@ -25,7 +25,7 @@ import org.apache.cassandra.io.sstable.SSTableId;
 /**
  * A class to cache the scores for an SSTable.
  */
-public class SSTableRowIdToScoreCacher
+public class SSTableRowIdToScoreCache
 {
     // A shared reference to the scores map for a single SSTable. The QueryContext stores all the relevant
     // maps. We copy the reference here to avoid a lookup on every row.
@@ -37,12 +37,14 @@ public class SSTableRowIdToScoreCacher
      * @param context - the QueryContext for the query
      * @param segmentRowIdOffset - the offset to add to the rowId to get the SS Table row id
      */
-    public SSTableRowIdToScoreCacher(SSTableId ssTableId, QueryContext context, long segmentRowIdOffset)
+    public SSTableRowIdToScoreCache(SSTableId ssTableId, QueryContext context, long segmentRowIdOffset)
     {
         // Get this SSTable's scores map from the QueryContext
         this.ssTableRowIdToScoreMap = context.getOrCreateScoreCacheForSSTable(ssTableId);
         this.segmentRowIdOffset = segmentRowIdOffset;
     }
+
+    // TODO need to add tests
 
     public void cacheScoreForRowId(long rowId, float score)
     {

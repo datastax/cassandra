@@ -46,7 +46,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
-import org.apache.cassandra.index.sai.utils.SSTableRowIdToScoreCacher;
+import org.apache.cassandra.index.sai.utils.SSTableRowIdToScoreCache;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.SparseFixedBitSet;
@@ -111,7 +111,7 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
 
         float[] queryVector = exp.lower.value.vector;
         return graph.search(queryVector, limit, bitsOrPostingList.getBits(), Integer.MAX_VALUE, context,
-                            new SSTableRowIdToScoreCacher(sstableId, context, metadata.segmentRowIdOffset));
+                            new SSTableRowIdToScoreCache(sstableId, context, metadata.segmentRowIdOffset));
     }
 
     /**
@@ -242,7 +242,7 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
             // else ask hnsw to perform a search limited to the bits we created
             float[] queryVector = exp.lower.value.vector;
             var results = graph.search(queryVector, limit, bits, Integer.MAX_VALUE, context,
-                                       new SSTableRowIdToScoreCacher(sstableId, context, metadata.segmentRowIdOffset));
+                                       new SSTableRowIdToScoreCache(sstableId, context, metadata.segmentRowIdOffset));
             return toPrimaryKeyIterator(results, context);
         }
     }
