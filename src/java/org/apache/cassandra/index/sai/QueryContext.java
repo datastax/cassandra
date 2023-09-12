@@ -267,7 +267,9 @@ public class QueryContext
         // this is only an assert and not an illegal argument.
         assert score >= 0;
         boolean exists = scorePerKey.containsKey(primaryKey);
-        if (exists && Float.compare(scorePerKey.get(primaryKey), score) != 0)
+        // Since we know the numbers are between 0 and 1, we use 0.0001f as the epsilon for floating point comparison
+        // See https://embeddeduse.com/2019/08/26/qt-compare-two-floats/
+        if (exists && Math.abs(scorePerKey.get(primaryKey) - score) > 0.0001f)
         {
             // found primary key with different score from different sstable. we don't know which vector is the latest. compute it later
             scorePerKey.put(primaryKey, -1);
