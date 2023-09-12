@@ -118,7 +118,7 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
 
             PrimaryKey pk = primaryKeyMap.primaryKeyFromRowId(rowId);
             if (ssTableRowIdToScoreMap != null)
-                queryContext.recordScore(pk, ssTableRowIdToScoreMap.get(rowId));
+                queryContext.recordScore(pk, ssTableRowIdToScoreMap.getOrDefault(rowId, -1));
             return pk;
         }
         catch (Throwable t)

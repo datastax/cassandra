@@ -263,6 +263,9 @@ public class QueryContext
 
     public void recordScore(PrimaryKey primaryKey, float score)
     {
+        // The stored score should never be less than 0. If it is, we have to recompute similarity later, which is why
+        // this is only an assert and not an illegal argument.
+        assert score >= 0;
         boolean exists = scorePerKey.containsKey(primaryKey);
         if (exists && Float.compare(scorePerKey.get(primaryKey), score) != 0)
         {
