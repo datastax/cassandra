@@ -80,6 +80,9 @@ public class QueryContext
     public long tokenSkippingCacheHits = 0;
     public long tokenSkippingLookups = 0;
 
+    public long similarityScoreCacheHits = 0;
+    public long similarityScoreCacheLookups = 0;
+
     public long queryTimeouts = 0;
 
     public int hnswVectorsAccessed;
@@ -291,6 +294,10 @@ public class QueryContext
 
     public float getScoreForKey(PrimaryKey primaryKey)
     {
-        return scorePerKey.getOrDefault(primaryKey, -1);
+        similarityScoreCacheLookups++;
+        var score = scorePerKey.getOrDefault(primaryKey, -1);
+        if (score >= 0.0f)
+            similarityScoreCacheHits++;
+        return score;
     }
 }
