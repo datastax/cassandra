@@ -76,7 +76,6 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
      * immediately so the posting list size can be used.
      */
     public PostingListRangeIterator(IndexContext indexContext,
-                                    SSTableId sstableId,
                                     PrimaryKeyMap primaryKeyMap,
                                     IndexSearcherContext searcherContext)
     {
@@ -88,7 +87,7 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
         this.searcherContext = searcherContext;
         this.queryContext = this.searcherContext.context;
         // Get and store reference to scores map if it exists.
-        this.ssTableRowIdToScoreMap = this.queryContext.getScoreCacheForSSTable(sstableId);
+        this.ssTableRowIdToScoreMap = this.queryContext.getScoreCacheForSSTable(primaryKeyMap.getSSTableId());
     }
 
     @Override
