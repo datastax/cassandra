@@ -34,7 +34,6 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.io.sstable.SSTableId;
 
 /**
  * Abstract reader for individual segments of an on-disk index.

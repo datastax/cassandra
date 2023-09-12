@@ -63,7 +63,6 @@ import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
-import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
