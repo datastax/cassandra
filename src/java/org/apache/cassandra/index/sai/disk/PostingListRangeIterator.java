@@ -60,7 +60,7 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
     private final Stopwatch timeToExhaust = Stopwatch.createStarted();
     private final QueryContext queryContext;
     @Nullable
-    private final LongFloatHashMap ssTableRowIdToScoreMap;
+    private final LongFloatHashMap sstableRowIdToScoreMap;
     private final PostingList postingList;
     private final IndexContext indexContext;
     private final PrimaryKeyMap primaryKeyMap;
@@ -86,7 +86,7 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
         this.searcherContext = searcherContext;
         this.queryContext = this.searcherContext.context;
         // Get and store reference to scores map if it exists.
-        this.ssTableRowIdToScoreMap = this.queryContext.getScoreCacheForSSTable(primaryKeyMap.getSSTableId());
+        this.sstableRowIdToScoreMap = this.queryContext.getScoreCacheForSSTable(primaryKeyMap.getSSTableId());
     }
 
     @Override
@@ -115,8 +115,8 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
                 return endOfData();
 
             PrimaryKey pk = primaryKeyMap.primaryKeyFromRowId(rowId);
-            if (ssTableRowIdToScoreMap != null)
-                queryContext.recordScore(pk, ssTableRowIdToScoreMap.getOrDefault(rowId, -1));
+            if (sstableRowIdToScoreMap != null)
+                queryContext.recordScore(pk, sstableRowIdToScoreMap.getOrDefault(rowId, -1));
             return pk;
         }
         catch (Throwable t)

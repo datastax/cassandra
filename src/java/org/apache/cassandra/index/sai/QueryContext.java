@@ -94,7 +94,7 @@ public class QueryContext
      * if the same key has different scored from different sstables, we don't know which is latest, reset it to -1 and compute in-flight
      */
     private final ObjectFloatMap<PrimaryKey> scorePerKey = new ObjectFloatHashMap<>();
-    private final Map<SSTableId, LongFloatHashMap> ssTableScoreMapMap = new HashMap<>();
+    private final Map<SSTableId, LongFloatHashMap> sstableScoreMapMap = new HashMap<>();
 
     @VisibleForTesting
     public QueryContext()
@@ -253,15 +253,15 @@ public class QueryContext
         }
     }
 
-    public LongFloatHashMap getOrCreateScoreCacheForSSTable(SSTableId ssTableId)
+    public LongFloatHashMap getOrCreateScoreCacheForSSTable(SSTableId sstableId)
     {
-        return ssTableScoreMapMap.computeIfAbsent(ssTableId, __ -> new LongFloatHashMap());
+        return sstableScoreMapMap.computeIfAbsent(sstableId, __ -> new LongFloatHashMap());
     }
 
     @Nullable
-    public LongFloatHashMap getScoreCacheForSSTable(SSTableId ssTableId)
+    public LongFloatHashMap getScoreCacheForSSTable(SSTableId sstableId)
     {
-        return ssTableScoreMapMap.get(ssTableId);
+        return sstableScoreMapMap.get(sstableId);
     }
 
     public void recordScore(PrimaryKey primaryKey, float score)

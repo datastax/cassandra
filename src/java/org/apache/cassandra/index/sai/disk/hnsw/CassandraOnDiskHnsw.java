@@ -86,7 +86,7 @@ public class CassandraOnDiskHnsw implements AutoCloseable
      */
     // VSTODO make this return something with a size
     public ReorderingPostingList search(float[] queryVector, int topK, Bits acceptBits, int vistLimit, QueryContext context,
-                                        SSTableRowIdToScoreCache sstableRowIdToScoreCacher)
+                                        SSTableRowIdToScoreCache sstableRowIdToScoreCache)
     {
         CassandraOnHeapHnsw.validateIndexable(queryVector, similarityFunction);
 
@@ -101,7 +101,7 @@ public class CassandraOnDiskHnsw implements AutoCloseable
                                              view,
                                              ordinalsMap.ignoringDeleted(acceptBits),
                                              vistLimit);
-            return annRowIdsToPostings(queue, sstableRowIdToScoreCacher);
+            return annRowIdsToPostings(queue, sstableRowIdToScoreCache);
         }
         catch (IOException e)
         {
@@ -109,18 +109,18 @@ public class CassandraOnDiskHnsw implements AutoCloseable
         }
     }
 
-    private class RowIdIteratorAndCacher implements PrimitiveIterator.OfInt, AutoCloseable
+    private class RowIdIterator implements PrimitiveIterator.OfInt, AutoCloseable
     {
         private final NeighborQueue queue;
-        private final SSTableRowIdToScoreCache cacher;
+        private final SSTableRowIdToScoreCache cache;
         private final OnDiskOrdinalsMap.RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
 
         private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
 
-        public RowIdIteratorAndCacher(NeighborQueue queue, SSTableRowIdToScoreCache cacher)
+        public RowIdIterator(NeighborQueue queue, SSTableRowIdToScoreCache cache)
         {
             this.queue = queue;
-            this.cacher = cacher;
+            this.cache = cache;
         }
 
         @Override
@@ -133,7 +133,7 @@ public class CassandraOnDiskHnsw implements AutoCloseable
                     int[] rowIds = rowIdsView.getSegmentRowIdsMatching(ordinal);
                     for (int rowId : rowIds)
                     {
-                        cacher.cacheScoreForRowId(rowId, score);
+                        cache.cacheScoreForRowId(rowId, score);
                     }
                     segmentRowIdIterator = Arrays.stream(rowIds).iterator();
                 }
@@ -153,17 +153,17 @@ public class CassandraOnDiskHnsw implements AutoCloseable
         }
 
         @Override
-        public void close() throws IOException
+        public void close()
         {
             rowIdsView.close();
         }
     }
 
     private ReorderingPostingList annRowIdsToPostings(NeighborQueue queue,
-                                                      SSTableRowIdToScoreCache SSTableRowIdToScoreCache) throws IOException
+                                                      SSTableRowIdToScoreCache sstableRowIdToScoreCache) throws IOException
     {
         int originalSize = queue.size();
-        try (var iterator = new RowIdIteratorAndCacher(queue, SSTableRowIdToScoreCache))
+        try (var iterator = new RowIdIterator(queue, sstableRowIdToScoreCache))
         {
             return new ReorderingPostingList(iterator, originalSize);
         }

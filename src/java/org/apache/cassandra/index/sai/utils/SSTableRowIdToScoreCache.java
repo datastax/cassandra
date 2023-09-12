@@ -29,27 +29,25 @@ public class SSTableRowIdToScoreCache
 {
     // A shared reference to the scores map for a single SSTable. The QueryContext stores all the relevant
     // maps. We copy the reference here to avoid a lookup on every row.
-    private final LongFloatHashMap ssTableRowIdToScoreMap;
+    private final LongFloatHashMap sstableRowIdToScoreMap;
     private final long segmentRowIdOffset;
 
     /**
-     * @param ssTableId - the SSTable id
+     * @param sstableId - the SSTable id
      * @param context - the QueryContext for the query
      * @param segmentRowIdOffset - the offset to add to the rowId to get the SS Table row id
      */
-    public SSTableRowIdToScoreCache(SSTableId ssTableId, QueryContext context, long segmentRowIdOffset)
+    public SSTableRowIdToScoreCache(SSTableId sstableId, QueryContext context, long segmentRowIdOffset)
     {
         // Get this SSTable's scores map from the QueryContext
-        this.ssTableRowIdToScoreMap = context.getOrCreateScoreCacheForSSTable(ssTableId);
+        this.sstableRowIdToScoreMap = context.getOrCreateScoreCacheForSSTable(sstableId);
         this.segmentRowIdOffset = segmentRowIdOffset;
     }
 
-    // TODO need to add tests
-
     public void cacheScoreForRowId(long rowId, float score)
     {
-        long ssTableRowId = rowId + segmentRowIdOffset;
-        float previousScore = ssTableRowIdToScoreMap.put(ssTableRowId, score);
+        long sstableRowId = rowId + segmentRowIdOffset;
+        float previousScore = sstableRowIdToScoreMap.put(sstableRowId, score);
         // Because SSTables are immutable, we should never have a rowId with a different score.
         // However, because of shadow primary keys, there is a chance that we'll store the score for the same row
         // twice.
