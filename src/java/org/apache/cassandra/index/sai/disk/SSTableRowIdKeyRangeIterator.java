@@ -20,14 +20,12 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.concurrent.TimeUnit;
-import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.carrotsearch.hppc.LongFloatHashMap;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -47,8 +45,7 @@ public class SSTableRowIdKeyRangeIterator extends RangeIterator<PrimaryKey>
     private final Stopwatch timeToExhaust = Stopwatch.createStarted();
     private final QueryContext queryContext;
     private final PrimaryKeyMap primaryKeyMap;
-    @Nullable
-    private final LongFloatHashMap sstableRowIdToScoreMap;
+    private final ScoreCacheMapper scoreCacheMapper;
     private final RangeIterator<Long> sstableRowIdIterator;
 
     private boolean needsSkipping = false;
@@ -69,8 +66,7 @@ public class SSTableRowIdKeyRangeIterator extends RangeIterator<PrimaryKey>
 
         this.primaryKeyMap = primaryKeyMap;
         this.queryContext = queryContext;
-        // Get and store reference to scores map if it exists.
-        this.sstableRowIdToScoreMap = queryContext.getScoreCacheForSSTable(primaryKeyMap.getSSTableId());
+        this.scoreCacheMapper = queryContext.getScoreCacheMapperForSSTable(primaryKeyMap.getSSTableId());
         this.sstableRowIdIterator = sstableRowIdIterator;
     }
 
@@ -113,8 +109,7 @@ public class SSTableRowIdKeyRangeIterator extends RangeIterator<PrimaryKey>
                 return endOfData();
 
             PrimaryKey pk = primaryKeyMap.primaryKeyFromRowId(rowId);
-            if (sstableRowIdToScoreMap != null)
-                queryContext.recordScore(pk, sstableRowIdToScoreMap.getOrDefault(rowId, -1));
+            scoreCacheMapper.mapSSTableRowIdToPrimaryKey(rowId, pk);
             return pk;
         }
         catch (Throwable t)

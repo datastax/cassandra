@@ -28,7 +28,6 @@ import java.util.Set;
 import java.util.PriorityQueue;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
-import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -38,6 +37,7 @@ import com.carrotsearch.hppc.ObjectFloatHashMap;
 import com.carrotsearch.hppc.ObjectFloatMap;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.disk.ScoreCacheMapper;
 import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw;
 import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnHeapHnsw;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -258,10 +258,9 @@ public class QueryContext
         return sstableScoreMapMap.computeIfAbsent(sstableId, __ -> new LongFloatHashMap());
     }
 
-    @Nullable
-    public LongFloatHashMap getScoreCacheForSSTable(SSTableId sstableId)
+    public ScoreCacheMapper getScoreCacheMapperForSSTable(SSTableId sstableId)
     {
-        return sstableScoreMapMap.get(sstableId);
+        return new ScoreCacheMapper(this, sstableScoreMapMap.get(sstableId));
     }
 
     public void recordScore(PrimaryKey primaryKey, float score)
