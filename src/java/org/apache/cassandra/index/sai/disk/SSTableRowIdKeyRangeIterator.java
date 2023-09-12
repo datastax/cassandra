@@ -49,7 +49,7 @@ public class SSTableRowIdKeyRangeIterator extends RangeIterator<PrimaryKey>
     private final QueryContext queryContext;
     private final PrimaryKeyMap primaryKeyMap;
     @Nullable
-    private final LongFloatHashMap ssTableRowIdToScoreMap;
+    private final LongFloatHashMap sstableRowIdToScoreMap;
     private final RangeIterator<Long> sstableRowIdIterator;
 
     private boolean needsSkipping = false;
@@ -64,7 +64,7 @@ public class SSTableRowIdKeyRangeIterator extends RangeIterator<PrimaryKey>
                                          long count,
                                          PrimaryKeyMap primaryKeyMap,
                                          QueryContext queryContext,
-                                         SSTableId ssTableId,
+                                         SSTableId sstableId,
                                          RangeIterator<Long> sstableRowIdIterator)
     {
         super(min, max, count);
@@ -72,7 +72,7 @@ public class SSTableRowIdKeyRangeIterator extends RangeIterator<PrimaryKey>
         this.primaryKeyMap = primaryKeyMap;
         this.queryContext = queryContext;
         // Get and store reference to scores map if it exists.
-        this.ssTableRowIdToScoreMap = queryContext.getScoreCacheForSSTable(ssTableId);
+        this.sstableRowIdToScoreMap = queryContext.getScoreCacheForSSTable(sstableId);
         this.sstableRowIdIterator = sstableRowIdIterator;
     }
 
@@ -116,8 +116,8 @@ public class SSTableRowIdKeyRangeIterator extends RangeIterator<PrimaryKey>
                 return endOfData();
 
             PrimaryKey pk = primaryKeyMap.primaryKeyFromRowId(rowId);
-            if (ssTableRowIdToScoreMap != null)
-                queryContext.recordScore(pk, ssTableRowIdToScoreMap.getOrDefault(rowId, -1));
+            if (sstableRowIdToScoreMap != null)
+                queryContext.recordScore(pk, sstableRowIdToScoreMap.getOrDefault(rowId, -1));
             return pk;
         }
         catch (Throwable t)

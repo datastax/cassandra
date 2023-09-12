@@ -86,7 +86,7 @@ public class CassandraOnDiskHnsw implements AutoCloseable
      */
     // VSTODO make this return something with a size
     public ReorderingPostingList search(float[] queryVector, int topK, Bits acceptBits, int vistLimit, QueryContext context,
-                                        SSTableRowIdToScoreCache SSTableRowIdToScoreCache)
+                                        SSTableRowIdToScoreCache sstableRowIdToScoreCacher)
     {
         CassandraOnHeapHnsw.validateIndexable(queryVector, similarityFunction);
 
@@ -101,7 +101,7 @@ public class CassandraOnDiskHnsw implements AutoCloseable
                                              view,
                                              ordinalsMap.ignoringDeleted(acceptBits),
                                              vistLimit);
-            return annRowIdsToPostings(queue, SSTableRowIdToScoreCache);
+            return annRowIdsToPostings(queue, sstableRowIdToScoreCacher);
         }
         catch (IOException e)
         {
