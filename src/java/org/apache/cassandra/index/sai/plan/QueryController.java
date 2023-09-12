@@ -240,8 +240,6 @@ public class QueryController
                                                                                  .map(e -> {
                                                                                      RangeIterator<Long> it = createRowIdIterator(op, e.getValue(), defer, isAnnHybridSearch);
                                                                                      if (isAnnHybridSearch)
-                                                                                         // we only want row id here because we don't yet know how many results we need...
-                                                                                         // would be bad to materialize all of them.
                                                                                          return reorderAndLimitBySSTableRowIds(it, e.getKey(), annQueryViewInHybridSearch);
                                                                                      var ssTableId = e.getKey().getId();
                                                                                      var pkFactory = e.getValue().iterator().next().index.getSSTableContext().primaryKeyMapFactory;

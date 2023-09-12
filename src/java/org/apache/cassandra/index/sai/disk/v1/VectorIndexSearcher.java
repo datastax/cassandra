@@ -241,9 +241,8 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
 
             // else ask hnsw to perform a search limited to the bits we created
             float[] queryVector = exp.lower.value.vector;
-            // We have ss table row ids, so we set the RowIdToPrimaryKeyMapper to use a 0 offset
             var results = graph.search(queryVector, limit, bits, Integer.MAX_VALUE, context,
-                                       new SSTableRowIdToScoreCacher(sstableId, context, 0));
+                                       new SSTableRowIdToScoreCacher(sstableId, context, metadata.segmentRowIdOffset));
             return toPrimaryKeyIterator(results, context);
         }
     }
