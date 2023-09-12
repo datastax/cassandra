@@ -578,7 +578,10 @@ public enum CassandraRelevantProperties
     SYSTEM_DISTRIBUTED_NTS_DC_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_dc_names"),
     SYSTEM_DISTRIBUTED_NTS_RF_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_per_dc"),
     SYSTEM_TRACES_DEFAULT_RF("cassandra.system_traces.default_rf", "2"),
-
+    // Allows admin to include only some system views (see two below)
+    SYSTEM_VIEWS_INCLUDE_ALL("cassandra.system_view.include_all", "true"),
+    //This only applies if include all is false
+    SYSTEM_VIEWS_INCLUDE_INDEXES("cassandra.system_view.include_indexes"),
     // Default metric aggegration strategy for tables without aggregation explicitly set.
     TABLE_METRICS_DEFAULT_HISTOGRAMS_AGGREGATION("cassandra.table_metrics_default_histograms_aggregation", TableMetrics.MetricsAggregation.INDIVIDUAL.name()),
     // Determines if table metrics should be also exported to shared global metric
