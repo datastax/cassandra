@@ -81,7 +81,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         private final IPartitioner partitioner;
         private final ClusteringComparator clusteringComparator;
         private final PrimaryKey.Factory primaryKeyFactory;
-        private final SSTableId ssTableId;
+        private final SSTableId sstableId;
 
         public RowAwarePrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable)
         {
@@ -101,7 +101,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                 this.partitioner = sstable.metadata().partitioner;
                 this.primaryKeyFactory = indexDescriptor.primaryKeyFactory;
                 this.clusteringComparator = indexDescriptor.clusteringComparator;
-                this.ssTableId = sstable.getId();
+                this.sstableId = sstable.getId();
             }
             catch (Throwable t)
             {
@@ -121,7 +121,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                                                  partitioner,
                                                  primaryKeyFactory,
                                                  clusteringComparator,
-                                                 ssTableId);
+                                                 sstableId);
             }
             catch (IOException e)
             {
@@ -138,7 +138,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         @Override
         public SSTableId getSSTableId()
         {
-            return ssTableId;
+            return sstableId;
         }
     }
 
@@ -149,7 +149,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     private final PrimaryKey.Factory primaryKeyFactory;
     private final ClusteringComparator clusteringComparator;
     private final ByteBuffer tokenBuffer = ByteBuffer.allocate(Long.BYTES);
-    private final SSTableId ssTableId;
+    private final SSTableId sstableId;
 
     private RowAwarePrimaryKeyMap(LongArray rowIdToToken,
                                   SortedTermsReader sortedTermsReader,
@@ -157,7 +157,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                                   IPartitioner partitioner,
                                   PrimaryKey.Factory primaryKeyFactory,
                                   ClusteringComparator clusteringComparator,
-                                  SSTableId ssTableId)
+                                  SSTableId sstableId)
     {
         this.rowIdToToken = rowIdToToken;
         this.sortedTermsReader = sortedTermsReader;
@@ -165,7 +165,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         this.partitioner = partitioner;
         this.primaryKeyFactory = primaryKeyFactory;
         this.clusteringComparator = clusteringComparator;
-        this.ssTableId = ssTableId;
+        this.sstableId = sstableId;
     }
 
     @Override
@@ -197,7 +197,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public SSTableId getSSTableId()
     {
-        return ssTableId;
+        return sstableId;
     }
 
     @Override
