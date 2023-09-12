@@ -19,6 +19,7 @@ package org.apache.cassandra.db.virtual;
 
 import com.google.common.collect.ImmutableList;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.virtual.AnalyzerView;
 import org.apache.cassandra.index.sai.virtual.IndexesSystemView;
 import org.apache.cassandra.index.sai.virtual.SSTablesSystemView;
@@ -30,10 +31,6 @@ import static org.apache.cassandra.schema.SchemaConstants.VIRTUAL_VIEWS;
 
 public final class SystemViewsKeyspace extends VirtualKeyspace
 {
-    private static final boolean INCLUDE_ALL = Boolean.getBoolean("cassandra.system_view.include_all");
-    private static final boolean INCLUDE_LOCAL_AND_PEERS = Boolean.getBoolean("cassandra.system_view.include_local_and_peers");
-    private static final boolean INCLUDE_INDEXES = Boolean.getBoolean("cassandra.system_view.include_indexes");
-
     public static SystemViewsKeyspace instance = new SystemViewsKeyspace();
 
     private SystemViewsKeyspace()
@@ -44,7 +41,7 @@ public final class SystemViewsKeyspace extends VirtualKeyspace
     private static Collection<VirtualTable> buildTables()
     {
         ImmutableList.Builder<VirtualTable> tables = new ImmutableList.Builder<>();
-        if (INCLUDE_ALL)
+        if (CassandraRelevantProperties.SYSTEM_VIEWS_INCLUDE_ALL.getBoolean())
             tables.add(new CachesTable(VIRTUAL_VIEWS))
                     .add(new ClientsTable(VIRTUAL_VIEWS))
                     .add(new SettingsTable(VIRTUAL_VIEWS))
@@ -72,7 +69,8 @@ public final class SystemViewsKeyspace extends VirtualKeyspace
                     .addAll(LocalRepairTables.getAll(VIRTUAL_VIEWS))
                     .addAll(CIDRFilteringMetricsTable.getAll(VIRTUAL_VIEWS))
                     .addAll(StorageAttachedIndexTables.getAll(VIRTUAL_VIEWS));
-        if (INCLUDE_ALL || INCLUDE_INDEXES)
+        if (CassandraRelevantProperties.SYSTEM_VIEWS_INCLUDE_ALL.getBoolean()
+            || CassandraRelevantProperties.SYSTEM_VIEWS_INCLUDE_INDEXES.getBoolean())
             tables.add(new IndexesSystemView(VIRTUAL_VIEWS));
 
         return tables.build();
