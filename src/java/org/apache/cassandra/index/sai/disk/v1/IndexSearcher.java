@@ -66,12 +66,11 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
     public static IndexSearcher open(PrimaryKeyMap.Factory primaryKeyMapFactory,
                                      PerIndexFiles indexFiles,
                                      SegmentMetadata segmentMetadata,
-                                     SSTableId sstableId,
                                      IndexDescriptor indexDescriptor,
                                      IndexContext indexContext) throws IOException
     {
         if (indexContext.isVector())
-            return new VectorIndexSearcher(primaryKeyMapFactory, indexFiles, segmentMetadata, sstableId, indexDescriptor, indexContext);
+            return new VectorIndexSearcher(primaryKeyMapFactory, indexFiles, segmentMetadata, indexDescriptor, indexContext);
         if (TypeUtil.isLiteral(indexContext.getValidator()))
             return new InvertedIndexSearcher(primaryKeyMapFactory, indexFiles, segmentMetadata, indexDescriptor, indexContext);
         return new KDTreeIndexSearcher(primaryKeyMapFactory, indexFiles, segmentMetadata, indexDescriptor, indexContext);

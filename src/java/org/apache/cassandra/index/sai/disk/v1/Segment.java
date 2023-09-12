@@ -70,7 +70,7 @@ public class Segment implements Closeable, SegmentOrdering
         this.indexFiles = indexFiles;
         this.metadata = metadata;
 
-        this.index = IndexSearcher.open(primaryKeyMapFactory, indexFiles, metadata, sstableContext.sstable().getId(), sstableContext.indexDescriptor, indexContext);
+        this.index = IndexSearcher.open(primaryKeyMapFactory, indexFiles, metadata, sstableContext.indexDescriptor, indexContext);
     }
 
     @VisibleForTesting

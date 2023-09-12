@@ -64,7 +64,6 @@ public class SSTableRowIdKeyRangeIterator extends RangeIterator<PrimaryKey>
                                          long count,
                                          PrimaryKeyMap primaryKeyMap,
                                          QueryContext queryContext,
-                                         SSTableId sstableId,
                                          RangeIterator<Long> sstableRowIdIterator)
     {
         super(min, max, count);
@@ -72,13 +71,12 @@ public class SSTableRowIdKeyRangeIterator extends RangeIterator<PrimaryKey>
         this.primaryKeyMap = primaryKeyMap;
         this.queryContext = queryContext;
         // Get and store reference to scores map if it exists.
-        this.sstableRowIdToScoreMap = queryContext.getScoreCacheForSSTable(sstableId);
+        this.sstableRowIdToScoreMap = queryContext.getScoreCacheForSSTable(primaryKeyMap.getSSTableId());
         this.sstableRowIdIterator = sstableRowIdIterator;
     }
 
     public static RangeIterator<PrimaryKey> create(PrimaryKeyMap primaryKeyMap,
                                                    QueryContext queryContext,
-                                                   SSTableId ssTableId,
                                                    RangeIterator<Long> sstableRowIdIterator)
     {
         if (sstableRowIdIterator.getCount() <= 0)
@@ -87,7 +85,7 @@ public class SSTableRowIdKeyRangeIterator extends RangeIterator<PrimaryKey>
         PrimaryKey min = primaryKeyMap.primaryKeyFromRowId(sstableRowIdIterator.getMinimum());
         PrimaryKey max = primaryKeyMap.primaryKeyFromRowId(sstableRowIdIterator.getMaximum());
         long count = sstableRowIdIterator.getCount();
-        return new SSTableRowIdKeyRangeIterator(min, max, count, primaryKeyMap, queryContext, ssTableId, sstableRowIdIterator);
+        return new SSTableRowIdKeyRangeIterator(min, max, count, primaryKeyMap, queryContext, sstableRowIdIterator);
     }
 
     @Override

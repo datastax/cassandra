@@ -68,7 +68,6 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
     VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                         PerIndexFiles perIndexFiles,
                         SegmentMetadata segmentMetadata,
-                        SSTableId sstableId,
                         IndexDescriptor indexDescriptor,
                         IndexContext indexContext) throws IOException
     {
@@ -77,7 +76,7 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
         this.keyFactory = PrimaryKey.factory(indexContext.comparator(), indexContext.indexFeatureSet());
         type = (VectorType<float[]>) indexContext.getValidator();
         cachedBitSets = ThreadLocal.withInitial(() -> new SparseFixedBitSet(graph.size()));
-        this.sstableId = sstableId;
+        this.sstableId = primaryKeyMapFactory.getSSTableId();
 
         // estimate the number of comparisons that a search would require; use brute force if we have
         // fewer rows involved than that

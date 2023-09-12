@@ -241,9 +241,8 @@ public class QueryController
                                                                                      RangeIterator<Long> it = createRowIdIterator(op, e.getValue(), defer, isAnnHybridSearch);
                                                                                      if (isAnnHybridSearch)
                                                                                          return reorderAndLimitBySSTableRowIds(it, e.getKey(), annQueryViewInHybridSearch);
-                                                                                     var ssTableId = e.getKey().getId();
                                                                                      var pkFactory = e.getValue().iterator().next().index.getSSTableContext().primaryKeyMapFactory;
-                                                                                     return convertToPrimaryKeyIterator(ssTableId, pkFactory, it);
+                                                                                     return convertToPrimaryKeyIterator(pkFactory, it);
                                                                                  })
                                                                                  .collect(Collectors.toList());
 
@@ -282,13 +281,13 @@ public class QueryController
         }
     }
 
-    private RangeIterator<PrimaryKey> convertToPrimaryKeyIterator(SSTableId ssTableId, PrimaryKeyMap.Factory pkFactory, RangeIterator<Long> sstableRowIdsIterator)
+    private RangeIterator<PrimaryKey> convertToPrimaryKeyIterator(PrimaryKeyMap.Factory pkFactory, RangeIterator<Long> sstableRowIdsIterator)
     {
         if (sstableRowIdsIterator.getCount() <= 0)
             return RangeIterator.emptyKeys();
 
         PrimaryKeyMap primaryKeyMap = pkFactory.newPerSSTablePrimaryKeyMap();
-        return SSTableRowIdKeyRangeIterator.create(primaryKeyMap, queryContext, ssTableId, sstableRowIdsIterator);
+        return SSTableRowIdKeyRangeIterator.create(primaryKeyMap, queryContext, sstableRowIdsIterator);
     }
 
     private RangeIterator<PrimaryKey> reorderAndLimitBy(RangeIterator<PrimaryKey> original, Memtable memtable, Expression expression)
