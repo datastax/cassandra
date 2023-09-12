@@ -73,7 +73,6 @@ public class V1SearchableIndex implements SearchableIndex
     private final long minSSTableRowId, maxSSTableRowId;
     private final long numRows;
     private PerIndexFiles indexFiles;
-    private SSTableReader ssTable;
 
     public V1SearchableIndex(SSTableContext sstableContext, IndexContext indexContext)
     {
@@ -106,8 +105,6 @@ public class V1SearchableIndex implements SearchableIndex
 
             this.minSSTableRowId = metadatas.get(0).minSSTableRowId;
             this.maxSSTableRowId = metadatas.get(metadatas.size() - 1).maxSSTableRowId;
-
-            this.ssTable = sstableContext.sstable();
         }
         catch (Throwable t)
         {
@@ -172,12 +169,6 @@ public class V1SearchableIndex implements SearchableIndex
                                             boolean defer,
                                             int limit) throws IOException
     {
-        if (keyRange instanceof Bounds && keyRange.left.equals(keyRange.right) && keyRange.left instanceof DecoratedKey)
-        {
-            if (!ssTable.getBloomFilter().isPresent((DecoratedKey)keyRange.left))
-                return Collections.emptyList();
-        }
-
         List<RangeIterator<Long>> iterators = new ArrayList<>();
 
         for (Segment segment : segments)

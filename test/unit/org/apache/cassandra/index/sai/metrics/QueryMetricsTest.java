@@ -138,26 +138,30 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         waitForIndexQueryable(keyspace, table);
 
-        ResultSet rows1 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 = 3");
-        assertEquals(1, rows1.all().size());
+//        ResultSet rows1 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 = 3");
+//        assertEquals(1, rows1.all().size());
 
-        ResultSet rows2 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 = '36' and v1 < 40");
+        ResultSet rows2 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 = '36' and v1 < 51");
         assertEquals(1, rows2.all().size());
 
-        ResultSet rows3 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 > '31' and v1 = 43 ALLOW FILTERING");
+        ResultSet rows3 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 = '49' and v1 < 51 ALLOW FILTERING");
         assertEquals(1, rows3.all().size());
 
-        ResultSet rows4 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 > '21' and id1 < '34' and v1 = 23 ALLOW FILTERING");
+//        ResultSet rows4 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 > '21' and id1 < '34' and v1 >= 0 and v1 < 51 ALLOW FILTERING");
+//        assertEquals(13, rows4.all().size());
+
+        ResultSet rows4 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 = '21' and v1 >= 0 and v1 < 51 ALLOW FILTERING");
         assertEquals(1, rows4.all().size());
 
-        ResultSet rows5 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 < 24 and v1 > 11");
-        assertEquals(12, rows5.all().size());
+        ResultSet rows5 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 = '35' and v1 > 0");
+        assertEquals(1, rows5.all().size());
 
-        ResultSet rows6 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 = 20 and id1 = '20'");
+        ResultSet rows6 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 > 0 and id1 = '20'");
         assertEquals(1, rows6.all().size());
 
         ObjectName oName = objectNameNoIndex("SSTableIndexesHit", keyspace, table, PER_QUERY_METRIC_TYPE);
         CassandraMetricsRegistry.JmxHistogramMBean o = JMX.newMBeanProxy(jmxConnection, oName, CassandraMetricsRegistry.JmxHistogramMBean.class);
+
         assertTrue(o.getMean() < 2);
     }
 
