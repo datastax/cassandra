@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import org.apache.commons.math3.random.JDKRandomGenerator;
 import org.junit.Ignore;
@@ -40,7 +41,9 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
+import org.apache.cassandra.io.sstable.UUIDBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
@@ -241,6 +244,7 @@ public class BaseCompactionStrategyTest
         when(ret.isPendingRepair()).thenReturn(pendingRepair != null);
         when(ret.getColumnFamilyName()).thenReturn(table);
         when(ret.getId()).thenReturn(new SequenceBasedSSTableId(level));
+        when(ret.getDataFile()).thenReturn(new File(UUIDBasedSSTableId.Builder.instance.generator(Stream.empty()).get() + ".db"));
         when(ret.toString()).thenReturn(String.format("Bytes on disk: %s, level %d, hotness %f, timestamp %d, first %s, last %s, disk index: %d, repaired: %b, pend. repair: %b",
                                                       FBUtilities.prettyPrintMemory(bytesOnDisk), level, hotness, timestamp, first, last, diskIndex, repaired, pendingRepair));
         long deletionTime;
