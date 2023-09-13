@@ -97,6 +97,38 @@ public class PathUtilsTest
     }
 
     @Test
+    public void testDeleteIfExists() throws IOException
+    {
+        // Check deleteIfExists doesn't throw an excption if file already doesn't exist:
+        File testDir = classTestDir.resolve("testDeleteIfExists");
+        assertTrue(PathUtils.createDirectoryIfNotExists(testDir.toPath()));
+
+        File file1 = testDir.resolve("file1");
+        assertTrue(PathUtils.createFileIfNotExists(file1.toPath()));
+        File file2 = testDir.resolve("nonExistingFile");
+
+        assertTrue(PathUtils.deleteIfExists(file1.toPath()));
+        assertFalse(PathUtils.deleteIfExists(file2.toPath()));
+
+        assertFalse(file1.exists());
+        assertFalse(file2.exists());
+
+        // Check that it throws an exception if deleting the file fails:
+        Path deletedPath = Mockito.mock(Path.class);
+        FileSystem fs = Mockito.mock(FileSystem.class);
+        FileSystemProvider fsp = Mockito.mock(FileSystemProvider.class);
+        BasicFileAttributes attributes = Mockito.mock(BasicFileAttributes.class);
+
+        Mockito.when(deletedPath.getFileSystem()).thenReturn(fs);
+        Mockito.when(fs.provider()).thenReturn(fsp);
+        Mockito.when(fsp.readAttributes(eq(deletedPath), eq(BasicFileAttributes.class), any())).thenReturn(attributes);
+        Mockito.when(attributes.isDirectory()).thenReturn(false);
+        Mockito.doThrow(new IOException("mock exception")).when(fsp).delete(deletedPath);
+
+        assertThrows(FSWriteError.class, () -> PathUtils.deleteIfExists(deletedPath));
+    }
+
+    @Test
     public void testDeleteQuietlyIsRecursive()
     {
         File testDir = classTestDir.resolve("testDeleteQuietlyIsRecursive");

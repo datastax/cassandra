@@ -128,10 +128,22 @@ public class File implements Comparable<File>
 
     /**
      * Try to delete the file, returning true iff it was deleted by us. Does not ordinarily throw exceptions.
+     * See also {@link File#deleteIfExists()}.
      */
     public boolean tryDelete()
     {
         return path != null && PathUtils.tryDelete(path);
+    }
+
+    /**
+     * Try to delete the file if it exists.
+     * If this method returns successfully, it guarantess the file does not exist.
+     * Returns true iff the file was deleted by us, false if the file didn't exist before.
+     * Throws an exception if the file existed and could not be removed.
+     */
+    public boolean deleteIfExists()
+    {
+        return path != null && PathUtils.deleteIfExists(path);
     }
 
     /**

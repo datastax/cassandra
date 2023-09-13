@@ -369,8 +369,7 @@ public abstract class SSTable
     private static void rewriteTOC(Descriptor descriptor, Collection<Component> components)
     {
         File tocFile = descriptor.fileFor(Component.TOC);
-        if (!tocFile.tryDelete())
-            logger.error("Failed to delete TOC component for " + descriptor);
+        tocFile.deleteIfExists();
         appendTOC(descriptor, components);
     }
 

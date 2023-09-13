@@ -269,6 +269,13 @@ public final class PathUtils
         }
     }
 
+    /**
+     * Tries to delete a file and ignores any errors.
+     * Does not guarantee the file is really removed after the call returns.
+     *
+     * @return true if the file has been deleted by this call, false if the file didn't exist or if it could
+     * not be deleted due to an I/O problem;
+     */
     public static boolean tryDelete(Path file)
     {
         try
@@ -280,6 +287,29 @@ public final class PathUtils
         catch (IOException e)
         {
             return false;
+        }
+    }
+
+    /**
+     * Deletes a file.
+     * @return true if the file was deleted by us, false if the file didn't exist
+     * @throws UncheckedIOException if the file exists and could not be deleted
+     */
+    public static boolean deleteIfExists(Path file)
+    {
+        try
+        {
+            Files.delete(file);
+            onDeletion.accept(file);
+            return true;
+        }
+        catch (NoSuchFileException ignore)
+        {
+            return false;
+        }
+        catch (IOException e)
+        {
+            throw propagateUnchecked(e, file, true);
         }
     }
 
