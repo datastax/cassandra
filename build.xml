@@ -2144,7 +2144,12 @@
     </modules>
   </component>
 </project>]]></echo>
-      <antcall target="_maybe_update_idea_to_java11"/>
+    <replaceregexp file=".idea/workspace.xml"
+                   match="\$JDKPath\$"
+                   replace="${java.home}"
+                   byline="true"/>
+
+    <antcall target="_maybe_update_idea_to_java11"/>
   </target>
 
   <!-- Generate Eclipse project description files -->

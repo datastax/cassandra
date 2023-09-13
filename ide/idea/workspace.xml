@@ -152,7 +152,9 @@
       <option name="ENV_VARIABLES" />
       <option name="PASS_PARENT_ENVS" value="true" />
       <module name="" />
-      <envs />
+      <envs>
+        <env name="JAVA_HOME" value="$JDKPath$" />
+      </envs>
       <method>
         <option name="AntTarget" enabled="true" antfile="file://$PROJECT_DIR$/build.xml" target="gen-cql3-grammar" />
         <option name="Make" enabled="true" />
@@ -177,7 +179,9 @@
         <value defaultName="singleModule" />
       </option>
       <fork_mode value="class" />
-      <envs />
+      <envs>
+        <env name="JAVA_HOME" value="$JDKPath$" />
+      </envs>
       <patterns />
       <method>
         <option name="AntTarget" enabled="true" antfile="file://$PROJECT_DIR$/build.xml" target="gen-cql3-grammar,generate-flex-java" />
@@ -196,7 +200,9 @@
       <option name="ENV_VARIABLES" />
       <option name="PASS_PARENT_ENVS" value="true" />
       <module name="trunk" />
-      <envs />
+      <envs>
+        <env name="JAVA_HOME" value="$JDKPath$" />
+      </envs>
       <RunnerSettings RunnerId="Debug">
         <option name="DEBUG_PORT" value="" />
         <option name="TRANSPORT" value="0" />
