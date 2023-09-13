@@ -138,17 +138,11 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         waitForIndexQueryable(keyspace, table);
 
-//        ResultSet rows1 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 = 3");
-//        assertEquals(1, rows1.all().size());
-
         ResultSet rows2 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 = '36' and v1 < 51");
         assertEquals(1, rows2.all().size());
 
         ResultSet rows3 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 = '49' and v1 < 51 ALLOW FILTERING");
         assertEquals(1, rows3.all().size());
-
-//        ResultSet rows4 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 > '21' and id1 < '34' and v1 >= 0 and v1 < 51 ALLOW FILTERING");
-//        assertEquals(13, rows4.all().size());
 
         ResultSet rows4 = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE id1 = '21' and v1 >= 0 and v1 < 51 ALLOW FILTERING");
         assertEquals(1, rows4.all().size());
