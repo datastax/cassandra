@@ -27,6 +27,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -116,6 +118,8 @@ public class Schema implements SchemaProvider
     public final SchemaUpdateHandler updateHandler;
 
     private final boolean online;
+
+    private final ConcurrentMap<TableId, CompletableFuture<?>> dropTableCompletions = new ConcurrentHashMap<>();
 
     /**
      * Initialize empty schema object and load the hardcoded system tables
@@ -782,13 +786,20 @@ public class Schema implements SchemaProvider
     private void dropTable(Keyspace keyspace, TableMetadata metadata, boolean dropData)
     {
         SchemaDiagnostics.tableDropping(this, metadata);
-        keyspace.dropCf(metadata.id, dropData);
+        assert dropTableCompletions.get(metadata.id) == null;
+        CompletableFuture<Void> completion = keyspace.dropCf(metadata.id, dropData)
+                                                     .thenAccept(ignored -> dropTableCompletions.remove(metadata.id));
+        dropTableCompletions.put(metadata.id, completion);
         SchemaDiagnostics.tableDropped(this, metadata);
     }
 
     private void createTable(Keyspace keyspace, TableMetadata table)
     {
         SchemaDiagnostics.tableCreating(this, table);
+        CompletableFuture<?> completion = dropTableCompletions.get(table.id);
+        if (completion != null)
+            completion.join();
+
         keyspace.initCf(tableMetadataRefCache.getTableMetadataRef(table.id), true);
         SchemaDiagnostics.tableCreated(this, table);
     }

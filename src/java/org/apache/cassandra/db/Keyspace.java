@@ -40,8 +40,10 @@ import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.repair.CassandraKeyspaceRepairManager;
@@ -117,6 +119,8 @@ public class Keyspace
     private volatile ReplicationParams replicationParams;
     private final KeyspaceRepairManager repairManager;
     private final SchemaProvider schema;
+
+    private final static DebuggableThreadPoolExecutor dropTableFinalizer = DebuggableThreadPoolExecutor.createWithFixedPoolSize("DropTableFinalizer", 1, false);
 
     private static volatile boolean initialized = false;
 
@@ -394,22 +398,41 @@ public class Keyspace
     }
 
     // best invoked on the compaction manager.
-    public void dropCf(TableId tableId, boolean dropData)
+    public CompletableFuture<?> dropCf(TableId tableId, boolean dropData)
     {
         ColumnFamilyStore cfs = columnFamilyStores.remove(tableId);
         if (cfs == null)
         {
-            logger.debug("No CFS found when trying to drop table {}, {}", tableId, schema.getTableMetadata(tableId).name);
-            return;
+            String name = metadata.tables.stream().filter(m -> m.id.equals(tableId)).map(m -> m.name).findFirst().orElse("<unknown>");
+            logger.debug("No CFS found when trying to drop table {}, {}", tableId, name);
+            return CompletableFuture.completedFuture(null);
         }
 
         cfs.onTableDropped();
 
         if (logger.isTraceEnabled())
             logger.trace("Dropping CFS {}: unloading CFS", cfs.name);
+
         unloadCf(cfs, dropData);
+
         if (logger.isTraceEnabled())
             logger.trace("Dropping CFS {}: completed", cfs.name);
+
+        return CompletableFuture.runAsync(() -> {
+            TableMetadata metadata = cfs.metadata();
+            if (cfs.getTracker().isDummy())
+            {
+                // offline services (e.g. standalone compactor) don't have Memtables or CommitLog. An attempt to flush would
+                // throw an exception
+                logger.debug("Memtables and CommitLog are disabled; not recycling or flushing {}", metadata);
+            }
+            else
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Recycling CL segments for dropping {}", metadata);
+                CommitLog.instance.forceRecycleAllSegments(Collections.singleton(metadata.id));
+            }
+        }, dropTableFinalizer);
     }
 
     /**

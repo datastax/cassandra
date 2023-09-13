@@ -46,29 +46,45 @@ public class NamedThreadFactory implements ThreadFactory
     private final ClassLoader contextClassLoader;
     private final ThreadGroup threadGroup;
     protected final AtomicInteger n = new AtomicInteger(1);
+    private final boolean isDaemon;
 
     public NamedThreadFactory(String id)
     {
         this(id, Thread.NORM_PRIORITY);
     }
 
+    public NamedThreadFactory(String id, boolean isDaemon)
+    {
+        this(id, Thread.NORM_PRIORITY, isDaemon);
+    }
+
     public NamedThreadFactory(String id, int priority)
     {
         this(id, priority, null, null);
     }
+    public NamedThreadFactory(String id, int priority, boolean isDaemon)
+    {
+        this(id, priority, null, null, isDaemon);
+    }
 
     public NamedThreadFactory(String id, int priority, ClassLoader contextClassLoader, ThreadGroup threadGroup)
+    {
+        this(id, priority, contextClassLoader, threadGroup, true);
+    }
+
+    public NamedThreadFactory(String id, int priority, ClassLoader contextClassLoader, ThreadGroup threadGroup, boolean isDaemon)
     {
         this.id = id;
         this.priority = priority;
         this.contextClassLoader = contextClassLoader;
         this.threadGroup = threadGroup;
+        this.isDaemon = isDaemon;
     }
 
     public Thread newThread(Runnable runnable)
     {
         String name = id + ':' + n.getAndIncrement();
-        Thread thread = createThread(threadGroup, runnable, name, true);
+        Thread thread = createThread(threadGroup, runnable, name, isDaemon);
         thread.setPriority(priority);
         if (contextClassLoader != null)
             thread.setContextClassLoader(contextClassLoader);

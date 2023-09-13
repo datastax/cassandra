@@ -123,6 +123,11 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
                                                 new NamedThreadFactory(threadPoolName));
     }
 
+    public static DebuggableThreadPoolExecutor createWithFixedPoolSize(String threadPoolName, int size)
+    {
+        return createWithMaximumPoolSize(threadPoolName, size, Integer.MAX_VALUE, TimeUnit.SECONDS, true);
+    }
+
     /**
      * Returns a ThreadPoolExecutor with a fixed number of threads.
      * When all threads are actively executing tasks, new tasks are queued.
@@ -131,9 +136,9 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
      * @param size the fixed number of threads for this executor
      * @return the new DebuggableThreadPoolExecutor
      */
-    public static DebuggableThreadPoolExecutor createWithFixedPoolSize(String threadPoolName, int size)
+    public static DebuggableThreadPoolExecutor createWithFixedPoolSize(String threadPoolName, int size, boolean isDaemon)
     {
-        return createWithMaximumPoolSize(threadPoolName, size, Integer.MAX_VALUE, TimeUnit.SECONDS);
+        return createWithMaximumPoolSize(threadPoolName, size, Integer.MAX_VALUE, TimeUnit.SECONDS, isDaemon);
     }
 
     /**
@@ -148,7 +153,12 @@ public class DebuggableThreadPoolExecutor extends ThreadPoolExecutor implements 
      */
     public static DebuggableThreadPoolExecutor createWithMaximumPoolSize(String threadPoolName, int size, int keepAliveTime, TimeUnit unit)
     {
-        return new DebuggableThreadPoolExecutor(size, Integer.MAX_VALUE, keepAliveTime, unit, new LinkedBlockingQueue<Runnable>(), new NamedThreadFactory(threadPoolName));
+        return createWithMaximumPoolSize(threadPoolName, size, keepAliveTime, unit, true);
+    }
+
+    public static DebuggableThreadPoolExecutor createWithMaximumPoolSize(String threadPoolName, int size, int keepAliveTime, TimeUnit unit, boolean isDaemon)
+    {
+        return new DebuggableThreadPoolExecutor(size, Integer.MAX_VALUE, keepAliveTime, unit, new LinkedBlockingQueue<Runnable>(), new NamedThreadFactory(threadPoolName, isDaemon));
     }
 
     protected void onInitialRejection(Runnable task) {}
