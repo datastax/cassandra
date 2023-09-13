@@ -113,16 +113,24 @@ public class MergePostingList implements PostingList
     @Override
     public long advance(long targetRowID) throws IOException
     {
-        // clean out any posting lists that are no longer relevant
+        // clean out obsolete child lists, and remember the smallest row seen in case
+        // we can use it for the fast path
+        long nextRowId = PostingList.END_OF_STREAM;
+        PostingList nextPostingList = null;
         var it = postingLists.iterator();
         while (it.hasNext())
         {
             var peekable = it.next();
             peekable.advanceWithoutConsuming(targetRowID);
             long peeked = peekable.peek();
+            // clean out obsolete child lists
             if (peeked == PostingList.END_OF_STREAM)
-            {
                 it.remove();
+
+            if (lastRowId <= peeked && peeked < nextRowId)
+            {
+                nextRowId = peeked;
+                nextPostingList = peekable;
             }
         }
 
@@ -134,26 +142,8 @@ public class MergePostingList implements PostingList
             return nextPosting();
         }
 
-        // we're skipping to a row we haven't seen before, which means we don't need the PQ,
-        // we can just return the smallest row from the remaining posting lists
-        long nextRowId = PostingList.END_OF_STREAM;
-        PostingList nextPostingList = null;
-
-        it = postingLists.iterator();
-        while (it.hasNext())
-        {
-            var peekable = it.next();
-            peekable.advanceWithoutConsuming(targetRowID);
-            long peeked = peekable.peek();
-
-            if (lastRowId <= peeked && peeked < nextRowId)
-            {
-                nextRowId = peeked;
-                nextPostingList = peekable;
-            }
-        }
-        pq = null; // we've invalidated the pq's assumptions, so force a rebuild if we need it again
-
+        // fast path -- no PQ
+        pq = null; // we're invalidating the pq's assumptions, so force a rebuild if we need it again
         if (nextPostingList == null)
             return PostingList.END_OF_STREAM;
         return nextPostingList.nextPosting();
