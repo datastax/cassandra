@@ -37,7 +37,6 @@ import com.carrotsearch.hppc.ObjectFloatHashMap;
 import com.carrotsearch.hppc.ObjectFloatMap;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.ScoreCacheMapper;
 import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw;
 import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnHeapHnsw;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -260,7 +259,7 @@ public class QueryContext
 
     public ScoreCacheMapper getScoreCacheMapperForSSTable(SSTableId sstableId)
     {
-        return new ScoreCacheMapper(this, sstableScoreMapMap.get(sstableId));
+        return ScoreCacheMapper.create(this, sstableScoreMapMap.get(sstableId));
     }
 
     public void recordScore(PrimaryKey primaryKey, float score)

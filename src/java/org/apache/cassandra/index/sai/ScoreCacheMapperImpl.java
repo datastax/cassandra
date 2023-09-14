@@ -16,30 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk;
+package org.apache.cassandra.index.sai;
 
 import javax.annotation.Nullable;
-import javax.annotation.concurrent.NotThreadSafe;
 
 import com.carrotsearch.hppc.LongFloatHashMap;
-import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
-@NotThreadSafe
-public class ScoreCacheMapper
-{
+class ScoreCacheMapperImpl implements ScoreCacheMapper {
     private final QueryContext queryContext;
     private final LongFloatHashMap cache;
 
-    public ScoreCacheMapper(QueryContext queryContext, @Nullable LongFloatHashMap cache)
-    {
+    ScoreCacheMapperImpl(QueryContext queryContext, @Nullable LongFloatHashMap cache) {
+        assert cache != null;
         this.queryContext = queryContext;
         this.cache = cache;
     }
 
-    public void mapSSTableRowIdToPrimaryKey(long sstableRowId, PrimaryKey pk)
-    {
-        if (cache != null)
-            queryContext.recordScore(pk, cache.getOrDefault(sstableRowId, -1));
+    @Override
+    public void mapSSTableRowIdToPrimaryKey(long sstableRowId, PrimaryKey pk) {
+        queryContext.recordScore(pk, cache.getOrDefault(sstableRowId, -1));
     }
 }
