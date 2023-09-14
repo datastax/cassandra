@@ -64,16 +64,23 @@ public class ChunkCache
         final ChunkReader file;
         final String path;
         final long position;
+        final int hashCode;
 
         public Key(ChunkReader file, long position)
         {
             super();
             this.file = file;
             this.position = position;
-            this.path = file.channel().filePath();
+            this.path = file.channel().filePath().intern();
+            hashCode = hashCodeInternal();
         }
 
-        public int hashCode()
+        @Override
+        public int hashCode() {
+            return hashCode;
+        }
+
+        private int hashCodeInternal()
         {
             final int prime = 31;
             int result = 1;
@@ -83,6 +90,7 @@ public class ChunkCache
             return result;
         }
 
+        @Override
         public boolean equals(Object obj)
         {
             if (this == obj)
@@ -93,7 +101,7 @@ public class ChunkCache
             Key other = (Key) obj;
             return (position == other.position)
                     && file.getClass() == other.file.getClass()
-                    && path.equals(other.path);
+                    && path == other.path; // == is okay b/c we explicitly intern
         }
     }
 
