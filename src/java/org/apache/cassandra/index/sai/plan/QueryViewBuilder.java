@@ -28,11 +28,14 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
 import org.apache.cassandra.tracing.Tracing;
 
 /**
@@ -164,6 +167,15 @@ public class QueryViewBuilder
     private boolean indexInRange(SSTableIndex index)
     {
         SSTableReader sstable = index.getSSTable();
+        if (range instanceof Bounds && range.left.equals(range.right) && (!range.left.isMinimum()) && range.left instanceof DecoratedKey)
+        {
+            if (sstable instanceof SSTableReaderWithFilter)
+            {
+                SSTableReaderWithFilter sstableWithFilter = (SSTableReaderWithFilter) sstable;
+                if (!sstableWithFilter.getFilter().isPresent((DecoratedKey) range.left))
+                    return false;
+            }
+        }
         return range.left.compareTo(sstable.last) <= 0 && (range.right.isMinimum() || sstable.first.compareTo(range.right) <= 0);
     }
 }
