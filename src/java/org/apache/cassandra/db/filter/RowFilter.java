@@ -22,14 +22,13 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.google.common.base.Objects;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
-import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,6 +54,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkBindValueSet;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -71,6 +71,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNu
 public abstract class RowFilter implements Iterable<RowFilter.Expression>
 {
     private static final Logger logger = LoggerFactory.getLogger(RowFilter.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     public static final Serializer serializer = new Serializer();
     public static final RowFilter NONE = CQLFilter.NONE;
@@ -89,7 +90,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
     public List<Expression> getExpressions()
     {
-        assertFilterIsNotATree();
+        warnIfFilterIsATree();
         return root.expressions;
     }
 
@@ -107,7 +108,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean hasExpressionOnClusteringOrRegularColumns()
     {
-        assertFilterIsNotATree();
+        warnIfFilterIsATree();
         for (Expression expression : root)
         {
             ColumnMetadata column = expression.column();
@@ -170,7 +171,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean partitionKeyRestrictionsAreSatisfiedBy(DecoratedKey key, AbstractType<?> keyValidator)
     {
-        assertFilterIsNotATree();
+        warnIfFilterIsATree();
         for (Expression e : root)
         {
             if (!e.column.isPartitionKey())
@@ -191,7 +192,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean clusteringKeyRestrictionsAreSatisfiedBy(Clustering<?> clustering)
     {
-        assertFilterIsNotATree();
+        warnIfFilterIsATree();
         for (Expression e : root)
         {
             if (!e.column.isClusteringColumn())
@@ -211,7 +212,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      */
     public RowFilter without(Expression expression)
     {
-        assertFilterIsNotATree();
+        warnIfFilterIsATree();
         assert root.contains(expression);
         if (root.size() == 1)
             return RowFilter.NONE;
@@ -236,7 +237,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
     public Iterator<Expression> iterator()
     {
-        assertFilterIsNotATree();
+        warnIfFilterIsATree();
         return root.iterator();
     }
 
@@ -246,11 +247,12 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         return root.toString();
     }
 
-    private void assertFilterIsNotATree()
+    private void warnIfFilterIsATree()
     {
-        Preconditions.checkState(root.children.isEmpty(),
-                                 "RowFilter must be a flat list of Expressions to be used in any iterative context like " +
-                                 "iterator() or getExpressions()");
+        if (!root.children.isEmpty())
+        {
+            noSpamLogger.warn("RowFilter is a tree, but we're using it as a list of top-levels expressions", new Exception("stacktrace of a potential misuse"));
+        }
     }
 
     public static Builder builder()
@@ -349,7 +351,10 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
         public Iterator<Expression> iterator()
         {
-            return expressions.iterator();
+            List<Expression> allExpressions = new ArrayList<>(expressions);
+            for (FilterElement child : children)
+                allExpressions.addAll(child.expressions);
+            return allExpressions.iterator();
         }
 
         public FilterElement filter(Predicate<Expression> filter)
