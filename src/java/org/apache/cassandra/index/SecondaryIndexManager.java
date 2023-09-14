@@ -1762,7 +1762,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             SSTableAddedNotification notice = (SSTableAddedNotification) notification;
 
             // SSTables associated to a memtable come from a flush, so their contents have already been indexed
-            if (notice.memtable().isEmpty())
+            if (!notice.memtable().isPresent())
             {
                 IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onSSTableAdded(notice);
                 build(decision, notice.added, false);
