@@ -25,8 +25,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Predicate;
@@ -75,6 +77,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkBindValueSet;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -91,6 +94,7 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNu
 public class RowFilter implements Iterable<RowFilter.Expression>
 {
     private static final Logger logger = LoggerFactory.getLogger(RowFilter.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     public static final Serializer serializer = new Serializer();
     private static final RowFilter NONE = new RowFilter(FilterElement.NONE, false);
@@ -117,6 +121,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
 
     public List<Expression> getExpressions()
     {
+        warnIfFilterIsATree();
         return root.expressions;
     }
 
@@ -153,11 +158,20 @@ public class RowFilter implements Iterable<RowFilter.Expression>
     }
 
     /**
+     * @return *all* the expressions from the RowFilter tree in pre-order.
+     */
+    public Stream<Expression> getExpressionsPreOrder()
+    {
+        return root.getExpressionsPreOrder();
+    }
+
+    /**
      * Checks if some of the expressions apply to clustering or regular columns.
      * @return {@code true} if some of the expressions apply to clustering or regular columns, {@code false} otherwise.
      */
     public boolean hasExpressionOnClusteringOrRegularColumns()
     {
+        warnIfFilterIsATree();
         for (Expression expression : root)
         {
             ColumnMetadata column = expression.column();
@@ -287,6 +301,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean partitionKeyRestrictionsAreSatisfiedBy(DecoratedKey key, AbstractType<?> keyValidator)
     {
+        warnIfFilterIsATree();
         for (Expression e : root)
         {
             if (!e.column.isPartitionKey())
@@ -307,6 +322,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
      */
     public boolean clusteringKeyRestrictionsAreSatisfiedBy(Clustering<?> clustering)
     {
+        warnIfFilterIsATree();
         for (Expression e : root)
         {
             if (!e.column.isClusteringColumn())
@@ -326,6 +342,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
      */
     public RowFilter without(Expression expression)
     {
+        warnIfFilterIsATree();
         assert root.contains(expression);
         if (root.size() == 1)
             return RowFilter.none();
@@ -380,6 +397,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
 
     public Iterator<Expression> iterator()
     {
+        warnIfFilterIsATree();
         return root.iterator();
     }
 
@@ -402,6 +420,14 @@ public class RowFilter implements Iterable<RowFilter.Expression>
     private String toString(boolean cql)
     {
         return root.toString(cql);
+    }
+
+    private void warnIfFilterIsATree()
+    {
+        if (!root.children.isEmpty())
+        {
+            noSpamLogger.warn("RowFilter is a tree, but we're using it as a list of top-levels expressions", new Exception("stacktrace of a potential misuse"));
+        }
     }
 
     public static Builder builder(boolean needsReconciliation)
@@ -615,6 +641,12 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         public String toString()
         {
             return toString(false);
+        }
+
+        public Stream<Expression> getExpressionsPreOrder()
+        {
+            return Stream.concat(expressions.stream(),
+                                 children.stream().flatMap(FilterElement::getExpressionsPreOrder));
         }
 
         public static class Builder
