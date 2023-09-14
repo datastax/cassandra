@@ -146,7 +146,8 @@ public class MergePostingList implements PostingList
         pq = null; // we're invalidating the pq's assumptions, so force a rebuild if we need it again
         if (nextPostingList == null)
             return PostingList.END_OF_STREAM;
-        return nextPostingList.nextPosting();
+        lastRowId = nextPostingList.nextPosting();
+        return lastRowId;
     }
 
     @Override
