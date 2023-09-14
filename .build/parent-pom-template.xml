@@ -1263,11 +1263,6 @@
         </exclusions>
       </dependency>
       <dependency>
-        <groupId>com.github.haifengl</groupId>
-        <artifactId>smile-nlp</artifactId>
-        <version>3.0.1</version>
-      </dependency>
-      <dependency>
         <groupId>ch.obermuhlner</groupId>
         <artifactId>big-math</artifactId>
         <version>2.3.0</version>
