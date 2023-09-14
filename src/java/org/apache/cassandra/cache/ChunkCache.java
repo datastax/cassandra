@@ -62,16 +62,20 @@ public class ChunkCache
     static class Key
     {
         final ChunkReader file;
-        final String path;
+        final String internedPath;
         final long position;
         final int hashCode;
 
-        public Key(ChunkReader file, long position)
+        /**
+         * Attention!  internedPath must be interned by caller -- intern() is too expensive
+         * to be done for every Key instantiation.
+         */
+        public Key(ChunkReader file, String internedPath, long position)
         {
             super();
             this.file = file;
             this.position = position;
-            this.path = file.channel().filePath().intern();
+            this.internedPath = internedPath;
             hashCode = hashCodeInternal();
         }
 
@@ -84,8 +88,7 @@ public class ChunkCache
         {
             final int prime = 31;
             int result = 1;
-            result = prime * result + path.hashCode();
-            result = prime * result + file.getClass().hashCode();
+            result = prime * result + internedPath.hashCode();
             result = prime * result + Long.hashCode(position);
             return result;
         }
@@ -100,8 +103,7 @@ public class ChunkCache
 
             Key other = (Key) obj;
             return (position == other.position)
-                    && file.getClass() == other.file.getClass()
-                    && path == other.path; // == is okay b/c we explicitly intern
+                   && internedPath == other.internedPath; // == is okay b/c we explicitly intern
         }
     }
 
@@ -201,7 +203,7 @@ public class ChunkCache
 
     public void invalidateFile(String fileName)
     {
-        cache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> x.path.equals(fileName)));
+        cache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> x.internedPath.equals(fileName)));
     }
 
     @VisibleForTesting
@@ -229,11 +231,13 @@ public class ChunkCache
     class CachingRebufferer implements Rebufferer, RebuffererFactory
     {
         private final ChunkReader source;
+        private final String internedPath;
         final long alignmentMask;
 
         public CachingRebufferer(ChunkReader file)
         {
             source = file;
+            internedPath = source.channel().filePath().intern();
             int chunkSize = file.chunkSize();
             assert Integer.bitCount(chunkSize) == 1 : String.format("%d must be a power of two", chunkSize);
             alignmentMask = -chunkSize;
@@ -247,7 +251,7 @@ public class ChunkCache
             {
                 long pageAlignedPos = position & alignmentMask;
                 Buffer buf;
-                Key key = new Key(source, pageAlignedPos);
+                Key key = new Key(source, internedPath, pageAlignedPos);
                 while (true)
                 {
                     buf = cache.get(key).reference();
@@ -282,7 +286,7 @@ public class ChunkCache
         public void invalidateIfCached(long position)
         {
             long pageAlignedPos = position & alignmentMask;
-            cache.invalidate(new Key(source, pageAlignedPos));
+            cache.invalidate(new Key(source, internedPath, pageAlignedPos));
         }
 
         @Override
@@ -353,6 +357,6 @@ public class ChunkCache
      */
     @VisibleForTesting
     public int sizeOfFile(String filePath) {
-        return (int) cache.asMap().keySet().stream().filter(x -> x.path.equals(filePath)).count();
+        return (int) cache.asMap().keySet().stream().filter(x -> x.internedPath.equals(filePath)).count();
     }
 }
