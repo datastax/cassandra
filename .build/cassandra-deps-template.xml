@@ -381,11 +381,6 @@
       <artifactId>jvector</artifactId>
     </dependency>
     <dependency>
-      <groupId>com.github.haifengl</groupId>
-      <artifactId>smile-nlp</artifactId>
-      <version>3.0.1</version>
-    </dependency>
-    <dependency>
       <groupId>com.vdurmont</groupId>
       <artifactId>semver4j</artifactId>
     </dependency>
