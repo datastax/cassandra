@@ -70,7 +70,7 @@ public class ChunkCache
          * Attention!  internedPath must be interned by caller -- intern() is too expensive
          * to be done for every Key instantiation.
          */
-        public Key(ChunkReader file, String internedPath, long position)
+        private Key(ChunkReader file, String internedPath, long position)
         {
             super();
             this.file = file;
@@ -201,9 +201,10 @@ public class ChunkCache
         return instance.wrapper.apply(file);
     }
 
-    public void invalidateFile(String fileName)
+    public void invalidateFile(String filePath)
     {
-        cache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> x.internedPath.equals(fileName)));
+        var internedPath = filePath.intern();
+        cache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> x.internedPath == internedPath));
     }
 
     @VisibleForTesting
@@ -357,6 +358,7 @@ public class ChunkCache
      */
     @VisibleForTesting
     public int sizeOfFile(String filePath) {
-        return (int) cache.asMap().keySet().stream().filter(x -> x.internedPath.equals(filePath)).count();
+        var internedPath = filePath.intern();
+        return (int) cache.asMap().keySet().stream().filter(x -> x.internedPath == internedPath).count();
     }
 }
