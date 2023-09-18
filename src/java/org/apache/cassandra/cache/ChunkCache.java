@@ -90,6 +90,7 @@ public class ChunkCache
             int result = 1;
             result = prime * result + internedPath.hashCode();
             result = prime * result + Long.hashCode(position);
+            result = prime * result + Integer.hashCode(file.chunkSize());
             return result;
         }
 
@@ -103,7 +104,8 @@ public class ChunkCache
 
             Key other = (Key) obj;
             return (position == other.position)
-                   && internedPath == other.internedPath; // == is okay b/c we explicitly intern
+                   && internedPath == other.internedPath // == is okay b/c we explicitly intern
+                   && file.chunkSize() == other.file.chunkSize(); // TODO we should not allow different chunk sizes
         }
     }
 
