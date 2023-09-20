@@ -27,6 +27,9 @@ import java.util.stream.IntStream;
 
 import javax.annotation.concurrent.NotThreadSafe;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -43,6 +46,8 @@ import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
 public class CassandraOnDiskHnsw implements AutoCloseable
 {
+    private static final Logger logger = LoggerFactory.getLogger(CassandraOnDiskHnsw.class);
+
     private final Function<QueryContext, VectorsWithCache> vectorsSupplier;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final OnDiskHnswGraph hnsw;
@@ -99,6 +104,7 @@ public class CassandraOnDiskHnsw implements AutoCloseable
                                              view,
                                              ordinalsMap.ignoringDeleted(acceptBits),
                                              vistLimit);
+            logger.debug("Visited {} nodes in graph", queue.visitedCount());
             return annRowIdsToPostings(queue);
         }
         catch (IOException e)

@@ -183,7 +183,7 @@ public class VectorMemtableIndex implements MemtableIndex
                 return RangeIterator.emptyKeys();
 
             int bruteForceRows = getMaxBruteForceRows(limit, indexContext.getIndexWriterConfig().getMaximumNodeConnections(), graph.size());
-            logger.debug("SAI materialized {} rows; max brute force rows is {} for memtable index with {} nodes of degree {}, LIMIT {}",
+            logger.debug("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes of degree {}, LIMIT {}",
                          resultKeys.size(), bruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
             if (resultKeys.size() < max(limit, bruteForceRows))
                 return new ReorderingRangeIterator(new PriorityQueue<>(resultKeys));
@@ -214,6 +214,8 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         int maxBruteForceRows = getMaxBruteForceRows(limit, indexContext.getIndexWriterConfig().getMaximumNodeConnections(), graph.size());
+        logger.debug("SAI materialized {} rows; max brute force rows is {} for memtable index with {} nodes of degree {}, LIMIT {}",
+                     results.size(), maxBruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
         if (results.size() <= maxBruteForceRows)
         {
             if (results.isEmpty())
