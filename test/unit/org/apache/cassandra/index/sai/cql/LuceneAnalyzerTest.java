@@ -75,6 +75,31 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
+    public void testCreateIndexWithQueryAnalyzerAndNoIndexAnalyzerFails() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, c1 text)");
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(c1) USING 'StorageAttachedIndex' WITH OPTIONS = " +
+                    "{'query_analyzer': 'whitespace'}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasRootCauseMessage("Cannot specify query_analyzer without an index_analyzer option or any combination of " +
+                             "case_sensitive, normalize, or ascii options. options={query_analyzer=whitespace, target=c1}");;
+    }
+
+    @Test
+    public void testCreateIndexWithNormalizersWorks() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, c1 text, c2 text, c3 text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(c1) USING 'StorageAttachedIndex' WITH OPTIONS = " +
+                    "{'query_analyzer': 'whitespace', 'case_sensitive': false}");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(c2) USING 'StorageAttachedIndex' WITH OPTIONS = " +
+                    "{'query_analyzer': 'whitespace', 'normalize': true}");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(c3) USING 'StorageAttachedIndex' WITH OPTIONS = " +
+                    "{'query_analyzer': 'whitespace', 'ascii': true}");
+    }
+
+    @Test
     public void testStandardAnalyzerWithFullConfig() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
