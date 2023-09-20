@@ -80,11 +80,12 @@ public class LuceneAnalyzerTest extends SAITester
         UntypedResultSet resultSet = execute("SELECT id FROM %s WHERE val : 'QUERY'");
         assertRows(resultSet, row(1), row(2), row(4));
 
-        // add whitespace in front of query and since it isn't filtered, we get no results
+        // add whitespace in front of query term and since it isn't tokenized by whitespace, we get no results
         resultSet = execute("SELECT id FROM %s WHERE val : ' query'");
         assertRows(resultSet);
 
-        // similarly, phrases do not match because index is analyzed with a different analyzer
+        // similarly, phrases do not match because index tokenized by whitespace (among other things) but the query
+        // is not
         resultSet = execute("SELECT id FROM %s WHERE val : 'the query'");
         assertRows(resultSet);
     }
