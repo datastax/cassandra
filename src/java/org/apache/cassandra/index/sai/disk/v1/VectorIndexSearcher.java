@@ -45,6 +45,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.SparseFixedBitSet;
 
@@ -136,8 +137,10 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
             // if num of matches are not bigger than limit, skip ANN
             var nRows = maxSSTableRowId - minSSTableRowId + 1;
             int maxBruteForceRows = Math.min(globalBruteForceRows, getMaxBruteForceRows(limit));
-            logger.debug("Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes of degree {}, LIMIT {}",
+            logger.trace("Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes of degree {}, LIMIT {}",
                          nRows, maxBruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
+            Tracing.trace("Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes of degree {}, LIMIT {}",
+                          nRows, maxBruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
             if (nRows <= maxBruteForceRows)
             {
                 IntArrayList postings = new IntArrayList(Math.toIntExact(nRows), -1);
@@ -234,8 +237,10 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
                     }
                 }
             }
-            logger.debug("SAI materialized {} rows; max brute force rows is {} for sstable index with {} nodes of degree {}, LIMIT {}",
+            logger.trace("SAI materialized {} rows; max brute force rows is {} for sstable index with {} nodes of degree {}, LIMIT {}",
                          n, maxBruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
+            Tracing.trace("SAI materialized {} rows; max brute force rows is {} for sstable index with {} nodes of degree {}, LIMIT {}",
+                          n, maxBruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
 
             // if we have a small number of results then let TopK processor do exact NN computation
             if (n < bruteForceRows.length)

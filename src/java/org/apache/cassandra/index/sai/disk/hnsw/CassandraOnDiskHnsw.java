@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.ReorderingPostingList;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.util.Bits;
@@ -104,7 +105,8 @@ public class CassandraOnDiskHnsw implements AutoCloseable
                                              view,
                                              ordinalsMap.ignoringDeleted(acceptBits),
                                              vistLimit);
-            logger.debug("Visited {} nodes in graph", queue.visitedCount());
+            logger.trace("Visited {} nodes in graph", queue.visitedCount());
+            Tracing.trace("Visited {} nodes in graph", queue.visitedCount());
             return annRowIdsToPostings(queue);
         }
         catch (IOException e)
