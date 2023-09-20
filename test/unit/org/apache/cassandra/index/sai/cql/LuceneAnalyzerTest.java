@@ -50,10 +50,43 @@ public class LuceneAnalyzerTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'the query')");
 
-        // TODO: randomize flushing... not sure how
         flush();
 
         assertEquals(0, execute("SELECT * FROM %s WHERE val : 'query'").size());
+    }
+
+    @Test
+    public void testQueryAnalyzerBuiltIn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': 'standard', 'query_analyzer': 'lowercase'};");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES (1, 'the query')");
+        execute("INSERT INTO %s (id, val) VALUES (2, 'my test Query')");
+        execute("INSERT INTO %s (id, val) VALUES (3, 'The Big Dog')");
+
+        // Some in sstable and some in memory
+        flush();
+
+        execute("INSERT INTO %s (id, val) VALUES (4, 'another QUERY')");
+        execute("INSERT INTO %s (id, val) VALUES (5, 'the fifth insert')");
+        execute("INSERT INTO %s (id, val) VALUES (6, 'MY LAST ENTRY')");
+
+        // Shows that the query term is lowercased to match all 'query' terms in the index
+        UntypedResultSet resultSet = execute("SELECT id FROM %s WHERE val : 'QUERY'");
+        assertRows(resultSet, row(1), row(2), row(4));
+
+        // add whitespace in front of query and since it isn't filtered, we get no results
+        resultSet = execute("SELECT id FROM %s WHERE val : ' query'");
+        assertRows(resultSet);
+
+        // similarly, phrases do not match because index is analyzed with a different analyzer
+        resultSet = execute("SELECT id FROM %s WHERE val : 'the query'");
+        assertRows(resultSet);
     }
 
     @Test
