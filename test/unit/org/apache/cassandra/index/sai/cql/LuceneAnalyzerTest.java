@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.cql;
 import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.InvalidQueryException;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.analyzer.filter.BuiltInAnalyzers;
@@ -53,6 +54,24 @@ public class LuceneAnalyzerTest extends SAITester
         flush();
 
         assertEquals(0, execute("SELECT * FROM %s WHERE val : 'query'").size());
+    }
+
+    @Test
+    public void testDifferentIndexAndQueryAnalyzersWhenAppliedDuringPostFiltering() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, c1 text)");
+        // This test verifies a bug fix where the query analyzer was incorrectly used in place of the index analyzer.
+        // The analyzers are selected in conjunction with the column values and the query. Specifically,
+        // the index analyzer includes a lowercase filter but the query analyzer does not.
+        createIndex("CREATE CUSTOM INDEX ON %s(c1) USING 'StorageAttachedIndex' WITH OPTIONS =" +
+                    "{'index_analyzer': 'standard', 'query_analyzer': 'whitespace'}");
+        waitForIndexQueryable();
+
+        // The standard analyzer maps this to just one output 'the', but the query analyzer would map this to 'THE'
+        execute("INSERT INTO %s (pk, c1) VALUES (?, ?)", 1, "THE");
+
+        UntypedResultSet resultSet = execute("SELECT pk FROM %s WHERE c1 : 'the'");
+        assertRows(resultSet, row(1));
     }
 
     @Test
