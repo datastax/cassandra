@@ -88,6 +88,11 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
         resetInternal(input);
     }
 
+    public static boolean hasQueryAnalyzer(Map<String, String> options)
+    {
+       return options.containsKey(LuceneAnalyzer.QUERY_ANALYZER);
+    }
+
     public interface AnalyzerFactory extends Closeable
     {
         AbstractAnalyzer create();
@@ -95,6 +100,12 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
         default void close()
         {
         }
+    }
+
+    public static AnalyzerFactory fromOptionsQueryAnalyzer(final AbstractType<?> type, final Map<String, String> options)
+    {
+        final String json = options.get(LuceneAnalyzer.QUERY_ANALYZER);
+        return toAnalyzerFactory(json, type, options);
     }
 
     public static AnalyzerFactory toAnalyzerFactory(String json, final AbstractType<?> type, final Map<String, String> options) //throws Exception
