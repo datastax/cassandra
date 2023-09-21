@@ -51,7 +51,7 @@ public interface PrimaryKeyMap extends Closeable
          * Returns the SSTableId for the SSTable this {@link PrimaryKeyMap.Factory} is associated with
          * @return
          */
-        SSTableId getSSTableId();
+        SSTableId<?> getSSTableId();
 
         @Override
         default void close() throws IOException
@@ -95,7 +95,7 @@ public interface PrimaryKeyMap extends Closeable
      * Returns the SSTableId for the SSTable this {@link PrimaryKeyMap} is associated with
      * @return
      */
-    SSTableId getSSTableId();
+    SSTableId<?> getSSTableId();
 
     @Override
     default void close() throws IOException

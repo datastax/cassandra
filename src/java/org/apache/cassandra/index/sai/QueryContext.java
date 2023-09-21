@@ -94,7 +94,7 @@ public class QueryContext
      * if the same key has different scored from different sstables, we don't know which is latest, reset it to -1 and compute in-flight
      */
     private final ObjectFloatMap<PrimaryKey> scorePerKey = new ObjectFloatHashMap<>();
-    private final Map<SSTableId, LongFloatHashMap> sstableScoreMapMap = new HashMap<>();
+    private final Map<SSTableId<?>, LongFloatHashMap> sstableScoreMapMap = new HashMap<>();
 
     @VisibleForTesting
     public QueryContext()
@@ -257,7 +257,7 @@ public class QueryContext
         return new RowIdScoreRecorder(segmentRowIdOffset, sstableScoreMap);
     }
 
-    public ScoreStoreProxy getScoreStoreProxyForSSTable(SSTableId sstableId)
+    public ScoreStoreProxy getScoreStoreProxyForSSTable(SSTableId<?> sstableId)
     {
         return ScoreStoreProxy.create(this, sstableScoreMapMap.get(sstableId));
     }

@@ -62,7 +62,7 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
 
     private final CassandraOnDiskHnsw graph;
     private final PrimaryKey.Factory keyFactory;
-    private final SSTableId sstableId;
+    private final SSTableId<?> sstableId;
     private final VectorType<float[]> type;
     private int globalBruteForceRows; // not final so test can inject its own setting
     private final ThreadLocal<SparseFixedBitSet> cachedBitSets;
