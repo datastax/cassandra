@@ -18,23 +18,27 @@
 
 package org.apache.cassandra.index.sai;
 
-import javax.annotation.Nullable;
-
 import com.carrotsearch.hppc.LongFloatHashMap;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
-class ScoreCacheMapperImpl implements ScoreCacheMapper {
+class ScoreStoreProxyImpl implements ScoreStoreProxy
+{
     private final QueryContext queryContext;
-    private final LongFloatHashMap cache;
+    private final LongFloatHashMap scoreMap;
 
-    ScoreCacheMapperImpl(QueryContext queryContext, @Nullable LongFloatHashMap cache) {
-        assert cache != null;
+    ScoreStoreProxyImpl(QueryContext queryContext, LongFloatHashMap scoreMap) {
+        assert scoreMap != null;
         this.queryContext = queryContext;
-        this.cache = cache;
+        this.scoreMap = scoreMap;
     }
 
     @Override
-    public void mapSSTableRowIdToPrimaryKey(long sstableRowId, PrimaryKey pk) {
-        queryContext.recordScore(pk, cache.getOrDefault(sstableRowId, -1));
+    public void mapStoredScoreForRowIdToPrimaryKey(long sstableRowId, PrimaryKey pk) {
+        float score = scoreMap.getOrDefault(sstableRowId, -1);
+        // The score should always be present in the cache because we just put it there in the previous iterator.
+        // A better solution would be to pass the score through the iterator's as metadata associated with a row.
+        // However, we cannot do that yet, so we use a map to store and retrieve the score.
+        assert score >= 0;
+        queryContext.recordScore(pk, score);
     }
 }

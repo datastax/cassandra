@@ -23,9 +23,9 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.io.sstable.SSTableId;
 
 /**
- * A class to cache the scores for an SSTable.
+ * A class that records a row's score in the QueryContext's score cache.
  */
-public class SSTableRowIdToScoreCache
+public class RowIdScoreRecorder
 {
     // A shared reference to the scores map for a single SSTable. The QueryContext stores all the relevant
     // maps. We copy the reference here to avoid a lookup on every row.
@@ -33,18 +33,18 @@ public class SSTableRowIdToScoreCache
     private final long segmentRowIdOffset;
 
     /**
-     * @param sstableId - the SSTable id
+     * @param sstableId - the SSTableId
      * @param context - the QueryContext for the query
      * @param segmentRowIdOffset - the offset to add to the rowId to get the SS Table row id
      */
-    public SSTableRowIdToScoreCache(SSTableId sstableId, QueryContext context, long segmentRowIdOffset)
+    public RowIdScoreRecorder(SSTableId<?> sstableId, QueryContext context, long segmentRowIdOffset)
     {
         // Get this SSTable's scores map from the QueryContext
         this.sstableRowIdToScoreMap = context.getOrCreateScoreCacheForSSTable(sstableId);
         this.segmentRowIdOffset = segmentRowIdOffset;
     }
 
-    public void cacheScoreForRowId(long rowId, float score)
+    public void record(long rowId, float score)
     {
         long sstableRowId = rowId + segmentRowIdOffset;
         float previousScore = sstableRowIdToScoreMap.put(sstableRowId, score);

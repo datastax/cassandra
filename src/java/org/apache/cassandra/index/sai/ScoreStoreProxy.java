@@ -25,12 +25,20 @@ import com.carrotsearch.hppc.LongFloatHashMap;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 @NotThreadSafe
-public interface ScoreCacheMapper
+public interface ScoreStoreProxy
 {
 
-    static ScoreCacheMapper create(QueryContext queryContext, @Nullable LongFloatHashMap cache)
+    ScoreStoreProxy EMPTY = new ScoreStoreProxy() {};
+
+    /**
+     * @param queryContext the query's context, which is used to record the store by primary key
+     * @param scoreMap the map from row id to score. Null if the score map is not available, e.g. the query does not
+     *                 track scores.
+     * @return a {@link ScoreStoreProxy} instance
+     */
+    static ScoreStoreProxy create(QueryContext queryContext, @Nullable LongFloatHashMap scoreMap)
     {
-        return cache == null ? new ScoreCacheMapper() {} : new ScoreCacheMapperImpl(queryContext, cache);
+        return scoreMap == null ? EMPTY : new ScoreStoreProxyImpl(queryContext, scoreMap);
     }
 
     /**
@@ -39,5 +47,5 @@ public interface ScoreCacheMapper
      * @param sstableRowId - the row's sstable row id
      * @param pk - the row's primary key
      */
-    default void mapSSTableRowIdToPrimaryKey(long sstableRowId, PrimaryKey pk) {}
+    default void mapStoredScoreForRowIdToPrimaryKey(long sstableRowId, PrimaryKey pk) {}
 }

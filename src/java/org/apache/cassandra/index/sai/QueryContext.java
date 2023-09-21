@@ -255,9 +255,9 @@ public class QueryContext
         return sstableScoreMapMap.computeIfAbsent(sstableId, __ -> new LongFloatHashMap());
     }
 
-    public ScoreCacheMapper getScoreCacheMapperForSSTable(SSTableId sstableId)
+    public ScoreStoreProxy getScoreStoreProxyForSSTable(SSTableId sstableId)
     {
-        return ScoreCacheMapper.create(this, sstableScoreMapMap.get(sstableId));
+        return ScoreStoreProxy.create(this, sstableScoreMapMap.get(sstableId));
     }
 
     public void recordScore(PrimaryKey primaryKey, float score)
