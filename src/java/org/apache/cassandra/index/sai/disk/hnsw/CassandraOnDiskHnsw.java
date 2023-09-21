@@ -27,6 +27,9 @@ import java.util.stream.IntStream;
 
 import javax.annotation.concurrent.NotThreadSafe;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -35,6 +38,7 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.ReorderingPostingList;
 import org.apache.cassandra.index.sai.utils.SSTableRowIdToScoreCache;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.util.Bits;
@@ -44,6 +48,8 @@ import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
 public class CassandraOnDiskHnsw implements AutoCloseable
 {
+    private static final Logger logger = LoggerFactory.getLogger(CassandraOnDiskHnsw.class);
+
     private final Function<QueryContext, VectorsWithCache> vectorsSupplier;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final OnDiskHnswGraph hnsw;
@@ -101,6 +107,8 @@ public class CassandraOnDiskHnsw implements AutoCloseable
                                              view,
                                              ordinalsMap.ignoringDeleted(acceptBits),
                                              vistLimit);
+            logger.trace("Visited {} nodes in graph", queue.visitedCount());
+            Tracing.trace("Visited {} nodes in graph", queue.visitedCount());
             return annRowIdsToPostings(queue, sstableRowIdToScoreCache);
         }
         catch (IOException e)

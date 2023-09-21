@@ -51,12 +51,19 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.lucene.util.Bits;
 
+import static java.lang.Math.min;
+import static java.lang.Math.pow;
 import static org.apache.cassandra.index.sai.disk.hnsw.CassandraOnHeapHnsw.InvalidVectorBehavior.FAIL;
+
+import static java.lang.Math.log;
+import static java.lang.Math.max;
+import static java.lang.Math.sqrt;
 
 public class VectorMemtableIndex implements MemtableIndex
 {
@@ -176,8 +183,12 @@ public class VectorMemtableIndex implements MemtableIndex
             if (resultKeys.isEmpty())
                 return RangeIterator.emptyKeys();
 
-            int bruteForceRows = (int)(indexContext.getIndexWriterConfig().getMaximumNodeConnections() * Math.log(graph.size()));
-            if (resultKeys.size() < Math.max(limit, bruteForceRows))
+            int bruteForceRows = getMaxBruteForceRows(limit, indexContext.getIndexWriterConfig().getMaximumNodeConnections(), graph.size());
+            logger.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes of degree {}, LIMIT {}",
+                         resultKeys.size(), bruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
+            Tracing.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes of degree {}, LIMIT {}",
+                          resultKeys.size(), bruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
+            if (resultKeys.size() < max(limit, bruteForceRows))
                 return new ReorderingRangeIterator(new PriorityQueue<>(resultKeys));
             else
                 bits = new KeyRangeFilteringBits(keyRange, queryContext.bitsetForShadowedPrimaryKeys(graph));
@@ -206,7 +217,11 @@ public class VectorMemtableIndex implements MemtableIndex
                 results.add(key);
         }
 
-        int maxBruteForceRows = Math.max(limit, (int)(indexContext.getIndexWriterConfig().getMaximumNodeConnections() * Math.log(graph.size())));
+        int maxBruteForceRows = getMaxBruteForceRows(limit, indexContext.getIndexWriterConfig().getMaximumNodeConnections(), graph.size());
+        logger.trace("SAI materialized {} rows; max brute force rows is {} for memtable index with {} nodes of degree {}, LIMIT {}",
+                     results.size(), maxBruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
+        Tracing.trace("SAI materialized {} rows; max brute force rows is {} for memtable index with {} nodes of degree {}, LIMIT {}",
+                      results.size(), maxBruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
         if (results.size() <= maxBruteForceRows)
         {
             if (results.isEmpty())
@@ -221,6 +236,17 @@ public class VectorMemtableIndex implements MemtableIndex
             return RangeIterator.emptyKeys();
         context.recordScores(keyQueue);
         return new ReorderingRangeIterator(keyQueue);
+    }
+
+    public static int getMaxBruteForceRows(int limit, int M, int graphSize)
+    {
+        // constants are computed by Code Interpreter based on observed comparison counts in tests
+        // https://chat.openai.com/share/29a25377-786f-4690-b146-12acb6acb75b
+        int expectedNodesVisited = min(graphSize, (int) (0.26 * log(graphSize) * M * pow(limit, 0.7933)));
+        int expectedComparisons = M * expectedNodesVisited;
+        // 0.8 because that's approximately our stdev -- we'd rather underestimate, since
+        // that results in doing more actual searches
+        return (int) max(limit, 0.8 * expectedComparisons);
     }
 
     @Override
