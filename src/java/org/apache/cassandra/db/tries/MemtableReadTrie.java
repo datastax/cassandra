@@ -538,12 +538,12 @@ public class MemtableReadTrie<T> extends Trie<T>
      * (i.e. it is positioned on a leaf node), it goes one level up the backtracking chain, where we are guaranteed to
      * have a remaining child to advance to. When there's nothing to backtrack to, the trie is exhausted.
      */
-    class MemtableCursor extends CursorBacktrackingState implements Cursor<T>
+    abstract class MemtableCursor extends CursorBacktrackingState implements Cursor<T>
     {
         private int currentNode;
         private int incomingTransition;
         private T content;
-        private int depth = -1;
+        int depth = -1;
 
         MemtableCursor()
         {
@@ -625,7 +625,7 @@ public class MemtableReadTrie<T> extends Trie<T>
                 case SPLIT_OFFSET:
                     return descendInSplitSublevel(node, SPLIT_START_LEVEL_LIMIT, 0, SPLIT_LEVEL_SHIFT * 2);
                 case SPARSE_OFFSET:
-                    return nextValidSparseTransition(node, getUnsignedShort(node + SPARSE_ORDER_OFFSET));
+                    return nextValidSparseTransition(node, prepareOrderWord(node));
                 default:
                     return getChainTransition(node);
             }
@@ -658,7 +658,91 @@ public class MemtableReadTrie<T> extends Trie<T>
          * @param shift This level's bit shift (6 for start, 3 for mid and 0 for tail).
          * @return the depth reached after descending.
          */
-        private int descendInSplitSublevel(int node, int limit, int collected, int shift)
+        abstract int descendInSplitSublevel(int node, int limit, int collected, int shift);
+
+        /**
+         * Backtrack to a split sub-level. The level is identified by the lowest non-0 bits in trans.
+         */
+        abstract int nextValidSplitTransition(int node, int trans);
+
+        private int nextValidSparseTransition(int node, int data)
+        {
+            UnsafeBuffer chunk = getChunk(node);
+            int inChunkNode = inChunkPointer(node);
+
+            // Peel off the next index.
+            int index = data % SPARSE_CHILD_COUNT;
+            data = data / SPARSE_CHILD_COUNT;
+
+            // If there are remaining transitions, add backtracking entry.
+            if (data != exhaustedOrderWord())
+                addBacktrack(node, data, depth);
+
+            // Follow the transition.
+            int child = chunk.getInt(inChunkNode + SPARSE_CHILDREN_OFFSET + index * 4);
+            int transition = chunk.getByte(inChunkNode + SPARSE_BYTES_OFFSET + index) & 0xFF;
+            return descendInto(child, transition);
+        }
+
+        /**
+         * Prepare the sparse node order word for iteration. For forward iteration, this means just reading it.
+         * For reverse, we also invert the data so that the peeling code above still works.
+         */
+        abstract int prepareOrderWord(int node);
+
+        /**
+         * Returns the state which marks the exhaustion of the order word.
+         */
+        abstract int exhaustedOrderWord();
+
+        private int getChainTransition(int node)
+        {
+            // No backtracking needed.
+            UnsafeBuffer chunk = getChunk(node);
+            int inChunkNode = inChunkPointer(node);
+            int transition = chunk.getByte(inChunkNode) & 0xFF;
+            int next = node + 1;
+            if (offset(next) <= CHAIN_MAX_OFFSET)
+                return descendIntoChain(next, transition);
+            else
+                return descendInto(chunk.getInt(inChunkNode + 1), transition);
+        }
+
+        int descendInto(int child, int transition)
+        {
+            ++depth;
+            incomingTransition = transition;
+            content = getNodeContent(child);
+            currentNode = followContentTransition(child);
+            return depth;
+        }
+
+        int descendIntoChain(int child, int transition)
+        {
+            ++depth;
+            incomingTransition = transition;
+            content = null;
+            currentNode = child;
+            return depth;
+        }
+    }
+
+    class MemtableCursorForward extends MemtableCursor
+    {
+        /**
+         * Descend into the sub-levels of a split node. Advances to the first child and creates backtracking entries
+         * for the following ones. We use the bits of trans (lowest non-zero ones) to identify which sub-level an
+         * entry refers to.
+         *
+         * @param node The node or block id, must have offset SPLIT_OFFSET.
+         * @param limit The transition limit for the current sub-level (4 for the start, 8 for the others).
+         * @param collected The transition bits collected from the parent chain (e.g. 0x40 after following 1 on the top
+         *                  sub-level).
+         * @param shift This level's bit shift (6 for start, 3 for mid and 0 for tail).
+         * @return the depth reached after descending.
+         */
+        @Override
+        int descendInSplitSublevel(int node, int limit, int collected, int shift)
         {
             while (true)
             {
@@ -694,7 +778,8 @@ public class MemtableReadTrie<T> extends Trie<T>
         /**
          * Backtrack to a split sub-level. The level is identified by the lowest non-0 bits in trans.
          */
-        private int nextValidSplitTransition(int node, int trans)
+        @Override
+        int nextValidSplitTransition(int node, int trans)
         {
             assert trans >= 0 && trans <= 0xFF;
             int childIndex = splitNodeChildIndex(trans);
@@ -751,54 +836,182 @@ public class MemtableReadTrie<T> extends Trie<T>
                 addBacktrack(node, collected | (nextChildIndex << shift), depth);
         }
 
-        private int nextValidSparseTransition(int node, int data)
+        @Override
+        int prepareOrderWord(int node)
         {
-            UnsafeBuffer chunk = getChunk(node);
-            int inChunkNode = inChunkPointer(node);
-
-            // Peel off the next index.
-            int index = data % SPARSE_CHILD_COUNT;
-            data = data / SPARSE_CHILD_COUNT;
-
-            // If there are remaining transitions, add backtracking entry.
-            if (data > 0)
-                addBacktrack(node, data, depth);
-
-            // Follow the transition.
-            int child = chunk.getInt(inChunkNode + SPARSE_CHILDREN_OFFSET + index * 4);
-            int transition = chunk.getByte(inChunkNode + SPARSE_BYTES_OFFSET + index) & 0xFF;
-            return descendInto(child, transition);
+            return getUnsignedShort(node + SPARSE_ORDER_OFFSET);
         }
 
-        private int getChainTransition(int node)
+        @Override
+        int exhaustedOrderWord()
         {
-            // No backtracking needed.
-            UnsafeBuffer chunk = getChunk(node);
-            int inChunkNode = inChunkPointer(node);
-            int transition = chunk.getByte(inChunkNode) & 0xFF;
-            int next = node + 1;
-            if (offset(next) <= CHAIN_MAX_OFFSET)
-                return descendIntoChain(next, transition);
-            else
-                return descendInto(chunk.getInt(inChunkNode + 1), transition);
+            return 0;
+        }
+    }
+
+    /*
+     * Cursor implementation.
+     *
+     * MemtableTrie cursors maintain their backtracking state in CursorBacktrackingState where they store
+     * information about the node to backtrack to and the transitions still left to take or attempt.
+     *
+     * This information is different for the different types of node:
+     * - for leaf and chain no backtracking is saved (because we know there are no further transitions)
+     * - for sparse we store the remainder of the order word
+     * - for split we store one entry per sub-level of the 2-3-3 split
+     *
+     * When the cursor is asked to advance it first checks the current node for children, and if there aren't any
+     * (i.e. it is positioned on a leaf node), it goes one level up the backtracking chain, where we are guaranteed to
+     * have a remaining child to advance to. When there's nothing to backtrack to, the trie is exhausted.
+     */
+    class MemtableCursorReverse extends MemtableCursor
+    {
+        /**
+         * Descend into the sub-levels of a split node. Advances to the first child and creates backtracking entries
+         * for the following ones. We use the bits of trans (lowest non-zero ones) to identify which sub-level an
+         * entry refers to.
+         *
+         * @param node The node or block id, must have offset SPLIT_OFFSET.
+         * @param limit The transition limit for the current sub-level (4 for the start, 8 for the others).
+         * @param collected The transition bits collected from the parent chain (e.g. 0x40 after following 1 on the top
+         *                  sub-level).
+         * @param shift This level's bit shift (6 for start, 3 for mid and 0 for tail).
+         * @return the depth reached after descending.
+         */
+        @Override
+        int descendInSplitSublevel(int node, int limit, int collected, int shift)
+        {
+            while (true)
+            {
+                assert offset(node) == SPLIT_OFFSET;
+                int childIndex;
+                int child = NONE;
+                // find the first non-null child
+                for (childIndex = limit - 1; childIndex >= 0; --childIndex)
+                {
+                    child = getSplitBlockPointer(node, childIndex, limit);
+                    if (!isNull(child))
+                        break;
+                }
+                // there must be at least one child
+                assert childIndex >= 0 && child != NONE;
+
+                // look for any more valid transitions and add backtracking if found
+                maybeAddSplitBacktrack(node, childIndex, limit, collected, shift);
+
+                // add the bits just found
+                collected |= childIndex << shift;
+                // descend to next sub-level or child
+                if (shift == 0)
+                    return descendInto(child, collected);
+                // continue with next sublevel; same as
+                // return descendInSplitSublevel(child + SPLIT_OFFSET, 8, collected, shift - 3)
+                node = child;
+                limit = SPLIT_OTHER_LEVEL_LIMIT;
+                shift -= SPLIT_LEVEL_SHIFT;
+            }
         }
 
-        private int descendInto(int child, int transition)
+        /**
+         * Backtrack to a split sub-level. The level is identified by the lowest non-0 bits in trans.
+         */
+        @Override
+        int nextValidSplitTransition(int node, int trans)
         {
-            ++depth;
-            incomingTransition = transition;
-            content = getNodeContent(child);
-            currentNode = followContentTransition(child);
-            return depth;
+            assert trans >= 0 && trans <= 0xFF;
+            int childIndex = splitNodeChildIndex(trans);
+            if (childIndex < SPLIT_OTHER_LEVEL_LIMIT - 1)
+            {
+                maybeAddSplitBacktrack(node,
+                                       childIndex,
+                                       SPLIT_OTHER_LEVEL_LIMIT,
+                                       trans & -(1 << (SPLIT_LEVEL_SHIFT * 1)),
+                                       SPLIT_LEVEL_SHIFT * 0);
+                int child = getSplitBlockPointer(node, childIndex, SPLIT_OTHER_LEVEL_LIMIT);
+                return descendInto(child, trans);
+            }
+            int tailIndex = splitNodeTailIndex(trans);
+            if (tailIndex < SPLIT_OTHER_LEVEL_LIMIT - 1)
+            {
+                maybeAddSplitBacktrack(node,
+                                       tailIndex,
+                                       SPLIT_OTHER_LEVEL_LIMIT,
+                                       trans & -(1 << (SPLIT_LEVEL_SHIFT * 2)),
+                                       SPLIT_LEVEL_SHIFT * 1);
+                int tail = getSplitBlockPointer(node, tailIndex, SPLIT_OTHER_LEVEL_LIMIT);
+                return descendInSplitSublevel(tail,
+                                              SPLIT_OTHER_LEVEL_LIMIT,
+                                              trans & -(1 << SPLIT_LEVEL_SHIFT * 1),
+                                              SPLIT_LEVEL_SHIFT * 0);
+            }
+            int midIndex = splitNodeMidIndex(trans);
+            assert midIndex < SPLIT_START_LEVEL_LIMIT - 1;
+            maybeAddSplitBacktrack(node,
+                                   midIndex,
+                                   SPLIT_START_LEVEL_LIMIT,
+                                   0,
+                                   SPLIT_LEVEL_SHIFT * 2);
+            int mid = getSplitBlockPointer(node, midIndex, SPLIT_START_LEVEL_LIMIT);
+            return descendInSplitSublevel(mid,
+                                          SPLIT_OTHER_LEVEL_LIMIT,
+                                          trans & -(1 << SPLIT_LEVEL_SHIFT * 2),
+                                          SPLIT_LEVEL_SHIFT * 1);
         }
 
-        private int descendIntoChain(int child, int transition)
+        /**
+         * Look for any further non-null transitions on this sub-level and, if found, add a backtracking entry.
+         */
+        private void maybeAddSplitBacktrack(int node, int startAfter, int limit, int collected, int shift)
         {
-            ++depth;
-            incomingTransition = transition;
-            content = null;
-            currentNode = child;
-            return depth;
+            int nextChildIndex;
+            for (nextChildIndex = startAfter - 1; nextChildIndex >= 0; --nextChildIndex)
+            {
+                if (!isNull(getSplitBlockPointer(node, nextChildIndex, limit)))
+                    break;
+            }
+            if (nextChildIndex >= 0)
+            {
+                // The x + 1 << shift - 1 adjustment will put all 1s in all lower bits
+                addBacktrack(node, collected | ((((nextChildIndex + 1) << shift)) - 1), depth);
+            }
+        }
+
+        @Override
+        int prepareOrderWord(int node)
+        {
+            int fwdState = getUnsignedShort(node + SPARSE_ORDER_OFFSET);
+
+            // Produce an inverted state word.
+
+            // One subtlety is that in forward order we know we can terminate the iteration when the state becomes
+            // 0 because 0 cannot be the largest child (we enforce 10 order for the first two children and then can
+            // only insert other digits in the word, thus 0 is always preceded by a 1 (not necessarily immediately)
+            // in the order word) and thus we can't confuse a completed iteration with one that still has the child
+            // at 0 to present.
+            // In reverse order 0 can be the last child that needs to be iterated (e.g. for two children the order
+            // word is always 10, which is 01 inverted; if we treat it exactly as the forward iteration, we will
+            // only list child 1 because we will interpret the state 0 after peeling the first digit as a completed
+            // iteration). To know when to stop we must thus use a different marker - since we know 1 is never the
+            // last child to be iterated in reverse order (because it is preceded by a 0 in the reversed order
+            // word), we can use another 1 as the termination marker. The generated number may not fit a 16-bit word
+            // any more, but that does not matter as we don't need to store it.
+            // For example, the code below translates 120 to 1021, and to iterate we peel the lower order digits
+            // until the iteration state becomes just 1.
+
+            int revState = 1;   // 1 can't be the smallest child
+            while (fwdState != 0)
+            {
+                revState = revState * SPARSE_CHILD_COUNT + fwdState % SPARSE_CHILD_COUNT;
+                fwdState /= SPARSE_CHILD_COUNT;
+            }
+
+            return revState;
+        }
+
+        @Override
+        int exhaustedOrderWord()
+        {
+            return 1;
         }
     }
 
@@ -807,9 +1020,9 @@ public class MemtableReadTrie<T> extends Trie<T>
         return !isNullOrLeaf(node) && offset(node) <= CHAIN_MAX_OFFSET;
     }
 
-    public MemtableCursor cursor()
+    public MemtableCursor cursor(Direction direction)
     {
-        return new MemtableCursor();
+        return direction.isForward() ? new MemtableCursorForward() : new MemtableCursorReverse();
     }
 
     /*
@@ -848,7 +1061,7 @@ public class MemtableReadTrie<T> extends Trie<T>
     @Override
     public String dump(Function<T, String> contentToString)
     {
-        MemtableCursor source = cursor();
+        MemtableCursor source = cursor(Direction.FORWARD);
         class TypedNodesCursor implements Cursor<String>
         {
             @Override
