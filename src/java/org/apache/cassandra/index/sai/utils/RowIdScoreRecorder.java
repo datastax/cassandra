@@ -19,8 +19,6 @@
 package org.apache.cassandra.index.sai.utils;
 
 import com.carrotsearch.hppc.LongFloatHashMap;
-import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.io.sstable.SSTableId;
 
 /**
  * A class that records a row's score in the QueryContext's score cache.
@@ -29,25 +27,23 @@ public class RowIdScoreRecorder
 {
     // A shared reference to the scores map for a single SSTable. The QueryContext stores all the relevant
     // maps. We copy the reference here to avoid a lookup on every row.
-    private final LongFloatHashMap sstableRowIdToScoreMap;
+    private final LongFloatHashMap sstableRowIdScoreMap;
     private final long segmentRowIdOffset;
 
     /**
-     * @param sstableId - the SSTableId
-     * @param context - the QueryContext for the query
+     * @param sstableRowIdScoreMap - a map from sstable row id to score
      * @param segmentRowIdOffset - the offset to add to the rowId to get the SS Table row id
      */
-    public RowIdScoreRecorder(SSTableId<?> sstableId, QueryContext context, long segmentRowIdOffset)
+    public RowIdScoreRecorder(long segmentRowIdOffset, LongFloatHashMap sstableRowIdScoreMap)
     {
-        // Get this SSTable's scores map from the QueryContext
-        this.sstableRowIdToScoreMap = context.getOrCreateScoreCacheForSSTable(sstableId);
+        this.sstableRowIdScoreMap = sstableRowIdScoreMap;
         this.segmentRowIdOffset = segmentRowIdOffset;
     }
 
     public void record(long rowId, float score)
     {
         long sstableRowId = rowId + segmentRowIdOffset;
-        float previousScore = sstableRowIdToScoreMap.put(sstableRowId, score);
+        float previousScore = sstableRowIdScoreMap.put(sstableRowId, score);
         // Because SSTables are immutable, we should never have a rowId with a different score.
         // However, because of shadow primary keys, there is a chance that we'll store the score for the same row
         // twice.

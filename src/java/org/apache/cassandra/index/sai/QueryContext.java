@@ -42,6 +42,7 @@ import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnHeapHnsw;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.RowIdScoreRecorder;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.lucene.util.Bits;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
@@ -250,9 +251,10 @@ public class QueryContext
         }
     }
 
-    public LongFloatHashMap getOrCreateScoreCacheForSSTable(SSTableId sstableId)
+    public RowIdScoreRecorder getScoreRecorder(SSTableId<?> sstableId, long segmentRowIdOffset)
     {
-        return sstableScoreMapMap.computeIfAbsent(sstableId, __ -> new LongFloatHashMap());
+        LongFloatHashMap sstableScoreMap = sstableScoreMapMap.computeIfAbsent(sstableId, __ -> new LongFloatHashMap());
+        return new RowIdScoreRecorder(segmentRowIdOffset, sstableScoreMap);
     }
 
     public ScoreStoreProxy getScoreStoreProxyForSSTable(SSTableId sstableId)
