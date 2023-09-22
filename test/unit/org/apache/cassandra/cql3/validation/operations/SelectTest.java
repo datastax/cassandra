@@ -3596,4 +3596,12 @@ public class SelectTest extends CQLTester
 
         assertRows(execute("SELECT udt_data FROM " + KEYSPACE + ".t4"), row(userType("random", "I'm newb")));
     }
+
+    // ensure that we can create composite types larger than signed short
+    @Test
+    public void compositeValuePk() throws Throwable
+    {
+        createTable(KEYSPACE, "CREATE TABLE %s (a blob, b blob, PRIMARY KEY ((a, b)))");
+        execute("INSERT INTO %s (a, b) VALUES (?, ?)", ByteBuffer.allocate(Short.MAX_VALUE + 1), EMPTY_BYTE_BUFFER);
+    }
 }
