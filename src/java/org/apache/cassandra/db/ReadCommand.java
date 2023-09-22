@@ -36,7 +36,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.guardrails.DefaultGuardrail;
-import org.apache.cassandra.guardrails.Guardrail;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.guardrails.Threshold;
 import org.apache.cassandra.net.MessageFlag;
@@ -65,6 +64,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.SchemaProvider;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.sensors.read.TrackingRowIterator;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static com.google.common.collect.Iterables.any;
@@ -386,8 +386,9 @@ public abstract class ReadCommand extends AbstractReadQuery
             Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
         }
 
-        UnfilteredPartitionIterator iterator = (null == searcher) ? queryStorage(cfs, executionController)
+        UnfilteredPartitionIterator iterator = (null == searcher) ? Transformation.apply(queryStorage(cfs, executionController), new TrackingRowIterator())
                                                                   : searchStorage(searcher, executionController);
+
         iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
 
         try
