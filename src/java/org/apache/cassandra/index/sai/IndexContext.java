@@ -161,7 +161,9 @@ public class IndexContext
             this.indexWriterConfig = IndexWriterConfig.fromOptions(fullIndexName, validator, config.options);
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(config.options);
             this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), config.options);
-            this.queryAnalyzerFactory = this.analyzerFactory;
+            this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(config.options)
+                                        ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
+                                        : this.analyzerFactory;
         }
         else
         {
