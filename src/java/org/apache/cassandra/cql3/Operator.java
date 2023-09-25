@@ -353,13 +353,13 @@ public enum Operator
         @Override
         public String toString()
         {
-            return "LIKE '%<term>%'";
+            return "NOT LIKE '%<term>%'";
         }
 
         @Override
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            return ByteBufferUtil.contains(leftOperand, rightOperand);
+            return !LIKE_CONTAINS.isSatisfiedBy(type, leftOperand, rightOperand);
         }
     },
     NOT_LIKE_MATCHES(22)
