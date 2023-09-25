@@ -33,6 +33,8 @@ import java.util.Set;
 
 import com.google.common.collect.ImmutableSet;
 
+import org.slf4j.Logger;
+
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -42,6 +44,8 @@ import org.apache.lucene.analysis.Analyzer;
 
 public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
 {
+    private static final Logger logger = org.slf4j.LoggerFactory.getLogger(AbstractAnalyzer.class);
+
     public static final Set<AbstractType<?>> ANALYZABLE_TYPES = ImmutableSet.of(UTF8Type.instance, AsciiType.instance);
 
     protected ByteBuffer next = null;
@@ -147,8 +151,11 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
         boolean containsNonTokenizingOptions = NonTokenizingOptions.hasNonDefaultOptions(options);
         if (containsIndexAnalyzer && containsNonTokenizingOptions)
         {
-            throw new InvalidRequestException("Cannot specify case_insensitive, normalize, or ascii options with" +
-                                              " index_analyzer option. options=" + options);
+            logger.warn("Invalid combination of options for index_analyzer: {}", options);
+            options.remove(NonTokenizingOptions.CASE_SENSITIVE);
+            options.remove(NonTokenizingOptions.NORMALIZE);
+            options.remove(NonTokenizingOptions.ASCII);
+            logger.warn("Rewrote options to {}", options);
         }
         boolean containsQueryAnalyzer = options.containsKey(LuceneAnalyzer.QUERY_ANALYZER);
         if (containsQueryAnalyzer && !containsIndexAnalyzer && !containsNonTokenizingOptions)
