@@ -63,9 +63,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
                              "SELECT * FROM %s WHERE c = 0 AND b <= ?", set(0));
         assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a 'IN' relation",
                              "SELECT * FROM %s WHERE c = 0 AND b IN (?)", set(0));
-        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a 'NOT IN' relation",
-                             "SELECT * FROM %s WHERE c = 0 AND b NOT IN (?)", set(0));
-        assertInvalidMessage("Collection column 'b' (set<int>) cannot be restricted by a '!=' relation",
+        assertInvalidMessage("NEQ restrictions are supported only on map columns",
                 "SELECT * FROM %s WHERE c = 0 AND b != 5");
         assertInvalidMessage("Unsupported restriction: b IS NOT NULL",
                 "SELECT * FROM %s WHERE c = 0 AND b IS NOT NULL");
@@ -659,7 +657,8 @@ public class SelectSingleColumnRelationTest extends CQLTester
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b IN (?)", udt);
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b NOT IN (?)", udt);
         assertInvalidMessage(msg, "SELECT * FROM %s WHERE b LIKE ?", udt);
-        assertInvalidMessage(msg, "SELECT * FROM %s WHERE b != {a: 0}", udt);
+        assertInvalidMessage("NEQ restrictions are supported only on map columns",
+                             "SELECT * FROM %s WHERE b != {a: 0}", udt);
         assertInvalidMessage("Unsupported restriction: b IS NOT NULL",
                              "SELECT * FROM %s WHERE b IS NOT NULL", udt);
         assertInvalidMessage("Cannot use CONTAINS on non-collection column b",
