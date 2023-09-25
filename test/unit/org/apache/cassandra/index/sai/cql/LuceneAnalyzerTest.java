@@ -197,32 +197,26 @@ public class LuceneAnalyzerTest extends SAITester
         .hasRootCauseMessage("Analzyer config requires at least a tokenizer, a filter, or a charFilter, but none found. config={}");
     }
 
-// FIXME re-enable this once incompatible options have been purged from prod DBs
-//    @Test
-//    public void testIndexAnalyzerAndNonTokenizingAnalyzerFailsAtCreation() {
-//        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
-//
-//        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
-//                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-//                                             "WITH OPTIONS = { 'index_analyzer': 'standard', 'ascii': true}"))
-//        .isInstanceOf(InvalidRequestException.class)
-//        .hasRootCauseMessage("Cannot specify case_insensitive, normalize, or ascii options with " +
-//                             "index_analyzer option. options={index_analyzer=standard, ascii=true, target=val}");
-//
-//        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
-//                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-//                                             "WITH OPTIONS = { 'index_analyzer': 'standard', 'normalize': true}"))
-//        .isInstanceOf(InvalidRequestException.class)
-//        .hasRootCauseMessage("Cannot specify case_insensitive, normalize, or ascii options with " +
-//                             "index_analyzer option. options={index_analyzer=standard, normalize=true, target=val}");
-//
-//        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
-//                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-//                                             "WITH OPTIONS = { 'index_analyzer': 'standard', 'case_sensitive': false}"))
-//        .isInstanceOf(InvalidRequestException.class)
-//        .hasRootCauseMessage("Cannot specify case_insensitive, normalize, or ascii options with " +
-//                             "index_analyzer option. options={index_analyzer=standard, case_sensitive=false, target=val}");
-//    }
+// FIXME re-enable exception detection once incompatible options have been purged from prod DBs
+    @Test
+    public void testIndexAnalyzerAndNonTokenizingAnalyzerFailsAtCreation() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX val_idx ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard', 'ascii': true}");
+        dropIndex("DROP INDEX %s.val_idx");
+
+        createIndex("CREATE CUSTOM INDEX val_idx ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard', 'normalize': true}");
+        dropIndex("DROP INDEX %s.val_idx");
+
+        createIndex("CREATE CUSTOM INDEX val_idx ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard', 'case_sensitive': false}");
+    }
 
     // Technically, the NoopAnalyzer is applied, but that maps each field without modification, so any operator
     // that matches the SAI field will also match the PK field when compared later in the search (there are two phases).
