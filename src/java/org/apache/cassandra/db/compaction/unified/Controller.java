@@ -898,7 +898,7 @@ public abstract class Controller
             }
         }
 
-        Environment env = new RealEnvironment(realm);
+        Environment env = realm.createEnvironment();
 
         // For remote storage, the sstables on L0 are created by the different replicas, and therefore it is likely
         // that there are RF identical copies, so here we adjust the survival factor for L0

@@ -126,6 +126,7 @@ public abstract class ControllerTest
         when(cfs.getKeyspaceName()).thenAnswer(invocation -> keyspaceName);
         when(cfs.getDiskBoundaries()).thenReturn(boundaries);
         when(cfs.getTableName()).thenReturn(tableName);
+        when(cfs.createEnvironment()).thenReturn(new RealEnvironment(cfs));
         when(boundaries.getNumBoundaries()).thenAnswer(invocation -> numDirectories);
 
         when(executorService.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class))).thenReturn(fut);

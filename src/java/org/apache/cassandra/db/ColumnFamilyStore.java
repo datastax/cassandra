@@ -85,6 +85,8 @@ import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.db.compaction.CompactionStrategyOptions;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.Verifier;
+import org.apache.cassandra.db.compaction.unified.Environment;
+import org.apache.cassandra.db.compaction.unified.RealEnvironment;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -858,6 +860,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return new ColumnFamilyStore(keyspace, columnFamily,
                                      directories.getUIDGenerator(SSTableIdFactory.instance.defaultBuilder()),
                                      metadata, directories, loadSSTables, registerBookkeeping, offline);
+    }
+
+    public Environment createEnvironment()
+    {
+        return new RealEnvironment(this);
     }
 
     /**

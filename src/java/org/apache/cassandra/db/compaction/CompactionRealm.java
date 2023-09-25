@@ -30,6 +30,7 @@ import com.google.common.base.Predicate;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.DiskBoundaries;
+import org.apache.cassandra.db.compaction.unified.Environment;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -285,6 +286,8 @@ public interface CompactionRealm
      * Signal that a repair session has completed.
      */
     void repairSessionCompleted(UUID sessionID);
+
+    Environment createEnvironment();
 
     /**
      * Run an operation with concurrent compactions being stopped.
