@@ -204,11 +204,7 @@ public final class SingleColumnRelation extends Relation
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
         if (mapKey == null)
-        {
-            Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
-            MarkerOrList skippedValues = MarkerOrList.list(Collections.singletonList(term));
-            return SingleColumnRestriction.SliceRestriction.fromSkippedValues(columnDef, skippedValues);
-        }
+            throw invalidRequest("NEQ restrictions are supported only on map columns");
 
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);
@@ -277,12 +273,21 @@ public final class SingleColumnRelation extends Relation
     @Override
     protected Restriction newContainsRestriction(TableMetadata table,
                                                  VariableSpecifications boundNames,
-                                                 boolean isKey,
-                                                 boolean isNot) throws InvalidRequestException
+                                                 boolean isKey) throws InvalidRequestException
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
         Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
-        return new SingleColumnRestriction.ContainsRestriction(columnDef, term, isKey, isNot);
+        return new SingleColumnRestriction.ContainsRestriction(columnDef, term, isKey, false);
+    }
+
+    @Override
+    protected Restriction newNotContainsRestriction(TableMetadata table,
+                                                 VariableSpecifications boundNames,
+                                                 boolean isKey) throws InvalidRequestException
+    {
+        ColumnMetadata columnDef = table.getExistingColumn(entity);
+        Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
+        return new SingleColumnRestriction.ContainsRestriction(columnDef, term, isKey, true);
     }
 
     @Override
