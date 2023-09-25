@@ -65,31 +65,6 @@ public class GeoDistanceRelation extends Relation
     }
 
     @Override
-    protected Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames)
-    {
-        throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
-
-    }
-
-    @Override
-    protected Restriction newNEQRestriction(TableMetadata table, VariableSpecifications boundNames)
-    {
-        throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
-    }
-
-    @Override
-    protected Restriction newINRestriction(TableMetadata table, VariableSpecifications boundNames)
-    {
-        throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
-    }
-
-    @Override
-    protected Restriction newNotINRestriction(TableMetadata table, VariableSpecifications boundNames)
-    {
-        throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
-    }
-
-    @Override
     protected Restriction newSliceRestriction(TableMetadata table,
                                               VariableSpecifications boundNames,
                                               Bound bound,
@@ -110,7 +85,37 @@ public class GeoDistanceRelation extends Relation
     }
 
     @Override
-    protected Restriction newContainsRestriction(TableMetadata table, VariableSpecifications boundNames, boolean isKey, boolean isNot)
+    protected Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
+    }
+
+    @Override
+    protected Restriction newNEQRestriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
+    }
+
+    @Override
+    protected Restriction newContainsRestriction(TableMetadata table, VariableSpecifications boundNames, boolean isKey)
+    {
+        throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
+    }
+
+    @Override
+    protected Restriction newNotContainsRestriction(TableMetadata table, VariableSpecifications boundNames, boolean isKey)
+    {
+        throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
+    }
+
+    @Override
+    protected Restriction newINRestriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
+    }
+
+    @Override
+    protected Restriction newNotINRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
         throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
     }
