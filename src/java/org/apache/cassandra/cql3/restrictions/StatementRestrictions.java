@@ -400,22 +400,23 @@ public class StatementRestrictions
              */
             for (Relation relation : element.relations())
             {
-                if ((relation.isContains() || relation.isContainsKey() || relation.isNotContains() || relation.isNotContainsKey()) && (type.isUpdate() || type.isDelete()))
+                if ((relation.isContains() || relation.isContainsKey() || relation.isNotContains() || relation.isNotContainsKey())
+                        && (type.isUpdate() || type.isDelete()))
                 {
                     throw invalidRequest("Cannot use %s with %s", type, relation.operator());
                 }
-    
+
                 if (relation.operator() == Operator.IS_NOT)
                 {
                     if (!forView)
                         throw invalidRequest("Unsupported restriction: %s", relation);
-    
+
                     notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames).getColumnDefs());
                 }
                 else
                 {
                     Restriction restriction = relation.toRestriction(table, boundNames);
-    
+
                     if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry)))
                     {
                         if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
