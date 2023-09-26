@@ -53,7 +53,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
 
     public NavigableSet<Clustering<?>> valuesAsClustering(QueryOptions options, ClientState state) throws InvalidRequestException
     {
-        MultiCBuilder builder = MultiCBuilder.create(comparator);
+        MultiClusteringBuilder builder = MultiClusteringBuilder.create(comparator);
         List<SingleRestriction> restrictions = restrictions();
         for (int i = 0; i < restrictions.size(); i++)
         {
@@ -63,7 +63,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
             if (hasIN() && Guardrails.inSelectCartesianProduct.enabled(state))
                 Guardrails.inSelectCartesianProduct.guard(builder.buildSize(), "clustering key", false, state);
 
-            if (builder.buildSize() == 0)
+            if (builder.buildIsEmpty())
                 break;
         }
         return builder.build();
@@ -73,7 +73,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
     {
         List<SingleRestriction> restrictionsList = restrictions();
 
-        MultiCBuilder builder = MultiCBuilder.create(comparator);
+        MultiClusteringBuilder builder = MultiClusteringBuilder.create(comparator);
         int keyPosition = 0;
 
         for (int i = 0; i < restrictionsList.size(); i++)
@@ -84,7 +84,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
 
             r.appendBoundTo(builder, bound, options);
 
-            if (builder.buildSize() == 0)
+            if (builder.buildIsEmpty())
                 return BTreeSet.empty(comparator);
 
             // We allow slice restriction only on the last clustering column restricted by the query.
