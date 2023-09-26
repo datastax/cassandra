@@ -80,6 +80,12 @@ public class GeoDistanceRelation extends Relation
     }
 
     @Override
+    protected Restriction newNotINRestriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
+    }
+
+    @Override
     protected Restriction newSliceRestriction(TableMetadata table,
                                               VariableSpecifications boundNames,
                                               Bound bound,

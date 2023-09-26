@@ -75,7 +75,7 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
     @Override
     public List<ByteBuffer> values(QueryOptions options, QueryState queryState)
     {
-        MultiCBuilder builder = MultiCBuilder.create(comparator, hasIN());
+        MultiCBuilder builder = MultiCBuilder.create(comparator);
         List<SingleRestriction> restrictions = restrictions();
         for (int i = 0; i < restrictions.size(); i++)
         {
@@ -85,7 +85,7 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
             if (hasIN() && Guardrails.inSelectCartesianProduct.enabled(queryState))
                 Guardrails.inSelectCartesianProduct.guard(builder.buildSize(), "IN Select", false, queryState);
 
-            if (builder.hasMissingElements())
+            if (builder.buildSize() == 0)
                 break;
         }
         return builder.buildSerializedPartitionKeys();
@@ -94,13 +94,13 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
     @Override
     public List<ByteBuffer> bounds(Bound bound, QueryOptions options)
     {
-        MultiCBuilder builder = MultiCBuilder.create(comparator, hasIN());
+        MultiCBuilder builder = MultiCBuilder.create(comparator);
         List<SingleRestriction> restrictions = restrictions();
         for (int i = 0; i < restrictions.size(); i++)
         {
             SingleRestriction r = restrictions.get(i);
             r.appendBoundTo(builder, bound, options);
-            if (builder.hasMissingElements())
+            if (builder.buildSize() == 0)
                 return Collections.EMPTY_LIST;
         }
         return builder.buildSerializedPartitionKeys();
