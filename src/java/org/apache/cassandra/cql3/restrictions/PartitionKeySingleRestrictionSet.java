@@ -25,7 +25,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.MultiCBuilder;
+import org.apache.cassandra.db.MultiClusteringBuilder;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.service.ClientState;
@@ -74,7 +74,7 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
     @Override
     public List<ByteBuffer> values(QueryOptions options, ClientState state)
     {
-        MultiCBuilder builder = MultiCBuilder.create(comparator);
+        MultiClusteringBuilder builder = MultiClusteringBuilder.create(comparator);
         List<SingleRestriction> restrictions = restrictions();
         for (int i = 0; i < restrictions.size(); i++)
         {
@@ -84,7 +84,7 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
             if (hasIN() && Guardrails.inSelectCartesianProduct.enabled(state))
                 Guardrails.inSelectCartesianProduct.guard(builder.buildSize(), "partition key", false, state);
 
-            if (builder.buildSize() == 0)
+            if (builder.buildIsEmpty())
                 break;
         }
         return builder.buildSerializedPartitionKeys();
@@ -93,14 +93,14 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
     @Override
     public List<ByteBuffer> bounds(Bound bound, QueryOptions options)
     {
-        MultiCBuilder builder = MultiCBuilder.create(comparator);
+        MultiClusteringBuilder builder = MultiClusteringBuilder.create(comparator);
         List<SingleRestriction> restrictions = restrictions();
         for (int i = 0; i < restrictions.size(); i++)
         {
             SingleRestriction r = restrictions.get(i);
             r.appendBoundTo(builder, bound, options);
-            if (builder.buildSize() == 0)
-                return Collections.EMPTY_LIST;
+            if (builder.buildIsEmpty())
+                return Collections.emptyList();
         }
         return builder.buildSerializedPartitionKeys();
     }

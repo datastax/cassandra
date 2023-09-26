@@ -30,7 +30,7 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.cql3.MarkerOrList;
+import org.apache.cassandra.cql3.MarkerOrTerms;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Term;
@@ -38,7 +38,7 @@ import org.apache.cassandra.cql3.Term.Terminal;
 import org.apache.cassandra.cql3.Tuples;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
-import org.apache.cassandra.db.MultiCBuilder;
+import org.apache.cassandra.db.MultiClusteringBuilder;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -233,14 +233,14 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             Tuples.Value t = ((Tuples.Value) term.bind(options));
             List<ByteBuffer> values = t.getElements();
             for (int i = 0, m = values.size(); i < m; i++)
             {
                 ColumnMetadata column = columnDefs.get(i);
-                builder.extend(MultiCBuilder.Element.point(values.get(i)), Collections.singletonList(column));
+                builder.extend(MultiClusteringBuilder.ClusteringElements.point(values.get(i)), Collections.singletonList(column));
                 checkFalse(builder.containsNull(), "Invalid null value for column %s", column.name);
             }
             return builder;
@@ -262,10 +262,10 @@ public abstract class MultiColumnRestriction implements SingleRestriction
 
     public static class INRestriction extends MultiColumnRestriction
     {
-        private final MarkerOrList terms;
+        private final MarkerOrTerms terms;
         private final Collection<ColumnIdentifier> columnIdentifiers;
 
-        public INRestriction(List<ColumnMetadata> columnDefs, MarkerOrList terms)
+        public INRestriction(List<ColumnMetadata> columnDefs, MarkerOrTerms terms)
         {
             super(columnDefs);
             this.terms = terms;
@@ -276,12 +276,12 @@ public abstract class MultiColumnRestriction implements SingleRestriction
          * {@inheritDoc}
          */
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             List<List<ByteBuffer>> values = terms.bindAndGetTuples(options, columnIdentifiers);
-            List<MultiCBuilder.Element> elements = new ArrayList<>(values.size());
+            List<MultiClusteringBuilder.ClusteringElements> elements = new ArrayList<>(values.size());
             for (List<ByteBuffer> value: values)
-                elements.add(MultiCBuilder.Element.point(value));
+                elements.add(MultiClusteringBuilder.ClusteringElements.point(value));
 
             builder.extend(elements, columnDefs);
 
@@ -345,12 +345,13 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         }
     }
 
+
     public static class SliceRestriction extends MultiColumnRestriction
     {
         private final TermSlice slice;
-        private final List<MarkerOrList> skippedValues; // values passed in NOT IN
+        private final List<MarkerOrTerms> skippedValues; // values passed in NOT IN
 
-        SliceRestriction(List<ColumnMetadata> columnDefs, TermSlice slice, List<MarkerOrList> skippedValues)
+        SliceRestriction(List<ColumnMetadata> columnDefs, TermSlice slice, List<MarkerOrTerms> skippedValues)
         {
             super(columnDefs);
             assert slice != null;
@@ -365,7 +366,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
             return new MultiColumnRestriction.SliceRestriction(columnDefs, slice, Collections.emptyList());
         }
 
-        public static MultiColumnRestriction.SliceRestriction fromSkippedValues(List<ColumnMetadata> columnDefs, MarkerOrList skippedValues)
+        public static MultiColumnRestriction.SliceRestriction fromSkippedValues(List<ColumnMetadata> columnDefs, MarkerOrTerms skippedValues)
         {
             return new MultiColumnRestriction.SliceRestriction(columnDefs, TermSlice.UNBOUNDED, Collections.singletonList(skippedValues));
         }
@@ -377,15 +378,15 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public MultiCBuilder appendBoundTo(MultiCBuilder builder, Bound bound, QueryOptions options)
+        public MultiClusteringBuilder appendBoundTo(MultiClusteringBuilder builder, Bound bound, QueryOptions options)
         {
-            List<MultiCBuilder.Element> toAdd = new ArrayList<>();
+            List<MultiClusteringBuilder.ClusteringElements> toAdd = new ArrayList<>();
             addSliceBounds(bound, options, toAdd);
             addSkippedValues(bound, options, toAdd);
             return builder.extend(toAdd, columnDefs);
@@ -402,7 +403,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
          * @param options needed to get the actual values bound to markers
          * @param toAdd receiver of the result
          */
-        private void addSliceBounds(Bound bound, QueryOptions options, List<MultiCBuilder.Element> toAdd)
+        private void addSliceBounds(Bound bound, QueryOptions options, List<MultiClusteringBuilder.ClusteringElements> toAdd)
         {
             // Stores the direction of sorting of the current processed column.
             // Used to detect when the next processed column has different direction of sorting than the last one.
@@ -456,7 +457,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
                             // (c1, c2) <  (x1, x2) ----> (c1 < x1) || (c1 = x1) && (c2 < x2)
                             // (c1, c2) >  (x1, x2) ----> (c1 > x1) || (c1 = x1) && (c2 > x2)
                             //                            ^^^^^^^^^
-                            toAdd.add(MultiCBuilder.Element.bound(values, bound, false));
+                            toAdd.add(MultiClusteringBuilder.ClusteringElements.bound(values, bound, false));
 
                             // Now add the other side of the union:
                             // (c1, c2) <= (x1, x2) ----> (c1 < x1) || (c1 = x1) && (c2 < x2)
@@ -464,7 +465,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
                             //                                         ^^^^^^^^^
                             // The other side has still some components. We need to end the slice that we have just open.
                             // Note that (c2 > x2) will be added by the call to an opposite bound.
-                            toAdd.add(MultiCBuilder.Element.point(values));
+                            toAdd.add(MultiClusteringBuilder.ClusteringElements.point(values));
                         }
                         else
                         {
@@ -474,7 +475,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
                             // (c1, c2) >= (x1, no value) ----> (c1 >= x1)
                             // (c1, c2) <  (x1, no value) ----> (c1 < x1)
                             // (c1, c2) >  (x1, no value) ----> (c1 > x1)
-                            toAdd.add(MultiCBuilder.Element.bound(values, bound, inclusive));
+                            toAdd.add(MultiClusteringBuilder.ClusteringElements.bound(values, bound, inclusive));
                         }
                     }
                 }
@@ -487,8 +488,10 @@ public abstract class MultiColumnRestriction implements SingleRestriction
             }
 
             if (values.size() > sizeOfLastElement)
-                toAdd.add(MultiCBuilder.Element.bound(values, bound, inclusive));
+                toAdd.add(MultiClusteringBuilder.ClusteringElements.bound(values, bound, inclusive));
         }
+
+
 
         /**
          * Generates a list of clustering bounds that exclude the skipped values.
@@ -500,13 +503,13 @@ public abstract class MultiColumnRestriction implements SingleRestriction
          * @param options needed to get the actual values bound to markers
          * @param toAdd receiver of the result
          */
-        private void addSkippedValues(Bound bound, QueryOptions options, List<MultiCBuilder.Element> toAdd)
+        private void addSkippedValues(Bound bound, QueryOptions options, List<MultiClusteringBuilder.ClusteringElements> toAdd)
         {
-            for (MarkerOrList markerOrList: skippedValues)
+            for (MarkerOrTerms markerOrTerms : skippedValues)
             {
-                for (List<ByteBuffer> tuple: markerOrList.bindAndGetTuples(options, ColumnMetadata.toIdentifiers(columnDefs)))
+                for (List<ByteBuffer> tuple: markerOrTerms.bindAndGetTuples(options, ColumnMetadata.toIdentifiers(columnDefs)))
                 {
-                    MultiCBuilder.Element element = MultiCBuilder.Element.bound(tuple, bound, false);
+                    MultiClusteringBuilder.ClusteringElements element = MultiClusteringBuilder.ClusteringElements.bound(tuple, bound, false);
                     toAdd.add(element);
                 }
             }
@@ -563,7 +566,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
             List<ColumnMetadata> newColumnDefs = columnDefs.size() >= otherSlice.columnDefs.size() ? columnDefs : otherSlice.columnDefs;
 
             int sizeHint = skippedValues.size() + otherSlice.skippedValues.size();
-            List<MarkerOrList> newSkippedValues = new ArrayList<>(sizeHint);
+            List<MarkerOrTerms> newSkippedValues = new ArrayList<>(sizeHint);
             newSkippedValues.addAll(skippedValues);
             newSkippedValues.addAll(otherSlice.skippedValues);
             TermSlice newSlice = slice.merge(otherSlice.slice);
@@ -602,7 +605,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
             int hasNullAt = bounds.indexOf(null);
             if (hasNullAt != -1)
                 throw new InvalidRequestException(String.format(
-                "Invalid null value in condition for column %s", columnDefs.get(hasNullAt).name));
+                    "Invalid null value in condition for column %s", columnDefs.get(hasNullAt).name));
 
             return bounds;
         }
@@ -610,8 +613,8 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         private static List<ByteBuffer> bindTuple(Terminal terminal, QueryOptions options)
         {
             return terminal instanceof Tuples.Value
-                   ? ((Tuples.Value) terminal).getElements()
-                   : Collections.singletonList(terminal.get(options.getProtocolVersion()));
+                ? ((Tuples.Value) terminal).getElements()
+                : Collections.singletonList(terminal.get(options.getProtocolVersion()));
         }
 
         private boolean hasComponent(Bound b, int index, EnumMap<Bound, List<ByteBuffer>> componentBounds)
@@ -659,7 +662,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             throw new UnsupportedOperationException("Cannot use IS NOT NULL restriction for slicing");
         }
