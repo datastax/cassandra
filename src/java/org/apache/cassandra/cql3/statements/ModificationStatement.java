@@ -61,9 +61,9 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.ResultSetBuilder;
 import org.apache.cassandra.cql3.selection.Selection;
 import org.apache.cassandra.cql3.selection.Selection.Selectors;
-import org.apache.cassandra.db.CBuilder;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringBound;
+import org.apache.cassandra.db.ClusteringBuilder;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
@@ -431,7 +431,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
     throws InvalidRequestException
     {
         if (appliesOnlyToStaticColumns() && !restrictions.hasClusteringColumnsRestrictions())
-            return FBUtilities.singleton(CBuilder.STATIC_BUILDER.build(), metadata().comparator);
+            return FBUtilities.singleton(ClusteringBuilder.STATIC_BUILDER.build(), metadata().comparator);
 
         return restrictions.getClusteringColumns(options, state);
     }

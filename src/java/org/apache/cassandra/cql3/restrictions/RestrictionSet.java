@@ -437,18 +437,11 @@ public abstract class RestrictionSet implements Restrictions
                 // new restriction
                 Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
 
-                if (existingRestrictions.isEmpty())
-                {
-                    addRestrictionForColumns(columnDefs, restriction, false);
-                }
-                else
-                {
-                    SingleRestriction merged = restriction;
-                    for (SingleRestriction existing : existingRestrictions)
-                        merged = existing.mergeWith(merged);
+                SingleRestriction merged = restriction;
+                for (SingleRestriction existing : existingRestrictions)
+                    merged = existing.mergeWith(merged);
 
-                    addRestrictionForColumns(merged.getColumnDefs(), merged, true);
-                }
+                addRestrictionForColumns(merged.getColumnDefs(), merged, true);
             }
         }
 
