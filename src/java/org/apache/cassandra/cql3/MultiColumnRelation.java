@@ -18,7 +18,6 @@
 package org.apache.cassandra.cql3;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -96,6 +95,13 @@ public class MultiColumnRelation extends Relation
         return new MultiColumnRelation(entities, Operator.IN, null, inValues, null);
     }
 
+    /**
+     * Creates a multi-column NOT IN relation with a list of NOT IN values or markers.
+     * For example: "SELECT ... WHERE (a, b) NOT IN ((0, 1), (2, 3))"
+     * @param entities the columns on the LHS of the relation
+     * @param inValues a list of Tuples.Literal instances or a Tuples.Raw markers
+     * @return a new <code>MultiColumnRelation</code> instance
+     */
     public static MultiColumnRelation createNotInRelation(List<ColumnIdentifier> entities, List<? extends Term.MultiColumnRaw> inValues)
     {
         return new MultiColumnRelation(entities, Operator.NOT_IN, null, inValues, null);
@@ -172,13 +178,13 @@ public class MultiColumnRelation extends Relation
         if (terms == null)
         {
             Term term = toTerm(receivers, getValue(), table.keyspace, boundNames);
-            return new MultiColumnRestriction.INRestriction(receivers, MarkerOrList.marker((AbstractMarker) term));
+            return new MultiColumnRestriction.INRestriction(receivers, new MarkerOrTerms.Marker((AbstractMarker) term));
         }
 
         if (terms.size() == 1)
             return new MultiColumnRestriction.EQRestriction(receivers, terms.get(0));
 
-        return new MultiColumnRestriction.INRestriction(receivers, MarkerOrList.list(terms));
+        return new MultiColumnRestriction.INRestriction(receivers, new MarkerOrTerms.Terms(terms));
     }
 
     @Override
@@ -186,15 +192,15 @@ public class MultiColumnRelation extends Relation
     {
         List<ColumnMetadata> receivers = receivers(table);
         List<Term> terms = toTerms(receivers, inValues, table.keyspace, boundNames);
-        MarkerOrList values;
+        MarkerOrTerms values;
         if (terms == null)
         {
             Term term = toTerm(receivers, getValue(), table.keyspace, boundNames);
-            values = MarkerOrList.marker((AbstractMarker) term);
+            values = new MarkerOrTerms.Marker((AbstractMarker) term);
         }
         else
         {
-            values = MarkerOrList.list(terms);
+            values = new MarkerOrTerms.Terms(terms);
         }
 
         return MultiColumnRestriction.SliceRestriction.fromSkippedValues(receivers, values);
