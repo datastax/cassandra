@@ -221,14 +221,14 @@ public final class SingleColumnRelation extends Relation
         if (terms == null)
         {
             Term term = toTerm(receivers, value, table.keyspace, boundNames);
-            return new SingleColumnRestriction.INRestriction(columnDef, MarkerOrList.marker((Lists.Marker) term));
+            return new SingleColumnRestriction.INRestriction(columnDef, new MarkerOrTerms.Marker((Lists.Marker) term));
         }
 
         // An IN restrictions with only one element is the same than an EQ restriction
         if (terms.size() == 1)
             return new SingleColumnRestriction.EQRestriction(columnDef, terms.get(0));
 
-        return new SingleColumnRestriction.INRestriction(columnDef, MarkerOrList.list(terms));
+        return new SingleColumnRestriction.INRestriction(columnDef, new MarkerOrTerms.Terms(terms));
     }
 
     @Override
@@ -237,15 +237,15 @@ public final class SingleColumnRelation extends Relation
         ColumnMetadata columnDef = table.getExistingColumn(entity);
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
         List<Term> terms = toTerms(receivers, inValues, table.keyspace, boundNames);
-        MarkerOrList values;
+        MarkerOrTerms values;
         if (terms == null)
         {
             Term term = toTerm(receivers, value, table.keyspace, boundNames);
-            values = MarkerOrList.marker((Lists.Marker) term);
+            values = new MarkerOrTerms.Marker((Lists.Marker) term);
         }
         else
         {
-            values = MarkerOrList.list(terms);
+            values = new MarkerOrTerms.Terms(terms);
         }
         return SingleColumnRestriction.SliceRestriction.fromSkippedValues(columnDef, values);
     }
