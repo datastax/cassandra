@@ -311,8 +311,10 @@ public class LuceneAnalyzerTest extends SAITester
 
         // Ensure row is there
         assertRows(execute("SELECT id FROM %s WHERE val : 'test'"), row("1"));
-        // Ensure we do not get a result
+        // Ensure a query with only stop words results in no rows
         assertRows(execute("SELECT id FROM %s WHERE val : 'the'"));
+        // Ensure that the AND is correctly applied so that we get no results
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the' AND val : 'test'"));
     }
 
     @Test

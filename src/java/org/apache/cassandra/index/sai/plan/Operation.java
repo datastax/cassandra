@@ -111,6 +111,7 @@ public class Operation
                     case CONTAINS_KEY:
                     case LIKE_PREFIX:
                     case LIKE_MATCHES:
+                    case ANALYZER_MATCHES:
                         isMultiExpression = true;
                         break;
 

@@ -45,6 +45,7 @@ public class LuceneAnalyzer extends AbstractAnalyzer
     public static final String QUERY_ANALYZER = "query_analyzer";
     private AbstractType<?> type;
     private boolean hasNext = false;
+    private boolean isReset = true;
 
     private final Analyzer analyzer;
     private TokenStream tokenStream;
@@ -79,6 +80,12 @@ public class LuceneAnalyzer extends AbstractAnalyzer
                 //       getting the max term from the mem trie is best
                 next = ByteBuffer.wrap(BytesRef.deepCopyOf(br).bytes);
             }
+            if (isReset && !hasNext)
+            {
+                next = ByteBuffer.allocate(0);
+                hasNext = true;
+            }
+            isReset = false;
             return hasNext;
         }
         catch (IOException ex)
@@ -143,6 +150,7 @@ public class LuceneAnalyzer extends AbstractAnalyzer
             termAttr = tokenStream.getAttribute(TermToBytesRefAttribute.class);
 
             this.hasNext = true;
+            this.isReset = true;
         }
         catch (Exception ex)
         {
@@ -156,6 +164,7 @@ public class LuceneAnalyzer extends AbstractAnalyzer
         return MoreObjects.toStringHelper(this)
                           .add("type", type)
                           .add("hasNext", hasNext)
+                          .add("isReset", isReset)
                           .add("analyzer", analyzer)
                           .add("tokenStream", tokenStream)
                           .add("termAttr", termAttr)
