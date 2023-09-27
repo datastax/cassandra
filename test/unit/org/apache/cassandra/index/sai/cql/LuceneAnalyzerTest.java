@@ -46,7 +46,7 @@ public class LuceneAnalyzerTest extends SAITester
                     "\t\"filters\":[{\"name\":\"porterstem\"}]\n" +
                     "}'};");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'the query')");
 
@@ -63,7 +63,7 @@ public class LuceneAnalyzerTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
                     "'index_analyzer': 'standard', 'query_analyzer': 'lowercase'};");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES (1, 'the query')");
         execute("INSERT INTO %s (id, val) VALUES (2, 'my test Query')");
@@ -99,7 +99,7 @@ public class LuceneAnalyzerTest extends SAITester
         // the index analyzer includes a lowercase filter but the query analyzer does not.
         createIndex("CREATE CUSTOM INDEX ON %s(c1) USING 'StorageAttachedIndex' WITH OPTIONS =" +
                     "{'index_analyzer': 'standard', 'query_analyzer': 'whitespace'}");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // The standard analyzer maps this to just one output 'the', but the query analyzer would map this to 'THE'
         execute("INSERT INTO %s (pk, c1) VALUES (?, ?)", 1, "THE");
@@ -293,6 +293,56 @@ public class LuceneAnalyzerTest extends SAITester
                                             "\t \"filters\":[{\"name\":\"stop\"}]}'}"))
         .isInstanceOf(InvalidQueryException.class)
         .hasMessageContaining("filter=stop is unsupported.");
+    }
+
+    @Test
+    public void verifyEmptyStringIndexingBehaviorOnNonAnalyzedColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 0, "");
+        flush();
+        assertRows(execute("SELECT * FROM %s WHERE v = ''"));
+    }
+
+    @Test
+    public void testEmptyQueryString() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'standard'}");
+        waitForTableIndexesQueryable();
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 0, "");
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "some text to analyze");
+        flush();
+        assertRows(execute("SELECT * FROM %s WHERE v : ''"));
+    }
+
+    // The english analyzer has a default set of stop words. This test relies on "the" being one of those stop words.
+    @Test
+    public void testStopWordFilteringEdgeCases() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
+                   "WITH OPTIONS = {'index_analyzer':'english'}");
+        waitForTableIndexesQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'the test')");
+        // When indexing a document with only stop words, the document should not be indexed.
+        // Note: from looking at the collections implementation, these rows are filtered out before getting
+        // to the NoOpAnalyzer, which would otherwise return an empty buffer, which would lead to incorrectly
+        // indexing documents at the base of the trie.
+        execute("INSERT INTO %s (id, val) VALUES ('2', 'the')");
+
+        flush();
+
+        // Ensure row is there
+        assertRows(execute("SELECT id FROM %s WHERE val : 'test'"), row("1"));
+        // Ensure a query with only stop words results in no rows
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the'"));
+        // Ensure that the AND is correctly applied so that we get no results
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the' AND val : 'test'"));
     }
 
     @Test
