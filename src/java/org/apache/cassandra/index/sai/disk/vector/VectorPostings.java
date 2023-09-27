@@ -29,18 +29,16 @@ import org.agrona.collections.IntArrayList;
 
 public class VectorPostings<T>
 {
-    private final List<T> postings;
+    // we expect that the overwhelmingly most common cardinality will be 1, so optimize for reads using COWAL
+    private final CopyOnWriteArrayList<T> postings;
     private final int ordinal;
 
     private volatile IntArrayList rowIds;
 
-    // VSTODO refactor this so we can add the first posting at construction time instead of having
-    // to append it separately (which will require a copy of the list)
-    public VectorPostings(int ordinal)
+    public VectorPostings(int ordinal, T firstKey)
     {
         this.ordinal = ordinal;
-        // we expect that the overwhelmingly most common cardinality will be 1, so optimize for reads
-        postings = new CopyOnWriteArrayList<>();
+        postings = new CopyOnWriteArrayList<>(List.of(firstKey));
     }
 
     public boolean add(T key)

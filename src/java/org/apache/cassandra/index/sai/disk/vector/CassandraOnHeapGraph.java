@@ -169,20 +169,23 @@ public class CassandraOnHeapGraph<T>
             bytes += (vectorValues instanceof ConcurrentVectorValues)
                      ? ((ConcurrentVectorValues) vectorValues).add(ordinal, vector)
                      : ((CompactionVectorValues) vectorValues).add(ordinal, term);
-            bytes += VectorPostings.emptyBytesUsed();
+            bytes += VectorPostings.emptyBytesUsed() + VectorPostings.bytesPerPosting();
             bytesUsed.addAndGet(bytes);
             newVector.set(true);
-            var vp = new VectorPostings<T>(ordinal);
+            var vp = new VectorPostings<T>(ordinal, key);
             postingsByOrdinal.put(ordinal, vp);
             return vp;
         });
-        if (postings.add(key))
+        if (newVector.get())
+        {
+            // add to the index outside of the computeIfAbsent block
+            bytesUsed.addAndGet(builder.addGraphNode(postings.getOrdinal(), vectorValues));
+        }
+        else if (postings.add(key))
         {
             bytesUsed.addAndGet(VectorPostings.bytesPerPosting());
-            if (newVector.get()) {
-                bytesUsed.addAndGet(builder.addGraphNode(postings.getOrdinal(), vectorValues));
-            }
         }
+
         return bytesUsed.get();
     }
 
