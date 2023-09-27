@@ -295,6 +295,26 @@ public class LuceneAnalyzerTest extends SAITester
         .hasMessageContaining("filter=stop is unsupported.");
     }
 
+    // The english analyzer has a default set of stop words. This test relies on "the" being one of those stop words.
+    @Test
+    public void testEnglishStopWordTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
+                   "WITH OPTIONS = {'index_analyzer':'english'}");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'the test')");
+
+        flush();
+
+        // Ensure row is there
+        assertRows(execute("SELECT id FROM %s WHERE val : 'test'"), row("1"));
+        // Ensure we do not get a result
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the'"));
+    }
+
     @Test
     public void testCharfilter() throws Throwable
     {
