@@ -306,6 +306,11 @@ public class LuceneAnalyzerTest extends SAITester
         waitForIndexQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'the test')");
+        // When indexing a document with only stop words, the document should not be indexed.
+        // Note: from looking at the collections implementation, these rows are filtered out before getting
+        // to the NoOpAnalyzer, which would otherwise return an empty buffer, which would lead to incorrectly
+        // indexing documents at the base of the trie.
+        execute("INSERT INTO %s (id, val) VALUES ('2', 'the')");
 
         flush();
 
