@@ -295,9 +295,32 @@ public class LuceneAnalyzerTest extends SAITester
         .hasMessageContaining("filter=stop is unsupported.");
     }
 
+    @Test
+    public void verifyEmptyStringIndexingBehaviorOnNonAnalyzedColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 0, "");
+        flush();
+        assertRows(execute("SELECT * FROM %s WHERE v = ''"));
+    }
+
+    @Test
+    public void testEmptyQueryString() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'standard'}");
+        waitForIndexQueryable();
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 0, "");
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "some text to analyze");
+        flush();
+        assertRows(execute("SELECT * FROM %s WHERE v : ''"));
+    }
+
     // The english analyzer has a default set of stop words. This test relies on "the" being one of those stop words.
     @Test
-    public void testEnglishStopWordTest() throws Throwable
+    public void testStopWordFilteringEdgeCases() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
