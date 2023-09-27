@@ -45,6 +45,7 @@ public class InsertInvalidateSizedRecordsTest extends CQLTester
     private static final ByteBuffer LARGE_BLOB = ByteBuffer.allocate(FBUtilities.MAX_UNSIGNED_SHORT + 1);
     private static final ByteBuffer MEDIUM_BLOB = ByteBuffer.allocate(FBUtilities.MAX_UNSIGNED_SHORT / 2 + 10);
 
+    static
     {
         requireNetwork();
     }
