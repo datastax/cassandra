@@ -37,6 +37,7 @@ import org.junit.Test;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.core.WhitespaceAnalyzer;
 
 import static org.junit.Assert.assertArrayEquals;
 
@@ -152,11 +153,22 @@ public class LuceneAnalyzerTest
         // acceptable. Note that in CQL, it'll just need 2 backslashes.
         String json = "{\"tokenizer\":{\"name\" : \"keyword\"}," +
                       "\"filters\":[{\"name\":\"synonym\", \"args\": " +
-                      "{\"synonyms\": \"as => like\"}}]}";
+                      "{\"synonyms\": \"as => like\", \"analyzer\":\"" + WhitespaceAnalyzer.class.getName() + "\"}}]}";
         String testString = "as";
         String[] expected = new String[]{ "like" };
         List<String> list = tokenize(testString, json);
         assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testMissingClassException() throws Exception
+    {
+        // Need 4 backslashes to get through all of the parsing... this is an unlikely scenario, so it seems
+        // acceptable. Note that in CQL, it'll just need 2 backslashes.
+        String json = "{\"tokenizer\":{\"name\" : \"keyword\"}," +
+                      "\"filters\":[{\"name\":\"synonym\", \"args\": " +
+                      "{\"synonyms\": \"as => like\", \"analyzer\":\"not-a-class\"}}]}";
+        tokenize("irrelevant text", json);
     }
 
     public static List<String> tokenize(String testString, String json) throws Exception
