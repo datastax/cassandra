@@ -105,6 +105,60 @@ public class LuceneAnalyzerTest
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
+    @Test
+    public void testStopwordWithEscapedComma() throws Exception
+    {
+        // Need 4 backslashes to get through all of the parsing... this is an unlikely scenario, so it seems
+        // acceptable. Note that in CQL, it'll just need 2 backslashes.
+        String json = "{\"tokenizer\":{\"name\" : \"whitespace\"}," +
+                      "\"filters\":[{\"name\":\"stop\", \"args\": " +
+                      "{\"words\": \"one\\\\,stopword, test\"}}]}";
+        // Put result in the middle to make sure that one,stopword and test are broken up and applied individually
+        String testString = "one,stopword result test";
+        String[] expected = new String[]{ "result" };
+        List<String> list = tokenize(testString, json);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    @Test
+    public void testStopwordWithSpace() throws Exception
+    {
+        // Need 4 backslashes to get through all of the parsing... this is an unlikely scenario, so it seems
+        // acceptable. Note that in CQL, it'll just need 2 backslashes.
+        String json = "{\"tokenizer\":{\"name\" : \"keyword\"}," +
+                      "\"filters\":[{\"name\":\"stop\", \"args\": " +
+                      "{\"words\": \"one stopword, test\"}}]}";
+        // 'one stopword' is a single stopword, so it gets filtered out (note that the tokenizer is keyword, so
+        // it doesn't get broken up into multiple tokens)
+        String testString = "one stopword";
+        List<String> list = tokenize(testString, json);
+        assertArrayEquals(new String[]{}, list.toArray(new String[0]));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testMissingSynonymArg() throws Exception
+    {
+        // The synonym filter takes a 'synonyms' argument, not a 'words' argument
+        String json = "{\"tokenizer\":{\"name\" : \"keyword\"}," +
+                      "\"filters\":[{\"name\":\"synonym\", \"args\": " +
+                      "{\"words\": \"as => like\"}}]}";
+        tokenize("irrelevant test string", json);
+    }
+
+    @Test
+    public void testSynonmyMapping() throws Exception
+    {
+        // Need 4 backslashes to get through all of the parsing... this is an unlikely scenario, so it seems
+        // acceptable. Note that in CQL, it'll just need 2 backslashes.
+        String json = "{\"tokenizer\":{\"name\" : \"keyword\"}," +
+                      "\"filters\":[{\"name\":\"synonym\", \"args\": " +
+                      "{\"synonyms\": \"as => like\"}}]}";
+        String testString = "as";
+        String[] expected = new String[]{ "like" };
+        List<String> list = tokenize(testString, json);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
     public static List<String> tokenize(String testString, String json) throws Exception
     {
         Analyzer luceneAnalyzer = JSONAnalyzerParser.parse(json);
