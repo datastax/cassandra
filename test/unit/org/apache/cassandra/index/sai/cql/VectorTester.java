@@ -39,7 +39,7 @@ public class VectorTester extends SAITester
                                     .atEntry();
         var ab = ActionBuilder.newActionBuilder()
                               .actions()
-                              .doAction("$this.globalBruteForceRows = " + n);
+                              .doAction("$this.maxBruteForceRows = " + n);
         var changeBruteForceThreshold = Injections.newCustom("force_non_bruteforce_queries")
                                                   .add(ipb)
                                                   .add(ab)
