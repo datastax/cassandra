@@ -120,7 +120,7 @@ public class OnDiskOrdinalsMapTest
         {
             float[] vector = vectorValues.vectorValue(i);
             int ordinal = i;
-            var vp = new VectorPostings<Integer>(ordinal);
+            var vp = new VectorPostings<>(ordinal, ordinal);
             postingsMap.put(vector, vp);
         }
 
