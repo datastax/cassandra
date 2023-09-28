@@ -34,11 +34,10 @@ class ScoreStoreProxyImpl implements ScoreStoreProxy
 
     @Override
     public void mapStoredScoreForRowIdToPrimaryKey(long sstableRowId, PrimaryKey pk) {
-        float score = scoreMap.getOrDefault(sstableRowId, -1);
         // The score should always be present in the cache because we just put it there in the previous iterator.
         // A better solution would be to pass the score through the iterator's as metadata associated with a row.
         // However, we cannot do that yet, so we use a map to store and retrieve the score.
-        assert score >= 0;
+        float score = scoreMap.getOrDefault(sstableRowId, -1);
         queryContext.recordScore(pk, score);
     }
 }

@@ -32,6 +32,9 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.carrotsearch.hppc.LongFloatHashMap;
 import com.carrotsearch.hppc.ObjectFloatHashMap;
 import com.carrotsearch.hppc.ObjectFloatMap;
@@ -55,6 +58,7 @@ import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 @NotThreadSafe
 public class QueryContext
 {
+    private static final Logger logger = LoggerFactory.getLogger(QueryContext.class);
     private static final boolean DISABLE_TIMEOUT = Boolean.getBoolean("cassandra.sai.test.disable.timeout");
 
     private final long queryStartTimeNanos;
@@ -265,8 +269,9 @@ public class QueryContext
     public void recordScore(PrimaryKey primaryKey, float score)
     {
         // The stored score should never be less than 0. If it is, we have to recompute similarity later, which is why
-        // this is only an assert and not an illegal argument.
-        assert score >= 0;
+        // this is only an assert and not an illegal argument. Note that we cannot drop this score due to shadow keys.
+        if (score < 0.0f)
+            logger.trace("Storing a vector similarity of 0, score will be recomputed later.");
         boolean exists = scorePerKey.containsKey(primaryKey);
         // Since we know the numbers are between 0 and 1, we use 0.0001f as the epsilon for floating point comparison
         // See https://embeddeduse.com/2019/08/26/qt-compare-two-floats/
