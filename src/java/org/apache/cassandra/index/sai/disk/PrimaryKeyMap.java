@@ -21,12 +21,16 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.Closeable;
 import java.io.IOException;
 
+import javax.annotation.concurrent.NotThreadSafe;
+
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.io.sstable.SSTableId;
 
 /**
  * A bidirectional map of {@link PrimaryKey} to row Id. Implementations of this interface
  * are not expected to be threadsafe.
  */
+@NotThreadSafe
 public interface PrimaryKeyMap extends Closeable
 {
     /**
@@ -41,7 +45,13 @@ public interface PrimaryKeyMap extends Closeable
          * @return a {@link PrimaryKeyMap}
          * @throws IOException
          */
-        PrimaryKeyMap newPerSSTablePrimaryKeyMap() throws IOException;
+        PrimaryKeyMap newPerSSTablePrimaryKeyMap();
+
+        /**
+         * Returns the SSTableId for the SSTable this {@link PrimaryKeyMap.Factory} is associated with
+         * @return
+         */
+        SSTableId<?> getSSTableId();
 
         @Override
         default void close() throws IOException
@@ -80,6 +90,12 @@ public interface PrimaryKeyMap extends Closeable
      * @return the last row Id associated with the {@link PrimaryKey}
      */
     long lastRowIdFromPrimaryKey(PrimaryKey key);
+
+    /**
+     * Returns the SSTableId for the SSTable this {@link PrimaryKeyMap} is associated with
+     * @return
+     */
+    SSTableId<?> getSSTableId();
 
     @Override
     default void close() throws IOException

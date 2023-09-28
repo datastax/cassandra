@@ -69,6 +69,7 @@ The following built-in analyzers are available:
 | `whitespace`  | Analyzer that uses `WhitespaceTokenizer`.                                                                |
 | `stop`        | Filters `LetterTokenizer` output with `LowerCaseFilter` and removes Lucene's default English stop words. |
 | `lowercase`   | Normalizes input by applying `LowerCaseFilter` (no additional tokenization is performed).                |
+| `keyword`     | Analyzer that uses `KeywordTokenizer`, which is an identity function on input values.                    |
 | `<language>`  | Analyzers for specific languages. For example, `english` and `french`.                                   |
 
 ### Standard Analyzer
@@ -78,7 +79,7 @@ Here is the custom analyzer configuration for the standard analyzer:
 ```
 OPTIONS = {
   'index_analyzer':
-  {
+  '{
     "tokenizer" : {
       "name" : "standard",
       "args" : {}
@@ -90,7 +91,7 @@ OPTIONS = {
       }
     ], 
     "charFilters" : []
-  }
+  }'
 }
 ```
 
@@ -101,7 +102,7 @@ Here is the custom analyzer configuration for the simple analyzer:
 ```
 OPTIONS = {
   'index_analyzer':
-  {
+  '{
     "tokenizer" : {
       "name" : "letter",
       "args" : {}
@@ -113,7 +114,7 @@ OPTIONS = {
       }
     ], 
     "charFilters" : []
-  }
+  }'
 }
 ```
 
@@ -124,14 +125,14 @@ Here is the custom analyzer configuration for the whitespace analyzer:
 ```
 OPTIONS = {
   'index_analyzer':
-  {
+  '{
     "tokenizer" : {
       "name" : "whitespace",
       "args" : {}
     },
     "filters" : [], 
     "charFilters" : []
-  }
+  }'
 }
 ```
 
@@ -142,7 +143,7 @@ Here is the custom analyzer configuration for the lowercase analyzer:
 ```
 OPTIONS = {
  'index_analyzer':
-  {
+  '{
     "tokenizer" : {
       "name" : "keyword",
       "args" : {}
@@ -154,6 +155,6 @@ OPTIONS = {
       }
     ], 
     "charFilters" : []
-  }
+  }'
 }
 ```

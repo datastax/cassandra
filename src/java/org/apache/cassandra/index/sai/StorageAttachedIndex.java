@@ -53,6 +53,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.restrictions.Restriction;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -112,13 +113,12 @@ public class StorageAttachedIndex implements Index
 
     private static class StorageAttachedIndexBuildingSupport implements IndexBuildingSupport
     {
-        public SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs,
+        public NavigableMap<SSTableReader, Set<StorageAttachedIndex>> prepareSSTablesToBuild(StorageAttachedIndexGroup group,
                                                        Set<Index> indexes,
                                                        Collection<SSTableReader> sstablesToRebuild,
                                                        boolean isFullRebuild)
         {
             NavigableMap<SSTableReader, Set<StorageAttachedIndex>> sstables = new TreeMap<>(SSTableReader.idComparator);
-            StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
 
             indexes.stream()
                    .filter((i) -> i instanceof StorageAttachedIndex)
@@ -147,7 +147,37 @@ public class StorageAttachedIndex implements Index
                                            });
                             });
 
-            return new StorageAttachedIndexBuilder(StorageAttachedIndexGroup.getIndexGroup(cfs), sstables, isFullRebuild, false);
+            return sstables;
+        }
+
+        @Override
+        public SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs, Set<Index> indexes, Collection<SSTableReader> sstablesToRebuild, boolean isFullRebuild)
+        {
+            StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
+            NavigableMap<SSTableReader, Set<StorageAttachedIndex>> sstables = prepareSSTablesToBuild(group, indexes, sstablesToRebuild, isFullRebuild);
+            return new StorageAttachedIndexBuilder(group, sstables, isFullRebuild, false);
+        }
+
+        @Override
+        public List<SecondaryIndexBuilder> getParallelIndexBuildTasks(ColumnFamilyStore cfs, Set<Index> indexes, Collection<SSTableReader> sstablesToRebuild, boolean isFullRebuild)
+        {
+            StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(cfs);
+            NavigableMap<SSTableReader, Set<StorageAttachedIndex>> sstables = prepareSSTablesToBuild(indexGroup, indexes, sstablesToRebuild, isFullRebuild);
+
+            List<List<SSTableReader>> groups = groupBySize(new ArrayList<>(sstables.keySet()), DatabaseDescriptor.getConcurrentCompactors());
+            List<SecondaryIndexBuilder> builders = new ArrayList<>();
+
+            for (List<SSTableReader> group : groups)
+            {
+                SortedMap<SSTableReader, Set<StorageAttachedIndex>> current = new TreeMap<>(Comparator.comparing(sstable -> sstable.descriptor.id));
+                group.forEach(sstable -> current.put(sstable, sstables.get(sstable)));
+
+                builders.add(new StorageAttachedIndexBuilder(indexGroup, current, isFullRebuild, false));
+            }
+
+            logger.info("Creating {} parallel index builds over {} total sstables for {}...", builders.size(), sstables.size(), cfs.metadata());
+
+            return builders;
         }
     }
 
@@ -165,7 +195,8 @@ public class StorageAttachedIndex implements Index
                                                                      IndexWriterConfig.MAXIMUM_NODE_CONNECTIONS,
                                                                      IndexWriterConfig.CONSTRUCTION_BEAM_WIDTH,
                                                                      IndexWriterConfig.SIMILARITY_FUNCTION,
-                                                                     LuceneAnalyzer.INDEX_ANALYZER);
+                                                                     LuceneAnalyzer.INDEX_ANALYZER,
+                                                                     LuceneAnalyzer.QUERY_ANALYZER);
 
     public static final Set<CQL3Type> SUPPORTED_TYPES = ImmutableSet.of(CQL3Type.Native.ASCII, CQL3Type.Native.BIGINT, CQL3Type.Native.DATE,
                                                                         CQL3Type.Native.DOUBLE, CQL3Type.Native.FLOAT, CQL3Type.Native.INT,
@@ -542,7 +573,7 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
-    public Comparator<List<ByteBuffer>> getPostQueryOrdering(Restriction restriction, int columnIndex, QueryOptions options)
+    public void postQuerySort(ResultSet cqlRows, Restriction restriction, int columnIndex, QueryOptions options)
     {
         // For now, only support ANN
         assert restriction instanceof SingleColumnRestriction.AnnRestriction;
@@ -550,18 +581,26 @@ public class StorageAttachedIndex implements Index
         Preconditions.checkState(indexContext.isVector());
 
         SingleColumnRestriction.AnnRestriction annRestriction = (SingleColumnRestriction.AnnRestriction) restriction;
-        VectorSimilarityFunction function = indexContext.getIndexWriterConfig().getSimilarityFunction();
+        VectorSimilarityFunction similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
 
-        float[] target = TypeUtil.decomposeVector(indexContext, annRestriction.value(options).duplicate());
+        float[] targetVector = TypeUtil.decomposeVector(indexContext, annRestriction.value(options).duplicate());
 
-        return (leftBuf, rightBuf) -> {
-            float[] left = TypeUtil.decomposeVector(indexContext, leftBuf.get(columnIndex).duplicate());
-            double scoreLeft = function.compare(left, target);
+        List<List<ByteBuffer>> buffRows = cqlRows.rows;
+        // Decorate-sort-undecorate to optimize sorting of vectors by their similarity scores
+        List<Pair<List<ByteBuffer>, Double>> listPairsVectorsScores = buffRows.stream()
+                                                                              .map(row -> {
+                                                                                  ByteBuffer vectorBuffer = row.get(columnIndex);
+                                                                                  float[] vector = TypeUtil.decomposeVector(indexContext, vectorBuffer.duplicate());
+                                                                                  Double score = (double) similarityFunction.compare(vector, targetVector);
+                                                                                  return Pair.create(row, score);
+                                                                              })
+                                                                              .collect(Collectors.toList());
+        listPairsVectorsScores.sort(Comparator.comparing(pair -> pair.right, Comparator.reverseOrder()));
+        List<List<ByteBuffer>> sortedRows = listPairsVectorsScores.stream()
+                                                                  .map(pair -> pair.left)
+                                                                  .collect(Collectors.toList());
 
-            float[] right = TypeUtil.decomposeVector(indexContext, rightBuf.get(columnIndex).duplicate());
-            double scoreRight = function.compare(right, target);
-            return Double.compare(scoreRight, scoreLeft); // descending order
-        };
+        cqlRows.rows = sortedRows;
     }
 
     @Override

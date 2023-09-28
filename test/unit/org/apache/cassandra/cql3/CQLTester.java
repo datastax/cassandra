@@ -86,12 +86,13 @@ import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.NettyOptions;
 import com.datastax.driver.core.PoolingOptions;
 import com.datastax.driver.core.ResultSet;
+
+import com.datastax.shaded.netty.channel.EventLoopGroup;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.SocketOptions;
 import com.datastax.driver.core.Statement;
-import com.datastax.shaded.netty.channel.EventLoopGroup;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.auth.CassandraAuthorizer;
@@ -226,6 +227,7 @@ public abstract class CQLTester
         @Override
         public void onClusterClose(EventLoopGroup eventLoopGroup)
         {
+            // shutdown driver connection immediatelly
             eventLoopGroup.shutdownGracefully(0, 0, TimeUnit.SECONDS).syncUninterruptibly();
         }
     };
@@ -919,7 +921,12 @@ public abstract class CQLTester
 
     protected String createTable(String keyspace, String query)
     {
-        String currentTable = createTableName();
+        return createTable(keyspace, query, null);
+    }
+
+    protected String createTable(String keyspace, String query, String tableName)
+    {
+        String currentTable = createTableName(tableName);
         String fullQuery = formatQuery(keyspace, query);
         logger.info(fullQuery);
         schemaChange(fullQuery);
@@ -928,7 +935,12 @@ public abstract class CQLTester
 
     protected String createTableName()
     {
-        String currentTable = String.format("table_%02d", seqNumber.getAndIncrement());
+        return createTableName(null);
+    }
+
+    protected String createTableName(String tableName)
+    {
+        String currentTable = tableName == null ? String.format("table_%02d", seqNumber.getAndIncrement()) : tableName;
         tables.add(currentTable);
         return currentTable;
     }
@@ -1174,12 +1186,12 @@ public abstract class CQLTester
         return Schema.instance.getTableMetadata(KEYSPACE, currentTable());
     }
 
-    protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, String query, Object... values) throws Throwable
+    protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, String query, Object... values)
     {
         return sessionNet(protocolVersion).execute(formatQuery(query), values);
     }
 
-    protected com.datastax.driver.core.ResultSet executeNet(String query, Object... values) throws Throwable
+    protected com.datastax.driver.core.ResultSet executeNet(String query, Object... values)
     {
         return sessionNet().execute(formatQuery(query), values);
     }
@@ -1351,12 +1363,12 @@ public abstract class CQLTester
         return QueryProcessor.instance.prepare(formatQuery(query), ClientState.forInternalCalls());
     }
 
-    public UntypedResultSet execute(String query, Object... values) throws Throwable
+    public UntypedResultSet execute(String query, Object... values)
     {
         return executeFormattedQuery(formatQuery(query), values);
     }
 
-    public UntypedResultSet executeFormattedQuery(String query, Object... values) throws Throwable
+    public UntypedResultSet executeFormattedQuery(String query, Object... values)
     {
         UntypedResultSet rs;
         if (usePrepared)

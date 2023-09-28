@@ -19,9 +19,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
-import java.nio.ByteBuffer;
 import java.util.Arrays;
-
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
@@ -35,10 +33,13 @@ import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.PostingListRangeIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw;
+import org.apache.cassandra.index.sai.disk.hnsw.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.disk.v1.postings.ReorderingPostingList;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
@@ -46,7 +47,9 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.index.sai.utils.RowIdScoreRecorder;
+import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.SparseFixedBitSet;
 
@@ -59,9 +62,9 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
 
     private final CassandraOnDiskHnsw graph;
     private final PrimaryKey.Factory keyFactory;
-    private final PrimaryKeyMap primaryKeyMap;
+    private final SSTableId<?> sstableId;
     private final VectorType<float[]> type;
-    private int maxBruteForceRows; // not final so test can inject its own setting
+    private int globalBruteForceRows; // not final so test can inject its own setting
     private final ThreadLocal<SparseFixedBitSet> cachedBitSets;
 
     VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
@@ -73,13 +76,11 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
         super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
         graph = new CassandraOnDiskHnsw(segmentMetadata.componentMetadatas, perIndexFiles, indexContext);
         this.keyFactory = PrimaryKey.factory(indexContext.comparator(), indexContext.indexFeatureSet());
-        this.primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
         type = (VectorType<float[]>) indexContext.getValidator();
         cachedBitSets = ThreadLocal.withInitial(() -> new SparseFixedBitSet(graph.size()));
+        this.sstableId = primaryKeyMapFactory.getSSTableId();
 
-        // estimate the number of comparisons that a search would require; use brute force if we have
-        // fewer rows involved than that
-        maxBruteForceRows = (int)(indexContext.getIndexWriterConfig().getMaximumNodeConnections() * Math.log(graph.size()));
+        globalBruteForceRows = Integer.MAX_VALUE;
     }
 
     @Override
@@ -108,7 +109,8 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
             return bitsOrPostingList.postingList();
 
         float[] queryVector = exp.lower.value.vector;
-        return graph.search(queryVector, limit, bitsOrPostingList.getBits(), Integer.MAX_VALUE, context);
+        return graph.search(queryVector, limit, bitsOrPostingList.getBits(), Integer.MAX_VALUE, context,
+                            context.getScoreRecorder(sstableId, metadata.segmentRowIdOffset));
     }
 
     /**
@@ -116,68 +118,84 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
      */
     private BitsOrPostingList bitsOrPostingListForKeyRange(QueryContext context, AbstractBounds<PartitionPosition> keyRange, int limit) throws IOException
     {
-        // not restricted
-        if (RangeUtil.coversFullRing(keyRange))
-            return new BitsOrPostingList(context.bitsetForShadowedPrimaryKeys(metadata, primaryKeyMap, graph));
-
-        PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
-        PrimaryKey lastPrimaryKey = keyFactory.createTokenOnly(keyRange.right.getToken());
-
-        // it will return the next row id if given key is not found.
-        long minSSTableRowId = primaryKeyMap.firstRowIdFromPrimaryKey(firstPrimaryKey);
-        long maxSSTableRowId = primaryKeyMap.lastRowIdFromPrimaryKey(lastPrimaryKey);
-
-        if (minSSTableRowId > maxSSTableRowId)
-            return new BitsOrPostingList(PostingList.EMPTY);
-
-        // if it covers entire segment, skip bit set
-        if (minSSTableRowId <= metadata.minSSTableRowId && maxSSTableRowId >= metadata.maxSSTableRowId)
-            return new BitsOrPostingList(context.bitsetForShadowedPrimaryKeys(metadata, primaryKeyMap, graph));
-
-        minSSTableRowId = Math.max(minSSTableRowId, metadata.minSSTableRowId);
-        maxSSTableRowId = Math.min(maxSSTableRowId, metadata.maxSSTableRowId);
-
-        // if num of matches are not bigger than limit, skip ANN
-        var nRows = maxSSTableRowId - minSSTableRowId + 1;
-        if (nRows <= Math.max(maxBruteForceRows, limit))
+        try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
         {
-            IntArrayList postings = new IntArrayList(Math.toIntExact(nRows), -1);
-            for (long sstableRowId = minSSTableRowId; sstableRowId <= maxSSTableRowId; sstableRowId++)
-            {
-                if (context.shouldInclude(sstableRowId, primaryKeyMap))
-                    postings.addInt(metadata.toSegmentRowId(sstableRowId));
-            }
-            return new BitsOrPostingList(new ArrayPostingList(postings.toIntArray()));
-        }
+            // not restricted
+            if (RangeUtil.coversFullRing(keyRange))
+                return new BitsOrPostingList(context.bitsetForShadowedPrimaryKeys(metadata, primaryKeyMap, graph));
 
-        // create a bitset of ordinals corresponding to the rows in the given key range
-        SparseFixedBitSet bits = bitSetForSearch();
-        boolean hasMatches = false;
-        try (var ordinalsView = graph.getOrdinalsView())
-        {
-            for (long sstableRowId = minSSTableRowId; sstableRowId <= maxSSTableRowId; sstableRowId++)
+            PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
+            PrimaryKey lastPrimaryKey = keyFactory.createTokenOnly(keyRange.right.getToken());
+
+            // it will return the next row id if given key is not found.
+            long minSSTableRowId = primaryKeyMap.firstRowIdFromPrimaryKey(firstPrimaryKey);
+            long maxSSTableRowId = primaryKeyMap.lastRowIdFromPrimaryKey(lastPrimaryKey);
+
+            if (minSSTableRowId > maxSSTableRowId)
+                return new BitsOrPostingList(PostingList.EMPTY);
+
+            // if it covers entire segment, skip bit set
+            if (minSSTableRowId <= metadata.minSSTableRowId && maxSSTableRowId >= metadata.maxSSTableRowId)
+                return new BitsOrPostingList(context.bitsetForShadowedPrimaryKeys(metadata, primaryKeyMap, graph));
+
+            minSSTableRowId = Math.max(minSSTableRowId, metadata.minSSTableRowId);
+            maxSSTableRowId = Math.min(maxSSTableRowId, metadata.maxSSTableRowId);
+
+            // if num of matches are not bigger than limit, skip ANN
+            var nRows = maxSSTableRowId - minSSTableRowId + 1;
+            int maxBruteForceRows = Math.min(globalBruteForceRows, getMaxBruteForceRows(limit));
+            logger.trace("Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes of degree {}, LIMIT {}",
+                         nRows, maxBruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
+            Tracing.trace("Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes of degree {}, LIMIT {}",
+                          nRows, maxBruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
+            if (nRows <= maxBruteForceRows)
             {
-                if (context.shouldInclude(sstableRowId, primaryKeyMap))
+                IntArrayList postings = new IntArrayList(Math.toIntExact(nRows), -1);
+                for (long sstableRowId = minSSTableRowId; sstableRowId <= maxSSTableRowId; sstableRowId++)
                 {
-                    int segmentRowId = metadata.toSegmentRowId(sstableRowId);
-                    int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                    if (ordinal >= 0)
+                    if (context.shouldInclude(sstableRowId, primaryKeyMap))
+                        postings.addInt(metadata.toSegmentRowId(sstableRowId));
+                }
+                return new BitsOrPostingList(new ArrayPostingList(postings.toIntArray()));
+            }
+
+            // create a bitset of ordinals corresponding to the rows in the given key range
+            SparseFixedBitSet bits = bitSetForSearch();
+            boolean hasMatches = false;
+            try (var ordinalsView = graph.getOrdinalsView())
+            {
+                for (long sstableRowId = minSSTableRowId; sstableRowId <= maxSSTableRowId; sstableRowId++)
+                {
+                    if (context.shouldInclude(sstableRowId, primaryKeyMap))
                     {
-                        bits.set(ordinal);
-                        hasMatches = true;
+                        int segmentRowId = metadata.toSegmentRowId(sstableRowId);
+                        int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
+                        if (ordinal >= 0)
+                        {
+                            bits.set(ordinal);
+                            hasMatches = true;
+                        }
                     }
                 }
             }
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
-        }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
 
-        if (!hasMatches)
-            return new BitsOrPostingList(PostingList.EMPTY);
+            if (!hasMatches)
+                return new BitsOrPostingList(PostingList.EMPTY);
 
-        return new BitsOrPostingList(bits);
+            return new BitsOrPostingList(bits);
+        }
+    }
+
+    private int getMaxBruteForceRows(int limit)
+    {
+        // VSTODO the memtable calculation assumes that doing a graph comparison is equally as expensive
+        // as a brute force comparison.  This is not correct but I'm not sure by how much.  2x seems like
+        // a reasonable minimum factor to increase it by.  (This will change for DiskANN.)
+        return 2 * VectorMemtableIndex.getMaxBruteForceRows(limit, indexContext.getIndexWriterConfig().getMaximumNodeConnections(), graph.size());
     }
 
     private SparseFixedBitSet bitSetForSearch()
@@ -190,52 +208,76 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
     @Override
     public RangeIterator<PrimaryKey> limitToTopResults(QueryContext context, RangeIterator<Long> iterator, Expression exp, int limit) throws IOException
     {
-        // the iterator represents keys from all the segments in our sstable -- we'll only pull of those that
-        // are from our own token range so we can use row ids to order the results by vector similarity.
-        var maxSegmentRowId = metadata.toSegmentRowId(metadata.maxSSTableRowId);
-        SparseFixedBitSet bits = bitSetForSearch();
-        int[] bruteForceRows = new int[Math.max(limit, this.maxBruteForceRows)];
-        int n = 0;
-        try (var ordinalsView = graph.getOrdinalsView())
+        try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
         {
-            while (iterator.hasNext())
+            // the iterator represents keys from all the segments in our sstable -- we'll only pull of those that
+            // are from our own token range so we can use row ids to order the results by vector similarity.
+            var maxSegmentRowId = metadata.toSegmentRowId(metadata.maxSSTableRowId);
+            SparseFixedBitSet bits = bitSetForSearch();
+            int maxBruteForceRows = Math.min(globalBruteForceRows, getMaxBruteForceRows(limit));
+            int[] bruteForceRows = new int[maxBruteForceRows];
+            int n = 0;
+            try (var ordinalsView = graph.getOrdinalsView())
             {
-                Long sstableRowId = iterator.peek();
-                // if sstable row id has exceeded current ANN segment, stop
-                if (sstableRowId > metadata.maxSSTableRowId)
-                    break;
-
-                iterator.next();
-                // skip rows that are not in our segment (or more preciesely, have no vectors that were indexed)
-                if (sstableRowId < metadata.minSSTableRowId)
-                    continue;
-
-                int segmentRowId = metadata.toSegmentRowId(sstableRowId);
-                if (n < bruteForceRows.length)
-                    bruteForceRows[n] = segmentRowId;
-                n++;
-
-                int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                assert ordinal <= maxSegmentRowId : "ordinal=" + ordinal + ", max=" + maxSegmentRowId; // ordinal count should be <= row count
-                if (ordinal >= 0)
+                while (iterator.hasNext())
                 {
-                    if (context.shouldInclude(sstableRowId, primaryKeyMap))
-                        bits.set(ordinal);
+                    Long sstableRowId = iterator.peek();
+                    // if sstable row id has exceeded current ANN segment, stop
+                    if (sstableRowId > metadata.maxSSTableRowId)
+                        break;
+
+                    iterator.next();
+                    // skip rows that are not in our segment (or more preciesely, have no vectors that were indexed)
+                    if (sstableRowId < metadata.minSSTableRowId)
+                        continue;
+
+                    int segmentRowId = metadata.toSegmentRowId(sstableRowId);
+                    if (n < bruteForceRows.length)
+                        bruteForceRows[n] = segmentRowId;
+                    n++;
+
+                    int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
+                    if (ordinal >= 0)
+                    {
+                        if (context.shouldInclude(sstableRowId, primaryKeyMap))
+                            bits.set(ordinal);
+                    }
                 }
             }
-        }
+            logger.trace("SAI materialized {} rows; max brute force rows is {} for sstable index with {} nodes of degree {}, LIMIT {}",
+                         n, maxBruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
+            Tracing.trace("SAI materialized {} rows; max brute force rows is {} for sstable index with {} nodes of degree {}, LIMIT {}",
+                          n, maxBruteForceRows, graph.size(), indexContext.getIndexWriterConfig().getMaximumNodeConnections(), limit);
 
-        // if we have a small number of results then let TopK processor do exact NN computation
-        if (n < bruteForceRows.length)
-        {
-            var results = new ReorderingPostingList(Arrays.stream(bruteForceRows, 0, n).iterator(), n);
-            return toPrimaryKeyIterator(results, context);
-        }
+            // if we have a small number of results then let TopK processor do exact NN computation
+            if (n < bruteForceRows.length)
+            {
+                var results = new ReorderingPostingList(Arrays.stream(bruteForceRows, 0, n).iterator(), n);
+                return toPrimaryKeyIterator(results, context, true);
+            }
 
-        // else ask hnsw to perform a search limited to the bits we created
-        float[] queryVector = exp.lower.value.vector;
-        var results = graph.search(queryVector, limit, bits, Integer.MAX_VALUE, context);
-        return toPrimaryKeyIterator(results, context);
+            // else ask hnsw to perform a search limited to the bits we created
+            float[] queryVector = exp.lower.value.vector;
+            var results = graph.search(queryVector, limit, bits, Integer.MAX_VALUE, context,
+                                       context.getScoreRecorder(sstableId, metadata.segmentRowIdOffset));
+            return toPrimaryKeyIterator(results, context, false);
+        }
+    }
+
+    RangeIterator<PrimaryKey> toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext, boolean isBruteForce) throws IOException
+    {
+        if (postingList == null || postingList.size() == 0)
+            return RangeIterator.emptyKeys();
+
+        IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
+                                                                        metadata.maxKey,
+                                                                        metadata.minSSTableRowId,
+                                                                        metadata.maxSSTableRowId,
+                                                                        metadata.segmentRowIdOffset,
+                                                                        queryContext,
+                                                                        postingList.peekable());
+
+        return new PostingListRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext, isBruteForce);
     }
 
     @Override
@@ -250,7 +292,6 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
     public void close() throws IOException
     {
         graph.close();
-        primaryKeyMap.close();
     }
 
     private static class BitsOrPostingList

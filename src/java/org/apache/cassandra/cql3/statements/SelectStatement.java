@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.statements;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
@@ -42,7 +43,6 @@ import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.cql3.*;
@@ -78,6 +78,7 @@ import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.FBUtilities;
 
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -102,6 +103,7 @@ import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
 public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 {
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(SelectStatement.logger, 1, TimeUnit.MINUTES);
 
     private final String rawCQLStatement;
     public final VariableSpecifications bindVariables;
@@ -476,10 +478,14 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             if (!restrictions.hasPartitionKeyRestrictions())
             {
                 warn("Aggregation query used without partition key");
+                noSpamLogger.warn(String.format("Aggregation query used without partition key on table %s.%s, aggregation type: %s",
+                                                 keyspace(), columnFamily(), aggregationSpec.kind()));
             }
             else if (restrictions.keyIsInRelation())
             {
                 warn("Aggregation query used on multiple partition keys (IN restriction)");
+                noSpamLogger.warn(String.format("Aggregation query used on multiple partition keys (IN restriction) on table %s.%s, aggregation type: %s",
+                                                 keyspace(), columnFamily(), aggregationSpec.kind()));
             }
         }
 
@@ -899,6 +905,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         ResultSet cqlRows = result.build();
 
+        ColumnFamilyStore store = cfs();
+        if (store != null)
+            store.metric.coordinatorReadSize.update(calculateSize(cqlRows.rows));
+
         orderResults(cqlRows, options);
 
         cqlRows.trim(userLimit);
@@ -906,9 +916,31 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         return cqlRows;
     }
 
+    public ColumnFamilyStore cfs()
+    {
+        return Schema.instance.getColumnFamilyStoreInstance(table.id);
+    }
+
+    private int calculateSize(List<List<ByteBuffer>> rows)
+    {
+        int size = 0;
+        for (List<ByteBuffer> row : rows)
+        {
+            for (int i = 0, isize = row.size(); i < isize; i++)
+            {
+                ByteBuffer value = row.get(i);
+                size += value != null ? value.remaining() : 0;
+            }
+        }
+        return size;
+    }
+
     public static ByteBuffer[] getComponents(TableMetadata metadata, DecoratedKey dk)
     {
         ByteBuffer key = dk.getKey();
+        if (metadata.partitionKeyColumns().size() == 1)
+            return new ByteBuffer[]{ key };
+
         if (metadata.partitionKeyType instanceof CompositeType)
         {
             return ((CompositeType)metadata.partitionKeyType).split(key);
@@ -1017,14 +1049,28 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     /**
      * Orders results when multiple keys are selected (using IN)
      */
-    private void orderResults(ResultSet cqlRows, QueryOptions options)
+    public void orderResults(ResultSet cqlRows, QueryOptions options)
     {
         if (cqlRows.size() == 0 || !needsPostQueryOrdering())
             return;
 
-        Comparator<List<ByteBuffer>> comparator = orderingComparator.prepareFor(table, options);
-        if (comparator != null)
-            Collections.sort(cqlRows.rows, comparator);
+        if (orderingComparator != null)
+        {
+            if (orderingComparator instanceof IndexColumnComparator)
+            {
+                SingleRestriction restriction = ((IndexColumnComparator<?>) orderingComparator).restriction;
+                int columnIndex = ((IndexColumnComparator<?>) orderingComparator).columnIndex;
+
+                Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
+                assert index != null;
+
+                index.postQuerySort(cqlRows, restriction, columnIndex, options);
+            }
+            else
+            {
+                Collections.sort(cqlRows.rows, orderingComparator);
+            }
+        }
     }
 
     public static class RawStatement extends QualifiedStatement<SelectStatement>
@@ -1495,14 +1541,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         {
             return false;
         }
-
-        /**
-         * Produces a prepared {@link ColumnComparator} for current table and query-options
-         */
-        public Comparator<T> prepareFor(TableMetadata table, QueryOptions options)
-        {
-            return this;
-        }
     }
 
     private static class ReversedColumnComparator<T> extends ColumnComparator<T>
@@ -1556,14 +1594,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         public boolean indexOrdering()
         {
             return true;
-        }
-
-        @Override
-        public Comparator<List<ByteBuffer>> prepareFor(TableMetadata table, QueryOptions options)
-        {
-            Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
-            assert index != null;
-            return index.getPostQueryOrdering(restriction, columnIndex, options);
         }
 
         @Override

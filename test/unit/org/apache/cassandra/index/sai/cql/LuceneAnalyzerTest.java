@@ -21,7 +21,7 @@ package org.apache.cassandra.index.sai.cql;
 import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.InvalidQueryException;
-import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.analyzer.filter.BuiltInAnalyzers;
@@ -36,17 +36,101 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
-                                             "'index_analyzer': '{\n" +
-                                             "\t\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
-                                             "\t\"filters\":[{\"name\":\"lowercase\"}]\n" +
-                                             "}'," +
-                                             "'query_analyzer': '{\n" +
-                                             "\t\"tokenizer\":{\"name\":\"whitespace\"},\n" +
-                                             "\t\"filters\":[{\"name\":\"porterstem\"}]\n" +
-                                             "}'};"))
-        .hasCauseInstanceOf(ConfigurationException.class)
-        .hasRootCauseMessage("Properties specified [query_analyzer] are not understood by StorageAttachedIndex");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': '{\n" +
+                    "\t\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
+                    "\t\"filters\":[{\"name\":\"lowercase\"}]\n" +
+                    "}'," +
+                    "'query_analyzer': '{\n" +
+                    "\t\"tokenizer\":{\"name\":\"whitespace\"},\n" +
+                    "\t\"filters\":[{\"name\":\"porterstem\"}]\n" +
+                    "}'};");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'the query')");
+
+        flush();
+
+        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'query'").size());
+    }
+
+    @Test
+    public void testQueryAnalyzerBuiltIn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': 'standard', 'query_analyzer': 'lowercase'};");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES (1, 'the query')");
+        execute("INSERT INTO %s (id, val) VALUES (2, 'my test Query')");
+        execute("INSERT INTO %s (id, val) VALUES (3, 'The Big Dog')");
+
+        // Some in sstable and some in memory
+        flush();
+
+        execute("INSERT INTO %s (id, val) VALUES (4, 'another QUERY')");
+        execute("INSERT INTO %s (id, val) VALUES (5, 'the fifth insert')");
+        execute("INSERT INTO %s (id, val) VALUES (6, 'MY LAST ENTRY')");
+
+        // Shows that the query term is lowercased to match all 'query' terms in the index
+        UntypedResultSet resultSet = execute("SELECT id FROM %s WHERE val : 'QUERY'");
+        assertRows(resultSet, row(1), row(2), row(4));
+
+        // add whitespace in front of query term and since it isn't tokenized by whitespace, we get no results
+        resultSet = execute("SELECT id FROM %s WHERE val : ' query'");
+        assertRows(resultSet);
+
+        // similarly, phrases do not match because index tokenized by whitespace (among other things) but the query
+        // is not
+        resultSet = execute("SELECT id FROM %s WHERE val : 'the query'");
+        assertRows(resultSet);
+    }
+
+    @Test
+    public void testDifferentIndexAndQueryAnalyzersWhenAppliedDuringPostFiltering() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, c1 text)");
+        // This test verifies a bug fix where the query analyzer was incorrectly used in place of the index analyzer.
+        // The analyzers are selected in conjunction with the column values and the query. Specifically,
+        // the index analyzer includes a lowercase filter but the query analyzer does not.
+        createIndex("CREATE CUSTOM INDEX ON %s(c1) USING 'StorageAttachedIndex' WITH OPTIONS =" +
+                    "{'index_analyzer': 'standard', 'query_analyzer': 'whitespace'}");
+        waitForIndexQueryable();
+
+        // The standard analyzer maps this to just one output 'the', but the query analyzer would map this to 'THE'
+        execute("INSERT INTO %s (pk, c1) VALUES (?, ?)", 1, "THE");
+
+        UntypedResultSet resultSet = execute("SELECT pk FROM %s WHERE c1 : 'the'");
+        assertRows(resultSet, row(1));
+    }
+
+    @Test
+    public void testCreateIndexWithQueryAnalyzerAndNoIndexAnalyzerFails() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, c1 text)");
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(c1) USING 'StorageAttachedIndex' WITH OPTIONS = " +
+                    "{'query_analyzer': 'whitespace'}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasRootCauseMessage("Cannot specify query_analyzer without an index_analyzer option or any combination of " +
+                             "case_sensitive, normalize, or ascii options. options={query_analyzer=whitespace, target=c1}");;
+    }
+
+    @Test
+    public void testCreateIndexWithNormalizersWorks() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, c1 text, c2 text, c3 text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(c1) USING 'StorageAttachedIndex' WITH OPTIONS = " +
+                    "{'query_analyzer': 'whitespace', 'case_sensitive': false}");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(c2) USING 'StorageAttachedIndex' WITH OPTIONS = " +
+                    "{'query_analyzer': 'whitespace', 'normalize': true}");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(c3) USING 'StorageAttachedIndex' WITH OPTIONS = " +
+                    "{'query_analyzer': 'whitespace', 'ascii': true}");
     }
 
     @Test
@@ -113,6 +197,32 @@ public class LuceneAnalyzerTest extends SAITester
         .hasRootCauseMessage("Analzyer config requires at least a tokenizer, a filter, or a charFilter, but none found. config={}");
     }
 
+    @Test
+    public void testIndexAnalyzerAndNonTokenizingAnalyzerFailsAtCreation() {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                                             "WITH OPTIONS = { 'index_analyzer': 'standard', 'ascii': true}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasRootCauseMessage("Cannot specify case_insensitive, normalize, or ascii options with " +
+                             "index_analyzer option. options={index_analyzer=standard, ascii=true, target=val}");
+
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                                             "WITH OPTIONS = { 'index_analyzer': 'standard', 'normalize': true}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasRootCauseMessage("Cannot specify case_insensitive, normalize, or ascii options with " +
+                             "index_analyzer option. options={index_analyzer=standard, normalize=true, target=val}");
+
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                                             "WITH OPTIONS = { 'index_analyzer': 'standard', 'case_sensitive': false}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasRootCauseMessage("Cannot specify case_insensitive, normalize, or ascii options with " +
+                             "index_analyzer option. options={index_analyzer=standard, case_sensitive=false, target=val}");
+    }
+
     // Technically, the NoopAnalyzer is applied, but that maps each field without modification, so any operator
     // that matches the SAI field will also match the PK field when compared later in the search (there are two phases).
     @Test
@@ -174,15 +284,105 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void testStopFilter() throws Throwable
+    public void testStopFilterNoFormat() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
                                             "\t{\"tokenizer\":{\"name\" : \"whitespace\"},\n" +
-                                            "\t \"filters\":[{\"name\":\"stop\"}]}'}"))
-        .isInstanceOf(InvalidQueryException.class)
-        .hasMessageContaining("filter=stop is unsupported.");
+                                            "\t \"filters\":[{\"name\":\"stop\", \"args\": {\"words\": \"the,test\"}}]}'}");
+        verifyStopWordsLoadedCorrectly();
+    }
+
+    @Test
+    public void testStopFilterWordSet() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                   "\t{\"tokenizer\":{\"name\" : \"whitespace\"},\n" +
+                   "\t \"filters\":[{\"name\":\"stop\", \"args\": {\"words\": \"the, test\", \"format\": \"wordset\"}}]}'}");
+        verifyStopWordsLoadedCorrectly();
+    }
+
+    @Test
+    public void testStopFilterSnowball() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        // snowball allows multiple words on the same line--they are broken up by whitespace
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                   "\t{\"tokenizer\":{\"name\" : \"whitespace\"},\n" +
+                   "\t \"filters\":[{\"name\":\"stop\", \"args\": {\"words\": \"the test\", \"format\": \"snowball\"}}]}'}");
+        verifyStopWordsLoadedCorrectly();
+
+    }
+
+    private void verifyStopWordsLoadedCorrectly() throws Throwable
+    {
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'the big test')");
+
+        flush();
+
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the'"));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the test'"));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'test'"));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the big'"), row("1"));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'big'"), row("1"));
+        // the extra words shouldn't change the outcome because tokenizer is whitespace and tokens are matched then unioned
+        assertRows(execute("SELECT id FROM %s WHERE val : 'test some other words'"));
+    }
+
+    @Test
+    public void verifyEmptyStringIndexingBehaviorOnNonAnalyzedColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 0, "");
+        flush();
+        assertRows(execute("SELECT * FROM %s WHERE v = ''"));
+    }
+
+    @Test
+    public void testEmptyQueryString() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'standard'}");
+        waitForIndexQueryable();
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 0, "");
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "some text to analyze");
+        flush();
+        assertRows(execute("SELECT * FROM %s WHERE v : ''"));
+    }
+
+    // The english analyzer has a default set of stop words. This test relies on "the" being one of those stop words.
+    @Test
+    public void testStopWordFilteringEdgeCases() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
+                   "WITH OPTIONS = {'index_analyzer':'english'}");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'the test')");
+        // When indexing a document with only stop words, the document should not be indexed.
+        // Note: from looking at the collections implementation, these rows are filtered out before getting
+        // to the NoOpAnalyzer, which would otherwise return an empty buffer, which would lead to incorrectly
+        // indexing documents at the base of the trie.
+        execute("INSERT INTO %s (id, val) VALUES ('2', 'the')");
+
+        flush();
+
+        // Ensure row is there
+        assertRows(execute("SELECT id FROM %s WHERE val : 'test'"), row("1"));
+        // Ensure a query with only stop words results in no rows
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the'"));
+        // Ensure that the AND is correctly applied so that we get no results
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the' AND val : 'test'"));
     }
 
     @Test
