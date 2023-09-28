@@ -19,9 +19,6 @@
 package org.apache.cassandra.index.sai.analyzer;
 
 import java.io.IOException;
-import java.util.Set;
-
-import com.google.common.collect.Sets;
 
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.filter.BuiltInAnalyzers;
@@ -32,15 +29,6 @@ import static org.apache.cassandra.utils.JsonUtils.JSON_OBJECT_MAPPER;
 
 public class JSONAnalyzerParser
 {
-    // unsupported because these filters open external files such as stop words
-    public static final Set<String> unsupportedFilters =
-    Sets.newHashSet("synonymgraph", // same as synonym
-                    "synonym", // replaces words, loads external file, could be implemented
-                    "commongrams", // loads external file terms, search feature
-                    "stop", // the stop words opens an arbitrary file and reads as stop words, so we don't yet support
-                    // arbitrary stop words. We do allow Lucene's built-in stop words, though.
-                    "snowballporter"); // bug in reflection instantiation
-
     public static Analyzer parse(String json) throws IOException
     {
         Analyzer analyzer = matchBuiltInAnalzyer(json.toUpperCase());
@@ -52,7 +40,7 @@ public class JSONAnalyzerParser
         // Don't have built in analyzer, parse JSON
         LuceneCustomAnalyzerConfig analyzerModel = JSON_OBJECT_MAPPER.readValue(json, LuceneCustomAnalyzerConfig.class);
 
-        CustomAnalyzer.Builder builder = CustomAnalyzer.builder();
+        CustomAnalyzer.Builder builder = CustomAnalyzer.builder(new ArgsStringLoader());
         // An ommitted tokenizer maps directly to the keyword tokenizer, which is an identity map on input terms
         if (analyzerModel.getTokenizer() == null)
         {
@@ -71,10 +59,6 @@ public class JSONAnalyzerParser
             if (filter.getName() == null)
             {
                 throw new InvalidRequestException("filter 'name' field is required for options=" + json);
-            }
-            if (unsupportedFilters.contains(filter.getName()))
-            {
-                throw new InvalidRequestException("filter=" + filter.getName() + " is unsupported.");
             }
             builder.addTokenFilter(filter.getName(), filter.getArgs());
         }
