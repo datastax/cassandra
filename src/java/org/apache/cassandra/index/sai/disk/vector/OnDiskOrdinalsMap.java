@@ -29,16 +29,12 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.DiskBinarySearch;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
-import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
 import io.github.jbellis.jvector.util.Bits;
 
 public class OnDiskOrdinalsMap
 {
     private static final Logger logger = LoggerFactory.getLogger(OnDiskOrdinalsMap.class);
 
-    private static final RowIdMatchingOrdinalsView rowIdMatchingOrdinalsView = new RowIdMatchingOrdinalsView();
-    private static final OrdinalsMatchingRowIdsView ordinalsMatchingRowIdsView = new OrdinalsMatchingRowIdsView();
     private final FileHandle fh;
     private final long ordToRowOffset;
     private final long segmentEnd;
@@ -46,8 +42,6 @@ public class OnDiskOrdinalsMap
     // the offset where we switch from recording ordinal -> rows, to row -> ordinal
     private final long rowOrdinalOffset;
     private final Set<Integer> deletedOrdinals;
-
-    private boolean rowIdsMatchOrdinals = false;
 
     public OnDiskOrdinalsMap(FileHandle fh, long segmentOffset, long segmentLength)
     {
@@ -59,13 +53,9 @@ public class OnDiskOrdinalsMap
         {
             reader.seek(segmentOffset);
             int deletedCount = reader.readInt();
-            if (deletedCount == -1) {
-                rowIdsMatchOrdinals = true;
-            }
             for (var i = 0; i < deletedCount; i++)
             {
-                int ordinal = reader.readInt();
-                deletedOrdinals.add(ordinal);
+                deletedOrdinals.add(reader.readInt());
             }
 
             this.ordToRowOffset = reader.getFilePointer();
@@ -82,11 +72,7 @@ public class OnDiskOrdinalsMap
 
     public RowIdsView getRowIdsView()
     {
-        if (rowIdsMatchOrdinals) {
-            return ordinalsMatchingRowIdsView;
-        }
-
-        return new FileReadingRowIdsView();
+        return new RowIdsView();
     }
 
     public Bits ignoringDeleted(Bits acceptBits)
@@ -94,26 +80,10 @@ public class OnDiskOrdinalsMap
         return BitsUtil.bitsIgnoringDeleted(acceptBits, deletedOrdinals);
     }
 
-    private static class OrdinalsMatchingRowIdsView implements RowIdsView {
-
-        @Override
-        public int[] getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
-        {
-            return new int[] { vectorOrdinal };
-        }
-
-        @Override
-        public void close()
-        {
-            // noop
-        }
-    }
-
-    private class FileReadingRowIdsView implements RowIdsView
+    public class RowIdsView implements AutoCloseable
     {
         RandomAccessReader reader = fh.createReader();
 
-        @Override
         public int[] getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
         {
             Preconditions.checkArgument(vectorOrdinal < size, "vectorOrdinal %s is out of bounds %s", vectorOrdinal, size);
@@ -157,30 +127,10 @@ public class OnDiskOrdinalsMap
 
     public OrdinalsView getOrdinalsView()
     {
-        if (rowIdsMatchOrdinals) {
-            return rowIdMatchingOrdinalsView;
-        }
-
-        return new FileReadingOrdinalsView();
+        return new OrdinalsView();
     }
 
-    private static class RowIdMatchingOrdinalsView implements OrdinalsView
-    {
-
-        @Override
-        public int getOrdinalForRowId(int rowId) throws IOException
-        {
-            return rowId;
-        }
-
-        @Override
-        public void close()
-        {
-            // noop
-        }
-    }
-
-    private class FileReadingOrdinalsView implements OrdinalsView
+    public class OrdinalsView implements AutoCloseable
     {
         RandomAccessReader reader = fh.createReader();
         private final long high = (segmentEnd - 8 - rowOrdinalOffset) / 8;
@@ -188,7 +138,6 @@ public class OnDiskOrdinalsMap
         /**
          * @return order if given row id is found; otherwise return -1
          */
-        @Override
         public int getOrdinalForRowId(int rowId) throws IOException
         {
             // Compute the offset of the start of the rowId to vectorOrdinal mapping
