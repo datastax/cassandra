@@ -197,30 +197,25 @@ public class LuceneAnalyzerTest extends SAITester
         .hasRootCauseMessage("Analzyer config requires at least a tokenizer, a filter, or a charFilter, but none found. config={}");
     }
 
+// FIXME re-enable exception detection once incompatible options have been purged from prod DBs
     @Test
-    public void testIndexAnalyzerAndNonTokenizingAnalyzerFailsAtCreation() {
+    public void testIndexAnalyzerAndNonTokenizingAnalyzerFailsAtCreation() throws Throwable
+    {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
-                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                                             "WITH OPTIONS = { 'index_analyzer': 'standard', 'ascii': true}"))
-        .isInstanceOf(InvalidRequestException.class)
-        .hasRootCauseMessage("Cannot specify case_insensitive, normalize, or ascii options with " +
-                             "index_analyzer option. options={index_analyzer=standard, ascii=true, target=val}");
+        createIndex("CREATE CUSTOM INDEX val_idx ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard', 'ascii': true}");
+        dropIndex("DROP INDEX %s.val_idx");
 
-        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
-                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                                             "WITH OPTIONS = { 'index_analyzer': 'standard', 'normalize': true}"))
-        .isInstanceOf(InvalidRequestException.class)
-        .hasRootCauseMessage("Cannot specify case_insensitive, normalize, or ascii options with " +
-                             "index_analyzer option. options={index_analyzer=standard, normalize=true, target=val}");
+        createIndex("CREATE CUSTOM INDEX val_idx ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard', 'normalize': true}");
+        dropIndex("DROP INDEX %s.val_idx");
 
-        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) " +
-                                             "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                                             "WITH OPTIONS = { 'index_analyzer': 'standard', 'case_sensitive': false}"))
-        .isInstanceOf(InvalidRequestException.class)
-        .hasRootCauseMessage("Cannot specify case_insensitive, normalize, or ascii options with " +
-                             "index_analyzer option. options={index_analyzer=standard, case_sensitive=false, target=val}");
+        createIndex("CREATE CUSTOM INDEX val_idx ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard', 'case_sensitive': false}");
     }
 
     // Technically, the NoopAnalyzer is applied, but that maps each field without modification, so any operator
@@ -284,15 +279,55 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void testStopFilter() throws Throwable
+    public void testStopFilterNoFormat() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
-        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
                                             "\t{\"tokenizer\":{\"name\" : \"whitespace\"},\n" +
-                                            "\t \"filters\":[{\"name\":\"stop\"}]}'}"))
-        .isInstanceOf(InvalidQueryException.class)
-        .hasMessageContaining("filter=stop is unsupported.");
+                                            "\t \"filters\":[{\"name\":\"stop\", \"args\": {\"words\": \"the,test\"}}]}'}");
+        verifyStopWordsLoadedCorrectly();
+    }
+
+    @Test
+    public void testStopFilterWordSet() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                   "\t{\"tokenizer\":{\"name\" : \"whitespace\"},\n" +
+                   "\t \"filters\":[{\"name\":\"stop\", \"args\": {\"words\": \"the, test\", \"format\": \"wordset\"}}]}'}");
+        verifyStopWordsLoadedCorrectly();
+    }
+
+    @Test
+    public void testStopFilterSnowball() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        // snowball allows multiple words on the same line--they are broken up by whitespace
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                   "\t{\"tokenizer\":{\"name\" : \"whitespace\"},\n" +
+                   "\t \"filters\":[{\"name\":\"stop\", \"args\": {\"words\": \"the test\", \"format\": \"snowball\"}}]}'}");
+        verifyStopWordsLoadedCorrectly();
+
+    }
+
+    private void verifyStopWordsLoadedCorrectly() throws Throwable
+    {
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', 'the big test')");
+
+        flush();
+
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the'"));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the test'"));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'test'"));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the big'"), row("1"));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'big'"), row("1"));
+        // the extra words shouldn't change the outcome because tokenizer is whitespace and tokens are matched then unioned
+        assertRows(execute("SELECT id FROM %s WHERE val : 'test some other words'"));
     }
 
     @Test

@@ -23,7 +23,6 @@ import java.io.IOException;
 import io.github.jbellis.jvector.util.Bits;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
-import org.apache.cassandra.index.sai.utils.RowIdScoreRecorder;
 
 /**
  * A common interface between Lucene and JVector graph indexes
@@ -39,7 +38,7 @@ public interface JVectorLuceneOnDiskGraph extends AutoCloseable
     /**
      * See CassandraDiskANN::search
      */
-    VectorPostingList search(float[] queryVector, int topK, int limit, Bits bits, QueryContext context, RowIdScoreRecorder sstableRowIdScoreRecorder);
+    VectorPostingList search(float[] queryVector, int topK, int limit, Bits bits, QueryContext context);
 
     void close() throws IOException;
 }

@@ -57,9 +57,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -253,12 +251,13 @@ public class CassandraOnHeapGraph<T>
     }
 
     /**
-     * @return keys associated with the topK vectors near the query
+     * @return keys (PrimaryKey or segment row id) associated with the topK vectors near the query
      */
-    public PriorityQueue<PrimaryKey> searchScoredKeys(float[] queryVector, int limit, Bits toAccept)
+    public PriorityQueue<T> search(float[] queryVector, int limit, Bits toAccept)
     {
         validateIndexable(queryVector, similarityFunction);
-        // VSTODO remove this block after migrating to jvector
+
+        // search() errors out when an empty graph is passed to it
         if (vectorValues.size() == 0)
             return new PriorityQueue<>();
 
@@ -273,17 +272,12 @@ public class CassandraOnHeapGraph<T>
                                           bits);
         Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         var a = result.getNodes();
-        PriorityQueue<PrimaryKey> keyQueue = new PriorityQueue<>();
+        PriorityQueue<T> keyQueue = new PriorityQueue<>();
         for (int i = 0; i < a.length; i++)
         {
             int node = a[i].node;
-            float score = a[i].score;
             Collection<T> keys = keysFromOrdinal(node);
-            for (T key : keys)
-            {
-                assert key instanceof PrimaryKey;
-                keyQueue.add(ScoredPrimaryKey.create((PrimaryKey) key, score));
-            }
+            keyQueue.addAll(keys);
         }
         return keyQueue;
     }

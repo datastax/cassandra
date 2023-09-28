@@ -47,7 +47,6 @@ import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
-import org.apache.cassandra.index.sai.utils.RowIdScoreRecorder;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -106,10 +105,9 @@ public class CassandraDiskAnn implements JVectorLuceneOnDiskGraph, AutoCloseable
      * @param limit the maximum number of results to return
      * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
      * @param context unused (vestige from HNSW, retained in signature to allow calling both easily)
-     * @param sstableRowIdScoreRecorder for caching similarity scores
      */
     @Override
-    public VectorPostingList search(float[] queryVector, int topK, int limit, Bits acceptBits, QueryContext context, RowIdScoreRecorder sstableRowIdScoreRecorder)
+    public VectorPostingList search(float[] queryVector, int topK, int limit, Bits acceptBits, QueryContext context)
     {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
@@ -133,21 +131,19 @@ public class CassandraDiskAnn implements JVectorLuceneOnDiskGraph, AutoCloseable
                                      topK,
                                      ordinalsMap.ignoringDeleted(acceptBits));
         Tracing.trace("DiakANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-        return annRowIdsToPostings(result, limit, sstableRowIdScoreRecorder);
+        return annRowIdsToPostings(result, limit);
     }
 
     private class RowIdIterator implements PrimitiveIterator.OfInt, AutoCloseable
     {
         private final Iterator<NodeScore> it;
         private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
-        private final RowIdScoreRecorder rowIdScoreRecorder;
 
         private OfInt segmentRowIdIterator = IntStream.empty().iterator();
 
-        public RowIdIterator(NodeScore[] results, RowIdScoreRecorder rowIdScoreRecorder)
+        public RowIdIterator(NodeScore[] results)
         {
             this.it = Arrays.stream(results).iterator();
-            this.rowIdScoreRecorder = rowIdScoreRecorder;
         }
 
         @Override
@@ -158,8 +154,6 @@ public class CassandraDiskAnn implements JVectorLuceneOnDiskGraph, AutoCloseable
                     NodeScore result = it.next();
                     var ordinal = result.node;
                     int[] rowIds = rowIdsView.getSegmentRowIdsMatching(ordinal);
-                    for (int rowId : rowIds)
-                        rowIdScoreRecorder.record(rowId, result.score);
                     segmentRowIdIterator = Arrays.stream(rowIds).iterator();
                 }
                 catch (IOException e)
@@ -184,9 +178,9 @@ public class CassandraDiskAnn implements JVectorLuceneOnDiskGraph, AutoCloseable
         }
     }
 
-    private VectorPostingList annRowIdsToPostings(SearchResult results, int limit, RowIdScoreRecorder rowIdScoreRecorder)
+    private VectorPostingList annRowIdsToPostings(SearchResult results, int limit)
     {
-        try (var iterator = new RowIdIterator(results.getNodes(), rowIdScoreRecorder))
+        try (var iterator = new RowIdIterator(results.getNodes()))
         {
             return new VectorPostingList(iterator, limit, results.getVisitedCount());
         }

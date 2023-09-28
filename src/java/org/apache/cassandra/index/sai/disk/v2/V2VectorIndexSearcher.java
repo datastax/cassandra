@@ -41,7 +41,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OptimizeFor;
@@ -53,7 +52,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
-import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.lang.Math.max;
@@ -69,7 +67,6 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
     private final JVectorLuceneOnDiskGraph graph;
     private final PrimaryKey.Factory keyFactory;
-    private final SSTableId<?> sstableId;
     private int globalBruteForceRows; // not final so test can inject its own setting
     private final AtomicRatio actualExpectedRatio = new AtomicRatio();
     private final ThreadLocal<SparseFixedBitSet> cachedBitSets;
@@ -94,7 +91,6 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         this.graph = graph;
         this.keyFactory = PrimaryKey.factory(indexContext.comparator(), indexContext.indexFeatureSet());
         cachedBitSets = ThreadLocal.withInitial(() -> new SparseFixedBitSet(graph.size()));
-        this.sstableId = primaryKeyMapFactory.getSSTableId();
 
         globalBruteForceRows = Integer.MAX_VALUE;
     }
@@ -126,8 +122,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             return bitsOrPostingList.postingList();
 
         float[] queryVector = exp.lower.value.vector;
-        var vectorPostings = graph.search(queryVector, topK, limit, bitsOrPostingList.getBits(), context,
-                                          context.getScoreRecorder(sstableId, metadata.segmentRowIdOffset));
+        var vectorPostings = graph.search(queryVector, topK, limit, bitsOrPostingList.getBits(), context);
         if (bitsOrPostingList.expectedNodesVisited >= 0)
             updateExpectedNodes(vectorPostings.getVisitedCount(), bitsOrPostingList.expectedNodesVisited);
         return vectorPostings;
@@ -304,18 +299,17 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             Tracing.trace("SAI materialized {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
                           rowIds.size(), maxBruteForceRows, graph.size(), limit);
             if (rowIds.size() <= maxBruteForceRows)
-                return toPrimaryKeyIterator(new ArrayPostingList(rowIds.toIntArray()), context, true);
+                return toPrimaryKeyIterator(new ArrayPostingList(rowIds.toIntArray()), context);
 
             // else ask the index to perform a search limited to the bits we created
             float[] queryVector = exp.lower.value.vector;
-            var results = graph.search(queryVector, topK, limit, bits, context,
-                                       context.getScoreRecorder(sstableId, metadata.segmentRowIdOffset));
+            var results = graph.search(queryVector, topK, limit, bits, context);
             updateExpectedNodes(results.getVisitedCount(), expectedNodesVisited(topK, maxSegmentRowId, graph.size()));
-            return toPrimaryKeyIterator(results, context, false);
+            return toPrimaryKeyIterator(results, context);
         }
     }
 
-    RangeIterator<PrimaryKey> toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext, boolean isBruteForce) throws IOException
+    RangeIterator<PrimaryKey> toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext) throws IOException
     {
         if (postingList == null || postingList.size() == 0)
             return RangeIterator.emptyKeys();
@@ -328,7 +322,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                                                         queryContext,
                                                                         postingList.peekable());
 
-        return new PostingListRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext, isBruteForce);
+        return new PostingListRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
     }
 
     @Override
