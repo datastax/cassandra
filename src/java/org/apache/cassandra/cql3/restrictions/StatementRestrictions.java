@@ -68,15 +68,13 @@ public class StatementRestrictions
 
     public static final String INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE = "Index on column %s does not support ':' restrictions.";
 
-    public static final String FILTERING_ANN_CONTRADICTION_MESSAGE = "Invalid query. One or more query predicates require filtering but ANN does not support filtering.";
-
     public static final String INDEX_DOES_NOT_SUPPORT_DISJUNCTION =
     "An index involved in this query does not support disjunctive queries using the OR operator";
 
     public static final String PARTITION_KEY_RESTRICTION_MUST_BE_TOP_LEVEL =
     "Restriction on partition key column %s must not be nested under OR operator";
 
-    public static final String ANN_REQUIRES_INDEX_MESSAGE = "ANN ordering by vector requires the column to be indexed";
+    public static final String ANN_REQUIRES_INDEX_MESSAGE = "ANN ordering by vector requires searched column(s) to be indexed";
 
     public static final String VECTOR_INDEXES_ANN_ONLY_MESSAGE = "Vector indexes only support ANN queries";
 
@@ -772,11 +770,15 @@ public class StatementRestrictions
         return children;
     }
 
+    public boolean hasAnnRestriction()
+    {
+        return nonPrimaryKeyRestrictions.getColumnDefs().stream().anyMatch(c -> c.type.isVector());
+    }
+
     public void throwRequiresAllowFilteringError(TableMetadata table)
     {
-        var hasAnnRestriction = nonPrimaryKeyRestrictions.getColumnDefs().stream().anyMatch(c -> c.type.isVector());
-        if (hasAnnRestriction)
-            throw invalidRequest(StatementRestrictions.FILTERING_ANN_CONTRADICTION_MESSAGE);
+        if (hasAnnRestriction())
+            throw invalidRequest(StatementRestrictions.ANN_REQUIRES_INDEX_MESSAGE);
         Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table);
         if (unsupported.isEmpty())
         {
