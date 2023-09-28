@@ -461,8 +461,5 @@ public class AllowFilteringTest extends SAITester
         assertInvalidMessage(StatementRestrictions.FILTERING_ANN_CONTRADICTION_MESSAGE,
                              "SELECT * FROM %s WHERE pk > 'A' AND pk < 'C' AND i > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
 
-        // Do not accept ALLOW FILTERING
-        assertInvalidMessage(StatementRestrictions.ANN_DOES_NOT_SUPPORT_FILTERING_MESSAGE,
-                             "SELECT * FROM %s WHERE i > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10 ALLOW FILTERING;");
     }
 }

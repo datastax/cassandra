@@ -178,6 +178,23 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
+    public void testTwoPredicatesWithOneAgainstClustringColumnWithoutIndex() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, b int, v vector<float, 3>, PRIMARY KEY(pk, b))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, b, v) VALUES (0, 0, [1.0, 2.0, 3.0])");
+        execute("INSERT INTO %s (pk, b, v) VALUES (1, 2, [2.0, 3.0, 4.0])");
+        execute("INSERT INTO %s (pk, b, v) VALUES (2, 4, [3.0, 4.0, 5.0])");
+        execute("INSERT INTO %s (pk, b, v) VALUES (3, 6, [4.0, 5.0, 6.0])");
+        // Note that this type of search only appears to work when b is a clustering column
+
+        assertRows(execute("SELECT pk FROM %s WHERE b > 2 ORDER BY v ANN OF [2.5, 3.5, 4.5] LIMIT 10 ALLOW FILTERING;"),
+                   row(2), row(3));
+    }
+
+    @Test
     public void testTwoPredicatesManyRows() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, PRIMARY KEY(pk))");

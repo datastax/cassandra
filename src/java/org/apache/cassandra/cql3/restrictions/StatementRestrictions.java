@@ -68,7 +68,6 @@ public class StatementRestrictions
 
     public static final String INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE = "Index on column %s does not support ':' restrictions.";
 
-    public static final String ANN_DOES_NOT_SUPPORT_FILTERING_MESSAGE = "ANN does not support filtering.";
     public static final String FILTERING_ANN_CONTRADICTION_MESSAGE = "Invalid query. One or more query predicates require filtering but ANN does not support filtering.";
 
     public static final String INDEX_DOES_NOT_SUPPORT_DISJUNCTION =
@@ -434,7 +433,7 @@ public class StatementRestrictions
 
             // ORDER BY clause.
             // Some indexes can be used for ordering.
-            addOrderingRestrictions(orderings, nonPrimaryKeyRestrictionSet, allowFiltering);
+            addOrderingRestrictions(orderings, nonPrimaryKeyRestrictionSet);
 
             PartitionKeyRestrictions partitionKeyRestrictions = partitionKeyRestrictionSet.build();
             ClusteringColumnRestrictions clusteringColumnsRestrictions = clusteringColumnsRestrictionSet.build();
@@ -648,12 +647,10 @@ public class StatementRestrictions
          * @param orderings orderings from the select statement
          * @param receiver target restriction builder to receive the additional restrictions
          */
-        private void addOrderingRestrictions(List<Ordering> orderings, RestrictionSet.Builder receiver, boolean allowFiltering)
+        private void addOrderingRestrictions(List<Ordering> orderings, RestrictionSet.Builder receiver)
         {
             List<Ordering> annOrderings = orderings.stream().filter(o -> o.expression.hasNonClusteredOrdering()).collect(Collectors.toList());
 
-            if (annOrderings.size() != 0 && allowFiltering)
-                throw new InvalidRequestException(StatementRestrictions.ANN_DOES_NOT_SUPPORT_FILTERING_MESSAGE);
             if (annOrderings.size() > 1)
                 throw new InvalidRequestException("Cannot specify more than one ANN ordering");
             else if (annOrderings.size() == 1)
