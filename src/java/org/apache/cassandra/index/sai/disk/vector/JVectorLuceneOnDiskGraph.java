@@ -34,7 +34,7 @@ public interface JVectorLuceneOnDiskGraph extends AutoCloseable
 
     int size();
 
-    OrdinalsView getOrdinalsView() throws IOException;
+    OnDiskOrdinalsMap.OrdinalsView getOrdinalsView() throws IOException;
 
     /**
      * See CassandraDiskANN::search
