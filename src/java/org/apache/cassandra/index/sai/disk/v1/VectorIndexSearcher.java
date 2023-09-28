@@ -253,18 +253,19 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
             if (n < bruteForceRows.length)
             {
                 var results = new ReorderingPostingList(Arrays.stream(bruteForceRows, 0, n).iterator(), n);
-                return toPrimaryKeyIterator(results, context, true);
+                return toPrimaryKeyIterator(results, context);
             }
 
             // else ask hnsw to perform a search limited to the bits we created
             float[] queryVector = exp.lower.value.vector;
             var results = graph.search(queryVector, limit, bits, Integer.MAX_VALUE, context,
                                        context.getScoreRecorder(sstableId, metadata.segmentRowIdOffset));
-            return toPrimaryKeyIterator(results, context, false);
+            return toPrimaryKeyIterator(results, context);
         }
     }
 
-    RangeIterator<PrimaryKey> toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext, boolean isBruteForce) throws IOException
+
+    RangeIterator<PrimaryKey> toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext) throws IOException
     {
         if (postingList == null || postingList.size() == 0)
             return RangeIterator.emptyKeys();
@@ -277,7 +278,7 @@ public class VectorIndexSearcher extends IndexSearcher implements SegmentOrderin
                                                                         queryContext,
                                                                         postingList.peekable());
 
-        return new PostingListRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext, isBruteForce);
+        return new PostingListRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
     }
 
     @Override
