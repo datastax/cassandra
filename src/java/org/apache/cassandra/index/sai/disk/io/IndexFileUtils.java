@@ -19,14 +19,20 @@
 package org.apache.cassandra.index.sai.disk.io;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.function.Supplier;
+import java.nio.channels.FileChannel;
+import java.nio.file.StandardOpenOption;
 import java.util.zip.CRC32;
 import java.util.zip.CRC32C;
 import java.util.zip.Checksum;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.compress.BufferType;
@@ -41,6 +47,8 @@ import org.apache.lucene.store.IndexInput;
 
 public class IndexFileUtils
 {
+    protected static final Logger logger = LoggerFactory.getLogger(IndexFileUtils.class);
+
     @VisibleForTesting
     public static final SequentialWriterOption DEFAULT_WRITER_OPTION = SequentialWriterOption.newBuilder()
                                                                                              .trickleFsync(DatabaseDescriptor.getTrickleFsync())
@@ -86,9 +94,15 @@ public class IndexFileUtils
     {
         assert writerOption.finishOnClose() : "IndexOutputWriter relies on close() to sync with disk.";
 
-        IndexOutputWriter indexOutputWriter = new IndexOutputWriter(new IncrementalChecksumSequentialWriter(file, writerOption, version));
+        IncrementalChecksumSequentialWriter checksumWriter = new IncrementalChecksumSequentialWriter(file, writerOption, version);
+        IndexOutputWriter indexOutputWriter = new IndexOutputWriter(checksumWriter);
         if (append)
+        {
+            // Got to recalculate checksum for the file opened for append, otherwise final checksum will be wrong.
+            // Checksum verification is not happening here as it sis not guranteed that the file has the checksum/footer.
+            checksumWriter.recalculateChecksum();
             indexOutputWriter.skipBytes(file.length());
+        }
 
         return indexOutputWriter;
     }
@@ -149,6 +163,55 @@ public class IndexFileUtils
             this.checksum = getChecksumFactory(version).get();
         }
 
+        /**
+         * Recalculates checksum for the file.
+         *
+         * Usefil when the file is opened for append and checksum will need to account for the existing data.
+         * e.g. if the file opened for append is a new file, then checksum start at 0 and goes from there with the writes.
+         * If the file opened for append is an existing file, without recalculating the checksum will start at 0
+         * and only account for appended data. Checksum validation will compare it to the checksum of the whole file and fail.
+         * Hence, for the existing files this method should be called to recalculate the checksum.
+         *
+         * @throws IOException if file read failed.
+         */
+        public void recalculateChecksum() throws IOException
+        {
+            checksum.reset();
+            if (!file.exists())
+                return;
+
+            try(FileChannel ch = FileChannel.open(file.toPath(), StandardOpenOption.READ))
+            {
+                if (ch.size() == 0)
+                    return;
+
+                final ByteBuffer buf = ByteBuffer.allocateDirect(65536);
+                int b = ch.read(buf);
+                while (b > 0)
+                {
+                    buf.flip();
+                    checksum.update(buf);
+                    buf.clear();
+                    b = ch.read(buf);
+                }
+            }
+        }
+
+        @Override
+        public void write(ByteBuffer src) throws IOException
+        {
+            ByteBuffer shallowCopy = src.slice().order(src.order());
+            super.write(src);
+            checksum.update(shallowCopy);
+        }
+
+        @Override
+        public void writeBoolean(boolean v) throws IOException
+        {
+            super.writeBoolean(v);
+            checksum.update(v ? 1 : 0);
+        }
+
         @Override
         public void writeByte(int b) throws IOException
         {
@@ -156,13 +219,8 @@ public class IndexFileUtils
             checksum.update(b);
         }
 
-        @Override
-        public void write(byte[] b) throws IOException
-        {
-            super.write(b);
-            checksum.update(b);
-        }
-
+        // Do not override write(byte[] b) to avoid double-counting bytes in the checksum.
+        // It just calls this method anyway.
         @Override
         public void write(byte[] b, int off, int len) throws IOException
         {
@@ -194,6 +252,19 @@ public class IndexFileUtils
         public long getChecksum()
         {
             return checksum.getValue();
+        }
+
+        // To avoid double-counting bytes in the checksum.
+        // Same as super's but calls super.writeByte
+        @DontInline
+        @Override
+        protected void writeSlow(long bytes, int count) throws IOException
+        {
+            int origCount = count;
+            if (ByteOrder.BIG_ENDIAN == buffer.order())
+                while (count > 0) super.writeByte((int) (bytes >>> (8 * --count)));
+            else
+                while (count > 0) super.writeByte((int) (bytes >>> (8 * (origCount - count--))));
         }
 
         private void addTochecksum(long bytes, int count)
