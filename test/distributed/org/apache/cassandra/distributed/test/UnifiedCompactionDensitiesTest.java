@@ -33,6 +33,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.hamcrest.Matchers;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_L0_SHARDS_ENABLED;
 import static org.apache.cassandra.cql3.TombstonesWithIndexedSSTableTest.makeRandomString;
 import static org.junit.Assert.assertThat;
 
@@ -64,6 +65,7 @@ public class UnifiedCompactionDensitiesTest extends TestBaseImpl
 
     private void testTargetSSTableSize(int nodeCount, int dataDirs) throws IOException
     {
+        UCS_L0_SHARDS_ENABLED.setBoolean(true);
         try (Cluster cluster = init(builder().withNodes(nodeCount)
                                              .withDataDirCount(dataDirs)
                                              .withConfig(cfg -> cfg.set("memtable_heap_space", "100MiB"))
