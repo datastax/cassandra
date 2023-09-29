@@ -31,7 +31,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnHeapHnsw;
+import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.io.BytesRefUtil;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
@@ -42,7 +42,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 
-import static org.apache.cassandra.index.sai.disk.hnsw.CassandraOnHeapHnsw.InvalidVectorBehavior.IGNORE;
+import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.InvalidVectorBehavior.IGNORE;
 
 /**
  * Creates an on-heap index data structure to be flushed to an SSTable index.
@@ -166,12 +166,12 @@ public abstract class SegmentBuilder
 
     public static class VectorSegmentBuilder extends SegmentBuilder
     {
-        private final CassandraOnHeapHnsw<Integer> graphIndex;
+        private final CassandraOnHeapGraph<Integer> graphIndex;
 
         public VectorSegmentBuilder(AbstractType<?> termComparator, NamedMemoryLimiter limiter, IndexWriterConfig indexWriterConfig)
         {
             super(termComparator, limiter);
-            graphIndex = new CassandraOnHeapHnsw<>(termComparator, indexWriterConfig, false);
+            graphIndex = new CassandraOnHeapGraph<>(termComparator, indexWriterConfig, false);
         }
 
         @Override
