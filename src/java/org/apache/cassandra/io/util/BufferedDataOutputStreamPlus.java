@@ -227,7 +227,7 @@ public class BufferedDataOutputStreamPlus extends DataOutputStreamPlus
     }
 
     @DontInline
-    private void writeSlow(long bytes, int count) throws IOException
+    protected void writeSlow(long bytes, int count) throws IOException
     {
         assert buffer != null : "Attempt to use a closed data output";
         int origCount = count;
