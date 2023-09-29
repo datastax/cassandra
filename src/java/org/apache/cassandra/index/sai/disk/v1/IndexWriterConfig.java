@@ -24,8 +24,9 @@ import java.util.stream.Collectors;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.disk.vector.OptimizeFor;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.lucene.index.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR_SEARCH_MAX_TOP_K;
 
@@ -43,6 +44,7 @@ public class IndexWriterConfig
     public static final String MAXIMUM_NODE_CONNECTIONS = "maximum_node_connections";
     public static final String CONSTRUCTION_BEAM_WIDTH = "construction_beam_width";
     public static final String SIMILARITY_FUNCTION = "similarity_function";
+    public static final String OPTIMIZE_FOR = "optimize_for";
 
     public static final int MAXIMUM_MAXIMUM_NODE_CONNECTIONS = 512;
     public static final int MAXIMUM_CONSTRUCTION_BEAM_WIDTH = 3200;
@@ -58,7 +60,12 @@ public class IndexWriterConfig
                                                                 .map(e -> e.name())
                                                                 .collect(Collectors.joining(", "));
 
-    private static final IndexWriterConfig EMPTY_CONFIG = new IndexWriterConfig(null, -1, -1, -1, -1, null);
+    private static final OptimizeFor DEFAULT_OPTIMIZE_FOR = OptimizeFor.LATENCY;
+    private static final String validOptimizeFor = Arrays.stream(OptimizeFor.values())
+                                                         .map(Enum::name)
+                                                         .collect(Collectors.joining(", "));
+
+    private static final IndexWriterConfig EMPTY_CONFIG = new IndexWriterConfig(null, -1, -1, -1, -1, null, null);
 
     // Fully qualified index name, in the format "<keyspace>.<table>.<index_name>".
     private final String indexName;
@@ -80,6 +87,7 @@ public class IndexWriterConfig
     private final int constructionBeamWidth;
 
     private final VectorSimilarityFunction similarityFunction;
+    private final OptimizeFor optimizeFor;
 
     public IndexWriterConfig(String indexName,
                              int bkdPostingsSkip,
@@ -90,7 +98,8 @@ public class IndexWriterConfig
              bkdPostingsMinLeaves,
              DEFAULT_MAXIMUM_NODE_CONNECTIONS,
              DEFAULT_CONSTRUCTION_BEAM_WIDTH,
-             DEFAULT_SIMILARITY_FUNCTION);
+             DEFAULT_SIMILARITY_FUNCTION,
+             DEFAULT_OPTIMIZE_FOR);
     }
 
     public IndexWriterConfig(String indexName,
@@ -98,7 +107,8 @@ public class IndexWriterConfig
                              int bkdPostingsMinLeaves,
                              int maximumNodeConnections,
                              int constructionBeamWidth,
-                             VectorSimilarityFunction similarityFunction)
+                             VectorSimilarityFunction similarityFunction,
+                             OptimizeFor optimizeFor)
     {
         this.indexName = indexName;
         this.bkdPostingsSkip = bkdPostingsSkip;
@@ -106,6 +116,7 @@ public class IndexWriterConfig
         this.maximumNodeConnections = maximumNodeConnections;
         this.constructionBeamWidth = constructionBeamWidth;
         this.similarityFunction = similarityFunction;
+        this.optimizeFor = optimizeFor;
     }
 
     public String getIndexName()
@@ -138,6 +149,11 @@ public class IndexWriterConfig
         return similarityFunction;
     }
 
+    public OptimizeFor getOptimizeFor()
+    {
+        return optimizeFor;
+    }
+
     public static IndexWriterConfig fromOptions(String indexName, AbstractType<?> type, Map<String, String> options)
     {
         int minLeaves = DEFAULT_POSTING_LIST_MIN_LEAVES;
@@ -145,6 +161,7 @@ public class IndexWriterConfig
         int maximumNodeConnections = DEFAULT_MAXIMUM_NODE_CONNECTIONS;
         int queueSize = DEFAULT_CONSTRUCTION_BEAM_WIDTH;
         VectorSimilarityFunction similarityFunction = DEFAULT_SIMILARITY_FUNCTION;
+        OptimizeFor optimizeFor = DEFAULT_OPTIMIZE_FOR;
 
         if (options.get(POSTING_LIST_LVL_MIN_LEAVES) != null || options.get(POSTING_LIST_LVL_SKIP_OPTION) != null)
         {
@@ -185,6 +202,7 @@ public class IndexWriterConfig
         }
         else if (options.get(MAXIMUM_NODE_CONNECTIONS) != null ||
                  options.get(CONSTRUCTION_BEAM_WIDTH) != null ||
+                 options.get(OPTIMIZE_FOR) != null ||
                  options.get(SIMILARITY_FUNCTION) != null)
         {
             if (!type.isVector())
@@ -238,8 +256,21 @@ public class IndexWriterConfig
                 }
 
             }
+            if (options.containsKey(OPTIMIZE_FOR))
+            {
+                String option = options.get(OPTIMIZE_FOR).toUpperCase();
+                try
+                {
+                    optimizeFor = OptimizeFor.valueOf(option);
+                }
+                catch (IllegalArgumentException e)
+                {
+                    throw new InvalidRequestException(String.format("optimize_for '%s' was not recognized for index %s. Valid values are: %s",
+                                                                    option, indexName, validOptimizeFor));
+                }
+            }
         }
-        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize, similarityFunction);
+        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize, similarityFunction, optimizeFor);
     }
 
     public static IndexWriterConfig defaultConfig(String indexName)
@@ -249,7 +280,8 @@ public class IndexWriterConfig
                                      DEFAULT_POSTING_LIST_MIN_LEAVES,
                                      DEFAULT_MAXIMUM_NODE_CONNECTIONS,
                                      DEFAULT_CONSTRUCTION_BEAM_WIDTH,
-                                     DEFAULT_SIMILARITY_FUNCTION);
+                                     DEFAULT_SIMILARITY_FUNCTION,
+                                     DEFAULT_OPTIMIZE_FOR);
     }
 
     public static IndexWriterConfig emptyConfig()
@@ -260,11 +292,12 @@ public class IndexWriterConfig
     @Override
     public String toString()
     {
-        return String.format("IndexWriterConfig{%s=%d, %s=%d, %s=%d, %s=%d, %s=%s}",
+        return String.format("IndexWriterConfig{%s=%d, %s=%d, %s=%d, %s=%d, %s=%s, %s=%s}",
                              POSTING_LIST_LVL_SKIP_OPTION, bkdPostingsSkip,
                              POSTING_LIST_LVL_MIN_LEAVES, bkdPostingsMinLeaves,
                              MAXIMUM_NODE_CONNECTIONS, maximumNodeConnections,
                              CONSTRUCTION_BEAM_WIDTH, constructionBeamWidth,
-                             SIMILARITY_FUNCTION, similarityFunction);
+                             SIMILARITY_FUNCTION, similarityFunction,
+                             OPTIMIZE_FOR, optimizeFor);
     }
 }
