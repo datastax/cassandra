@@ -64,6 +64,7 @@ public class StaticControllerTest extends ControllerTest
                             .mapToObj(useIntegers ? Integer::toString : UnifiedCompactionStrategy::printScalingParameter)
                             .collect(Collectors.joining(","));
         options.put(StaticController.SCALING_PARAMETERS_OPTION, wStr);
+        options.put(Controller.SSTABLE_GROWTH_OPTION, "0");
     }
 
     @Test
@@ -280,6 +281,7 @@ public class StaticControllerTest extends ControllerTest
     public void testMaxSSTablesToCompact()
     {
         Map<String, String> options = new HashMap<>();
+        options.put(Controller.SSTABLE_GROWTH_OPTION, "0");
         Controller controller = testFromOptions(false, options);
         assertTrue(controller.maxSSTablesToCompact <= controller.dataSetSize * controller.maxSpaceOverhead / controller.minSSTableSize);
 
@@ -300,6 +302,7 @@ public class StaticControllerTest extends ControllerTest
     public void testExpiredSSTableCheckFrequency()
     {
         Map<String, String> options = new HashMap<>();
+        options.put(Controller.SSTABLE_GROWTH_OPTION, "0");
 
         Controller controller = testFromOptions(false, options);
         assertTrue(controller instanceof StaticController);
@@ -327,6 +330,7 @@ public class StaticControllerTest extends ControllerTest
     public void testAllowOverlaps()
     {
         Map<String, String> options = new HashMap<>();
+        options.put(Controller.SSTABLE_GROWTH_OPTION, "0");
 
         Controller controller = testFromOptions(false, options);
         assertTrue(controller instanceof StaticController);
@@ -342,6 +346,7 @@ public class StaticControllerTest extends ControllerTest
     public void testBaseShardCountDefault()
     {
         Map<String, String> options = new HashMap<>();
+        options.put(Controller.SSTABLE_GROWTH_OPTION, "0");
         Controller controller = Controller.fromOptions(cfs, options);
         assertEquals(Controller.DEFAULT_BASE_SHARD_COUNT, controller.baseShardCount);
 
