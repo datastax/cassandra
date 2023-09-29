@@ -320,6 +320,8 @@ public abstract class Controller
 
     protected final Overlaps.InclusionMethod overlapInclusionMethod;
 
+    final boolean l0ShardsEnabled;
+
     Controller(MonotonicClock clock,
                Environment env,
                double[] survivalFactors,
@@ -353,6 +355,7 @@ public abstract class Controller
         this.reservedThreads = reservedThreads;
         this.reservationsType = reservationsType;
         this.maxSpaceOverhead = maxSpaceOverhead;
+        this.l0ShardsEnabled = UCS_L0_SHARDS_ENABLED.getBoolean(false); // FIXME VECTOR-23
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
             maxSSTablesToCompact = (int) (dataSetSize * this.maxSpaceOverhead * 0.5 / getMinSstableSizeBytes());
@@ -486,9 +489,10 @@ public abstract class Controller
         if (sstableGrowthModifier == 1)
         {
             shards = baseShardCount;
-            logger.debug("Shard count {} for density {} in fixed shards mode",
+            logger.debug("Shard count {} for density {} in fixed shards mode. SStableGrowthModifier {}",
                          shards,
-                         FBUtilities.prettyPrintBinary(localDensity, "B", " "));
+                         FBUtilities.prettyPrintBinary(localDensity, "B", " "),
+                         sstableGrowthModifier);
             return shards;
         }
         else if (sstableGrowthModifier == 0)
@@ -508,11 +512,12 @@ public abstract class Controller
             shards = baseShardCount * Integer.highestOneBit((int) count | 1);
 
             if (logger.isDebugEnabled())
-                logger.debug("Shard count {} for density {}, {} times target {}",
+                logger.debug("Shard count {} for density {}, {} times target {}. SStableGrowthModifier {}",
                              shards,
                              FBUtilities.prettyPrintBinary(localDensity, "B", " "),
                              localDensity / targetSSTableSize,
-                             FBUtilities.prettyPrintBinary(targetSSTableSize, "B", " "));
+                             FBUtilities.prettyPrintBinary(targetSSTableSize, "B", " "),
+                             sstableGrowthModifier);
             return shards;
         }
         else
@@ -540,11 +545,12 @@ public abstract class Controller
             if (logger.isDebugEnabled())
             {
                 long targetSize = (long) (targetSSTableSize * Math.exp(countLog * sstableGrowthModifier));
-                logger.debug("Shard count {} for density {}, {} times target {}",
+                logger.debug("Shard count {} for density {}, {} times target {}. SStableGrowthModifier {}",
                              shards,
                              FBUtilities.prettyPrintBinary(localDensity, "B", " "),
                              localDensity / targetSize,
-                             FBUtilities.prettyPrintBinary(targetSize, "B", " "));
+                             FBUtilities.prettyPrintBinary(targetSize, "B", " "),
+                             sstableGrowthModifier);
             }
             return shards;
         }
@@ -555,7 +561,7 @@ public abstract class Controller
      */
     public boolean areL0ShardsEnabled()
     {
-        return false; // l0ShardsEnabled; FIXME VECTOR-23
+        return l0ShardsEnabled;
     }
 
     /**
