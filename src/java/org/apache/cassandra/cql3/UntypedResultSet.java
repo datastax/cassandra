@@ -45,6 +45,7 @@ import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.ByteType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.DoubleType;
+import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.ListType;
@@ -415,6 +416,11 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
         public double getDouble(String column)
         {
             return DoubleType.instance.compose(data.get(column));
+        }
+
+        public double getFloat(String column)
+        {
+            return FloatType.instance.compose(data.get(column));
         }
 
         public ByteBuffer getBytes(String column)
