@@ -30,16 +30,16 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import io.github.jbellis.jvector.util.Bits;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnDiskHnsw;
-import org.apache.cassandra.index.sai.disk.hnsw.CassandraOnHeapHnsw;
-import org.apache.cassandra.index.sai.disk.hnsw.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
+import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.lucene.util.Bits;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
@@ -142,7 +142,7 @@ public class QueryContext
         return shadowedPrimaryKeys;
     }
 
-    public Bits bitsetForShadowedPrimaryKeys(CassandraOnHeapHnsw<PrimaryKey> graph)
+    public Bits bitsetForShadowedPrimaryKeys(CassandraOnHeapGraph<PrimaryKey> graph)
     {
         if (shadowedPrimaryKeys == null)
             return null;
@@ -150,7 +150,7 @@ public class QueryContext
         return new IgnoredKeysBits(graph, shadowedPrimaryKeys);
     }
 
-    public Bits bitsetForShadowedPrimaryKeys(SegmentMetadata metadata, PrimaryKeyMap primaryKeyMap, CassandraOnDiskHnsw graph) throws IOException
+    public Bits bitsetForShadowedPrimaryKeys(SegmentMetadata metadata, PrimaryKeyMap primaryKeyMap, JVectorLuceneOnDiskGraph graph) throws IOException
     {
         Set<Integer> ignoredOrdinals = null;
         try (OnDiskOrdinalsMap.OrdinalsView ordinalsView = graph.getOrdinalsView())
@@ -215,10 +215,10 @@ public class QueryContext
 
     private static class IgnoredKeysBits implements Bits
     {
-        private final CassandraOnHeapHnsw<PrimaryKey> graph;
+        private final CassandraOnHeapGraph<PrimaryKey> graph;
         private final NavigableSet<PrimaryKey> ignored;
 
-        public IgnoredKeysBits(CassandraOnHeapHnsw<PrimaryKey> graph, NavigableSet<PrimaryKey> ignored)
+        public IgnoredKeysBits(CassandraOnHeapGraph<PrimaryKey> graph, NavigableSet<PrimaryKey> ignored)
         {
             this.graph = graph;
             this.ignored = ignored;
