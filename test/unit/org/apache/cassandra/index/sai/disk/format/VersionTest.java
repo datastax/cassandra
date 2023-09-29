@@ -24,6 +24,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class VersionTest
 {
@@ -34,10 +35,23 @@ public class VersionTest
     }
 
     @Test
+    public void testVersionsSorted()
+    {
+        Version previous = null;
+        for (Version version : Version.ALL)
+        {
+            if (previous != null)
+                assertTrue(previous.onOrAfter(version));
+            previous = version;
+        }
+    }
+
+    @Test
     public void supportedVersionsWillParse()
     {
         assertEquals(Version.AA, Version.parse("aa"));
         assertEquals(Version.BA, Version.parse("ba"));
+        assertEquals(Version.CA, Version.parse("ca"));
     }
 
     @Test
