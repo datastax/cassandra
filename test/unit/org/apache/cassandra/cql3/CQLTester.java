@@ -2697,17 +2697,31 @@ public abstract class CQLTester
     }
 
     @SafeVarargs
-    protected final <T> Vector<T> vector(T... values)
+    protected static <T> Vector<T> vector(T... values)
     {
         return new Vector<>(values);
     }
 
-    protected Vector<Float> vector(float[] v)
+    protected static Vector<Float> vector(float[] v)
     {
         var v2 = new Float[v.length];
         for (int i = 0; i < v.length; i++)
             v2[i] = v[i];
         return new Vector<>(v2);
+    }
+
+    /** Normalize the given vector in-place */
+    protected static void normalize(Float[] v)
+    {
+        var sum = 0.0f;
+        for (int i = 0; i < v.length; i++)
+        {
+            sum += v[i] * v[i];
+        }
+
+        sum = (float) Math.sqrt(sum);
+        for (int i = 0; i < v.length; i++)
+            v[i] /= sum;
     }
 
     protected Set<Object> set(Object...values)
