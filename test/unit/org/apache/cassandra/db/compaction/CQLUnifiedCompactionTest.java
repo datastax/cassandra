@@ -35,6 +35,7 @@ import org.apache.cassandra.db.compaction.unified.StaticController;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_L0_SHARDS_ENABLED;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -72,6 +73,7 @@ public class CQLUnifiedCompactionTest extends CQLTester
     @BeforeClass
     public static void beforeClass()
     {
+        UCS_L0_SHARDS_ENABLED.setBoolean(true);
         DatabaseDescriptor.daemonInitialization();
         DatabaseDescriptor.setReadThresholdsEnabled(false);
 
