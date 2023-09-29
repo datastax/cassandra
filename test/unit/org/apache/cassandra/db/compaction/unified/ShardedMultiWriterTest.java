@@ -27,6 +27,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.StorageService;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_L0_SHARDS_ENABLED;
 import static org.junit.Assert.assertEquals;
 
 public class ShardedMultiWriterTest extends CQLTester
@@ -36,6 +37,7 @@ public class ShardedMultiWriterTest extends CQLTester
     @BeforeClass
     public static void beforeClass()
     {
+        UCS_L0_SHARDS_ENABLED.setBoolean(true);
         CQLTester.setUpClass();
         StorageService.instance.initServer();
     }
