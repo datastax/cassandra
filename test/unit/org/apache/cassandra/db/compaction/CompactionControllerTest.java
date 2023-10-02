@@ -21,7 +21,6 @@ package org.apache.cassandra.db.compaction;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -206,15 +205,15 @@ public class CompactionControllerTest extends SchemaLoader
     @BMRule(name = "Pause compaction",
     targetClass = "CompactionTask",
     targetMethod = "runMayThrow",
-    targetLocation = "INVOKE getCompactionAwareWriter",
+    targetLocation = "INVOKE createCompactionOperation",
     condition = "Thread.currentThread().getName().equals(\"compaction1\")",
     action = "org.apache.cassandra.db.compaction.CompactionControllerTest.createCompactionControllerLatch.countDown();" +
              "com.google.common.util.concurrent.Uninterruptibles.awaitUninterruptibly" +
              "(org.apache.cassandra.db.compaction.CompactionControllerTest.compaction2FinishLatch);"),
     @BMRule(name = "Check overlaps",
-    targetClass = "CompactionTask",
-    targetMethod = "runMayThrow",
-    targetLocation = "INVOKE finish",
+    targetClass = "CompactionAwareWriter",
+    targetMethod = "finish",
+    targetLocation = "INVOKE finished",
     condition = "Thread.currentThread().getName().equals(\"compaction1\")",
     action = "org.apache.cassandra.db.compaction.CompactionControllerTest.compaction1RefreshLatch.countDown();" +
              "com.google.common.util.concurrent.Uninterruptibles.awaitUninterruptibly" +
@@ -307,17 +306,16 @@ public class CompactionControllerTest extends SchemaLoader
 
         CompactionTasks tasks = twcs.getUserDefinedTasks(sstables, 0);
 
-        assertNotNull(tasks);
-        Optional<AbstractCompactionTask> maybeTask = tasks.stream().findFirst();
-        assertTrue(maybeTask.isPresent());
-        AbstractCompactionTask task = maybeTask.get();
+        CompactionTask task = (CompactionTask) tasks.iterator().next();
+
+        assertNotNull(task);
         assertEquals(1, Iterables.size(task.transaction.originals()));
 
         //start a compaction for the first sstable (compaction1)
         //the overlap iterator should contain sstable2
         //this compaction will be paused by the BMRule
         Thread t = new Thread(() -> {
-            task.execute(null);
+            task.executeInternal();
         });
 
         //start a compaction for the second sstable (compaction2)
