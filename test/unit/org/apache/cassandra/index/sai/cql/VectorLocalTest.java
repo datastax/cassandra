@@ -33,13 +33,10 @@ import org.junit.Test;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.utils.Glove;
 import org.assertj.core.data.Percentage;
@@ -524,19 +521,4 @@ public class VectorLocalTest extends VectorTester
         super.compact();
         verifyChecksum();
     }
-
-    private void verifyChecksum()  {
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        cfs.indexManager.listIndexes().stream().forEach(index -> {
-            var indexContext = SAITester.createIndexContext(index.getIndexMetadata().name, VectorType.getInstance(FloatType.instance, 100), cfs);
-            if (!indexContext.getColumnName().matches("table_\\d+_val_idx"))
-            {
-                return;
-            }
-            logger.info("Verifying checksum for index {}", index.getIndexMetadata().name);
-            boolean checksumValid = verifyChecksum(indexContext);
-            assertThat(checksumValid).isTrue();
-        });
-    }
-
 }
