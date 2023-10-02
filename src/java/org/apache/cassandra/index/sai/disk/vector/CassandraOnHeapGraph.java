@@ -23,7 +23,6 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -31,7 +30,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMapLong;
@@ -363,9 +361,9 @@ public class CassandraOnHeapGraph<T>
             // train PQ and encode
             ProductQuantization pq = ProductQuantization.compute(vectorValues, M, false);
             assert !vectorValues.isValueShared();
-            List<byte[]> encoded = IntStream.range(0, vectorValues.size()).parallel()
-                                            .mapToObj(i -> pq.encode(vectorValues.vectorValue(i)))
-                                            .collect(Collectors.toList());
+            byte[][] encoded = IntStream.range(0, vectorValues.size()).parallel()
+                                        .mapToObj(i -> pq.encode(vectorValues.vectorValue(i)))
+                                        .toArray(byte[][]::new);
             CompressedVectors cv = new CompressedVectors(pq, encoded);
             // save
             cv.write(writer);
