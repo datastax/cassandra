@@ -61,7 +61,7 @@ public class VectorTypeTest extends VectorTester
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
         cfs.indexManager.listIndexes().stream().forEach(index -> {
             var indexContext = SAITester.createIndexContext(index.getIndexMetadata().name, VectorType.getInstance(FloatType.instance, 100), cfs);
-            if (!indexContext.getColumnName().matches("table_\\d+_val_idx"))
+            if (!indexContext.isVector())
             {
                 return;
             }
@@ -748,5 +748,21 @@ public class VectorTypeTest extends VectorTester
         flush();
 
         assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2"), row(1), row(2));
+    }
+
+    @Test
+    public void testRowWithMissingVectorThatMatchesQueryPredicates()
+    {
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // There was an edge case where we failed because there was just a single row in the table.
+        execute("INSERT INTO %s (pk, val) VALUES (1, 'match me')");
+        assertRows(execute("SELECT pk FROM %s WHERE val = 'match me' ORDER BY vec ANN OF [1,1] LIMIT 2"));
+        // Push memtable to sstable. we should get same result
+        flush();
+        assertRows(execute("SELECT pk FROM %s WHERE val = 'match me' ORDER BY vec ANN OF [1,1] LIMIT 2"));
     }
 }
