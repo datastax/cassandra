@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang.reflect.FieldUtils;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -39,6 +40,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
@@ -60,10 +62,18 @@ public class VectorTypeTest extends VectorTester
     private void verifyChecksum() {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
         cfs.indexManager.listIndexes().stream().forEach(index -> {
-            var indexContext = SAITester.createIndexContext(index.getIndexMetadata().name, VectorType.getInstance(FloatType.instance, 100), cfs);
-            logger.info("Verifying checksum for index {}", index.getIndexMetadata().name);
-            boolean checksumValid = verifyChecksum(indexContext);
-            assertThat(checksumValid).isTrue();
+            try
+            {
+                var indexContext = (IndexContext) FieldUtils
+                                                  .getDeclaredField(index.getClass(), "indexContext", true)
+                                                  .get(index);
+                logger.info("Verifying checksum for index {}", index.getIndexMetadata().name);
+                boolean checksumValid = verifyChecksum(indexContext);
+                assertThat(checksumValid).isTrue();
+            } catch (IllegalAccessException e)
+            {
+                throw new RuntimeException(e);
+            }
         });
     }
 
