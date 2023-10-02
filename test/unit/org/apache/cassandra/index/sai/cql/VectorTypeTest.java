@@ -61,10 +61,6 @@ public class VectorTypeTest extends VectorTester
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
         cfs.indexManager.listIndexes().stream().forEach(index -> {
             var indexContext = SAITester.createIndexContext(index.getIndexMetadata().name, VectorType.getInstance(FloatType.instance, 100), cfs);
-            if (!indexContext.isVector())
-            {
-                return;
-            }
             logger.info("Verifying checksum for index {}", index.getIndexMetadata().name);
             boolean checksumValid = verifyChecksum(indexContext);
             assertThat(checksumValid).isTrue();
