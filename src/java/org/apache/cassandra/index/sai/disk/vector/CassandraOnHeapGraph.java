@@ -30,7 +30,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMapLong;
@@ -362,7 +361,7 @@ public class CassandraOnHeapGraph<T>
             assert !vectorValues.isValueShared();
             var encoded = IntStream.range(0, vectorValues.size()).parallel()
                           .mapToObj(i -> pq.encode(vectorValues.vectorValue(i)))
-                          .collect(Collectors.toList());
+                          .toArray(byte[][]::new);
             var cv = new CompressedVectors(pq, encoded);
             // save
             cv.write(writer);
