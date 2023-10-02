@@ -25,23 +25,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import org.apache.commons.lang.reflect.FieldUtils;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.TracingTestImpl;
@@ -57,24 +50,6 @@ public class VectorTypeTest extends VectorTester
     public static void setupClass()
     {
         System.setProperty("cassandra.custom_tracing_class", "org.apache.cassandra.tracing.TracingTestImpl");
-    }
-
-    private void verifyChecksum() {
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        cfs.indexManager.listIndexes().stream().forEach(index -> {
-            try
-            {
-                var indexContext = (IndexContext) FieldUtils
-                                                  .getDeclaredField(index.getClass(), "indexContext", true)
-                                                  .get(index);
-                logger.info("Verifying checksum for index {}", index.getIndexMetadata().name);
-                boolean checksumValid = verifyChecksum(indexContext);
-                assertThat(checksumValid).isTrue();
-            } catch (IllegalAccessException e)
-            {
-                throw new RuntimeException(e);
-            }
-        });
     }
 
     @Override
