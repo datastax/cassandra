@@ -93,16 +93,11 @@ public class CompactionController extends AbstractCompactionController
             else
                 logger.debug("Not using overlaps for {}.{} - neverPurgeTombstones is enabled", realm.getKeyspaceName(), realm.getTableName());
         }
-        else if (ignoreOverlaps())
-        {
-            overlapTracker = realm.getOverlapTracker(null);
-            logger.debug("Ignoring overlapping sstables for {}.{}", realm.getKeyspaceName(), realm.getTableName());
-        }
         else
             overlapTracker = realm.getOverlapTracker(compacting);
 
-        logger.debug("Compaction controller created for {} with {} compacting sstables, {} overlapping sstables, tsOption={}, ignoreOverlaps={}, compactingRepaired={}",
-                     realm.metadata(), compacting == null ? 0 : compacting.size(), overlapTracker == null ? 0 : overlapTracker.overlaps().size(), tombstoneOption, ignoreOverlaps(), compactingRepaired());
+        logger.debug("Compaction controller created for {} with {} compacting sstables, {} overlapping sstables, tsOption={}, compactingRepaired={}",
+                     realm.metadata(), compacting == null ? 0 : compacting.size(), overlapTracker == null ? 0 : overlapTracker.overlaps().size(), tombstoneOption, compactingRepaired());
     }
 
     public void maybeRefreshOverlaps()
