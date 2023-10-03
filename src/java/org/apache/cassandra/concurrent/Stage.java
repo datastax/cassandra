@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Strings;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.net.MessagingService;
@@ -51,6 +52,7 @@ import static java.util.stream.Collectors.toMap;
 public enum Stage
 {
     READ              (false, "ReadStage",             "request",  DatabaseDescriptor::getConcurrentReaders,        DatabaseDescriptor::setConcurrentReaders,        Stage::multiThreadedLowSignalStage),
+    INDEX_READ        (false, "IndexReadStage",        "request",  Stage::getIndexReadStageThreadNum,               null,                                            Stage::multiThreadedLowSignalStage),
     MUTATION          (true,  "MutationStage",         "request",  DatabaseDescriptor::getConcurrentWriters,        DatabaseDescriptor::setConcurrentWriters,        Stage::multiThreadedLowSignalStage),
     COUNTER_MUTATION  (true,  "CounterMutationStage",  "request",  DatabaseDescriptor::getConcurrentCounterWriters, DatabaseDescriptor::setConcurrentCounterWriters, Stage::multiThreadedLowSignalStage),
     VIEW_MUTATION     (true,  "ViewMutationStage",     "request",  DatabaseDescriptor::getConcurrentViewWriters,    DatabaseDescriptor::setConcurrentViewWriters,    Stage::multiThreadedLowSignalStage),
@@ -80,6 +82,20 @@ public enum Stage
         this.shutdownBeforeCommitlog = shutdownBeforeCommitlog;
         this.jmxName = jmxName;
         this.initialiser = () -> initialiser.init(jmxName,jmxType, numThreads.getAsInt(), onSetMaximumPoolSize);
+    }
+
+    public static int getIndexReadStageThreadNum()
+    {
+        return getStageSpecificProcessorsOverride("IndexReadStage", 2 * FBUtilities.getAvailableProcessors());
+    }
+
+    public static int getStageSpecificProcessorsOverride(String stageName, int defaultNum)
+    {
+        String num = System.getProperty(stageName + ".cassandra.threads");
+        if (!Strings.isNullOrEmpty(num))
+            return Integer.parseInt(num);
+        else
+            return defaultNum;
     }
 
     private static String normalizeName(String stageName)
