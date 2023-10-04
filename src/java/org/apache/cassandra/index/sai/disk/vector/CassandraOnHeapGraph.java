@@ -25,12 +25,10 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMapLong;
@@ -71,7 +69,7 @@ public class CassandraOnHeapGraph<T>
     private final GraphIndexBuilder<float[]> builder;
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
-    private final Map<float[], VectorPostings<T>> postingsMap;
+    private final ConcurrentMap<float[], VectorPostings<T>> postingsMap;
     private final NonBlockingHashMapLong<VectorPostings<T>> postingsByOrdinal;
     private final AtomicInteger nextOrdinal = new AtomicInteger();
     private volatile boolean hasDeletions;
@@ -164,6 +162,7 @@ public class CassandraOnHeapGraph<T>
         if (postings == null)
         {
             postings = new VectorPostings<T>(key);
+            // since we are using ConcurrentSkipListMap, it is NOT correct to use computeIfAbsent here
             if (postingsMap.putIfAbsent(vector, postings) == null)
             {
                 // we won the race to add the new entry; assign it an ordinal and add to the other structures
