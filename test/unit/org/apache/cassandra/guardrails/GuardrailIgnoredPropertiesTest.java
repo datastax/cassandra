@@ -28,6 +28,7 @@ import org.junit.Test;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.TableAttributes;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -66,10 +67,12 @@ public class GuardrailIgnoredPropertiesTest extends GuardrailTester
         tableAttributes.addProperty("speculative_retry", "99p");
 
         assertTrue(tableAttributes.hasProperty("comment"));
+        assertEquals(10, tableAttributes.updatedProperties().size());
 
         // Should not throw ConcurrentModificationException (CNDB-7724)
         Guardrails.ignoredTableProperties.maybeIgnoreAndWarn(tableAttributes.updatedProperties(), tableAttributes::removeProperty, null);
 
         assertFalse(tableAttributes.hasProperty("comment"));
+        assertEquals(9, tableAttributes.updatedProperties().size());
     }
 }
