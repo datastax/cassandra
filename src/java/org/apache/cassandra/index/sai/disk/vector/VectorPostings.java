@@ -31,7 +31,7 @@ public class VectorPostings<T>
 {
     // we expect that the overwhelmingly most common cardinality will be 1, so optimize for reads using COWAL
     private final CopyOnWriteArrayList<T> postings;
-    private int ordinal = -1;
+    private volatile int ordinal = -1;
 
     private volatile IntArrayList rowIds;
 
