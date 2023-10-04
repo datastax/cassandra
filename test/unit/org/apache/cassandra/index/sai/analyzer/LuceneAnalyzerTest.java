@@ -174,7 +174,7 @@ public class LuceneAnalyzerTest
     public static List<String> tokenize(String testString, String json) throws Exception
     {
         Analyzer luceneAnalyzer = JSONAnalyzerParser.parse(json);
-        LuceneAnalyzer analyzer = new LuceneAnalyzer(UTF8Type.instance, luceneAnalyzer, new HashMap<String, String>());
+        LuceneAnalyzer analyzer = new LuceneAnalyzer(UTF8Type.instance, luceneAnalyzer, new HashMap<String, String>(), DefaultParser.INSTANCE);
 
         ByteBuffer toAnalyze = ByteBuffer.wrap(testString.getBytes(Charsets.UTF_8));
         analyzer.reset(toAnalyze);

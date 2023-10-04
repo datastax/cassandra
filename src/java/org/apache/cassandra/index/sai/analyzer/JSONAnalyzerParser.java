@@ -19,6 +19,9 @@
 package org.apache.cassandra.index.sai.analyzer;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -74,6 +77,17 @@ public class JSONAnalyzerParser
         }
         return builder.build();
     }
+
+    public static DataParser dataParser(String fields)
+    {
+        if(fields == null){
+            return DefaultParser.INSTANCE;
+        }
+        final List<String> parseFields = Arrays.stream(fields.split("\\,", -1)).map(s -> s.trim()).collect(Collectors.toList());
+        return new JsonFieldsParser(parseFields);
+    }
+
+
 
     private static Analyzer matchBuiltInAnalzyer(String maybeAnalyzer) {
         for (BuiltInAnalyzers analyzer : BuiltInAnalyzers.values()) {

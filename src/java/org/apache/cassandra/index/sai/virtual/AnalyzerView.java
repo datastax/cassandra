@@ -32,6 +32,7 @@ import org.apache.cassandra.db.virtual.AbstractVirtualTable;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.analyzer.DefaultParser;
 import org.apache.cassandra.index.sai.analyzer.JSONAnalyzerParser;
 import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.schema.TableMetadata;
@@ -70,7 +71,7 @@ public class AnalyzerView extends AbstractVirtualTable
             optionsString = UTF8Type.instance.compose(array[1]);
 
             Analyzer analyzer = JSONAnalyzerParser.parse(optionsString);
-            luceneAnalyzer = new LuceneAnalyzer(UTF8Type.instance, analyzer, new HashMap<>());
+            luceneAnalyzer = new LuceneAnalyzer(UTF8Type.instance, analyzer, new HashMap<>(), DefaultParser.INSTANCE);
 
             ByteBuffer toAnalyze = ByteBuffer.wrap(text.getBytes(Charsets.UTF_8));
             luceneAnalyzer.reset(toAnalyze);

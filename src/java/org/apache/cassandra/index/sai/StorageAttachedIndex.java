@@ -197,7 +197,8 @@ public class StorageAttachedIndex implements Index
                                                                      IndexWriterConfig.SIMILARITY_FUNCTION,
                                                                      IndexWriterConfig.OPTIMIZE_FOR,
                                                                      LuceneAnalyzer.INDEX_ANALYZER,
-                                                                     LuceneAnalyzer.QUERY_ANALYZER);
+                                                                     LuceneAnalyzer.QUERY_ANALYZER,
+                                                                     LuceneAnalyzer.DATA_PARSER);
 
     public static final Set<CQL3Type> SUPPORTED_TYPES = ImmutableSet.of(CQL3Type.Native.ASCII, CQL3Type.Native.BIGINT, CQL3Type.Native.DATE,
                                                                         CQL3Type.Native.DOUBLE, CQL3Type.Native.FLOAT, CQL3Type.Native.INT,
