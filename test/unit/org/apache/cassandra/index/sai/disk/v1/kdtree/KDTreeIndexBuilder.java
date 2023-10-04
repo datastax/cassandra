@@ -80,7 +80,7 @@ public class KDTreeIndexBuilder
         }
 
         @Override
-        public long rowIdFromPrimaryKey(PrimaryKey key)
+        public long exactRowIdForPrimaryKey(PrimaryKey key)
         {
             return key.token().getLongValue();
         }

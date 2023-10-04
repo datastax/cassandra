@@ -138,7 +138,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     @Override
-    public long rowIdFromPrimaryKey(PrimaryKey key)
+    public long exactRowIdForPrimaryKey(PrimaryKey key)
     {
         return rowIdToToken.findTokenRowID(key.token().getLongValue());
     }

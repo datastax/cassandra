@@ -156,7 +156,7 @@ public class QueryContext
                 if (primaryKey.compareTo(metadata.minKey) < 0 || primaryKey.compareTo(metadata.maxKey) > 0)
                     continue;
 
-                long sstableRowId = primaryKeyMap.rowIdFromPrimaryKey(primaryKey);
+                long sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
                 if (sstableRowId == Long.MAX_VALUE) // not found
                     continue;
 
