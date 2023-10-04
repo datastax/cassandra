@@ -127,8 +127,8 @@ public class VectorTester extends SAITester
                 var indexContext = (IndexContext) FieldUtils
                                                   .getDeclaredField(index.getClass(), "indexContext", true)
                                                   .get(index);
-                if (!indexContext.isVector())
-                    return;
+//                if (!indexContext.isVector())
+//                    return;
                 logger.info("Verifying checksum for index {}", index.getIndexMetadata().name);
                 boolean checksumValid = verifyChecksum(indexContext);
                 assertThat(checksumValid).isTrue();
