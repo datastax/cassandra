@@ -96,6 +96,12 @@ public class KDTreeIndexBuilder
         {
             return key.token().getLongValue();
         }
+
+        @Override
+        public boolean isNotFound(long sstableRowId)
+        {
+            return false;
+        }
     };
     public static final PrimaryKeyMap.Factory TEST_PRIMARY_KEY_MAP_FACTORY = () -> TEST_PRIMARY_KEY_MAP;
 
