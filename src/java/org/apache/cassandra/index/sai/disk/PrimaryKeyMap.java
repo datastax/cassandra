@@ -84,6 +84,13 @@ public interface PrimaryKeyMap extends Closeable
      */
     long lastRowIdFromPrimaryKey(PrimaryKey key);
 
+    /**
+     * This method is necessary because the two implementations have varying definitions of end of stream.
+     * @param sstableRowId
+     * @return true if the row Id is a terminal value for the stream
+     */
+    boolean isNotFound(long sstableRowId);
+
     @Override
     default void close() throws IOException
     {

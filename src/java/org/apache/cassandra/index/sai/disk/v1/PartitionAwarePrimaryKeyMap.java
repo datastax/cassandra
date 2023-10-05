@@ -156,6 +156,12 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     @Override
+    public boolean isNotFound(long sstableRowId)
+    {
+        return sstableRowId < 0;
+    }
+
+    @Override
     public void close() throws IOException
     {
         FileUtils.closeQuietly(rowIdToToken, rowIdToOffset, reader);

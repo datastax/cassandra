@@ -157,7 +157,7 @@ public class QueryContext
                     continue;
 
                 long sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
-                if (sstableRowId == Long.MAX_VALUE) // not found
+                if (primaryKeyMap.isNotFound(sstableRowId)) // not found
                     continue;
 
                 int segmentRowId = metadata.toSegmentRowId(sstableRowId);
