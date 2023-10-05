@@ -30,6 +30,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.MonotonicBlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
+import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.Pair;
@@ -111,7 +112,18 @@ public class SortedTermsReader
      */
     public long ceiling(@Nonnull ByteComparable term)
     {
-        return getPointId(term, false);
+        Preconditions.checkNotNull(term, "term null");
+
+        try (TrieRangeIterator reader = new TrieRangeIterator(termsTrie.instantiateRebufferer(),
+                                                              meta.trieFP,
+                                                              term,
+                                                              null,
+                                                              true,
+                                                              true))
+        {
+            final Iterator<Pair<ByteSource, Long>> iterator = reader.iterator();
+            return iterator.hasNext() ? iterator.next().right : Long.MAX_VALUE;
+        }
     }
 
     /**
@@ -122,22 +134,11 @@ public class SortedTermsReader
      */
     public long getExactPointId(@Nonnull ByteComparable term)
     {
-        return getPointId(term, true);
-    }
-
-    private long getPointId(@Nonnull ByteComparable term, boolean exactMatch)
-    {
         Preconditions.checkNotNull(term, "term null");
-
-        try (TrieRangeIterator reader = new TrieRangeIterator(termsTrie.instantiateRebufferer(),
-                                                              meta.trieFP,
-                                                              term,
-                                                              exactMatch ? term : null,
-                                                              true,
-                                                              true))
+        try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(), meta.trieFP))
         {
-            final Iterator<Pair<ByteSource, Long>> iterator = reader.iterator();
-            return iterator.hasNext() ? iterator.next().right : Long.MAX_VALUE;
+            long result = reader.exactMatch(term);
+            return result < 0 ? Long.MAX_VALUE : result;
         }
     }
 
