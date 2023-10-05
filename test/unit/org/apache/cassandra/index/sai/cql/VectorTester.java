@@ -24,7 +24,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
-import org.apache.commons.lang.reflect.FieldUtils;
+import org.apache.commons.lang3.reflect.FieldUtils;
 import org.junit.Before;
 
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
@@ -127,8 +127,6 @@ public class VectorTester extends SAITester
                 var indexContext = (IndexContext) FieldUtils
                                                   .getDeclaredField(index.getClass(), "indexContext", true)
                                                   .get(index);
-                if (!indexContext.isVector())
-                    return;
                 logger.info("Verifying checksum for index {}", index.getIndexMetadata().name);
                 boolean checksumValid = verifyChecksum(indexContext);
                 assertThat(checksumValid).isTrue();
