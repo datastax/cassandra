@@ -105,8 +105,8 @@ public class SortedTermsReader
     }
 
     /**
-     * Returns the point id (ordinal) associated with the greatest term less than or equal to the given term, or
-     * <code>Long.MAX_VALUE</code> if there is no such term.
+     * Returns the point id (ordinal) associated with the least term greater than or equal to the given term, or
+     * <code>Long.MAX_VALUE</code> if there is no such point id.
      * @param term
      * @return
      */
@@ -143,7 +143,7 @@ public class SortedTermsReader
     }
 
     /**
-     * Returns the point id (ordinal) associated with the least term greater than or equal to the given term, or
+     * Returns the point id (ordinal) associated with the greatest term less than or equal to the given term, or
      * <code>Long.MAX_VALUE</code> if there is no such term.
      * Complexity of this operation is O(log n).
      *
