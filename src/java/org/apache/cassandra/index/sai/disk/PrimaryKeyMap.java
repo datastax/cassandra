@@ -69,20 +69,22 @@ public interface PrimaryKeyMap extends Closeable
     long exactRowIdForPrimaryKey(PrimaryKey key);
 
     /**
-     * Returns the first row Id for a given {@link PrimaryKey}
+     * Returns the sstable row id associated with the least {@link PrimaryKey} greater than or equal to the given
+     * {@link PrimaryKey}, or <code>Long.MAX_VALUE</code> if there is no such row id.
      *
      * @param key the {@link PrimaryKey} to lookup
      * @return the first row Id associated with the {@link PrimaryKey}
      */
-    long firstRowIdFromPrimaryKey(PrimaryKey key);
+    long ceiling(PrimaryKey key);
 
     /**
-     * Returns the last row Id for a given {@link PrimaryKey}
+     * Returns the sstable row id associated with the greatest {@link PrimaryKey} less than or equal to the given
+     * {@link PrimaryKey}, or <code>Long.MAX_VALUE</code> if there is no such term.
      *
      * @param key the {@link PrimaryKey} to lookup
      * @return the last row Id associated with the {@link PrimaryKey}
      */
-    long lastRowIdFromPrimaryKey(PrimaryKey key);
+    long floor(PrimaryKey key);
 
     /**
      * This method is necessary because the two implementations have varying definitions of end of stream.

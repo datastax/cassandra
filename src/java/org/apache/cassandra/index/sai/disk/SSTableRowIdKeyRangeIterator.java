@@ -143,7 +143,7 @@ public class SSTableRowIdKeyRangeIterator extends RangeIterator<PrimaryKey>
         long sstableRowId;
         if (needsSkipping)
         {
-            long targetRowID = primaryKeyMap.firstRowIdFromPrimaryKey(skipToToken);
+            long targetRowID = primaryKeyMap.ceiling(skipToToken);
             // skipToToken is larger than max token in token file
             if (primaryKeyMap.isNotFound(targetRowID))
                 return PostingList.END_OF_STREAM;
