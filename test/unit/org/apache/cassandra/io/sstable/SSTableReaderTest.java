@@ -35,15 +35,10 @@ import java.util.stream.Stream;
 
 import com.google.common.collect.Sets;
 import org.junit.Assume;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.*;
-import java.util.stream.Stream;
 
-import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.After;
 import org.junit.Assert;
@@ -58,6 +53,7 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -84,6 +80,7 @@ import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.format.CompressionInfoComponent;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
+import org.apache.cassandra.io.sstable.format.TOCComponent;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.big.BigFormat.Components;
 import org.apache.cassandra.io.sstable.format.big.BigTableReader;
@@ -1342,40 +1339,40 @@ public class SSTableReaderTest
         final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD_NO_BLOOM_FILTER);
 
         SSTableReader sstable = getNewSSTable(cfs, numKeys, 1);
-        Assert.assertTrue(sstable.getBloomFilterSerializedSize() == 0);
-        Assert.assertSame(FilterFactory.AlwaysPresent, sstable.getBloomFilter());
+        Assert.assertTrue(getFilterSize(sstable) == 0);
+        Assert.assertSame(FilterFactory.AlwaysPresent, getFilter(sstable));
 
         // should do nothing
-        checkSSTableOpenedWithGivenFPChance(sstable, 1, false, numKeys, false);
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1, false, numKeys, false);
 
         // should create BF because the FP has changed
-        checkSSTableOpenedWithGivenFPChance(sstable, BloomCalculations.minSupportedBloomFilterFpChance(), true, numKeys, true);
-        checkSSTableOpenedWithGivenFPChance(sstable, 0.05, true, numKeys, true);
-        checkSSTableOpenedWithGivenFPChance(sstable, 0.1, true, numKeys, true);
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, BloomCalculations.minSupportedBloomFilterFpChance(), true, numKeys, true);
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.05, true, numKeys, true);
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.1, true, numKeys, true);
 
         // should deserialize the existing BF
-        checkSSTableOpenedWithGivenFPChance(sstable, 0.1, true, numKeys, false);
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.1, true, numKeys, false);
         // should create BF because the FP has changed
-        checkSSTableOpenedWithGivenFPChance(sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys, true);
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys, true);
         // should install empty filter without changing file or metadata
-        checkSSTableOpenedWithGivenFPChance(sstable, 1, false, numKeys, false);
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1, false, numKeys, false);
 
         // corrupted bf file should fail to deserialize and we should fall back to recreating it
-        Files.write(Paths.get(sstable.descriptor.filenameFor(Component.FILTER)), new byte[] { 0, 0, 0, 0});
-        checkSSTableOpenedWithGivenFPChance(sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys, true);
+        Files.write(sstable.descriptor.fileFor(Components.FILTER).toPath(), new byte[] { 0, 0, 0, 0});
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 1 - BloomFilter.fpChanceTolerance, true, numKeys, true);
 
         // missing primary index file should make BF fail to load and we should install the empty one
-        new File(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX)).delete();
-        checkSSTableOpenedWithGivenFPChance(sstable, 0.05, false, numKeys, false);
+        sstable.descriptor.fileFor(Components.PRIMARY_INDEX).delete();
+        checkSSTableOpenedWithGivenFPChance(cfs, sstable, 0.05, false, numKeys, false);
     }
 
-    private void checkSSTableOpenedWithGivenFPChance(SSTableReader sstable, double fpChance, boolean bfShouldExist, int numKeys, boolean expectRecreated) throws IOException
+    private void checkSSTableOpenedWithGivenFPChance(ColumnFamilyStore cfs, SSTableReader sstable, double fpChance, boolean bfShouldExist, int numKeys, boolean expectRecreated) throws IOException
     {
         Descriptor desc = sstable.descriptor;
         TableMetadata metadata = sstable.metadata.get().unbuild().bloomFilterFpChance(fpChance).build();
         ValidationMetadata prevValidationMetadata = getValidationMetadata(desc);
         Assert.assertNotNull(prevValidationMetadata);
-        File bfFile = new File(desc.filenameFor(Component.FILTER));
+        File bfFile = desc.fileFor(Components.FILTER);
 
         SSTableReader target = null;
         try
@@ -1385,12 +1382,13 @@ public class SSTableReaderTest
             // make sure we wait enough - some JDK implementations use seconds granularity and we need to wait a bit to actually see the change
             Uninterruptibles.sleepUninterruptibly(1, Util.supportedMTimeGranularity);
 
-            target = SSTableReader.open(desc,
-                                        SSTableReader.discoverComponentsFor(desc),
+            target = SSTableReader.open(cfs,
+                                        desc,
+                                        TOCComponent.loadTOC(desc),
                                         TableMetadataRef.forOfflineTools(metadata),
                                         false,
                                         false);
-            IFilter bloomFilter = target.getBloomFilter();
+            IFilter bloomFilter = getFilter(target);
             ValidationMetadata validationMetadata = getValidationMetadata(desc);
             Assert.assertNotNull(validationMetadata);
             FileTime bf1Time = bfFile.exists() ? Files.getLastModifiedTime(bfFile.toPath()) : FileTime.from(Instant.MIN);
@@ -1407,15 +1405,15 @@ public class SSTableReaderTest
             if (bfShouldExist)
             {
                 Assert.assertNotEquals(FilterFactory.AlwaysPresent, bloomFilter);
-                Assert.assertTrue(bloomFilter.serializedSize() > 0);
+                Assert.assertTrue(bloomFilter.serializedSize(false) > 0);
                 Assert.assertEquals(fpChance, validationMetadata.bloomFilterFPChance, BloomFilter.fpChanceTolerance);
                 Assert.assertTrue(bfFile.exists());
-                Assert.assertEquals(bloomFilter.serializedSize(), bfFile.length());
+                Assert.assertEquals(bloomFilter.serializedSize(false), bfFile.length());
             }
             else
             {
-                Assert.assertEquals(FilterFactory.AlwaysPresent, sstable.getBloomFilter());
-                Assert.assertTrue(sstable.getBloomFilterSerializedSize() == 0);
+                Assert.assertEquals(FilterFactory.AlwaysPresent, getFilter(sstable));
+                Assert.assertTrue(getFilterSize(sstable) == 0);
                 Assert.assertEquals(prevValidationMetadata.bloomFilterFPChance, validationMetadata.bloomFilterFPChance, BloomFilter.fpChanceTolerance);
                 Assert.assertEquals(bfFile.exists(), bfFile.exists());
             }
@@ -1435,6 +1433,16 @@ public class SSTableReaderTest
         }
     }
 
+    static long getFilterSize(SSTableReader rdr)
+    {
+        return ((SSTableReaderWithFilter) rdr).getFilterSerializedSize();
+    }
+
+    static IFilter getFilter(SSTableReader rdr)
+    {
+        return ((SSTableReaderWithFilter) rdr).getFilter();
+    }
+
     private static ValidationMetadata getValidationMetadata(Descriptor descriptor)
     {
         EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION);
@@ -1446,7 +1454,7 @@ public class SSTableReaderTest
         }
         catch (Throwable t)
         {
-            throw new CorruptSSTableException(t, descriptor.filenameFor(Component.STATS));
+            throw new CorruptSSTableException(t, descriptor.fileFor(Components.STATS));
         }
 
         return (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);

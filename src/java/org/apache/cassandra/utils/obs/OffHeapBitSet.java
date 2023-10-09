@@ -18,7 +18,6 @@
 package org.apache.cassandra.utils.obs;
 
 import java.io.*;
-import java.io.DataInputStream;
 import java.io.IOException;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -173,7 +172,7 @@ public class OffHeapBitSet implements IBitSet
     }
 
     @SuppressWarnings("resource")
-    public static <I extends InputStream & DataInput> OffHeapBitSet deserialize(DataInputStream in, boolean oldBfFormat, MemoryLimiter memoryLimiter) throws IOException, MemoryLimiter.ReachedMemoryLimitException
+    public static <I extends InputStream & DataInput> OffHeapBitSet deserialize(I in, boolean oldBfFormat, MemoryLimiter memoryLimiter) throws IOException, MemoryLimiter.ReachedMemoryLimitException
     {
         long byteCount = in.readInt() * 8L;
         Memory memory = allocate(byteCount, memoryLimiter);

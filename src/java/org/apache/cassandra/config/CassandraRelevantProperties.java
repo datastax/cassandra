@@ -62,6 +62,21 @@ public enum CassandraRelevantProperties
     BATCHLOG_REPLAY_TIMEOUT_IN_MS("cassandra.batchlog.replay_timeout_in_ms"),
     BATCH_COMMIT_LOG_SYNC_INTERVAL("cassandra.batch_commitlog_sync_interval_millis", "1000"),
     /**
+     * A minimal relative change of the fase-positive chance so that it is considered as a reason to recreate the bloom
+     * filter. If the change is smaller than this, it will be ignored.
+     */
+    BF_FP_CHANCE_TOLERANCE("cassandra.bf.fp_chance_tolerance", "0.000001"),
+    /**
+     * The maximum memory to be used by all loaded bloom filters. If the limit is exceeded, pass-through filter will be
+     * used until some filters get unloaded.
+     */
+    BF_MAX_MEMORY_MB("cassandra.bf.max_memory_mb", "0"),
+    /**
+     * If the false-positive chance has changed since the last compaction (for example by alter table statement), and
+     * the node is restarted - the bloom filter can get rebuilt if this property jest set to true.
+     */
+    BF_RECREATE_ON_FP_CHANCE_CHANGE("cassandra.bf.recreate_on_fp_chance_change", "false"),
+    /**
      * When bootstraping how long to wait for schema versions to be seen.
      */
     BOOTSTRAP_SCHEMA_DELAY_MS("cassandra.schema_delay_ms"),
@@ -582,7 +597,7 @@ public enum CassandraRelevantProperties
             if (!visited.add(next.getKey()))
                 throw new IllegalStateException("System properties have duplicate key: " + next.getKey());
             if (prev != null && next.name().compareTo(prev.name()) < 0)
-                throw new IllegalStateException("Enum constants are not in alphabetical order: " + prev.name() + " should come before " + next.name());
+                throw new IllegalStateException("Enum constants are not in alphabetical order: " + prev.name() + " should come after " + next.name());
             else
                 prev = next;
         }

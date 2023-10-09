@@ -19,10 +19,6 @@
 package org.apache.cassandra.utils;
 
 import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.text.NumberFormat;
@@ -36,9 +32,12 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Ignore;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.ExpectedException;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -51,13 +50,12 @@ import org.apache.cassandra.utils.KeyGenerator.RandomStringGenerator;
 import org.apache.cassandra.utils.obs.IBitSet;
 import org.apache.cassandra.utils.obs.MemoryLimiter;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class BloomFilterTest
 {
+    @Rule
+    public ExpectedException expectedException = ExpectedException.none();
     public IFilter bfInvHashes;
     public MemoryLimiter memoryLimiter;
 
@@ -94,7 +92,7 @@ public class BloomFilterTest
     {
         // Set a high limit so that normal tests won't reach it, but we don't want Long.MAX_VALUE because
         // we want to test what happens when we reach it
-        System.setProperty(BloomFilter.MAX_MEMORY_MB_PROP, Long.toString(128 << 10));
+        CassandraRelevantProperties.BF_MAX_MEMORY_MB.setLong(128 << 10);
         memoryLimiter = new MemoryLimiter(128L << 30, "Allocating %s for bloom filter would reach max of %s (current %s)");
         bfInvHashes = FilterFactory.getFilter(10000L, FilterTestHelper.MAX_FAILURE_RATE);
     }
@@ -290,7 +288,7 @@ public class BloomFilterTest
             try (IFilter blankFilter = FilterFactory.getFilter(allocSize, fpChance, memoryLimiter))
             {
                 assertNotNull(blankFilter);
-                assertTrue(blankFilter instanceof AlwaysPresentFilter);
+                assertEquals(blankFilter, FilterFactory.AlwaysPresent);
 
                 assertEquals(memBefore, memoryLimiter.memoryAllocated());
             }
@@ -308,7 +306,7 @@ public class BloomFilterTest
         try (IFilter filter = FilterFactory.getFilter(allocSize, fpChance, memoryLimiter))
         {
             size = filter.offHeapSize();
-            BloomFilter.serializer.serialize((BloomFilter) filter, out);
+            BloomFilterSerializer.forVersion(false).serialize((BloomFilter) filter, out);
         }
         assertNotEquals(0, size);
 
@@ -321,13 +319,10 @@ public class BloomFilterTest
 
             long memBefore = memoryLimiter.memoryAllocated();
 
+            expectedException.expect(RuntimeException.class);
+            expectedException.expectMessage("Out of native memory occured, You can avoid it by increasing the system ram space or by increasing bloom_filter_fp_chance.");
             ByteArrayInputStream in = new ByteArrayInputStream(out.getData(), 0, out.getLength());
-            try (IFilter blankFilter = new BloomFilterSerializer(memoryLimiter).deserialize(new DataInputStream(in), false))
-            {
-                assertNotNull(blankFilter);
-                assertTrue(blankFilter instanceof AlwaysPresentFilter);
-                assertEquals(memBefore, memoryLimiter.memoryAllocated());
-            }
+            BloomFilterSerializer.forVersion(false).deserialize(Util.DataInputStreamPlusImpl.wrap(in), memoryLimiter);
         }
     }
 
@@ -352,7 +347,7 @@ public class BloomFilterTest
                 System.out.println(String.format("%s keys %s FP chance => %s",
                                                  NumberFormat.getNumberInstance(Locale.US).format(nk),
                                                  NumberFormat.getNumberInstance(Locale.US).format(fp),
-                                                 FBUtilities.prettyPrintMemory(filter.serializedSize())));
+                                                 FBUtilities.prettyPrintMemory(filter.serializedSize(false))));
             }
         }
     }
