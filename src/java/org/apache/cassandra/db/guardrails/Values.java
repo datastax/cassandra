@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.guardrails;
 
+import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -117,6 +118,7 @@ public class Values<T> extends Guardrail
         {
             warn(format("Ignoring provided values %s as they are not supported for %s (ignored values are: %s)",
                         toIgnore.stream().sorted().collect(Collectors.toList()), what, ignored));
+            toIgnore = new HashSet<>(toIgnore); // defensive copy as the action may modify the underlying set
             toIgnore.forEach(ignoreAction);
         }
 
