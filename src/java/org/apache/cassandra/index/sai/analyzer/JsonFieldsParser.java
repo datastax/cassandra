@@ -25,32 +25,26 @@ import java.util.List;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.cassandra.index.sai.analyzer.json.JsonFieldExtractor;
+import org.apache.cassandra.index.sai.analyzer.json.JsonFieldExtractorFactory;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class JsonFieldsParser implements DataParser
 {
-    private final List<String> parseFields;
-    public JsonFieldsParser(List<String> parseFields){
-        this.parseFields = parseFields;
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private final JsonFieldExtractor extr;
+    public JsonFieldsParser(String parseFields){
+        extr = JsonFieldExtractorFactory.construct(MAPPER)
+                                        .buildExtractor(parseFields);
     }
     private static ObjectMapper mapper = new ObjectMapper();
 
     @Override
     public ByteBuffer parse(ByteBuffer input) throws IOException
     {
-        String json = ByteBufferUtil.string(input.duplicate());
-        if(json.charAt(0) == '{'){
-            final ObjectNode jsonValue = (ObjectNode) mapper.readTree(json);
-            StringBuilder sb = new StringBuilder();
-            for (String field : parseFields)
-            {
-                JsonNode node = jsonValue.get(field);
-                if(node != null){
-                    sb.append(node.asText());
-                    sb.append(" ");
-                }
-            }
-            return ByteBufferUtil.bytes(sb.toString());
+        final byte firstByte = input.duplicate().get(0);
+        if(firstByte == '{'){
+            return ByteBuffer.wrap(extr.extractAsBytes(input));
         }else {
             return input;
         }

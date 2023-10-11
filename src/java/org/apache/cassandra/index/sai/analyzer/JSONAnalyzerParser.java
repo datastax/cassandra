@@ -83,8 +83,7 @@ public class JSONAnalyzerParser
         if(fields == null){
             return DefaultParser.INSTANCE;
         }
-        final List<String> parseFields = Arrays.stream(fields.split("\\,", -1)).map(s -> s.trim()).collect(Collectors.toList());
-        return new JsonFieldsParser(parseFields);
+        return new JsonFieldsParser(fields);
     }
 
 
