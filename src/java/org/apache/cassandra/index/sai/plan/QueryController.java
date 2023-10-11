@@ -83,6 +83,10 @@ public class QueryController
 {
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
+    // The cassandra.sai.order.chunk.size (default: 100000) controls the maximum number of PrimaryKeys that will
+    // be read into memory and then ordered/limited by the query controller at one time.
+    public static final int ORDER_CHUNK_SIZE = Integer.getInteger("cassandra.sai.order.chunk.size", 100000);
+
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
     private final QueryContext queryContext;
@@ -278,11 +282,9 @@ public class QueryController
     // This is a hybrid query. We apply all other predicates before ordering and limiting.
     public RangeIterator getTopKRows(RangeIterator source, RowFilter.Expression expression)
     {
-        // VSTODO find way to test different chunk sizes. Found a fundamental flaw with 1, so it'd be good to continue
-        // testing that case.
         return new OrderingFilterRangeIterator(source,
-                                               100000,
-                                      list -> this.getTopKRows(list, expression));
+                                               ORDER_CHUNK_SIZE,
+                                               list -> this.getTopKRows(list, expression));
     }
 
     private RangeIterator getTopKRows(List<PrimaryKey> rawSourceKeys, RowFilter.Expression expression)
