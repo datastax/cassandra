@@ -224,7 +224,7 @@ public class QueryController
         boolean defer = op == Operation.OperationType.OR || RangeIntersectionIterator.shouldDefer(exp.size());
         RangeIterator.Builder builder = op == Operation.OperationType.OR
                                         ? RangeUnionIterator.builder()
-                                        : RangeIntersectionIterator.builder(exp.size());
+                                        : RangeIntersectionIterator.builder(RangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT);
 
         Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view = referenceAndGetView(op, exp).entrySet();
 
