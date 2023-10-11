@@ -154,6 +154,11 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         this.clusteringComparator = clusteringComparator;
     }
 
+    public long count()
+    {
+        return rowIdToToken.length();
+    }
+
     @Override
     public PrimaryKey primaryKeyFromRowId(long sstableRowId)
     {
@@ -175,7 +180,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             return rowIdToToken.exactRowId(key.token().getLongValue());
         }
 
-        return cursor.getExactPointId(v -> key.asComparableBytes(v));
+        return cursor.getExactPointId(key::asComparableBytes);
     }
 
     @Override
@@ -202,13 +207,13 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public long ceiling(PrimaryKey key)
     {
-        return cursor.ceiling(v -> key.asComparableBytesMinPrefix(v));
+        return cursor.ceiling(key::asComparableBytesMinPrefix);
     }
 
     @Override
     public long floor(PrimaryKey key)
     {
-        return cursor.floor(v -> key.asComparableBytesMaxPrefix(v));
+        return cursor.floor(key::asComparableBytesMaxPrefix);
     }
 
 
