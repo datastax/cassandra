@@ -1220,15 +1220,18 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             switch (operator)
             {
                 case CONTAINS:
+                case NOT_CONTAINS:
                     assert type instanceof CollectionType;
                     CollectionType<?> ct = (CollectionType<?>)type;
                     type = ct.kind == CollectionType.Kind.SET ? ct.nameComparator() : ct.valueComparator();
                     break;
                 case CONTAINS_KEY:
+                case NOT_CONTAINS_KEY:
                     assert type instanceof MapType;
                     type = ((MapType<?, ?>)type).nameComparator();
                     break;
                 case IN:
+                case NOT_IN:
                     type = ListType.getInstance(type, false);
                     break;
                 default:
@@ -1316,8 +1319,8 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             AbstractType<?> nt = mt.nameComparator();
             AbstractType<?> vt = mt.valueComparator();
             return cql
-                 ? String.format("%s[%s] = %s", column.name.toCQLString(), nt.toCQLString(key), vt.toCQLString(value))
-                 : String.format("%s[%s] = %s", column.name.toString(), nt.getString(key), vt.getString(value));
+                 ? String.format("%s[%s] %s %s", column.name.toCQLString(), nt.toCQLString(key), operator, vt.toCQLString(value))
+                 : String.format("%s[%s] %s %s", column.name.toString(), nt.getString(key), operator, vt.getString(value));
         }
 
         @Override
