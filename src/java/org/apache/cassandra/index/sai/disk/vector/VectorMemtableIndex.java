@@ -384,7 +384,7 @@ public class VectorMemtableIndex implements MemtableIndex
         @Override
         protected void performSkipTo(PrimaryKey nextKey)
         {
-            while (!keyQueue.hasNext())
+            while (keyQueue.hasNext())
             {
                 maybeNext = keyQueue.next();
                 if (maybeNext.compareTo(nextKey) >= 0)
