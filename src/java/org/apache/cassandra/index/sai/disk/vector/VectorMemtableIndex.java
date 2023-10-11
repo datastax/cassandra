@@ -205,10 +205,9 @@ public class VectorMemtableIndex implements MemtableIndex
     public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
     {
         if (minimumKey == null)
-        {
-            assert maximumKey == null : "Minimum key is null but maximum key is not";
+            // This case implies maximumKey is empty too.
             return RangeIterator.empty();
-        }
+
         List<PrimaryKey> results = keys.stream()
                                       .dropWhile(k -> k.compareTo(minimumKey) < 0)
                                       .takeWhile(k -> k.compareTo(maximumKey) <= 0)
