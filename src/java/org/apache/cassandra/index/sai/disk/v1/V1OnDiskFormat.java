@@ -259,7 +259,8 @@ public class V1OnDiskFormat implements OnDiskFormat
                 logger.debug(descriptor.logMessage("{} failed for index component {} on SSTable {}"),
                              (checksum ? "Checksum validation" : "Validation"),
                              component,
-                             descriptor.descriptor);
+                             descriptor.descriptor,
+                             e);
             }
             return false;
         }
