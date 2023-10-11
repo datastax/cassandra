@@ -33,6 +33,8 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 
+import com.google.common.collect.Iterators;
+import com.google.common.collect.PeekingIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -371,13 +373,12 @@ public class VectorMemtableIndex implements MemtableIndex
 
     private class ListRangeIterator extends RangeIterator
     {
-        private final Iterator<PrimaryKey> keyQueue;
-        private PrimaryKey maybeNext;
+        private final PeekingIterator<PrimaryKey> keyQueue;
 
         ListRangeIterator(List<PrimaryKey> keyQueue)
         {
             super(minimumKey, maximumKey, keyQueue.size());
-            this.keyQueue = keyQueue.iterator();
+            this.keyQueue = Iterators.peekingIterator(keyQueue.iterator());
         }
 
         @Override
@@ -385,9 +386,9 @@ public class VectorMemtableIndex implements MemtableIndex
         {
             while (keyQueue.hasNext())
             {
-                maybeNext = keyQueue.next();
-                if (maybeNext.compareTo(nextKey) >= 0)
+                if (keyQueue.peek().compareTo(nextKey) >= 0)
                     break;
+                keyQueue.next();
             }
         }
 
@@ -397,15 +398,7 @@ public class VectorMemtableIndex implements MemtableIndex
         @Override
         protected PrimaryKey computeNext()
         {
-            if (maybeNext != null)
-            {
-                var next = maybeNext;
-                maybeNext = null;
-                return next;
-            }
-            if (keyQueue.hasNext())
-                return keyQueue.next();
-            return endOfData();
+            return keyQueue.hasNext() ? keyQueue.next() : endOfData();
         }
     }
 
