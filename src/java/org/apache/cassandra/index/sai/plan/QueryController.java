@@ -300,12 +300,12 @@ public class QueryController
 
         try
         {
-            List<RangeIterator> sstableIntersections = queryView.view.entrySet()
-                                                                                 .stream()
-                                                                                 .map(e -> {
-                                                                                     return reorderAndLimitBySSTableRowIds(sourceKeys, e.getKey(), queryView);
-                                                                                 })
-                                                                                 .collect(Collectors.toList());
+            List<RangeIterator> sstableIntersections = queryView.view.values()
+                                                                     .stream()
+                                                                     .map(e -> {
+                                                                         return reorderAndLimitBySSTableRowIds(sourceKeys, e);
+                                                                     })
+                                                                     .collect(Collectors.toList());
 
             return TermIterator.build(sstableIntersections, memtableResults, queryView.referencedIndexes, queryContext);
         }
@@ -318,9 +318,8 @@ public class QueryController
 
     }
 
-    private RangeIterator reorderAndLimitBySSTableRowIds(List<PrimaryKey> keys, SSTableReader sstable, QueryViewBuilder.QueryView annQueryView)
+    private RangeIterator reorderAndLimitBySSTableRowIds(List<PrimaryKey> keys, List<QueryViewBuilder.IndexExpression> annIndexExpressions)
     {
-        List<QueryViewBuilder.IndexExpression> annIndexExpressions = annQueryView.view.get(sstable);
         assert annIndexExpressions.size() == 1 : "only one index is expected in ANN expression, found " + annIndexExpressions.size() + " in " + annIndexExpressions;
         QueryViewBuilder.IndexExpression annIndexExpression = annIndexExpressions.get(0);
 
