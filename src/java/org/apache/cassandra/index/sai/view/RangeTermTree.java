@@ -45,18 +45,18 @@ public class RangeTermTree implements TermTree
     
     private final IntervalTree<Term, SSTableIndex, Interval<Term, SSTableIndex>> rangeTree;
 
-    private RangeTermTree(ByteBuffer min, ByteBuffer max, IntervalTree<Term, SSTableIndex, Interval<Term, SSTableIndex>> rangeTree, AbstractType<?> comparator)
+    private RangeTermTree(IntervalTree<Term, SSTableIndex, Interval<Term, SSTableIndex>> rangeTree, AbstractType<?> comparator)
     {
-        this.min = min;
-        this.max = max;
+        this.min = rangeTree.isEmpty() ? null : rangeTree.min().term;
+        this.max = rangeTree.isEmpty() ? null : rangeTree.max().term;
         this.rangeTree = rangeTree;
         this.comparator = comparator;
     }
 
     public Set<SSTableIndex> search(Expression e)
     {
-        ByteBuffer minTerm = e.lower == null ? min : e.lower.value.encoded;
-        ByteBuffer maxTerm = e.upper == null ? max : e.upper.value.encoded;
+        ByteBuffer minTerm = e.getOp().isNonEquality() || e.lower == null ? min : e.lower.value.encoded;
+        ByteBuffer maxTerm = e.getOp().isNonEquality() || e.upper == null ? max : e.upper.value.encoded;
 
         return new HashSet<>(rangeTree.search(Interval.create(new Term(minTerm, comparator),
                                                               new Term(maxTerm, comparator),
@@ -91,7 +91,7 @@ public class RangeTermTree implements TermTree
 
         public TermTree build()
         {
-            return new RangeTermTree(min, max, IntervalTree.build(intervals), comparator);
+            return new RangeTermTree(IntervalTree.build(intervals), comparator);
         }
     }
 
@@ -112,6 +112,12 @@ public class RangeTermTree implements TermTree
 
         public int compareTo(Term o)
         {
+            if (term == null && o.term == null)
+                return 0;
+            if (term == null)
+                return -1;
+            if (o.term == null)
+                return 1;
             return TypeUtil.compare(term, o.term, comparator);
         }
     }

@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -32,6 +33,8 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.index.sai.disk.EmptyIndex;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -144,7 +147,11 @@ public class SSTableIndex implements SegmentOrdering
                                 boolean defer,
                                 int limit) throws IOException
     {
-        return searchableIndex.search(expression, keyRange, context, defer, limit);
+        // for NEQ, NOT_CONTAINS_KEY, NOT_CONTAINS_VALUE we return everything
+        // and AntiJoin + post-filtering at the top level will filter out the unnecesary keys
+        return expression.getOp().isNonEquality()
+                ? allSSTableKeys(keyRange)
+                : searchableIndex.search(expression, keyRange, context, defer, limit);
     }
 
     public void populateSegmentView(SimpleDataSet dataSet)
@@ -184,6 +191,11 @@ public class SSTableIndex implements SegmentOrdering
     public boolean isReleased()
     {
         return references.get() <= 0;
+    }
+
+    public boolean isEmpty()
+    {
+        return searchableIndex instanceof EmptyIndex;
     }
 
     public void release()
@@ -239,4 +251,10 @@ public class SSTableIndex implements SegmentOrdering
                           .add("totalRows", sstable.getTotalRows())
                           .toString();
     }
+
+    protected final RangeIterator allSSTableKeys(AbstractBounds<PartitionPosition> keyRange) throws IOException
+    {
+        return PrimaryKeyMapIterator.create(sstableContext, keyRange);
+    }
+
 }

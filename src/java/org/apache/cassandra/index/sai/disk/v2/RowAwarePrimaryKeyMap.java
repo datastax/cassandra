@@ -155,6 +155,11 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         this.clusteringComparator = clusteringComparator;
     }
 
+    public long count()
+    {
+        return rowIdToToken.length();
+    }
+
     @Override
     public PrimaryKey primaryKeyFromRowId(long sstableRowId)
     {
