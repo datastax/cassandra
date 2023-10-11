@@ -278,8 +278,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     // VSTODO this is O(log n), is this a hotspot?
                     long sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
                     // skip rows that are not in our segment (or more preciesely, have no vectors that were indexed)
-                    // or are not in this segment
-                    if (sstableRowId < metadata.minSSTableRowId || primaryKeyMap.isNotFound(sstableRowId))
+                    // or are not in this segment (exactRowIdForPrimaryKey returns a negative value for not found)
+                    if (sstableRowId < metadata.minSSTableRowId)
                         continue;
 
                     // if sstable row id has exceeded current ANN segment, stop
