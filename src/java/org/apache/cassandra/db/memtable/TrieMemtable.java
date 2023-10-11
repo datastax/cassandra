@@ -279,6 +279,30 @@ public class TrieMemtable extends AbstractShardedMemtable
     }
 
     @Override
+    public DecoratedKey minPartitionKey()
+    {
+        for (int i = 0; i < shards.length; i++)
+        {
+            MemtableShard shard = shards[i];
+            if (!shard.isClean())
+                return shard.minPartitionKey();
+        }
+        return null;
+    }
+
+    @Override
+    public DecoratedKey maxPartitionKey()
+    {
+        for (int i = shards.length - 1; i >= 0; i--)
+        {
+            MemtableShard shard = shards[i];
+            if (!shard.isClean())
+                return shard.maxPartitionKey();
+        }
+        return null;
+    }
+
+    @Override
     RegularAndStaticColumns columns()
     {
         for (MemtableShard shard : shards)
@@ -462,6 +486,10 @@ public class TrieMemtable extends AbstractShardedMemtable
         @Unmetered
         private final TrieMemtableMetricsView metrics;
 
+        private TableMetadataRef metadata;
+
+        private DecoratedKey maxPartitionKey;
+
         @VisibleForTesting
         MemtableShard(TableMetadataRef metadata, MemtableAllocator allocator, TrieMemtableMetricsView metrics)
         {
@@ -470,6 +498,7 @@ public class TrieMemtable extends AbstractShardedMemtable
             this.statsCollector = new AbstractMemtable.StatsCollector();
             this.allocator = allocator;
             this.metrics = metrics;
+            this.metadata = metadata;
         }
 
         public long put(DecoratedKey key, PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup) throws InMemoryTrie.SpaceExhaustedException
@@ -507,6 +536,7 @@ public class TrieMemtable extends AbstractShardedMemtable
                     minLocalDeletionTime = Math.min(minLocalDeletionTime, update.stats().minLocalDeletionTime);
                     liveDataSize += updater.dataSize;
                     currentOperations += update.operationCount();
+                    updateMaxPartitionKey(key);
 
                     columnsCollector.update(update.columns());
                     statsCollector.update(update.stats());
@@ -522,6 +552,12 @@ public class TrieMemtable extends AbstractShardedMemtable
         public boolean isClean()
         {
             return data.isEmpty();
+        }
+
+        private void updateMaxPartitionKey(DecoratedKey key)
+        {
+            if (maxPartitionKey == null || key.compareTo(maxPartitionKey) > 0)
+                maxPartitionKey = key;
         }
 
         public int size()
@@ -547,6 +583,23 @@ public class TrieMemtable extends AbstractShardedMemtable
         long minLocalDeletionTime()
         {
             return minLocalDeletionTime;
+        }
+        
+        public DecoratedKey minPartitionKey()
+        {
+            Iterator<Map.Entry<ByteComparable, BTreePartitionData>> iter = data.entryIterator();
+            if (!iter.hasNext())
+                return null;
+
+            Map.Entry<ByteComparable, BTreePartitionData> entry = iter.next();
+            Partition partition = getPartitionFromTrieEntry(metadata.get(), allocator.ensureOnHeap(), entry);
+            return partition.partitionKey();
+        }
+
+        public DecoratedKey maxPartitionKey()
+        {
+            // Until we have a way to iterate the trie backwards, we need to update the max when putting data.
+            return maxPartitionKey;
         }
     }
 
