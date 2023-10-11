@@ -27,8 +27,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
- * This iterator is a work in progress.
- * It currently consumes a chunk of {@link PrimaryKey}s from the {@link RangeIterator}, passes them to the
+ * An iterator that consumes a chunk of {@link PrimaryKey}s from the {@link RangeIterator}, passes them to the
  * {@link Function} to filter the chunk of {@link PrimaryKey}s and then pass the results to next consumer.
  * The PKs are currently returned in {@link PrimaryKey} order, but that contract may change.
  */
