@@ -335,20 +335,6 @@ public class QueryController
     }
 
     /**
-     * @return ann expression if expressions have one ANN index and at least one non-ANN index
-     */
-    private Expression getAnnExpressionInHybridSearch(Collection<Expression> expressions)
-    {
-        if (expressions.size() < 2)
-        {
-            // if there is a single expression, just run search against it even if it's ANN
-            return null;
-        }
-
-        return expressions.stream().filter(e -> e.operation == Expression.Op.ANN).findFirst().orElse(null);
-    }
-
-    /**
      * Create row id iterator from different indexes' on-disk searcher of the same sstable
      */
     private RangeIterator createRowIdIterator(List<QueryViewBuilder.IndexExpression> indexExpressions, boolean defer)
