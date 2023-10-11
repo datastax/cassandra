@@ -823,6 +823,18 @@ public class ColumnFamilyStoreTest
             }
 
             @Override
+            public DecoratedKey minPartitionKey()
+            {
+                return null;
+            }
+
+            @Override
+            public DecoratedKey maxPartitionKey()
+            {
+                return null;
+            }
+
+            @Override
             public void markExtraOnHeapUsed(long additionalSpace, Group opGroup)
             {
             }
