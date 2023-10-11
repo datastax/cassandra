@@ -219,7 +219,7 @@ public class QueryController
      *
      * @return range iterator builder based on given expressions and operation type.
      */
-    public RangeIterator getIndexes(Operation.OperationType op, Collection<Expression> expressions)
+    public RangeIterator buildRangeIteratorForExpressions(Operation.OperationType op, Collection<Expression> expressions)
     {
         assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + filterOperation;
 

@@ -358,7 +358,7 @@ public class Operation
         {
             var builder = RangeIntersectionIterator.sizedBuilder(1 + children.size());
             if (!expressionMap.isEmpty())
-                builder.add(controller.getIndexes(OperationType.AND, expressionMap.values()));
+                builder.add(controller.buildRangeIteratorForExpressions(OperationType.AND, expressionMap.values()));
             for (Node child : children)
                 if (child.canFilter())
                     builder.add(child.rangeIterator(controller));
@@ -385,7 +385,7 @@ public class Operation
         {
             var builder = RangeUnionIterator.<PrimaryKey>builder(1 + children.size());
             if (!expressionMap.isEmpty())
-                builder.add(controller.getIndexes(OperationType.OR, expressionMap.values()));
+                builder.add(controller.buildRangeIteratorForExpressions(OperationType.OR, expressionMap.values()));
             for (Node child : children)
                 if (child.canFilter())
                     builder.add(child.rangeIterator(controller));
@@ -424,7 +424,7 @@ public class Operation
         RangeIterator rangeIterator(QueryController controller)
         {
             assert canFilter() : "Cannot process query with no expressions";
-            return controller.getIndexes(OperationType.AND, expressionMap.values());
+            return controller.buildRangeIteratorForExpressions(OperationType.AND, expressionMap.values());
         }
     }
 }
