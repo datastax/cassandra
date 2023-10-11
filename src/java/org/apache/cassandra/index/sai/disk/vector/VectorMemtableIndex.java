@@ -33,8 +33,6 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 
-import com.google.common.collect.Iterators;
-import com.google.common.collect.PeekingIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,6 +48,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.ListRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -224,7 +223,7 @@ public class VectorMemtableIndex implements MemtableIndex
         {
             if (results.isEmpty())
                 return RangeIterator.empty();
-            return new ListRangeIterator(results);
+            return new ListRangeIterator(minimumKey, maximumKey, results);
         }
 
         float[] qv = exp.lower.value.vector;
@@ -368,37 +367,6 @@ public class VectorMemtableIndex implements MemtableIndex
             if (keyQueue.isEmpty())
                 return endOfData();
             return keyQueue.poll();
-        }
-    }
-
-    private class ListRangeIterator extends RangeIterator
-    {
-        private final PeekingIterator<PrimaryKey> keyQueue;
-
-        ListRangeIterator(List<PrimaryKey> keyQueue)
-        {
-            super(minimumKey, maximumKey, keyQueue.size());
-            this.keyQueue = Iterators.peekingIterator(keyQueue.iterator());
-        }
-
-        @Override
-        protected void performSkipTo(PrimaryKey nextKey)
-        {
-            while (keyQueue.hasNext())
-            {
-                if (keyQueue.peek().compareTo(nextKey) >= 0)
-                    break;
-                keyQueue.next();
-            }
-        }
-
-        @Override
-        public void close() {}
-
-        @Override
-        protected PrimaryKey computeNext()
-        {
-            return keyQueue.hasNext() ? keyQueue.next() : endOfData();
         }
     }
 
