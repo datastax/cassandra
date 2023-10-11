@@ -79,13 +79,13 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE;
+
 public class QueryController
 {
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
-    // The cassandra.sai.order.chunk.size (default: 100000) controls the maximum number of PrimaryKeys that will
-    // be read into memory and then ordered/limited by the query controller at one time.
-    public static final int ORDER_CHUNK_SIZE = Integer.getInteger("cassandra.sai.order.chunk.size", 100000);
+    public static final int ORDER_CHUNK_SIZE = SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE.getInt();
 
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
