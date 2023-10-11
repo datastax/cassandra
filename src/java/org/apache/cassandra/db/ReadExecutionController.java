@@ -73,7 +73,7 @@ public class ReadExecutionController implements AutoCloseable
         this.command = command;
         this.createdAtNanos = createdAtNanos;
 
-        this.sstablesScannedPerRowRead = new ClearableHistogram(new DecayingEstimatedHistogramReservoir(false));
+        this.sstablesScannedPerRowRead = new ClearableHistogram(new DecayingEstimatedHistogramReservoir(true));
 
         if (trackRepairedStatus)
         {
