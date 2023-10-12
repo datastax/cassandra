@@ -77,7 +77,7 @@ public class PostingsReader implements OrdinalPostingList
 
     public PostingsReader(IndexInput input, BlocksSummary summary, QueryEventListener.PostingListEventListener listener) throws IOException
     {
-        assert input instanceof IndexInputReader;
+        assert input instanceof IndexInputReader : "PostingsReader requires an IndexInputReader, found " + input.getClass();
         logger.trace("Opening postings reader for {}", input);
         this.input = input;
         this.seekingInput = new SeekingRandomAccessInput(input);

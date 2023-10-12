@@ -118,7 +118,8 @@ public class QueryContext
     {
         if (shadowedPrimaryKeys == null)
             shadowedPrimaryKeys = new TreeSet<>();
-        shadowedPrimaryKeys.add(primaryKey);
+        boolean isNewKey = shadowedPrimaryKeys.add(primaryKey);
+        assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query.";
     }
 
     // Returns true if the row ID will be included or false if the row ID will be shadowed
@@ -127,9 +128,9 @@ public class QueryContext
         return shadowedPrimaryKeys == null || !shadowedPrimaryKeys.contains(primaryKeyMap.primaryKeyFromRowId(sstableRowId));
     }
 
-    public boolean containsShadowedPrimaryKey(PrimaryKey primaryKey)
+    public boolean shouldInclude(PrimaryKey pk)
     {
-        return shadowedPrimaryKeys != null && shadowedPrimaryKeys.contains(primaryKey);
+        return shadowedPrimaryKeys == null || !shadowedPrimaryKeys.contains(pk);
     }
 
     /**

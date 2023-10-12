@@ -110,6 +110,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     @Override
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
+        // VSTODO see about switching to use an order op instead of ann
         Supplier<ResultRetriever> queryIndexes = () -> new ResultRetriever(analyze(), analyzeFilter(), controller, executionController, queryContext, command.isTopK());
         if (!command.isTopK())
             return queryIndexes.get();
@@ -134,7 +135,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
      *
      * @return operation
      */
-    private RangeIterator<PrimaryKey> analyze()
+    private RangeIterator analyze()
     {
         return Operation.buildIterator(controller);
     }
@@ -160,7 +161,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final Iterator<DataRange> keyRanges;
         private AbstractBounds<PartitionPosition> currentKeyRange;
 
-        private final RangeIterator<PrimaryKey> operation;
+        private final RangeIterator operation;
         private final FilterTree filterTree;
         private final QueryController controller;
         private final ReadExecutionController executionController;
@@ -170,7 +171,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
         private PrimaryKey lastKey;
 
-        private ResultRetriever(RangeIterator<PrimaryKey> operation,
+        private ResultRetriever(RangeIterator operation,
                                 FilterTree filterTree,
                                 QueryController controller,
                                 ReadExecutionController executionController,
