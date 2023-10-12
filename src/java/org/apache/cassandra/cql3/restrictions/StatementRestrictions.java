@@ -1100,7 +1100,7 @@ public class StatementRestrictions
     private Token getTokenBound(Bound b, QueryOptions options, IPartitioner p)
     {
         if (!partitionKeyRestrictions.hasBound(b))
-            return b == Bound.START ? p.getMinimumToken() : p.getMaximumToken();
+            return b.isStart() ? p.getMinimumToken() : p.getMaximumToken();
 
         ByteBuffer value = partitionKeyRestrictions.bounds(b, options).get(0);
         checkNotNull(value, "Invalid null token value");
