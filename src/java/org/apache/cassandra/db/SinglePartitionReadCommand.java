@@ -820,7 +820,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             StorageHook.instance.reportRead(cfs.metadata().id, partitionKey());
 
             List<UnfilteredRowIterator> iterators = inputCollector.finalizeIterators(cfs, nowInSec(), controller.oldestUnrepairedTombstone());
-            return withSSTablesIterated(iterators, view.sstables.size(), cfs.metric, metricsCollector, startTimeNanos);
+            return withSSTablesIterated(iterators, controller, view.sstables.size(), cfs.metric, metricsCollector, startTimeNanos);
         }
         catch (RuntimeException | Error e)
         {
@@ -888,6 +888,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
      * would cause all iterators to be initialized and hence all sstables to be accessed.
      */
     private UnfilteredRowIterator withSSTablesIterated(List<UnfilteredRowIterator> iterators,
+                                                       ReadExecutionController controller,
                                                        int totalIntersectingSSTables,
                                                        TableMetrics metrics,
                                                        SSTableReadMetricsCollector metricsCollector,
@@ -902,16 +903,29 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             metrics.topReadPartitionSSTableCount.addSample(key.getKey(), metricsCollector.getMergedSSTables());
         }
 
+        return withSSTablesIterated(merged, controller, totalIntersectingSSTables, metrics, metricsCollector, startTimeNanos);
+    }
+
+    private UnfilteredRowIterator withSSTablesIterated(UnfilteredRowIterator iterator,
+                                                       ReadExecutionController controller,
+                                                       int totalIntersectingSSTables,
+                                                       TableMetrics metrics,
+                                                       SSTableReadMetricsCollector metricsCollector,
+                                                       long startTimeNanos)
+    {
+        DecoratedKey key = iterator.partitionKey();
+        metrics.topReadPartitionFrequency.addSample(key.getKey(), 1);
+
         class UpdateSstablesIterated extends Transformation<UnfilteredRowIterator>
         {
-           public void onPartitionClose()
-           {
-               int mergedSSTablesIterated = metricsCollector.getMergedSSTables();
-               metrics.updateSSTableIterated(mergedSSTablesIterated, totalIntersectingSSTables, Clock.Global.nanoTime() - startTimeNanos);
-               Tracing.trace("Merged data from memtables and {} sstables", mergedSSTablesIterated);
-           }
+            public void onPartitionClose()
+            {
+                int mergedSSTablesIterated = metricsCollector.getMergedSSTables();
+                metrics.updateSSTableIterated(mergedSSTablesIterated, totalIntersectingSSTables, Clock.Global.nanoTime() - startTimeNanos);
+                controller.updateSstablesIteratedPerRow(mergedSSTablesIterated);
+            }
         }
-        return Transformation.apply(merged, new UpdateSstablesIterated());
+        return Transformation.apply(iterator, new UpdateSstablesIterated());
     }
 
     private boolean queriesMulticellType()
@@ -1042,7 +1056,9 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         cfs.metric.topReadPartitionSSTableCount.addSample(key.getKey(), metricsCollector.getMergedSSTables());
         StorageHook.instance.reportRead(cfs.metadata.id, partitionKey());
 
-        return result.unfilteredIterator(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed());
+        UnfilteredRowIterator iterator = result.unfilteredIterator(columnFilter(), Slices.ALL, clusteringIndexFilter().isReversed());
+        return withSSTablesIterated(iterator, controller, view.sstables.size(), cfs.metric, metricsCollector, startTimeNanos);
+
     }
 
     private ImmutableBTreePartition add(UnfilteredRowIterator iter, ImmutableBTreePartition result, ClusteringIndexNamesFilter filter, boolean isRepaired, ReadExecutionController controller)
