@@ -2661,13 +2661,6 @@ public abstract class CQLTester
         return Arrays.asList(values);
     }
 
-    /** @return a normalized vector with the given dimension */
-    public Vector<Float> randomVectorBoxed(int dimension)
-    {
-        float[] floats = randomVector(dimension);
-        return vector(floats);
-    }
-
     public float[] randomVector(int dimension)
     {
         // this can be called from concurrent threads so don't use getRandom()
@@ -2694,20 +2687,6 @@ public abstract class CQLTester
         sum = (float) Math.sqrt(sum);
         for (int i = 0; i < v.length; i++)
             v[i] /= sum;
-    }
-
-    @SafeVarargs
-    protected static <T> Vector<T> vector(T... values)
-    {
-        return new Vector<>(values);
-    }
-
-    protected static Vector<Float> vector(float[] v)
-    {
-        var v2 = new Float[v.length];
-        for (int i = 0; i < v.length; i++)
-            v2[i] = v[i];
-        return new Vector<>(v2);
     }
 
     /** Normalize the given vector in-place */
