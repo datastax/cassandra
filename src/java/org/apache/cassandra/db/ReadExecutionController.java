@@ -25,7 +25,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.codahale.metrics.Histogram;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
@@ -73,7 +72,7 @@ public class ReadExecutionController implements AutoCloseable
         this.command = command;
         this.createdAtNanos = createdAtNanos;
 
-        this.sstablesScannedPerRowRead = new ClearableHistogram(new DecayingEstimatedHistogramReservoir(true));
+        this.sstablesScannedPerRowRead = new Histogram(new DecayingEstimatedHistogramReservoir(true));
 
         if (trackRepairedStatus)
         {
