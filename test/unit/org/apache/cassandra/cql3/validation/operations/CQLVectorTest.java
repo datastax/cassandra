@@ -554,4 +554,10 @@ public class CQLVectorTest extends CQLTester.InMemory
         // make sure the function referencing the UDT is dropped before dropping the UDT at cleanup
         execute("DROP FUNCTION " + f);
     }
+
+    @SafeVarargs
+    protected final <T> Vector<T> vector(T... values)
+    {
+        return new Vector<>(values);
+    }
 }
