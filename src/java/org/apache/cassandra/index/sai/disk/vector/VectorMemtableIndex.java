@@ -359,9 +359,7 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         @Override
-        public void close()
-        {
-        }
+        public void close() {}
 
         @Override
         protected PrimaryKey computeNext()
