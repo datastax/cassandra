@@ -81,12 +81,10 @@ public class RangeConcatIterator extends RangeIterator
     {
         if (currentRange == null || !currentRange.hasNext())
         {
-            do
-            {
-                if (!ranges.hasNext())
-                    return endOfData();
-                currentRange = ranges.next();
-            } while (!currentRange.hasNext());
+            if (!ranges.hasNext())
+                return endOfData();
+            currentRange = ranges.next();
+            assert currentRange.hasNext() : "Only non empty range iterators are added. Current range must not be empty.";
         }
         return currentRange.next();
     }
