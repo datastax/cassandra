@@ -116,6 +116,7 @@ public class RangeConcatIterator extends RangeIterator
             this.rangeIterators = new ArrayList<>(size);
         }
 
+        @Override
         public int rangeCount()
         {
             return rangeIterators.size();
