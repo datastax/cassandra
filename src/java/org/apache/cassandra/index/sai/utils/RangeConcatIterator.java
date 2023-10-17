@@ -45,7 +45,7 @@ public class RangeConcatIterator extends RangeIterator
         super(statistics);
 
         this.ranges = ranges.iterator();
-        this.toRelease = new ArrayList<>(ranges);
+        this.toRelease = ranges;
     }
 
     @Override
