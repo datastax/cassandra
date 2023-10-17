@@ -48,6 +48,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.ListRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -205,10 +206,9 @@ public class VectorMemtableIndex implements MemtableIndex
     public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
     {
         if (minimumKey == null)
-        {
-            assert maximumKey == null : "Minimum key is null but maximum key is not";
+            // This case implies maximumKey is empty too.
             return RangeIterator.empty();
-        }
+
         List<PrimaryKey> results = keys.stream()
                                       .dropWhile(k -> k.compareTo(minimumKey) < 0)
                                       .takeWhile(k -> k.compareTo(maximumKey) <= 0)
@@ -223,7 +223,7 @@ public class VectorMemtableIndex implements MemtableIndex
         {
             if (results.isEmpty())
                 return RangeIterator.empty();
-            return new ListRangeIterator(results);
+            return new ListRangeIterator(minimumKey, maximumKey, results);
         }
 
         float[] qv = exp.lower.value.vector;
@@ -359,7 +359,9 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         @Override
-        public void close() {}
+        public void close()
+        {
+        }
 
         @Override
         protected PrimaryKey computeNext()
@@ -367,46 +369,6 @@ public class VectorMemtableIndex implements MemtableIndex
             if (keyQueue.isEmpty())
                 return endOfData();
             return keyQueue.poll();
-        }
-    }
-
-    private class ListRangeIterator extends RangeIterator
-    {
-        private final Iterator<PrimaryKey> keyQueue;
-        private PrimaryKey maybeNext;
-
-        ListRangeIterator(List<PrimaryKey> keyQueue)
-        {
-            super(minimumKey, maximumKey, keyQueue.size());
-            this.keyQueue = keyQueue.iterator();
-        }
-
-        @Override
-        protected void performSkipTo(PrimaryKey nextKey)
-        {
-            while (!keyQueue.hasNext())
-            {
-                maybeNext = keyQueue.next();
-                if (maybeNext.compareTo(nextKey) >= 0)
-                    break;
-            }
-        }
-
-        @Override
-        public void close() {}
-
-        @Override
-        protected PrimaryKey computeNext()
-        {
-            if (maybeNext != null)
-            {
-                var next = maybeNext;
-                maybeNext = null;
-                return next;
-            }
-            if (keyQueue.hasNext())
-                return keyQueue.next();
-            return endOfData();
         }
     }
 

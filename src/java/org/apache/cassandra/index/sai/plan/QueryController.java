@@ -53,6 +53,7 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -77,9 +78,13 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE;
+
 public class QueryController
 {
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
+
+    public static final int ORDER_CHUNK_SIZE = SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE.getInt();
 
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
@@ -213,7 +218,7 @@ public class QueryController
      *
      * @return range iterator builder based on given expressions and operation type.
      */
-    public RangeIterator getIndexes(Operation.OperationType op, Collection<Expression> expressions)
+    public RangeIterator buildRangeIteratorForExpressions(Operation.OperationType op, Collection<Expression> expressions)
     {
         assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + filterOperation;
 
@@ -222,7 +227,7 @@ public class QueryController
         boolean defer = op == Operation.OperationType.OR || RangeIntersectionIterator.shouldDefer(exp.size());
         RangeIterator.Builder builder = op == Operation.OperationType.OR
                                         ? RangeUnionIterator.builder()
-                                        : RangeIntersectionIterator.builder(exp.size());
+                                        : RangeIntersectionIterator.builder(RangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT);
 
         Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view = referenceAndGetView(op, exp).entrySet();
 
@@ -276,11 +281,9 @@ public class QueryController
     // This is a hybrid query. We apply all other predicates before ordering and limiting.
     public RangeIterator getTopKRows(RangeIterator source, RowFilter.Expression expression)
     {
-        // VSTODO find way to test different chunk sizes. Found a fundamental flaw with 1, so it'd be good to continue
-        // testing that case.
         return new OrderingFilterRangeIterator(source,
-                                               100000,
-                                      list -> this.getTopKRows(list, expression));
+                                               ORDER_CHUNK_SIZE,
+                                               list -> this.getTopKRows(list, expression));
     }
 
     private RangeIterator getTopKRows(List<PrimaryKey> rawSourceKeys, RowFilter.Expression expression)
@@ -288,8 +291,7 @@ public class QueryController
         // Filter out PKs now. Each PK is passed to every segment of the ANN index, so filtering shadowed keys
         // eagerly can save some work when going from PK to row id for on disk segments.
         // Since the result is shared with multiple streams, we use an unmodifiable list.
-        var sourceKeys = rawSourceKeys.stream().filter(queryContext::shouldInclude).collect(Collectors.toUnmodifiableList());
-        // this is the hybrid, the above is the pure
+        var sourceKeys = rawSourceKeys.stream().filter(queryContext::shouldInclude).collect(Collectors.toList());
         var planExpression = new Expression(this.getContext(expression));
         planExpression.add(Operator.ANN, expression.getIndexValue().duplicate());
 
@@ -299,12 +301,12 @@ public class QueryController
 
         try
         {
-            List<RangeIterator> sstableIntersections = queryView.view.entrySet()
-                                                                                 .stream()
-                                                                                 .map(e -> {
-                                                                                     return reorderAndLimitBySSTableRowIds(sourceKeys, e.getKey(), queryView);
-                                                                                 })
-                                                                                 .collect(Collectors.toList());
+            List<RangeIterator> sstableIntersections = queryView.view.values()
+                                                                     .stream()
+                                                                     .map(e -> {
+                                                                         return reorderAndLimitBySSTableRowIds(sourceKeys, e);
+                                                                     })
+                                                                     .collect(Collectors.toList());
 
             return TermIterator.build(sstableIntersections, memtableResults, queryView.referencedIndexes, queryContext);
         }
@@ -317,9 +319,8 @@ public class QueryController
 
     }
 
-    private RangeIterator reorderAndLimitBySSTableRowIds(List<PrimaryKey> keys, SSTableReader sstable, QueryViewBuilder.QueryView annQueryView)
+    private RangeIterator reorderAndLimitBySSTableRowIds(List<PrimaryKey> keys, List<QueryViewBuilder.IndexExpression> annIndexExpressions)
     {
-        List<QueryViewBuilder.IndexExpression> annIndexExpressions = annQueryView.view.get(sstable);
         assert annIndexExpressions.size() == 1 : "only one index is expected in ANN expression, found " + annIndexExpressions.size() + " in " + annIndexExpressions;
         QueryViewBuilder.IndexExpression annIndexExpression = annIndexExpressions.get(0);
 
@@ -331,20 +332,6 @@ public class QueryController
         {
             throw new RuntimeException(e);
         }
-    }
-
-    /**
-     * @return ann expression if expressions have one ANN index and at least one non-ANN index
-     */
-    private Expression getAnnExpressionInHybridSearch(Collection<Expression> expressions)
-    {
-        if (expressions.size() < 2)
-        {
-            // if there is a single expression, just run search against it even if it's ANN
-            return null;
-        }
-
-        return expressions.stream().filter(e -> e.operation == Expression.Op.ANN).findFirst().orElse(null);
     }
 
     /**
@@ -562,7 +549,11 @@ public class QueryController
     {
         return Sets.filter(indexes, index -> {
             SSTableReader sstable = index.getSSTable();
-
+            if (mergeRange instanceof Bounds && mergeRange.left.equals(mergeRange.right) && (!mergeRange.left.isMinimum()) && mergeRange.left instanceof DecoratedKey)
+            {
+                if (!sstable.getBloomFilter().isPresent((DecoratedKey)mergeRange.left))
+                    return false;
+            }
             return mergeRange.left.compareTo(sstable.last) <= 0 && (mergeRange.right.isMinimum() || sstable.first.compareTo(mergeRange.right) <= 0);
         });
     }

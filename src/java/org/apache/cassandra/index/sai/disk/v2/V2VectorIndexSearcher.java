@@ -48,6 +48,7 @@ import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
 import org.apache.cassandra.index.sai.utils.AtomicRatio;
+import org.apache.cassandra.index.sai.utils.ListRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -159,7 +160,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             // it will return the next row id if given key is not found.
             long minSSTableRowId = primaryKeyMap.ceiling(firstPrimaryKey);
             // If we didn't find the first key, we won't find the last primary key either
-            if (primaryKeyMap.isNotFound(minSSTableRowId))
+            if (minSSTableRowId < 0)
                 return new BitsOrPostingList(PostingList.EMPTY);
             long maxSSTableRowId = primaryKeyMap.floor(lastPrimaryKey);
 
@@ -264,6 +265,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                            .dropWhile(k -> k.compareTo(metadata.minKey) < 0)
                                            .takeWhile(k -> k.compareTo(metadata.maxKey) <= 0)
                                            .collect(Collectors.toList());
+        if (keysInRange.isEmpty())
+            return RangeIterator.empty();
+        int topK = topKFor(limit);
+        if (shouldUseBruteForce(topK, limit, keysInRange.size()))
+            return new ListRangeIterator(metadata.minKey, metadata.maxKey, keysInRange);
+
         try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
         {
             // the iterator represents keys from the whole table -- we'll only pull of those that
@@ -275,11 +282,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             {
                 for (PrimaryKey primaryKey : keysInRange)
                 {
-                    // VSTODO this is O(log n), is this a hotspot?
                     long sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
                     // skip rows that are not in our segment (or more preciesely, have no vectors that were indexed)
-                    // or are not in this segment
-                    if (sstableRowId < metadata.minSSTableRowId || primaryKeyMap.isNotFound(sstableRowId))
+                    // or are not in this segment (exactRowIdForPrimaryKey returns a negative value for not found)
+                    if (sstableRowId < metadata.minSSTableRowId)
                         continue;
 
                     // if sstable row id has exceeded current ANN segment, stop
@@ -296,14 +302,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 }
             }
 
-            // if we have a small number of results then let TopK processor do exact NN computation
-            int topK = topKFor(limit);
-            var maxBruteForceRows = min(globalBruteForceRows, maxBruteForceRows(topK, rowIds.size(), graph.size()));
-            logger.trace("SAI materialized {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
-                         rowIds.size(), maxBruteForceRows, graph.size(), limit);
-            Tracing.trace("SAI materialized {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
-                          rowIds.size(), maxBruteForceRows, graph.size(), limit);
-            if (rowIds.size() <= maxBruteForceRows)
+            if (shouldUseBruteForce(topK, limit, rowIds.size()))
                 return toPrimaryKeyIterator(new ArrayPostingList(rowIds.toIntArray()), context);
 
             // else ask the index to perform a search limited to the bits we created
@@ -312,6 +311,17 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             updateExpectedNodes(results.getVisitedCount(), expectedNodesVisited(topK, maxSegmentRowId, graph.size()));
             return toPrimaryKeyIterator(results, context);
         }
+    }
+
+    private boolean shouldUseBruteForce(int topK, int limit, int numRows)
+    {
+        // if we have a small number of results then let TopK processor do exact NN computation
+        var maxBruteForceRows = min(globalBruteForceRows, maxBruteForceRows(topK, numRows, graph.size()));
+        logger.trace("SAI materialized {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
+                     numRows, maxBruteForceRows, graph.size(), limit);
+        Tracing.trace("SAI materialized {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
+                      numRows, maxBruteForceRows, graph.size(), limit);
+        return numRows <= maxBruteForceRows;
     }
 
     @Override
