@@ -66,8 +66,7 @@ Epoch tracks each change. Period tracks
 * */
 
 // Actually SealPeriod has some nice javadoc...
-
-public class Period
+public class Period // JACEK: we should rename it to LogUtil or something like that
 {
     private static final Logger logger = LoggerFactory.getLogger(Period.class);
     public static final long EMPTY = 0;

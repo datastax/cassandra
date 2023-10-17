@@ -52,7 +52,7 @@ import org.apache.cassandra.utils.btree.BTreeMultimap;
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.tcm.membership.NodeVersion.CURRENT;
 
-public class Directory implements MetadataValue<Directory>
+public class Directory implements MetadataValue<Directory> // JACEK: rename this class - maybe NodeDirectory? or NodeIndex? or Nodes?
 {
     public static final Serializer serializer = new Serializer();
 

@@ -96,7 +96,7 @@ public interface MetadataSnapshots
         {
             try
             {
-                SystemKeyspace.storeSnapshot(metadata.epoch, metadata.period, ClusterMetadata.toBytes(metadata));
+                SystemKeyspace.storeSnapshot(metadata.epoch, metadata.period, ClusterMetadata.toBytes(metadata)); // JACEK: kinda inconsistent - maybe we can have a serializer for ClusterMetadata?
             }
             catch (IOException e)
             {
