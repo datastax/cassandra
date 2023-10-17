@@ -101,6 +101,7 @@ public abstract class LocalLog implements Closeable
      */
 
     // KATE: Why the higher epoch comes before the lower? Whatever is forced comes first, and then the rest is ordered by epoch.
+    // JACEK: would it be better to simply filter out snapshot transformations to the external set? we could avoid sorting at all because epochs are retrieved or added in order
     protected final ConcurrentSkipListSet<Entry> pending = new ConcurrentSkipListSet<>((Entry e1, Entry e2) -> {
         if (e1.transform.kind() == Transformation.Kind.FORCE_SNAPSHOT && e2.transform.kind() == Transformation.Kind.FORCE_SNAPSHOT)
             return e2.epoch.compareTo(e1.epoch);

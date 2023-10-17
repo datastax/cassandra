@@ -164,6 +164,8 @@ public final class SystemKeyspace
     public static final String PREPARED_STATEMENTS = "prepared_statements";
     public static final String REPAIRS = "repairs";
     public static final String TOP_PARTITIONS = "top_partitions";
+
+    // --- TCM tables ---
     public static final String METADATA_LOG = "local_metadata_log";
     public static final String SNAPSHOT_TABLE_NAME = "metadata_snapshots";
     public static final String SEALED_PERIODS_TABLE_NAME = "metadata_sealed_periods";
@@ -506,6 +508,7 @@ public final class SystemKeyspace
                                                       .partitioner(new LocalPartitioner(LongType.instance))
                                                       .build();
 
+    // JACEK: It looks like it is used to store a pair of values. Wouldn't it make sense to store that in the LOCAL table instead of creating a dedicated one?
     public static final TableMetadata LastSealedPeriod = parse(LAST_SEALED_PERIOD_TABLE_NAME,
                                                                "ClusterMetadata last sealed period",
                                                                "CREATE TABLE IF NOT EXISTS %s (" +

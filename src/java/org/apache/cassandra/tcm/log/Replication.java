@@ -93,7 +93,7 @@ public class Replication
     public Replication(ImmutableList<Entry> entries)
     {
         this.entries = entries;
-    }
+    } // JACEK: the constructor should be private?
 
     public ImmutableList<Entry> entries()
     {

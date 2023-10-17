@@ -94,7 +94,7 @@ import static org.apache.cassandra.db.TypeSizes.sizeof;
  *
  * @see MetadataSnapshots for more information about cluster metadata snapshots
  *
- * JACEK: should we version the metadata structure? For example, to support new or modified fields in the future?
+ * JACEK: for all those bean-like classes we should consider using some reflection based equals, hashCode, and ser/de verifiers
  */
 public class ClusterMetadata
 {
@@ -373,6 +373,10 @@ public class ClusterMetadata
         return VersionedEndpoints.forToken(writeEndpoints.lastModified(), endpointsForToken.build());
     }
 
+    /**
+     * Builds a new cluster metadata based on top of the provided one, registering the keys of all the overridden
+     * items.
+     */
     public static class Transformer
     {
         private final ClusterMetadata base;
@@ -567,6 +571,7 @@ public class ClusterMetadata
                     mutable.withLastModified(epoch);
             }
 
+            // JACEK: why do we compare all those things by references instead of values (like dumpDiff does)?
             if (schema != base.schema)
             {
                 modifiedKeys.add(MetadataKeys.SCHEMA);
