@@ -29,7 +29,8 @@ import org.apache.cassandra.index.sai.plan.Expression;
 /**
  * A {@link SegmentOrdering} orders and limits a list of {@link PrimaryKey}s.
  *
- * When using {@link SegmentOrdering} there are several steps:
+ * When using {@link SegmentOrdering} there are several steps to
+ * build the list of Primary Keys to be ordered and limited:
  *
  * 1. Find all primary keys that match each non-ordering query predicate.
  * 2. Union and intersect the results of step 1 to build a single {@link RangeIterator}
