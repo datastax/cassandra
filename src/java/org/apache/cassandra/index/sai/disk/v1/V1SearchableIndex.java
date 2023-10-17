@@ -165,7 +165,7 @@ public class V1SearchableIndex implements SearchableIndex
                                 boolean defer,
                                 int limit) throws IOException
     {
-        RangeConcatIterator.Builder rangeConcatIteratorBuilder = RangeConcatIterator.builder();
+        RangeConcatIterator.Builder rangeConcatIteratorBuilder = RangeConcatIterator.builder(segments.size());
 
         for (Segment segment : segments)
         {
@@ -181,7 +181,7 @@ public class V1SearchableIndex implements SearchableIndex
     @Override
     public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
-        RangeConcatIterator.Builder concatIteratorBuilder = new RangeConcatIterator.Builder();
+        RangeConcatIterator.Builder concatIteratorBuilder = RangeConcatIterator.builder(segments.size());
         for (Segment segment : segments)
             concatIteratorBuilder.add(segment.limitToTopResults(context, keys, exp, limit));
 
