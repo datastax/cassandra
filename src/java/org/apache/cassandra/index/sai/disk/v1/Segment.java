@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -68,7 +69,18 @@ public class Segment implements Closeable, SegmentOrdering
         this.metadata = metadata;
 
         var format = sstableContext.indexDescriptor.version.onDiskFormat();
-        this.index = format.newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
+        // FIXME we only have one IndexDescriptor + Version per sstable, so this is a hack
+        // to support indexes at different versions.  Vectors are the only types impacted by multiple versions so far.
+        IndexSearcher searcher;
+        try
+        {
+            searcher = format.newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
+        }
+        catch (IllegalArgumentException e)
+        {
+            searcher = Version.LATEST.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
+        }
+        this.index = searcher;
     }
 
     @VisibleForTesting
