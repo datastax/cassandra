@@ -106,12 +106,12 @@ public class VectorTopKProcessor
 
     /**
      * Stage to use for parallel index reads.
-     * Defiend by -DIndexReadStage.cassandra.stage=<value> where valie matches one of the Stage enum values.
+     * Defined by -DIndexReadStage.cassandra.stage=<value> where value matches one of the Stage enum values.
      * INDEX_READ is default, READ is a possibility, or IMMEDIATE to disable parallel reads.
      * Others are not recommended.
      * @see org.apache.cassandra.concurrent.Stage
      *
-     * INDEX_READ uses 2 * cpus threads by default but can be overrriden with -DIndexReadStage.cassandra.threads=<value>
+     * INDEX_READ uses 2 * cpus threads by default but can be overridden with -DIndexReadStage.cassandra.threads=<value>
      *
      * @return stage to use, default INDEX_READ
      */
