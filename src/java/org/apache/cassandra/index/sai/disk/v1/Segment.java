@@ -68,17 +68,25 @@ public class Segment implements Closeable, SegmentOrdering
         this.indexFiles = indexFiles;
         this.metadata = metadata;
 
-        var format = sstableContext.indexDescriptor.version.onDiskFormat();
+        var version = sstableContext.indexDescriptor.version;
         // FIXME we only have one IndexDescriptor + Version per sstable, so this is a hack
         // to support indexes at different versions.  Vectors are the only types impacted by multiple versions so far.
         IndexSearcher searcher;
         try
         {
-            searcher = format.newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
+            searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
         }
-        catch (IllegalArgumentException e)
+        catch (Throwable e) // there's multiple things that can go wrong w/ version mismatch, so catch all of them
         {
-            searcher = Version.LATEST.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
+            if (!List.of(Version.BA, Version.CA).contains(version))
+            {
+                // we're only trying to recover from BA/CA confusion, this is something else
+                throw e;
+            }
+            // opening with the global format didn't work.  that means that (unless it's actually corrupt)
+            // the correct version is whichever one the global format is not set to
+            var otherVersion = version == Version.CA ? Version.BA : Version.CA;
+            searcher = otherVersion.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
         }
         this.index = searcher;
     }
