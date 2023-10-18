@@ -181,6 +181,7 @@ public class StorageAttachedIndex implements Index
                                                                      NonTokenizingOptions.CASE_SENSITIVE,
                                                                      NonTokenizingOptions.NORMALIZE,
                                                                      NonTokenizingOptions.ASCII,
+                                                                     // For now, we leave this for backward compatibility even though it's not used
                                                                      IndexContext.ENABLE_SEGMENT_COMPACTION_OPTION_NAME,
                                                                      IndexTarget.TARGET_OPTION_NAME,
                                                                      IndexTarget.CUSTOM_INDEX_OPTION_NAME,
