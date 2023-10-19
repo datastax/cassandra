@@ -388,15 +388,16 @@ public class CompositeType extends AbstractCompositeType
 
         // We want to return the first two bytes, the component itself, and the end-of-component byte
         int componentLength = bb.getShort(bb.position()) + 3;
+        int endOfComponentPosition = componentLength - 1;
         // If this buffer is the lower bound or if the end-of-component byte is 1, we just need to set the limit
-        if (isLowerBound || bb.get(bb.position() + componentLength - 1) == (byte) 1)
+        if (isLowerBound || bb.get(bb.position() + endOfComponentPosition) == (byte) 1)
             return bb.limit(componentLength);
 
         // We need to copy the first component and set the end-of-component byte to 1.
         // See class's javadoc for explanation.
         var dest = ByteBuffer.allocate(componentLength);
-        ByteBufferUtil.copyBytes(bb, bb.position(), dest, 0, componentLength - 1);
-        dest.put(componentLength - 1, (byte) 1);
+        ByteBufferUtil.copyBytes(bb, bb.position(), dest, 0, endOfComponentPosition);
+        dest.put(endOfComponentPosition, (byte) 1);
         return dest;
     }
 
