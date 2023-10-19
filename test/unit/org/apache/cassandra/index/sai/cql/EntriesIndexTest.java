@@ -168,7 +168,6 @@ public class EntriesIndexTest extends SAITester
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 3"));
     }
 
-    // TODO this test fails right now because the values are indexed as text. Need to understand the deeper issue here.
     @Test
     public void queryLargeEntriesWithZeroes()
     {

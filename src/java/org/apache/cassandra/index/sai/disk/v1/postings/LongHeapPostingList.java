@@ -40,7 +40,6 @@ public class LongHeapPostingList implements PostingList
         if (heap.size() == 0)
             return PostingList.END_OF_STREAM;
         var next = heap.pop();
-        System.out.println("nextPosting: " + next);
         return next;
     }
 
