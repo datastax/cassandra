@@ -111,7 +111,7 @@ public class SSTableImporter
 
                             if (options.failOnMissingIndex)
                             {
-                                Index.Group saiIndexGroup = cfs.indexManager.getIndexGroup(StorageAttachedIndexGroup.class);
+                                Index.Group saiIndexGroup = cfs.indexManager.getIndexGroup(StorageAttachedIndexGroup.GROUP_KEY);
                                 if (saiIndexGroup != null)
                                 {
                                     String keyspace = cfs.getKeyspaceName();
