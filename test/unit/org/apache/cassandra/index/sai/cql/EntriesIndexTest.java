@@ -367,4 +367,26 @@ public class EntriesIndexTest extends SAITester
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['orange'] < 1"), row(1));
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['orange'] >= 3"), row(4), row(3));
     }
+
+    @Test
+    public void testRangeQueriesCombinedWithQueryAgainstOtherIndexes()
+    {
+        createTable("CREATE TABLE %s (partition int primary key, store_name text, item_cost map<text, int>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(store_name) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // We intentionally use apple, banana, and orange to deal with multiple keys in the trie.
+        // We then search against banana to show that we only get results for banana
+        execute("INSERT INTO %s (partition, store_name, item_cost) VALUES (0, 'Partial Foods', {'apple': 5, 'orange': 7})");
+        flush();
+        execute("INSERT INTO %s (partition, store_name, item_cost) VALUES (1, 'Stale Market', {'apple': 6, 'orange': 4})");
+
+        // Test basic ranges
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 6"), row(0));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['orange'] < 7"), row(1));
+
+        // Combine ranges with query on other index
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= 6 AND store_name = 'Partial Foods'"), row(0));
+    }
 }
