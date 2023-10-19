@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -281,6 +282,17 @@ public interface Index
      * @param registry the index registry to register the instance with
      */
     public void register(IndexRegistry registry);
+
+    /**
+     * Unregister current index when it's removed from system
+     *
+     * @param registry the index registry to unregister the instance with
+     */
+    default void unregister(IndexRegistry registry)
+    {
+        // for singleton index, the group key is the index itself
+        registry.unregisterIndex(this, new Index.Group.Key(this));
+    }
 
     /**
      * If the index implementation uses a local table to store its index data, this method should return a
@@ -728,11 +740,41 @@ public interface Index
      * Class providing grouped operations for indexes that communicate with each other.
      *
      * Index implementations should provide a {@code Group} implementation calling to
-     * {@link SecondaryIndexManager#registerIndex(Index, Object, Supplier)} during index registering
-     * at {@link #register(IndexRegistry)} method.
+     * {@link SecondaryIndexManager#registerIndex(Index, Key, Supplier)} during index registering
+     * at {@link #register(IndexRegistry)} method and provide {@code groupKey} calling to
+     * {@link SecondaryIndexManager#unregisterIndex(Index, Key)} during index unregistering
+     * at {@link #unregister(IndexRegistry)} method
      */
     interface Group
     {
+        /**
+         * Group key is used to uniquely identify a {@link Group} within a table
+         */
+        class Key
+        {
+            private final Object object;
+
+            public Key(Object object)
+            {
+                this.object = object;
+            }
+
+            @Override
+            public boolean equals(Object o)
+            {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                Key key = (Key) o;
+                return Objects.equals(object, key.object);
+            }
+
+            @Override
+            public int hashCode()
+            {
+                return Objects.hash(object);
+            }
+        }
+
         /**
          * Returns the indexes that are members of this group.
          *
@@ -820,8 +862,8 @@ public interface Index
         }
 
         /**
-         * Called when the table associated with this group has been invalidated. Implementations
-         * should dispose of any resources tied to the lifecycle of the {@link Group}.
+         * Called when the table associated with this group has been invalidated or all indexes in the group are removed.
+         * Implementations should dispose of any resources tied to the lifecycle of the {@link Group}.
          */
         default void invalidate() { }
 
