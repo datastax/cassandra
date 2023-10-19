@@ -23,6 +23,8 @@ package org.apache.cassandra.index.sai.functional;
 import java.util.Collection;
 import java.util.Collections;
 
+import javax.management.InstanceNotFoundException;
+
 import com.google.common.collect.Lists;
 import org.junit.Assert;
 import org.junit.Test;
@@ -62,7 +64,6 @@ import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -338,10 +339,9 @@ public class CompactionTest extends SAITester
         }
 
         // verify index group metrics are cleared.
-        assertEquals(0, getOpenIndexFiles());
-        assertEquals(0, getDiskUsage());
+        assertThatThrownBy(this::getOpenIndexFiles).isInstanceOf(InstanceNotFoundException.class);
+        assertThatThrownBy(this::getDiskUsage).isInstanceOf(InstanceNotFoundException.class);
 
-        // verify indexes are dropped
         // verify indexes are dropped
         assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v1>=0"))
                 .isInstanceOf(InvalidQueryException.class)
