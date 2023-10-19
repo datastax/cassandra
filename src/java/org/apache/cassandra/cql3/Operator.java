@@ -354,7 +354,7 @@ public enum Operator
         @Override
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            return ByteBufferUtil.contains(leftOperand, rightOperand);
+            return !LIKE_CONTAINS.isSatisfiedBy(type, leftOperand, rightOperand);
         }
     },
     NOT_LIKE_MATCHES(22)
