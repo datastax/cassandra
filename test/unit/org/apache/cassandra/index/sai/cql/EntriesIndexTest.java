@@ -137,12 +137,19 @@ public class EntriesIndexTest extends SAITester
 
     private void entriesIndexRangeNestedPredicatesTestAssertions()
     {
-        // Intersections
+        // Intersections for x and y
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] <= 0 AND coordinates['y'] > 0"),
                    row(1), row(4));
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -100 AND coordinates['y'] > 0"),
                    row(1));
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -100 AND coordinates['y'] > 1000000"));
+
+        // Intersections for x (setting upper and lower bounds)
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -100 AND coordinates['x'] > -1000000"));
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] <= -100 AND coordinates['x'] >= -1000000"),
+                   row(1), row(4));
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -99 AND coordinates['x'] >= -101"),
+                   row(4));
 
         // Unions
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] > -101 OR coordinates['y'] > 2"),
