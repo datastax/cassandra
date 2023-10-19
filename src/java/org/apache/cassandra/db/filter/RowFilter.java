@@ -298,7 +298,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             return expression;
         }
 
-        public void addMapEquality(ColumnMetadata def, ByteBuffer key, Operator op, ByteBuffer value)
+        public void addMapComparison(ColumnMetadata def, ByteBuffer key, Operator op, ByteBuffer value)
         {
             add(new MapComparisonExpression(def, key, op, value));
         }

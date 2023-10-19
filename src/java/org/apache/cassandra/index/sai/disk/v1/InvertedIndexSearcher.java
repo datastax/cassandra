@@ -103,8 +103,7 @@ public class InvertedIndexSearcher extends IndexSearcher
         else if (exp.getOp() == Expression.Op.RANGE)
         {
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
-            // TODO figure out if it is safe to cast to int
-            return reader.rangeMatch(exp, (int) this.metadata.numRows, listener, context);
+            return reader.rangeMatch(exp, listener, context);
         }
         throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));
     }

@@ -24,8 +24,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.lang3.NotImplementedException;
-
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.*;
@@ -453,17 +451,17 @@ public abstract class SingleColumnRestriction implements SingleRestriction
      */
     public static class MapSliceRestriction extends SingleColumnRestriction
     {
-        private final HashMap<Term, TermSlice> slices;
+        // Left is the map's key and right is the slice on the map's value.
+        private final List<Pair<Term, TermSlice>> slices;
 
         public MapSliceRestriction(ColumnMetadata columnDef, Bound bound, boolean inclusive, Term key, Term value)
         {
             super(columnDef);
-            checkTrue(key instanceof Constants.Value, "Key must be a constant for Map Slice restriction, but was %s", key);
-            slices = new HashMap<>();
-            slices.put(key, TermSlice.newInstance(bound, inclusive, value));
+            slices = new ArrayList<>();
+            slices.add(Pair.create(key, TermSlice.newInstance(bound, inclusive, value)));
         }
 
-        private MapSliceRestriction(ColumnMetadata columnDef, HashMap<Term, TermSlice> slices)
+        private MapSliceRestriction(ColumnMetadata columnDef, List<Pair<Term, TermSlice>> slices)
         {
             super(columnDef);
             this.slices = slices;
@@ -472,19 +470,16 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public void addFunctionsTo(List<Function> functions)
         {
-            slices.values().forEach(slice -> slice.addFunctionsTo(functions));
+            slices.forEach(slice -> {
+                slice.left.addFunctionsTo(functions);
+                slice.right.addFunctionsTo(functions);
+            });
         }
 
         @Override
         MultiColumnRestriction toMultiColumnRestriction()
         {
             throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public boolean isMapSlice()
-        {
-            return true;
         }
 
         @Override
@@ -510,21 +505,34 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            checkTrue(otherRestriction.isMapSlice(),
+            checkTrue(otherRestriction instanceof SingleColumnRestriction.MapSliceRestriction,
                       "Column \"%s\" cannot be restricted by both an equality and an inequality relation",
                       columnDef.name);
 
             var otherMapSlice = ((SingleColumnRestriction.MapSliceRestriction) otherRestriction);
-            // Put all of the old slices into the new slices, and then add the new slices.
-            var newKeySliceMap = new HashMap<Term, TermSlice>(slices);
-            for (Map.Entry<Term, TermSlice> entry : otherMapSlice.slices.entrySet())
+            // Because the keys are not necessarily bound, we defer on making assertions about boundary violations
+            // until we create the row filter.
+            var newSlices = new ArrayList<>(slices);
+            newSlices.addAll(otherMapSlice.slices);
+            return new MapSliceRestriction(columnDef, newSlices);
+        }
+
+        @Override
+        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
+        {
+            var map = new HashMap<ByteBuffer, TermSlice>();
+            // First, we iterate through to verify that none of the slices create invalid ranges.
+            // We can only do this now because this is the point when we can bind the map's key and
+            // correctly compare them.
+            for (Pair<Term, TermSlice> pair : slices)
             {
-                var otherKey = entry.getKey();
-                var otherSlice = entry.getValue();
-                newKeySliceMap.compute(otherKey, (key, slice) -> {
+                final ByteBuffer key = pair.left.bindAndGet(options);
+                final TermSlice otherSlice = pair.right();
+                map.compute(key, (k, slice) -> {
                     if (slice == null)
-                        return entry.getValue();
-                    // Before we merge, validate
+                        return otherSlice;
+
+                    // Validate that the bounds do not conflict
                     checkFalse(slice.hasBound(Bound.START) && otherSlice.hasBound(Bound.START),
                                "More than one restriction was found for the start bound on %s", columnDef.name);
                     checkFalse(slice.hasBound(Bound.END) && otherSlice.hasBound(Bound.END),
@@ -532,30 +540,30 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                     return slice.merge(otherSlice);
                 });
             }
-            return new MapSliceRestriction(columnDef, newKeySliceMap);
-        }
-
-        @Override
-        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
-        {
-            for (Map.Entry<Term, TermSlice> entry : slices.entrySet())
+            // Now we can add the filters.
+            for (Map.Entry<ByteBuffer, TermSlice> entry : map.entrySet())
             {
-                var key = entry.getKey();
                 var slice = entry.getValue();
                 var start = slice.bound(Bound.START);
                 if (start != null)
-                    filter.addMapEquality(columnDef, key.bindAndGet(options), slice.isInclusive(Bound.START) ? Operator.GTE : Operator.GT, start.bindAndGet(options));
+                    filter.addMapComparison(columnDef,
+                                            entry.getKey(),
+                                            slice.isInclusive(Bound.START) ? Operator.GTE : Operator.GT,
+                                            start.bindAndGet(options));
                 var end = slice.bound(Bound.END);
                 if (end != null)
-                    filter.addMapEquality(columnDef, key.bindAndGet(options), slice.isInclusive(Bound.END) ? Operator.LTE : Operator.LT, end.bindAndGet(options));
+                    filter.addMapComparison(columnDef,
+                                            entry.getKey(),
+                                            slice.isInclusive(Bound.END) ? Operator.LTE : Operator.LT,
+                                            end.bindAndGet(options));
             }
         }
 
         @Override
         protected boolean isSupportedBy(Index index)
         {
-            for (TermSlice slice : slices.values())
-                if (!slice.isSupportedBy(columnDef, index))
+            for (Pair<Term, TermSlice> slice : slices)
+                if (!slice.right().isSupportedBy(columnDef, index))
                     return false;
             return true;
         }
@@ -642,7 +650,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             List<ByteBuffer> evs = bindAndGet(entryValues, options);
             assert eks.size() == evs.size();
             for (int i = 0; i < eks.size(); i++)
-                filter.addMapEquality(columnDef, eks.get(i), Operator.EQ, evs.get(i));
+                filter.addMapComparison(columnDef, eks.get(i), Operator.EQ, evs.get(i));
         }
 
         @Override

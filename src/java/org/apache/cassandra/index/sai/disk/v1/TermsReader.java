@@ -130,10 +130,10 @@ public class TermsReader implements Closeable
         return new TermQuery(term, perQueryEventListener, context).execute();
     }
 
-    public PostingList rangeMatch(Expression exp, int numSegmentRows, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
+    public PostingList rangeMatch(Expression exp, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
     {
         perQueryEventListener.onSegmentHit();
-        return new RangeQuery(exp, numSegmentRows, perQueryEventListener, context).execute();
+        return new RangeQuery(exp, perQueryEventListener, context).execute();
     }
 
     @VisibleForTesting
@@ -224,15 +224,13 @@ public class TermsReader implements Closeable
         private final QueryContext context;
 
         private Expression exp;
-        private int numSegmentRows;
 
-        RangeQuery(Expression exp, int numSegmentRows, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
+        RangeQuery(Expression exp, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
         {
             this.listener = listener;
             postingsInput = IndexFileUtils.instance.openInput(postingsFile);
             postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
             this.exp = exp;
-            this.numSegmentRows = numSegmentRows;
             lookupStartTime = System.nanoTime();
             this.context = context;
         }
@@ -278,7 +276,7 @@ public class TermsReader implements Closeable
          */
         private LongHeap materializeResults(Iterator<Pair<ByteSource,Long>> iterable) throws IOException
         {
-            var heap = new LongHeap(numSegmentRows);
+            var heap = new LongHeap(1);
             while (iterable.hasNext())
             {
                 Pair<ByteSource,Long> next = iterable.next();

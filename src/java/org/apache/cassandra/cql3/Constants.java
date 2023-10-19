@@ -438,23 +438,6 @@ public abstract class Constants
         {
             return ByteBufferUtil.bytesToHex(bytes);
         }
-
-        @Override
-        public boolean equals(Object other)
-        {
-            if (other == this)
-                return true;
-            if (!(other instanceof Value))
-                return false;
-            var otherValue = (Value) other;
-            return (bytes == otherValue.bytes) || bytes.equals(otherValue.bytes);
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return bytes != null ? bytes.hashCode() : 0;
-        }
     }
 
     public static class Marker extends AbstractMarker

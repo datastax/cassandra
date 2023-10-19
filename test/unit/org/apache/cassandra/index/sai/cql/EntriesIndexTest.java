@@ -389,4 +389,22 @@ public class EntriesIndexTest extends SAITester
         // Combine ranges with query on other index
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= 6 AND store_name = 'Partial Foods'"), row(0));
     }
+
+    @Test
+    public void testPreparedQuery() throws Throwable
+    {
+        createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // We intentionally use apple, banana, and orange to deal with multiple keys in the trie.
+        // We then search against banana to show that we only get results for banana
+        execute("INSERT INTO %s (partition, item_cost) VALUES (0, {'apple': 5, 'orange': 7})");
+        flush();
+        execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 6, 'orange': 4})");
+
+        String query = "SELECT partition FROM %s WHERE item_cost[?] < ?";
+        prepare(query);
+        assertRows(execute(query, "apple", 6), row(0));
+    }
 }
