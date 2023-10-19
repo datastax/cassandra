@@ -386,9 +386,10 @@ public class CompositeType extends AbstractCompositeType
         if (bb.remaining() == 0)
             return null;
 
-        // We need the first two bytes, the component itself, and the end-of-component byte
+        // We want to return the first two bytes, the component itself, and the end-of-component byte
         int componentLength = bb.getShort(bb.position()) + 3;
-        if (isLowerBound)
+        // If this buffer is the lower bound or if the end-of-component byte is 1, we just need to set the limit
+        if (isLowerBound || bb.get(bb.position() + componentLength - 1) == (byte) 1)
             return bb.limit(componentLength);
 
         // We need to copy the first component and set the end-of-component byte to 1.
