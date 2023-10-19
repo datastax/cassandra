@@ -123,7 +123,7 @@ public class SortedTermsReader
                                                               true))
         {
             final Iterator<Pair<ByteSource, Long>> iterator = reader.iterator();
-            return iterator.hasNext() ? iterator.next().right() : NOT_FOUND;
+            return iterator.hasNext() ? iterator.next().right : NOT_FOUND;
         }
     }
 

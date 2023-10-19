@@ -994,6 +994,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     public static class MapComparisonExpression extends Expression
     {
         private final ByteBuffer key;
+        private ByteBuffer indexValue = null;
 
         public MapComparisonExpression(ColumnMetadata column, ByteBuffer key, Operator operator, ByteBuffer value)
         {
@@ -1014,7 +1015,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         @Override
         public ByteBuffer getIndexValue()
         {
-            return CompositeType.build(ByteBufferAccessor.instance, key, value);
+            if (indexValue == null)
+                indexValue = CompositeType.build(ByteBufferAccessor.instance, key, value);
+            return indexValue;
         }
 
         /**
@@ -1124,7 +1127,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     return this.getIndexValue();
                 case LT:
                 case LTE:
-                    return CompositeType.build(ByteBufferAccessor.instance, key);
+                    return CompositeType.extractFirstComponentAsTrieSearchPrefix(getIndexValue(), true);
                 default:
                     throw new AssertionError();
             }
@@ -1141,12 +1144,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             switch (operator) {
                 case GT:
                 case GTE:
-                    // TODO this is a leak in the abstraction. Where does this go? It works because we know the way the
-                    // bytes are always indexed with a terminating 0, we can guarantee our
-                    // upper bound is inclusive of all values by setting the last byte to 1
-                    var result = CompositeType.build(ByteBufferAccessor.instance, key);
-                    result.put(result.limit() - 1, (byte) 1);
-                    return result;
+                    return CompositeType.extractFirstComponentAsTrieSearchPrefix(getIndexValue(), false);
                 case EQ:
                 case LT:
                 case LTE:

@@ -106,7 +106,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             // TODO figure out if it is safe to cast to int
             return reader.rangeMatch(exp, (int) this.metadata.numRows, listener, context);
         }
-        throw new IllegalArgumentException("you failed");
+        throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));
     }
 
     @Override

@@ -478,7 +478,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         MultiColumnRestriction toMultiColumnRestriction()
         {
-            throw new NotImplementedException();
+            throw new UnsupportedOperationException();
         }
 
         @Override
