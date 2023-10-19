@@ -20,6 +20,9 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 
+import javax.annotation.Nonnull;
+
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
@@ -40,11 +43,11 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     private final PrimaryKeyMap keys;
     private long currentRowId;
 
-    private PrimaryKeyMapIterator(PrimaryKeyMap keys, PrimaryKey min, PrimaryKey max)
+    private PrimaryKeyMapIterator(PrimaryKeyMap keys, PrimaryKey min, PrimaryKey max, long startRowId)
     {
         super(min, max, keys.count());
         this.keys = keys;
-        this.currentRowId = keys.exactRowIdForPrimaryKey(min);
+        this.currentRowId = startRowId;
     }
 
     public static RangeIterator create(SSTableContext ctx, AbstractBounds<PartitionPosition> keyRange)
@@ -67,7 +70,11 @@ public final class PrimaryKeyMapIterator extends RangeIterator
         PrimaryKey maxKey = (sstableMaxKey == null || !maxToken.isMinimum() && maxKeyBound.compareTo(sstableMaxKey) < 0)
                             ? maxKeyBound
                             : sstableMaxKey;
-        return new PrimaryKeyMapIterator(keys, minKey, maxKey);
+        assert sstableMinKey != null;
+        assert sstableMaxKey != null;
+
+        long startRowId = minToken.isMinimum() ? 0 : keys.ceiling(minKey);
+        return new PrimaryKeyMapIterator(keys, minKey, maxKey, startRowId);
     }
 
     @Override
@@ -79,7 +86,7 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     @Override
     protected PrimaryKey computeNext()
     {
-        return currentRowId < keys.count()
+        return currentRowId >= 0 && currentRowId < keys.count()
                ? keys.primaryKeyFromRowId(currentRowId++)
                : endOfData();
     }
