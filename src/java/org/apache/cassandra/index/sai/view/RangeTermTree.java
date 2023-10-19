@@ -29,7 +29,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -54,17 +53,10 @@ public class RangeTermTree implements TermTree
         this.comparator = comparator;
     }
 
-    private ByteBuffer getByteComparable(ByteBuffer byteBuffer, boolean isLower)
-    {
-        if (comparator instanceof CompositeType)
-            return CompositeType.extractFirstComponentAsTrieSearchPrefix(byteBuffer, isLower);
-        return byteBuffer;
-    }
-
     public Set<SSTableIndex> search(Expression e)
     {
-        ByteBuffer minTerm = e.lower == null ? min : getByteComparable(e.lower.value.encoded, true);
-        ByteBuffer maxTerm = e.upper == null ? max : getByteComparable(e.upper.value.encoded, false);
+        ByteBuffer minTerm = e.lower == null ? min : e.getLowerBound();
+        ByteBuffer maxTerm = e.upper == null ? max : e.getUpperBound();
 
         return new HashSet<>(rangeTree.search(Interval.create(new Term(minTerm, comparator),
                                                               new Term(maxTerm, comparator),

@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -269,6 +270,26 @@ public class Expression
         }
 
         return true;
+    }
+
+    public ByteBuffer getLowerBound()
+    {
+        return getBound(lower, true);
+    }
+
+    public ByteBuffer getUpperBound()
+    {
+        return getBound(upper, false);
+    }
+
+    private ByteBuffer getBound(Bound bound, boolean isLowerBound)
+    {
+        if (bound == null)
+            return null;
+        // TODO verify other usages of CompositeType, and possibly consider using a different type.
+        if (validator instanceof CompositeType)
+            return CompositeType.extractFirstComponentAsTrieSearchPrefix(bound.value.encoded, isLowerBound);
+        return bound.value.encoded;
     }
 
     private boolean validateStringValue(ByteBuffer columnValue, ByteBuffer requestedValue)

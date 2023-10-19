@@ -193,10 +193,7 @@ public class TrieMemoryIndex extends MemoryIndex
         boolean lowerInclusive, upperInclusive;
         if (expression.lower != null)
         {
-            if (expression.validator instanceof CompositeType)
-                lowerBound = encode(CompositeType.extractFirstComponentAsTrieSearchPrefix(expression.lower.value.encoded, true));
-            else
-                lowerBound = encode(expression.lower.value.encoded);
+            lowerBound = encode(expression.getLowerBound());
             lowerInclusive = expression.lower.inclusive;
         }
         else
@@ -207,10 +204,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
         if (expression.upper != null)
         {
-            if (expression.validator instanceof CompositeType)
-                upperBound = encode(CompositeType.extractFirstComponentAsTrieSearchPrefix(expression.upper.value.encoded, false));
-            else
-                upperBound = encode(expression.upper.value.encoded);
+            upperBound = encode(expression.getUpperBound());
             upperInclusive = expression.upper.inclusive;
         }
         else

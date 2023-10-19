@@ -28,7 +28,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
@@ -238,15 +237,10 @@ public class TermsReader implements Closeable
             this.context = context;
         }
 
-        private ByteComparable getByteComparable(ByteBuffer byteBuffer, boolean isLower)
-        {
-            return ByteComparable.fixedLength(CompositeType.extractFirstComponentAsTrieSearchPrefix(byteBuffer, isLower));
-        }
-
         public PostingList execute()
         {
-            final ByteComparable lower = exp.lower != null ? getByteComparable(exp.lower.value.encoded, true) : null;
-            final ByteComparable upper = exp.upper != null ? getByteComparable(exp.upper.value.encoded, false) : null;
+            final ByteComparable lower = exp.lower != null ? ByteComparable.fixedLength(exp.getLowerBound()) : null;
+            final ByteComparable upper = exp.upper != null ? ByteComparable.fixedLength(exp.getUpperBound()) : null;
             try (TrieRangeIterator reader = new TrieRangeIterator(termDictionaryFile.instantiateRebufferer(),
                                                                   termDictionaryRoot,
                                                                   lower,

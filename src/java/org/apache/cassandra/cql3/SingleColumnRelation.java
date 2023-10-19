@@ -238,7 +238,6 @@ public final class SingleColumnRelation extends Relation
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);
         Term entryValue = toTerm(Collections.singletonList(receivers.get(1)), value, table.keyspace, boundNames);
         return new SingleColumnRestriction.MapSliceRestriction(columnDef, bound, inclusive, entryKey, entryValue);
-
     }
 
     @Override
