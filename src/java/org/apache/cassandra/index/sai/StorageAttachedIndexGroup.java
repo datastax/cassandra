@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -30,7 +31,6 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -75,11 +75,13 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
 {
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexGroup.class);
 
+    public static final Index.Group.Key GROUP_KEY = new Index.Group.Key(StorageAttachedIndexGroup.class);
+
     private final TableQueryMetrics queryMetrics;
     private final TableStateMetrics stateMetrics;
     private final IndexGroupMetrics groupMetrics;
-    
-    private final Set<StorageAttachedIndex> indices = Sets.newConcurrentHashSet();
+
+    private final Set<StorageAttachedIndex> indices = ConcurrentHashMap.newKeySet();
     private final ColumnFamilyStore baseCfs;
 
     private final SSTableContextManager contextManager;
@@ -99,7 +101,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     @Nullable
     public static StorageAttachedIndexGroup getIndexGroup(ColumnFamilyStore cfs)
     {
-        return (StorageAttachedIndexGroup) cfs.indexManager.getIndexGroup(StorageAttachedIndexGroup.class);
+        return (StorageAttachedIndexGroup) cfs.indexManager.getIndexGroup(GROUP_KEY);
     }
 
     @Override
@@ -129,7 +131,6 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             for (SSTableReader sstable : contextManager.sstables())
                 sstable.unregisterComponents(IndexDescriptor.create(sstable).getLivePerSSTableComponents(), baseCfs.getTracker());
             deletePerSSTableFiles(baseCfs.getLiveSSTables());
-            baseCfs.getTracker().unsubscribe(this);
         }
     }
 
@@ -137,6 +138,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     public void invalidate()
     {
         // in case of dropping table, sstable contexts should already been removed by SSTableListChangedNotification.
+        // in case of removing last index from group,  sstable contexts should already been removed by StorageAttachedIndexGroup#removeIndex
         queryMetrics.release();
         groupMetrics.release();
         stateMetrics.release();

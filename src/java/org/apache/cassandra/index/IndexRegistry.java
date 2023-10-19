@@ -64,7 +64,12 @@ public interface IndexRegistry
     IndexRegistry EMPTY = new IndexRegistry()
     {
         @Override
-        public void registerIndex(Index index, Object groupKey, Supplier<Index.Group> groupSupplier)
+        public void registerIndex(Index index, Index.Group.Key groupKey, Supplier<Index.Group> groupSupplier)
+        {
+        }
+
+        @Override
+        public void unregisterIndex(Index index, Index.Group.Key groupKey)
         {
         }
 
@@ -245,7 +250,11 @@ public interface IndexRegistry
             }
         };
 
-        public void registerIndex(Index index, Object groupKey, Supplier<Index.Group> groupSupplier)
+        public void registerIndex(Index index, Index.Group.Key groupKey, Supplier<Index.Group> groupSupplier)
+        {
+        }
+
+        public void unregisterIndex(Index index, Index.Group.Key groupKey)
         {
         }
 
@@ -277,9 +286,10 @@ public interface IndexRegistry
 
     default void registerIndex(Index index)
     {
-        registerIndex(index, index, () -> new SingletonIndexGroup(index));
+        registerIndex(index, new Index.Group.Key(index), () -> new SingletonIndexGroup());
     }
-    void registerIndex(Index index, Object groupKey, Supplier<Index.Group> groupSupplier);
+    void registerIndex(Index index, Index.Group.Key groupKey, Supplier<Index.Group> groupSupplier);
+    void unregisterIndex(Index index, Index.Group.Key groupKey);
     Collection<Index.Group> listIndexGroups();
 
     Index getIndex(IndexMetadata indexMetadata);
