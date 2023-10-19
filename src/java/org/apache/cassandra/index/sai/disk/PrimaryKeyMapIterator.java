@@ -71,7 +71,7 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        this.currentRowId = keys.exactRowIdForPrimaryKey(nextKey);
+        this.currentRowId = keys.ceiling(nextKey);
     }
 
     @Override
