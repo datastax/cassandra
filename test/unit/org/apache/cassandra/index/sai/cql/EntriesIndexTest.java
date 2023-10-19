@@ -121,6 +121,25 @@ public class EntriesIndexTest extends SAITester
     }
 
     @Test
+    public void queryMissingKeyTest()
+    {
+        createTable("CREATE TABLE %s (partition int primary key, coordinates map<text, int>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(entries(coordinates)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // No rows in table yet, so definitely no results
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] > 10"));
+
+        // Insert row with keys surrounding x but not including it so that we test the empty iterator case
+        execute("INSERT INTO %s (partition, coordinates) VALUES (1, {'w': 100, 'y': 2})");
+
+        // Make sure we still get no results
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] > 10"));
+        flush();
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] > 10"));
+    }
+
+    @Test
     public void entriesIndexRangeNestedPredicatesTest()
     {
         createTable("CREATE TABLE %s (partition int primary key, coordinates map<text, int>)");

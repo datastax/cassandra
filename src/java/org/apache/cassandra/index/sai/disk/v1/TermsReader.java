@@ -248,8 +248,7 @@ public class TermsReader implements Closeable
                 var iter = reader.iterator();
                 if (!iter.hasNext())
                 {
-                    FileUtils.closeQuietly(postingsInput);
-                    FileUtils.closeQuietly(postingsSummaryInput);
+                    closeQuietly();
                     return PostingList.EMPTY;
                 }
 
@@ -264,7 +263,7 @@ public class TermsReader implements Closeable
                 if (!(e instanceof AbortedOperationException))
                     logger.error(indexContext.logMessage("Failed to execute term query"), e);
 
-                closeOnException();
+                closeQuietly();
                 throw Throwables.cleaned(e);
             }
         }
@@ -297,7 +296,7 @@ public class TermsReader implements Closeable
             return heap;
         }
 
-        private void closeOnException()
+        private void closeQuietly()
         {
             FileUtils.closeQuietly(postingsInput);
             FileUtils.closeQuietly(postingsSummaryInput);
