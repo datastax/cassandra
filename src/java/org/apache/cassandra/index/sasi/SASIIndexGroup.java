@@ -25,9 +25,9 @@ import org.apache.cassandra.index.sasi.plan.SASIIndexQueryPlan;
 
 public class SASIIndexGroup extends SingletonIndexGroup
 {
-    public SASIIndexGroup(SASIIndex index)
+    public SASIIndexGroup()
     {
-        super(index);
+        super();
     }
 
     @Override
