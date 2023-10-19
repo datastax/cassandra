@@ -48,7 +48,7 @@ public class EntriesIndexTest extends SAITester
     }
 
     @Test
-    public void basicEntriesIndexRangeTest()
+    public void basicIntegerEntriesIndexRangeTest()
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
@@ -135,15 +135,21 @@ public class EntriesIndexTest extends SAITester
 
     private void entriesIndexRangeNestedPredicatesTestAssertions()
     {
-        assertRows(execute("SELECT partition FROM %s WHERE coordinates['y'] > 0"),
-                   row(1), row(4));
-        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] <= 0"),
-                   row(1), row(4));
+        // Intersections
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] <= 0 AND coordinates['y'] > 0"),
                    row(1), row(4));
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -100 AND coordinates['y'] > 0"),
                    row(1));
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -100 AND coordinates['y'] > 1000000"));
+
+        // Unions
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] > -101 OR coordinates['y'] > 2"),
+                   row(1), row(4));
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] > 0 OR coordinates['y'] > 0"),
+                   row(1), row(4));
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -100 OR coordinates['y'] < 0"),
+                   row(1));
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -1000000 OR coordinates['y'] > 1000000"));
     }
 
     // This test requires the ability to reverse lookup multiple rows from a single trie node
