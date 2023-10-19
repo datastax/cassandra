@@ -47,10 +47,12 @@ public final class PrimaryKeyMapIterator extends RangeIterator
         this.currentRowId = keys.exactRowIdForPrimaryKey(min);
     }
 
-    public static PrimaryKeyMapIterator create(SSTableContext ctx, AbstractBounds<PartitionPosition> keyRange)
+    public static RangeIterator create(SSTableContext ctx, AbstractBounds<PartitionPosition> keyRange)
     {
         PrimaryKeyMap keys = ctx.primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
         long count = keys.count();
+        if (keys.count() == 0)
+            return RangeIterator.empty();
 
         PrimaryKey.Factory pkFactory = ctx.indexDescriptor.primaryKeyFactory;
         Token minToken = keyRange.left.getToken();
