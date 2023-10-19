@@ -118,6 +118,24 @@ public class EntriesIndexTest extends SAITester
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= " + Integer.MIN_VALUE));
     }
 
+    @Test
+    public void entriesIndexRangeNestedPredicatesTest()
+    {
+        createTable("CREATE TABLE %s (partition int primary key, coordinates map<text, int>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(entries(coordinates)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (partition, coordinates) VALUES (1, {'x': -1000000, 'y': 1000000})");
+        execute("INSERT INTO %s (partition, coordinates) VALUES (4, {'x': -100, 'y': 2})");
+
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] <= 0 AND coordinates['y'] > 0"),
+                   row(1), row(4));
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -100 AND coordinates['y'] > 0"),
+                   row(1));
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -100 AND coordinates['y'] > 1000000"));
+        // TODO add more cases once we get this working
+    }
+
     // This test requires the ability to reverse lookup multiple rows from a single trie node
     // The indexing works by having a trie map that maps from a term to an ordinal in the posting list
     // and the posting list's ordinal maps to a list of primary keys.
