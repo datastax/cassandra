@@ -128,12 +128,22 @@ public class EntriesIndexTest extends SAITester
         execute("INSERT INTO %s (partition, coordinates) VALUES (1, {'x': -1000000, 'y': 1000000})");
         execute("INSERT INTO %s (partition, coordinates) VALUES (4, {'x': -100, 'y': 2})");
 
+        entriesIndexRangeNestedPredicatesTestAssertions();
+        flush();
+        entriesIndexRangeNestedPredicatesTestAssertions();
+    }
+
+    private void entriesIndexRangeNestedPredicatesTestAssertions()
+    {
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['y'] > 0"),
+                   row(1), row(4));
+        assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] <= 0"),
+                   row(1), row(4));
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] <= 0 AND coordinates['y'] > 0"),
                    row(1), row(4));
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -100 AND coordinates['y'] > 0"),
                    row(1));
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -100 AND coordinates['y'] > 1000000"));
-        // TODO add more cases once we get this working
     }
 
     // This test requires the ability to reverse lookup multiple rows from a single trie node
@@ -208,13 +218,18 @@ public class EntriesIndexTest extends SAITester
         waitForIndexQueryable();
 
         execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 101, 'orange': 2})");
-        execute("INSERT INTO %s (partition, item_cost) VALUES (4, {'apple': 302, 'orange': 2})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 302, 'orange': 2})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (3, {'apple': -1000000, 'orange': 2})");
         flush();
-        execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 200, 'orange': 1})");
-        execute("INSERT INTO %s (partition, item_cost) VALUES (3, {'apple': 10, 'orange': 3})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (4, {'apple': 1000000, 'orange': 1})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (5, {'apple': -1000001, 'orange': 3})");
 
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 2"),
-                   row(1), row(2), row(4), row(3));
+                   row(1), row(2), row(4));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 0"), row(5), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= 0"), row(5), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < -100"), row(5), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= -100"), row(5), row(3));
     }
 
     @Test

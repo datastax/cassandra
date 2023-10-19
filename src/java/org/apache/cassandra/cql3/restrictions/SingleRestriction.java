@@ -31,6 +31,11 @@ public interface SingleRestriction extends Restriction
         return false;
     }
 
+    default boolean isMapSlice()
+    {
+        return false;
+    }
+
     public default boolean isEQ()
     {
         return false;
