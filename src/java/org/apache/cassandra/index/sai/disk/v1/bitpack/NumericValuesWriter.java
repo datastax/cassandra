@@ -26,11 +26,14 @@ import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.lucene.store.IndexOutput;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_NUMERIC_VALUES_BLOCK_SIZE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_NUMERIC_VALUES_MONOTONIC_BLOCK_SIZE;
+
 
 public class NumericValuesWriter implements Closeable
 {
-    public static final int MONOTONIC_BLOCK_SIZE = Integer.getInteger("dse.sai.numeric_values.monotonic_block_size", 16384);
-    public static final int BLOCK_SIZE = Integer.getInteger("dse.sai.numeric_values.block_size", 128);
+    public static final int MONOTONIC_BLOCK_SIZE = SAI_NUMERIC_VALUES_MONOTONIC_BLOCK_SIZE.getInt();
+    public static final int BLOCK_SIZE = SAI_NUMERIC_VALUES_BLOCK_SIZE.getInt();
 
     private final IndexOutput output;
     private final AbstractBlockPackedWriter writer;
