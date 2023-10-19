@@ -318,7 +318,7 @@ public class EntriesIndexTest extends SAITester
     }
 
     @Test
-    public void queryLargeTextEntriesWithZeroes()
+    public void queryTextEntriesWithZeroes()
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, text>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
@@ -332,5 +332,39 @@ public class EntriesIndexTest extends SAITester
 
         assertRowsIgnoringOrder(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 'a'"),
                                 row(1), row(2), row(3));
+    }
+
+    @Test
+    public void testUpdatesAndDeletes()
+    {
+        createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 1, 'orange': -2})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 2, 'orange': 1})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (3, {'apple': 1, 'orange': 3})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (4, {'apple': 10, 'orange': -7})");
+        flush();
+
+        // Set a baseline to make sure data is as expected
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 1"),
+                                row(2), row(4));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['orange'] < 1"),
+                   row(1), row(4));
+
+        // Delete and update some rows
+        execute("DELETE FROM %s WHERE partition = 2");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (4, {'apple': 1, 'orange': 3})");
+
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 1"));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['orange'] < 1"), row(1));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['orange'] >= 3"), row(4), row(3));
+
+        flush();
+
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 1"));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['orange'] < 1"), row(1));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['orange'] >= 3"), row(4), row(3));
     }
 }
