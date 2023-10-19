@@ -28,6 +28,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import org.junit.After;
 import org.junit.BeforeClass;
@@ -300,9 +301,10 @@ public class SegmentFlushTest
         SegmentMetadata segmentMetadata = segmentMetadatas.get(0);
         segmentRowIdOffset = sstableRowId1;
         posting1 = 0;
-        posting2 = (int) (sstableRowId2 - segmentRowIdOffset);
+        posting2 = segments == 1 ? (int) (sstableRowId2 - segmentRowIdOffset) : 0;
         minKey = SAITester.TEST_FACTORY.createTokenOnly(key1.getToken());
-        maxKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());
+        DecoratedKey maxDecoratedKey = segments == 1 ? key2 : key1;
+        maxKey = SAITester.TEST_FACTORY.createTokenOnly(maxDecoratedKey.getToken());
         minTerm = term1;
         maxTerm = segments == 1 ? term2 : term1;
         numRows = segments == 1 ? 2 : 1;
@@ -311,6 +313,7 @@ public class SegmentFlushTest
 
         if (segments > 1)
         {
+            Preconditions.checkState(segments == 2);
             segmentRowIdOffset = sstableRowId2;
             posting1 = 0;
             posting2 = 0;
