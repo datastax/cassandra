@@ -214,7 +214,6 @@ public class TermsReader implements Closeable
         }
     }
 
-    @VisibleForTesting
     public class RangeQuery
     {
         private final IndexInput postingsInput;

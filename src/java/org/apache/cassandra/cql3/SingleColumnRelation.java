@@ -334,7 +334,7 @@ public final class SingleColumnRelation extends Relation
             {
                 receiver = makeCollectionReceiver(receiver, isContainsKey());
             }
-            else if (receiver.type.isMultiCell() && mapKey != null && (isEQ() || isSlice()))
+            else if (receiver.type.isMultiCell() && isMapEntryComparison())
             {
                 List<ColumnSpecification> receivers = new ArrayList<>(2);
                 receivers.add(makeCollectionReceiver(receiver, true));
@@ -353,12 +353,12 @@ public final class SingleColumnRelation extends Relation
 
     private boolean isLegalRelationForNonFrozenCollection()
     {
-        return isContainsKey() || isContains() || isMapEntryEquality() || isSlice();
+        return isContainsKey() || isContains() || isMapEntryComparison();
     }
 
-    private boolean isMapEntryEquality()
+    private boolean isMapEntryComparison()
     {
-        return mapKey != null && isEQ();
+        return mapKey != null && (isEQ() || isSlice());
     }
 
     private boolean canHaveOnlyOneValue()
