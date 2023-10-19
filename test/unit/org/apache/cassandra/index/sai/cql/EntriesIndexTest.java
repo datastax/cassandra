@@ -48,7 +48,7 @@ public class EntriesIndexTest extends SAITester
     }
 
     @Test
-    public void createEntriesIndexRangeTest()
+    public void basicEntriesIndexRangeTest()
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
@@ -60,7 +60,17 @@ public class EntriesIndexTest extends SAITester
         execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 2, 'orange': 1})");
         execute("INSERT INTO %s (partition, item_cost) VALUES (3, {'apple': 1, 'orange': 3})");
 
+        // Test range over both sstable and memtable
+        assertRangeQueries();
+        // Make two sstables
+        flush();
+        assertRangeQueries();
+    }
+
+    private void assertRangeQueries() {
         // GT cases with all, some, and no results
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > " + Integer.MIN_VALUE),
+                   row(1), row(2), row(4), row(3));
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > -1"),
                    row(1), row(2), row(4), row(3));
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 0"),
@@ -71,6 +81,8 @@ public class EntriesIndexTest extends SAITester
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > " + Integer.MAX_VALUE));
 
         // GTE cases with all, some, and no results
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] >= " + Integer.MIN_VALUE),
+                   row(1), row(2), row(4), row(3));
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] >= -1"),
                    row(1), row(2), row(4), row(3));
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] >= 0"),
@@ -91,6 +103,7 @@ public class EntriesIndexTest extends SAITester
                    row(1), row(3));
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 1"));
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 0"));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < " + Integer.MIN_VALUE));
 
         // LTE cases with all, some, and no results
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= " + Integer.MAX_VALUE),
@@ -102,6 +115,7 @@ public class EntriesIndexTest extends SAITester
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= 1"),
                    row(1), row(3));
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= 0"));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= " + Integer.MIN_VALUE));
     }
 
     // This test requires the ability to reverse lookup multiple rows from a single trie node
