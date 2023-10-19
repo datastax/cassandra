@@ -53,20 +53,27 @@ public class TraversingPostingsReader implements PostingList
 
     public long nextPosting() throws IOException
     {
-        if (iterable.hasNext())
+        if (currentReader != null)
+        {
+            var nextPosting = currentReader.nextPosting();
+            if (nextPosting != PostingList.END_OF_STREAM)
+                return nextPosting;
+        }
+        while (iterable.hasNext())
         {
             var next = iterable.next();
             byte[] nextBytes = ByteSourceInverse.readBytes(next.left);
             if (exp.isSatisfiedBy(ByteBuffer.wrap(nextBytes)))
+            {
                 // TODO need to read all of the values
                 // TODO how expensive am I? Is there a better way to do this?
-                return new PostingsReader(input, next.right, listener).nextPosting();
-            return nextPosting();
+                currentReader = new PostingsReader(input, next.right, listener);
+                var nextPosting = currentReader.nextPosting();
+                if (nextPosting != PostingList.END_OF_STREAM)
+                    return nextPosting;
+            }
         }
-        else
-        {
-            return PostingList.END_OF_STREAM;
-        }
+        return PostingList.END_OF_STREAM;
     }
 
     @Override
