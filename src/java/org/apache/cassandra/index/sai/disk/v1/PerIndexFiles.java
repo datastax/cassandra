@@ -115,7 +115,7 @@ public class PerIndexFiles implements Closeable
         return getFile(IndexComponent.PQ).sharedCopy();
     }
 
-    private FileHandle getFile(IndexComponent indexComponent)
+    public FileHandle getFile(IndexComponent indexComponent)
     {
         FileHandle file = files.get(indexComponent);
         if (file == null)
