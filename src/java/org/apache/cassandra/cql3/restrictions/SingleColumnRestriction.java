@@ -445,7 +445,11 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     }
 
     /**
-     * A slice restriction on a given key's value within a map.
+     * One or more slice restrictions on a column's map entries.
+     * For a map column of type map&lt;text,int&gt; with name m, here are some examples of valid restrictions:
+     * One restriction:                m['a'] > 1
+     * Restrictions on different keys: m['a'] > 1 AND m['b'] < 2
+     * Restrictions on same key:       m['a'] > 0 AND m['a'] < 2
      */
     public static class MapSliceRestriction extends SingleColumnRestriction
     {
@@ -454,13 +458,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public MapSliceRestriction(ColumnMetadata columnDef, Bound bound, boolean inclusive, Term key, Term value)
         {
             super(columnDef);
-            if (!key.isTerminal())
-                throw new IllegalArgumentException("Key must be terminal");
+            checkTrue(key.isTerminal(), "Key must be terminal for Map Slice restriction, but was %s", key);
             slices = new HashMap<>();
             slices.put(key, TermSlice.newInstance(bound, inclusive, value));
         }
 
-        public MapSliceRestriction(ColumnMetadata columnDef, HashMap<Term, TermSlice> slices)
+        private MapSliceRestriction(ColumnMetadata columnDef, HashMap<Term, TermSlice> slices)
         {
             super(columnDef);
             this.slices = slices;
