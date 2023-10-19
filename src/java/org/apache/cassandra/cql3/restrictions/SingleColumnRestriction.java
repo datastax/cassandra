@@ -554,7 +554,9 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         protected boolean isSupportedBy(Index index)
         {
-            // todo revisit
+            for (TermSlice slice : slices.values())
+                if (!slice.isSupportedBy(columnDef, index))
+                    return false;
             return true;
         }
 

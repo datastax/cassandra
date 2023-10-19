@@ -480,4 +480,26 @@ public class AllowFilteringTest extends SAITester
         assertInvalidMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_COLUMNS_INDEXED_MESSAGE,
                              "SELECT * FROM %s WHERE pk > 'A' AND pk < 'C' AND i > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10 ALLOW FILTERING;");
     }
+
+    @Test
+    public void testMapRangeQueries() throws Throwable
+    {
+        createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(keys(item_cost)) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(values(item_cost)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // Insert data for later
+        execute("INSERT INTO %s (partition, item_cost) VALUES (0, {'apple': 2, 'orange': 1})");
+
+        // Gen an ALLOW FILTERING recommendation.
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "item_cost"),
+                             "SELECT partition FROM %s WHERE item_cost['apple'] < 6");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // Show that we're now able to execute the query.
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= 6"), row(0));
+    }
 }
