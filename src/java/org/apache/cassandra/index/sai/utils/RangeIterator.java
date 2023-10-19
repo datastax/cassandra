@@ -25,7 +25,6 @@ import java.util.PriorityQueue;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.index.sasi.disk.Token;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
