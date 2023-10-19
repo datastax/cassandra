@@ -458,7 +458,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public MapSliceRestriction(ColumnMetadata columnDef, Bound bound, boolean inclusive, Term key, Term value)
         {
             super(columnDef);
-            checkTrue(key.isTerminal(), "Key must be terminal for Map Slice restriction, but was %s", key);
+            checkTrue(key instanceof Constants.Value, "Key must be a constant for Map Slice restriction, but was %s", key);
             slices = new HashMap<>();
             slices.put(key, TermSlice.newInstance(bound, inclusive, value));
         }
