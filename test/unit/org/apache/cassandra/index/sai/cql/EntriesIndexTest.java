@@ -186,6 +186,44 @@ public class EntriesIndexTest extends SAITester
                    row(1), row(2), row(3));
     }
 
+    @Test
+    public void basicTimestampEntriesIndexRangeTest()
+    {
+        createTable("CREATE TABLE %s (partition int primary key, timestamps map<text, timestamp>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(entries(timestamps)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // 2011-02-03 04:05+0000 is 1296705900000
+        execute("INSERT INTO %s (partition, timestamps) VALUES (1, {'a': '2011-02-03 04:05+0000'})");
+        // 1299038900000 is on 2011-03-02
+        execute("INSERT INTO %s (partition, timestamps) VALUES (4, {'a': '1299038900000'})");
+        flush();
+        execute("INSERT INTO %s (partition, timestamps) VALUES (2, {'a': '1000000000000'})");
+        execute("INSERT INTO %s (partition, timestamps) VALUES (3, {'a': '1999999900000'})");
+
+        // Test range over both sstable and memtable
+        assertTimestampRangeQueries();
+        // Make two sstables
+        flush();
+        assertTimestampRangeQueries();
+    }
+
+    private void assertTimestampRangeQueries()
+    {
+        assertRows(execute("SELECT partition FROM %s WHERE timestamps['a'] > '0'"),
+                   row(1), row(2), row(4), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE timestamps['a'] > '1000000000000'"),
+                   row(1), row(4), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE timestamps['a'] > '1296705900000'"),
+                   row(4), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE timestamps['a'] >= '1296705900000'"),
+                   row(1), row(4), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE timestamps['a'] < '2011-02-03 04:05+0000'"),
+                   row(2));
+        assertRows(execute("SELECT partition FROM %s WHERE timestamps['a'] <= '2011-02-03 04:05+0000'"),
+                   row(1), row(2));
+    }
+
     // This test requires the ability to reverse lookup multiple rows from a single trie node
     // The indexing works by having a trie map that maps from a term to an ordinal in the posting list
     // and the posting list's ordinal maps to a list of primary keys.
