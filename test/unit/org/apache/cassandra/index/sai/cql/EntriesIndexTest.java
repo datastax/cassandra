@@ -61,13 +61,13 @@ public class EntriesIndexTest extends SAITester
         execute("INSERT INTO %s (partition, item_cost) VALUES (3, {'apple': 1, 'orange': 3})");
 
         // Test range over both sstable and memtable
-        assertRangeQueries();
+        assertIntRangeQueries();
         // Make two sstables
         flush();
-        assertRangeQueries();
+        assertIntRangeQueries();
     }
 
-    private void assertRangeQueries() {
+    private void assertIntRangeQueries() {
         // GT cases with all, some, and no results
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > " + Integer.MIN_VALUE),
                    row(1), row(2), row(4), row(3));
@@ -150,6 +150,38 @@ public class EntriesIndexTest extends SAITester
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -100 OR coordinates['y'] < 0"),
                    row(1));
         assertRows(execute("SELECT partition FROM %s WHERE coordinates['x'] < -1000000 OR coordinates['y'] > 1000000"));
+    }
+
+    @Test
+    public void basicDateEntriesIndexRangeTest()
+    {
+        createTable("CREATE TABLE %s (partition int primary key, dates map<text, date>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(entries(dates)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (partition, dates) VALUES (1, {'a': '2000-02-03'})");
+        execute("INSERT INTO %s (partition, dates) VALUES (4, {'a': '2001-02-03'})");
+        flush();
+        execute("INSERT INTO %s (partition, dates) VALUES (2, {'a': '1999-02-03'})");
+        execute("INSERT INTO %s (partition, dates) VALUES (3, {'a': '2000-01-01'})");
+
+        // Test range over both sstable and memtable
+        assertDateRangeQueries();
+        // Make two sstables
+        flush();
+        assertDateRangeQueries();
+    }
+
+    private void assertDateRangeQueries()
+    {
+        assertRows(execute("SELECT partition FROM %s WHERE dates['a'] > '2000-01-01'"),
+                   row(1), row(4));
+        assertRows(execute("SELECT partition FROM %s WHERE dates['a'] >= '2000-01-01'"),
+                   row(1), row(4), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE dates['a'] < '2000-02-03'"),
+                   row(2), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE dates['a'] <= '2000-02-03'"),
+                   row(1), row(2), row(3));
     }
 
     // This test requires the ability to reverse lookup multiple rows from a single trie node
