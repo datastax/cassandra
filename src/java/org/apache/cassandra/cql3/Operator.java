@@ -348,7 +348,7 @@ public enum Operator
         @Override
         public String toString()
         {
-            return "LIKE '%<term>%'";
+            return "NOT LIKE '%<term>%'";
         }
 
         @Override
