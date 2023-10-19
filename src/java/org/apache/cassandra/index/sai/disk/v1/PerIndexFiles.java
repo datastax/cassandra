@@ -65,18 +65,20 @@ public class PerIndexFiles implements Closeable
         toOpen.remove(IndexComponent.META);
         toOpen.remove(IndexComponent.COLUMN_COMPLETION_MARKER);
 
+        var componentsPresent = new HashSet<IndexComponent>();
         for (IndexComponent component : toOpen)
         {
             try
             {
                 files.put(component, indexDescriptor.createPerIndexFileHandle(component, indexContext, temporary));
+                componentsPresent.add(component);
             }
             catch (UncheckedIOException e)
             {
-                var message = String.format("Skipping opening component %s for SSTable %s", component, indexDescriptor.descriptor);
-                logger.info(message, e);
+                // leave logging until we're done
             }
         }
+        logger.info("Components present for {} are {}", indexDescriptor, componentsPresent);
     }
 
     /** It is the caller's responsibility to close the returned file handle. */
