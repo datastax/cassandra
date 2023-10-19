@@ -121,7 +121,7 @@ public class EntriesIndexTest extends SAITester
         flush();
 
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 0"),
-                   row(1), row(3), row(2), row(4));
+                   row(1), row(2), row(4), row(3));
     }
 
     @Test

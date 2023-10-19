@@ -25,7 +25,6 @@ import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.Iterators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,9 +33,9 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
+import org.apache.cassandra.index.sai.disk.v1.postings.LongHeapPostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.ScanningPostingsReader;
-import org.apache.cassandra.index.sai.disk.v1.postings.TraversingPostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.TrieRangeIterator;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
@@ -48,8 +47,10 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.util.LongHeap;
 
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.validate;
 
@@ -130,10 +131,10 @@ public class TermsReader implements Closeable
         return new TermQuery(term, perQueryEventListener, context).execute();
     }
 
-    public PostingList rangeMatch(Expression exp, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
+    public PostingList rangeMatch(Expression exp, int numSegmentRows, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
     {
         perQueryEventListener.onSegmentHit();
-        return new RangeQuery(exp, perQueryEventListener, context).execute();
+        return new RangeQuery(exp, numSegmentRows, perQueryEventListener, context).execute();
     }
 
     @VisibleForTesting
@@ -224,13 +225,15 @@ public class TermsReader implements Closeable
         private final QueryContext context;
 
         private Expression exp;
+        private int numSegmentRows;
 
-        RangeQuery(Expression exp, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
+        RangeQuery(Expression exp, int numSegmentRows, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
         {
             this.listener = listener;
             postingsInput = IndexFileUtils.instance.openInput(postingsFile);
             postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
             this.exp = exp;
+            this.numSegmentRows = numSegmentRows;
             lookupStartTime = System.nanoTime();
             this.context = context;
         }
@@ -251,7 +254,7 @@ public class TermsReader implements Closeable
                                                                   exp.lowerInclusive,
                                                                   exp.upperInclusive))
             {
-                var iter = Iterators.peekingIterator(reader.iterator());
+                var iter = reader.iterator();
                 if (!iter.hasNext())
                 {
                     FileUtils.closeQuietly(postingsInput);
@@ -260,8 +263,9 @@ public class TermsReader implements Closeable
                 }
 
                 context.checkpoint();
-
-                return new TraversingPostingsReader(exp, postingsInput, iter, listener.postingListEventListener());
+                // Because postings are not sorted, we need to eagerly materialize the results and sort them.
+                LongHeap postings = materializeResults(iter);
+                return new LongHeapPostingList(postings);
             }
             catch (Throwable e)
             {
@@ -272,6 +276,34 @@ public class TermsReader implements Closeable
                 closeOnException();
                 throw Throwables.cleaned(e);
             }
+        }
+
+        /**
+         * Build an in-memory heap of row ids from the posting lists of the matching terms.
+         * @return an ordered {@link LongHeap} of row ids
+         */
+        private LongHeap materializeResults(Iterator<Pair<ByteSource,Long>> iterable) throws IOException
+        {
+            var heap = new LongHeap(numSegmentRows);
+            while (iterable.hasNext())
+            {
+                Pair<ByteSource,Long> next = iterable.next();
+                byte[] nextBytes = ByteSourceInverse.readBytes(next.left);
+                if (exp.isSatisfiedBy(ByteBuffer.wrap(nextBytes)))
+                {
+                    // TODO is this the correct way to get the posting list?
+                    var currentReader = new PostingsReader(postingsInput, next.right, listener.postingListEventListener());
+                    while (true)
+                    {
+                        long nextPosting = currentReader.nextPosting();
+                        if (nextPosting != PostingList.END_OF_STREAM)
+                            heap.push(nextPosting);
+                        else
+                            break;
+                    }
+                }
+            }
+            return heap;
         }
 
         private void closeOnException()
