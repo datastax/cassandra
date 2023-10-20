@@ -116,7 +116,7 @@ class PathBasedFilterFactory {
         if (childNodes.size() == 1) {
             Map.Entry<String, InclusionTreeNode> entry = childNodes.entrySet().iterator().next();
             return new PathBasedFilter.SinglePathFilter(entry.getKey(),
-                    buildFilterFromInclusionTree(entry.getValue()));
+                                                        buildFilterFromInclusionTree(entry.getValue()));
         }
         Map<String, TokenFilter> filters = new HashMap<>();
         for (Map.Entry<String, InclusionTreeNode> entry : childNodes.entrySet()) {

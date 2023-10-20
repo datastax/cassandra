@@ -17,7 +17,6 @@
  */
 
 package org.apache.cassandra.index.sai.analyzer.json;
-
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 

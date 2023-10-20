@@ -21,7 +21,17 @@ package org.apache.cassandra.index.sai.analyzer;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+/**
+ * Data parser interface can be implemented if text analyzer needs to be performed on data parsed
+ * from the original column data.
+ */
 public interface DataParser
 {
+    /**
+     * Accepts column and query data and returns data that need to be analyzed
+     * @param input
+     * @return
+     * @throws IOException
+     */
     ByteBuffer parse(ByteBuffer input) throws IOException;
 }

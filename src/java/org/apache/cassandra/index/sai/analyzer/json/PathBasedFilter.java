@@ -17,7 +17,6 @@
  */
 
 package org.apache.cassandra.index.sai.analyzer.json;
-
 import com.fasterxml.jackson.core.filter.TokenFilter;
 
 import java.util.Map;

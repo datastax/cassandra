@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.analyzer;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,6 +30,10 @@ import org.apache.cassandra.index.sai.analyzer.json.JsonFieldExtractor;
 import org.apache.cassandra.index.sai.analyzer.json.JsonFieldExtractorFactory;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+/**
+ * Data parser for json data that picks only the required json fields and returns as a concatenated
+ * data buffer
+ */
 public class JsonFieldsParser implements DataParser
 {
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -37,22 +42,11 @@ public class JsonFieldsParser implements DataParser
         extr = JsonFieldExtractorFactory.construct(MAPPER)
                                         .buildExtractor(parseFields);
     }
-    private static ObjectMapper mapper = new ObjectMapper();
-
     @Override
     public ByteBuffer parse(ByteBuffer input) throws IOException
     {
-        final byte firstByte = input.duplicate().get(0);
-        if(firstByte == '{'){
-            return ByteBuffer.wrap(extr.extractAsBytes(input));
-        }else {
-            return input;
-        }
-    }
-
-    public int readShortLength(ByteBuffer bb)
-    {
-        int length = (bb.get() & 0xFF) << 8;
-        return length | (bb.get() & 0xFF);
+        Optional<byte[]> parsedInfo = extr.extractAsBytes(input);
+        if(parsedInfo.isPresent()) return ByteBuffer.wrap(parsedInfo.get());
+        else return input;
     }
 }

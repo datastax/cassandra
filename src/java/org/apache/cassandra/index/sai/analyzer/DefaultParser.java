@@ -20,6 +20,9 @@ package org.apache.cassandra.index.sai.analyzer;
 
 import java.nio.ByteBuffer;
 
+/**
+ * Default data parser that just returns the original data
+ */
 public class DefaultParser implements DataParser
 {
     public static final DefaultParser INSTANCE = new DefaultParser();
