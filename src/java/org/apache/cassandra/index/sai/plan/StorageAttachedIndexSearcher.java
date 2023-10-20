@@ -118,6 +118,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         // If there are shadowed primary keys, we have to at least query twice.
         // First time to find out there are shadowed keys, second time to find out there are no more shadow keys.
         int loopsCount = 1;
+        final long startShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
         while (true)
         {
             long lastShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
@@ -133,6 +134,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             }
             loopsCount++;
             Tracing.trace("Found {} new shadowed keys, rerunning query (loop {})", currentShadowedKeysCount - lastShadowedKeysCount, loopsCount);
+        }
     }
 
     /**
