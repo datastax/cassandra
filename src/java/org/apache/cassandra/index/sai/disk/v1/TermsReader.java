@@ -268,16 +268,16 @@ public class TermsReader implements Closeable
          * Build an in-memory heap of row ids from the posting lists of the matching terms.
          * @return an ordered {@link LongHeap} of row ids
          */
-        private LongHeap materializeResults(Iterator<Pair<ByteSource,Long>> iterable) throws IOException
+        private LongHeap materializeResults(Iterator<Pair<ByteSource,Long>> trieEntries) throws IOException
         {
-            assert iterable.hasNext();
+            assert trieEntries.hasNext();
             var heap = new LongHeap(1);
             try (var postingsInput = IndexFileUtils.instance.openInput(postingsFile);
                  var postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile))
             {
                 do
                 {
-                    Pair<ByteSource, Long> nextTrieEntry = iterable.next();
+                    Pair<ByteSource, Long> nextTrieEntry = trieEntries.next();
                     ByteSource key = nextTrieEntry.left;
                     long rowId = nextTrieEntry.right;
                     byte[] nextBytes = ByteSourceInverse.readBytes(key);
@@ -297,7 +297,7 @@ public class TermsReader implements Closeable
                             heap.push(nextPosting);
                         }
                     }
-                } while (iterable.hasNext());
+                } while (trieEntries.hasNext());
                 return heap;
             }
         }
