@@ -209,13 +209,16 @@ public class Operation
 
     static RangeIterator buildIterator(QueryController controller)
     {
-        List<RowFilter.Expression> orderings = controller.filterOperation().expressions()
-                                                         .stream().filter(e -> e.operator() == Operator.ANN).collect(Collectors.toList());
+        RowFilter.FilterElement filterOperation = controller.filterOperation();
+        List<RowFilter.Expression> orderings = filterOperation.expressions()
+                                                              .stream().filter(e -> e.operator() == Operator.ANN).collect(Collectors.toList());
         assert orderings.size() <= 1;
-        if (controller.filterOperation().expressions().size() == 1 && orderings.size() == 1)
+        if (filterOperation.expressions().size() == 1 && filterOperation.children().isEmpty() && orderings.size() == 1)
             // If we only have one expression, we just use the ANN index to order and limit.
             return controller.getTopKRows(orderings.get(0));
-        RangeIterator iter = Node.buildTree(controller.filterOperation()).analyzeTree(controller).rangeIterator(controller);
+        List<RowFilter.Expression> nonOrderingExpressions = filterOperation.expressions().stream()
+                                                                           .filter(e -> e.operator() != Operator.ANN).collect(Collectors.toList());
+        RangeIterator iter = Node.buildTree(nonOrderingExpressions, filterOperation.children(), filterOperation.isDisjunction()).analyzeTree(controller).rangeIterator(controller);
         if (orderings.isEmpty())
             return iter;
         return controller.getTopKRows(iter, orderings.get(0));
@@ -256,14 +259,19 @@ public class Operation
 
         abstract RangeIterator rangeIterator(QueryController controller);
 
-        static Node buildTree(RowFilter.FilterElement filterOperation)
+        static Node buildTree(List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
         {
-            OperatorNode node = filterOperation.isDisjunction() ? new OrNode() : new AndNode();
-            for (RowFilter.Expression expression : filterOperation.expressions())
+            OperatorNode node = isDisjunction ? new OrNode() : new AndNode();
+            for (RowFilter.Expression expression : expressions)
                 node.add(buildExpression(expression));
-            for (RowFilter.FilterElement child : filterOperation.children())
+            for (RowFilter.FilterElement child : children)
                 node.add(buildTree(child));
             return node;
+        }
+
+        static Node buildTree(RowFilter.FilterElement filterOperation)
+        {
+            return buildTree(filterOperation.expressions(), filterOperation.children(), filterOperation.isDisjunction());
         }
 
         static Node buildExpression(RowFilter.Expression expression)
