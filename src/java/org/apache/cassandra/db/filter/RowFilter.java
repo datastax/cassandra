@@ -1073,7 +1073,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 case GTE:
                     return comp >= 0;
                 default:
-                    throw new AssertionError();
+                    throw new AssertionError("Unsupported operator: " + operator);
             }
         }
 

@@ -216,8 +216,6 @@ public class TermsReader implements Closeable
 
     public class RangeQuery
     {
-        private final IndexInput postingsInput;
-        private final IndexInput postingsSummaryInput;
         private final QueryEventListener.TrieIndexEventListener listener;
         private final long lookupStartTime;
         private final QueryContext context;
@@ -227,8 +225,6 @@ public class TermsReader implements Closeable
         RangeQuery(Expression exp, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
         {
             this.listener = listener;
-            postingsInput = IndexFileUtils.instance.openInput(postingsFile);
-            postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
             this.exp = exp;
             lookupStartTime = System.nanoTime();
             this.context = context;
@@ -247,10 +243,7 @@ public class TermsReader implements Closeable
             {
                 var iter = reader.iterator();
                 if (!iter.hasNext())
-                {
-                    closeQuietly();
                     return PostingList.EMPTY;
-                }
 
                 context.checkpoint();
                 // Because postings are not sorted, we need to eagerly materialize the results and sort them.
@@ -277,34 +270,37 @@ public class TermsReader implements Closeable
          */
         private LongHeap materializeResults(Iterator<Pair<ByteSource,Long>> iterable) throws IOException
         {
+            assert iterable.hasNext();
             var heap = new LongHeap(1);
-            while (iterable.hasNext())
+            try (var postingsInput = IndexFileUtils.instance.openInput(postingsFile);
+                 var postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile))
             {
-                Pair<ByteSource,Long> next = iterable.next();
-                byte[] nextBytes = ByteSourceInverse.readBytes(next.left);
-                if (exp.isSatisfiedBy(ByteBuffer.wrap(nextBytes)))
+                do
                 {
-                    // TODO is this the correct way to get the posting list?
-                    var currentReader = new PostingsReader(postingsInput, next.right, listener.postingListEventListener());
-                    while (true)
+                    Pair<ByteSource, Long> nextTrieEntry = iterable.next();
+                    ByteSource key = nextTrieEntry.left;
+                    long rowId = nextTrieEntry.right;
+                    byte[] nextBytes = ByteSourceInverse.readBytes(key);
+                    if (exp.isSatisfiedBy(ByteBuffer.wrap(nextBytes)))
                     {
-                        long nextPosting = currentReader.nextPosting();
-                        if (nextPosting != PostingList.END_OF_STREAM)
+                        var blocksSummary = new PostingsReader.BlocksSummary(postingsSummaryInput, rowId, PostingsReader.InputCloser.NOOP);
+                        @SuppressWarnings("resource")
+                        var currentReader = new PostingsReader(postingsInput,
+                                                               blocksSummary,
+                                                               listener.postingListEventListener(),
+                                                               PostingsReader.InputCloser.NOOP);
+                        while (true)
+                        {
+                            long nextPosting = currentReader.nextPosting();
+                            if (nextPosting == PostingList.END_OF_STREAM)
+                                break;
                             heap.push(nextPosting);
-                        else
-                            break;
+                        }
                     }
-                }
+                } while (iterable.hasNext());
+                return heap;
             }
-            return heap;
         }
-
-        private void closeQuietly()
-        {
-            FileUtils.closeQuietly(postingsInput);
-            FileUtils.closeQuietly(postingsSummaryInput);
-        }
-
     }
 
     // currently only used for testing
