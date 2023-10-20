@@ -246,6 +246,11 @@ public class TableMetrics
     public final Gauge<Double> bloomFilterFalseRatio;
     /** Off heap memory used by compression meta data*/
     public final Gauge<Long> compressionMetadataOffHeapMemoryUsed;
+
+    /** Shadowed keys scan metrics **/
+    public final TableHistogram shadowedKeysScannedHistogram;
+    public final TableHistogram shadowedKeysLoopsHistogram;
+
     /** Tombstones scanned in queries on this CF */
     public final TableHistogram tombstoneScannedHistogram;
     public final Counter tombstoneScannedCounter;
@@ -947,6 +952,8 @@ public class TableMetrics
         additionalWriteLatencyNanos = createTableGauge("AdditionalWriteLatencyNanos", () -> MICROSECONDS.toNanos(cfs.additionalWriteLatencyMicros));
 
         tombstoneScannedHistogram = createTableHistogram("TombstoneScannedHistogram", cfs.getKeyspaceMetrics().tombstoneScannedHistogram, false);
+        shadowedKeysScannedHistogram = createTableHistogram("ShadowedKeysScannedHistogram", cfs.getKeyspaceMetrics().shadowedKeysScannedHistogram, false);
+        shadowedKeysLoopsHistogram = createTableHistogram("ShadowedKeysLoopsHistogram", cfs.getKeyspaceMetrics().shadowedKeysLoopsHistogram, false);
         tombstoneScannedCounter = createTableCounter("TombstoneScannedCounter");
         liveScannedHistogram = createTableHistogram("LiveScannedHistogram", cfs.getKeyspaceMetrics().liveScannedHistogram, false);
         colUpdateTimeDeltaHistogram = createTableHistogram("ColUpdateTimeDeltaHistogram", cfs.getKeyspaceMetrics().colUpdateTimeDeltaHistogram, false);
@@ -1058,6 +1065,12 @@ public class TableMetrics
     public void incLiveRows(long liveRows)
     {
         liveScannedHistogram.update(liveRows);
+    }
+
+    public void incShadowedKeys(long numLoops, long numShadowedKeys)
+    {
+        shadowedKeysLoopsHistogram.update(numLoops);
+        shadowedKeysScannedHistogram.update(numShadowedKeys);
     }
 
     public void incTombstones(long tombstones, boolean triggerWarning)
