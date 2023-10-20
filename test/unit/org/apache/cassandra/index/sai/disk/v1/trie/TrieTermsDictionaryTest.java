@@ -38,7 +38,9 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
+import static org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader.NOT_FOUND;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS41;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.compare;
 
@@ -78,12 +80,12 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
         {
-            assertEquals(TrieTermsDictionaryReader.NOT_FOUND, reader.exactMatch(asByteComparable("a")));
+            assertEquals(NOT_FOUND, reader.exactMatch(asByteComparable("a")));
             assertEquals(0, reader.exactMatch(asByteComparable("ab")));
             assertEquals(2, reader.exactMatch(asByteComparable("abc")));
-            assertEquals(TrieTermsDictionaryReader.NOT_FOUND, reader.exactMatch(asByteComparable("abca")));
+            assertEquals(NOT_FOUND, reader.exactMatch(asByteComparable("abca")));
             assertEquals(1, reader.exactMatch(asByteComparable("abb")));
-            assertEquals(TrieTermsDictionaryReader.NOT_FOUND, reader.exactMatch(asByteComparable("abba")));
+            assertEquals(NOT_FOUND, reader.exactMatch(asByteComparable("abba")));
         }
     }
 
@@ -107,7 +109,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         {
             assertEquals(0, reader.ceiling(asByteComparable("A")));
             assertEquals(0, reader.ceiling(asByteComparable("a")));
-            assertEquals(TrieTermsDictionaryReader.NOT_FOUND, reader.ceiling(asByteComparable("z")));
+            assertEquals(NOT_FOUND, reader.ceiling(asByteComparable("z")));
             assertEquals(0, reader.ceiling(asByteComparable("ab")));
             assertEquals(2, reader.ceiling(asByteComparable("abbb")));
             assertEquals(2, reader.ceiling(asByteComparable("abc")));
@@ -116,7 +118,51 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             assertEquals(2, reader.ceiling(asByteComparable("abba")));
             assertEquals(5, reader.ceiling(asByteComparable("cb")));
             assertEquals(5, reader.ceiling(asByteComparable("c")));
-            assertEquals(TrieTermsDictionaryReader.NOT_FOUND, reader.ceiling(asByteComparable("cbbbb")));
+            assertEquals(NOT_FOUND, reader.ceiling(asByteComparable("cbbbb")));
+        }
+    }
+
+    @Test
+    public void testCeilingWithEmulatedPrimaryKey() throws Exception
+    {
+        long fp;
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext, false))
+        {
+            writer.add(primaryKey("ab", "cd", "def"), 0);
+            writer.add(primaryKey("ab", "cde", "def"), 1);
+            writer.add(primaryKey("ab", "ce", "def"), 2);
+            writer.add(primaryKey("ab", "ce", "defg"), 3);
+            writer.add(primaryKey("ab", "cf", "def"), 4);
+            fp = writer.complete(new MutableLong());
+        }
+
+        try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
+        {
+            // Validate token only searches
+            assertEquals(0, reader.ceiling(primaryKey("a", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(0, reader.ceiling(primaryKey("ab", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(0, reader.ceiling(primaryKey("aa", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(NOT_FOUND, reader.ceiling(primaryKey("abc", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(NOT_FOUND, reader.ceiling(primaryKey("ba", ByteSource.LT_NEXT_COMPONENT)));
+
+            // Validate token and partition key only searches
+            assertEquals(0, reader.ceiling(primaryKey("a", "b", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(0, reader.ceiling(primaryKey("ab", "b", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(2, reader.ceiling(primaryKey("ab", "ce", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(4, reader.ceiling(primaryKey("ab", "cee", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(NOT_FOUND, reader.ceiling(primaryKey("ab", "d", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(NOT_FOUND, reader.ceiling(primaryKey("abb", "a", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(0, reader.ceiling(primaryKey("aa", "d", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(NOT_FOUND, reader.ceiling(primaryKey("abc", "a", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(NOT_FOUND, reader.ceiling(primaryKey("ba", "a", ByteSource.LT_NEXT_COMPONENT)));
+
+
+            // Validate token, partition key, and clustring column searches
+            assertEquals(0, reader.ceiling(primaryKey("a", "b", "c", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(1, reader.ceiling(primaryKey("ab", "cdd", "a", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(1, reader.ceiling(primaryKey("ab", "cde", "a", ByteSource.LT_NEXT_COMPONENT)));
+            assertEquals(2, reader.ceiling(primaryKey("ab", "cde", "z", ByteSource.LT_NEXT_COMPONENT)));
         }
     }
 
@@ -138,15 +184,59 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
         {
-            assertEquals(TrieTermsDictionaryReader.NOT_FOUND, reader.floor(asByteComparable("a")));
+            assertEquals(NOT_FOUND, reader.floor(asByteComparable("a")));
             assertEquals(5, reader.floor(asByteComparable("z")));
             assertEquals(0, reader.floor(asByteComparable("ab")));
             assertEquals(2, reader.floor(asByteComparable("abc")));
             assertEquals(1, reader.floor(asByteComparable("abca")));
             assertEquals(1, reader.floor(asByteComparable("abb")));
-            assertEquals(TrieTermsDictionaryReader.NOT_FOUND, reader.floor(asByteComparable("abba")));
+            assertEquals(NOT_FOUND, reader.floor(asByteComparable("abba")));
             assertEquals(3, reader.floor(asByteComparable("abda")));
             assertEquals(4, reader.floor(asByteComparable("c")));
+        }
+    }
+
+    @Test
+    public void testFloorWithEmulatedPrimaryKey() throws Exception
+    {
+        long fp;
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext, false))
+        {
+            writer.add(primaryKey("ab", "cd", "def"), 0);
+            writer.add(primaryKey("ab", "cde", "def"), 1);
+            writer.add(primaryKey("ab", "ce", "def"), 2);
+            writer.add(primaryKey("ab", "ce", "defg"), 3);
+            writer.add(primaryKey("ab", "cf", "def"), 4);
+            fp = writer.complete(new MutableLong());
+        }
+
+        try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
+        {
+            // Validate token only searches
+            assertEquals(NOT_FOUND, reader.floor(primaryKey("a", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(4, reader.floor(primaryKey("ab", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(NOT_FOUND, reader.floor(primaryKey("aa", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(4, reader.floor(primaryKey("abc", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(4, reader.floor(primaryKey("ba", ByteSource.GT_NEXT_COMPONENT)));
+
+            // Validate token and partition key only searches
+            assertEquals(NOT_FOUND, reader.floor(primaryKey("a", "b", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(NOT_FOUND, reader.floor(primaryKey("ab", "b", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(3, reader.floor(primaryKey("ab", "ce", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(3, reader.floor(primaryKey("ab", "cee", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(4, reader.floor(primaryKey("ab", "d", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(4, reader.floor(primaryKey("abb", "a", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(NOT_FOUND, reader.floor(primaryKey("aa", "d", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(4, reader.floor(primaryKey("abc", "a", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(4, reader.floor(primaryKey("ba", "a", ByteSource.GT_NEXT_COMPONENT)));
+
+
+            // Validate token, partition key, and clustring column searches
+            assertEquals(NOT_FOUND, reader.floor(primaryKey("a", "b", "c", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(0, reader.floor(primaryKey("ab", "cdd", "a", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(0, reader.floor(primaryKey("ab", "cde", "a", ByteSource.GT_NEXT_COMPONENT)));
+            assertEquals(1, reader.floor(primaryKey("ab", "cde", "z", ByteSource.GT_NEXT_COMPONENT)));
         }
     }
 
@@ -224,6 +314,49 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
                             .filter(string -> Collections.frequency(randomStrings, string) == 1)
                             .map(this::asByteComparable)
                             .collect(Collectors.toList());
+    }
+
+    /**
+     * Used to generate ByteComparable objects that are used as keys in the TrieTermsDictionary.
+     * @param token
+     * @param partitionKey
+     * @param clustringColumn
+     * @return
+     */
+    private ByteComparable primaryKey(String token, String partitionKey, String clustringColumn)
+    {
+        assert token != null && partitionKey != null && clustringColumn != null;
+        return primaryKey(token, partitionKey, clustringColumn, ByteSource.TERMINATOR);
+    }
+
+    private ByteComparable primaryKey(String token, int terminator)
+    {
+        assert token != null;
+        return primaryKey(token, null, null, terminator);
+    }
+
+    private ByteComparable primaryKey(String token, String partitionKey, int terminator)
+    {
+        assert token != null && partitionKey != null;
+        return primaryKey(token, partitionKey, null, terminator);
+    }
+
+    private ByteComparable primaryKey(String token, String partitionKey, String clustringColumn, int terminator)
+    {
+        ByteComparable tokenByteComparable = asByteComparable(token);
+        if (partitionKey == null)
+            return (v) -> ByteSource.withTerminator(terminator, tokenByteComparable.asComparableBytes(v));
+        ByteComparable partitionKeyByteComparable = asByteComparable(partitionKey);
+        if (clustringColumn == null)
+            return (v) -> ByteSource.withTerminator(terminator,
+                                                    tokenByteComparable.asComparableBytes(v),
+                                                    partitionKeyByteComparable.asComparableBytes(v));
+        ByteComparable clusteringColumnByteComparable = asByteComparable(clustringColumn);
+        return (v) -> ByteSource.withTerminator(terminator,
+                                                tokenByteComparable.asComparableBytes(v),
+                                                partitionKeyByteComparable.asComparableBytes(v),
+                                                clusteringColumnByteComparable.asComparableBytes(v));
+
     }
 
     private ByteComparable asByteComparable(String s)

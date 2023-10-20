@@ -95,6 +95,12 @@ public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
         return getCurrentPayload();
     }
 
+    /**
+     * Returns the position associated with the least term greater than or equal to the given key, or
+     * a negative value if there is no such term.
+     * @param key the prefix to traverse in the trie
+     * @return a position, if found, or a negative value if there is no such position
+     */
     public long ceiling(ByteComparable key)
     {
         int b = followWithGreater(key);
@@ -111,6 +117,12 @@ public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
         return initialResult;
     }
 
+    /**
+     * Returns the position associated with the greatest term less than or equal to the given key, or
+     * a negative value if there is no such term.
+     * @param key the prefix to traverse in the trie
+     * @return a position, if found, or a negative value if there is no such position
+     */
     public long floor(ByteComparable key)
     {
         int b = followWithLesser(key);
