@@ -70,9 +70,9 @@ public interface PrimaryKeyMap extends Closeable
 
     /**
      * Returns the sstable row id associated with the least {@link PrimaryKey} greater than or equal to the given
-     * {@link PrimaryKey}. If the {@link PrimaryKey} a prefix of {@link PrimaryKey}s in the map, e.g. it is just a token
-     * or a token and a partition key, the row id associated with the least {@link PrimaryKey} will be returned.
-     * If there is no {@link PrimaryKey} in the map that meets this definition, returns a negative value.
+     * {@link PrimaryKey}. If the {@link PrimaryKey} is a prefix of multiple {@link PrimaryKey}s in the map, e.g. it is
+     * just a token or a token and a partition key, the row id associated with the least {@link PrimaryKey} will be
+     * returned. If there is no {@link PrimaryKey} in the map that meets this definition, returns a negative value.
      *
      * @param key the {@link PrimaryKey} to lookup
      * @return an sstable row id or a negative value if no row is found
@@ -81,9 +81,9 @@ public interface PrimaryKeyMap extends Closeable
 
     /**
      * Returns the sstable row id associated with the greatest {@link PrimaryKey} less than or equal to the given
-     * {@link PrimaryKey}. If the {@link PrimaryKey} a prefix of {@link PrimaryKey}s in the map, e.g. it is just a token
-     * or a token and a partition key, the row id associated with the greatest {@link PrimaryKey} will be returned.
-     * If there is no {@link PrimaryKey} in the map that meets this definition, returns a negative value.
+     * {@link PrimaryKey}. If the {@link PrimaryKey} is a prefix of multiple {@link PrimaryKey}s in the map, e.g. it is
+     * just a token or a token and a partition key, the row id associated with the greatest {@link PrimaryKey} will be
+     * returned. If there is no {@link PrimaryKey} in the map that meets this definition, returns a negative value.
      *
      * @param key the {@link PrimaryKey} to lookup
      * @return an sstable row id or a negative value if no row is found
