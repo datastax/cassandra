@@ -131,6 +131,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 cfs.metric.incShadowedKeys(loopsCount, currentShadowedKeysCount - startShadowedKeysCount);
                 if (loopsCount > 1)
                     Tracing.trace("No new shadowed keys after query loop {}", loopsCount);
+                return topK;
             }
             loopsCount++;
             Tracing.trace("Found {} new shadowed keys, rerunning query (loop {})", currentShadowedKeysCount - lastShadowedKeysCount, loopsCount);
