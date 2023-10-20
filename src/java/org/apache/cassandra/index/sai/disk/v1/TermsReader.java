@@ -255,11 +255,9 @@ public class TermsReader implements Closeable
             }
             catch (Throwable e)
             {
-                //TODO Is there an equivalent of AOE in OS?
                 if (!(e instanceof AbortedOperationException))
                     logger.error(indexContext.logMessage("Failed to execute term query"), e);
 
-                closeQuietly();
                 throw Throwables.cleaned(e);
             }
         }
