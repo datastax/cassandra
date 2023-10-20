@@ -988,8 +988,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     }
 
     /**
-     * An expression of the form 'column' ['key'] = 'value' (which is only
-     * supported when 'column' is a map).
+     * An expression of the form 'column' ['key'] OPERATOR 'value' (which is only
+     * supported when 'column' is a map) and where the operator can be {@link Operator#EQ}, {@link Operator#LT},
+     * {@link Operator#LTE}, {@link Operator#GT}, or {@link Operator#GTE}.
      */
     public static class MapComparisonExpression extends Expression
     {
@@ -1129,7 +1130,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 case LTE:
                     return CompositeType.extractFirstComponentAsTrieSearchPrefix(getIndexValue(), true);
                 default:
-                    throw new AssertionError();
+                    throw new AssertionError("Unsupported operator: " + operator);
             }
         }
 
@@ -1150,7 +1151,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 case LTE:
                     return this.getIndexValue();
                 default:
-                    throw new AssertionError();
+                    throw new AssertionError("Unsupported operator: " + operator);
             }
         }
     }

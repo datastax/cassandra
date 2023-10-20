@@ -222,7 +222,7 @@ public class TermsReader implements Closeable
         private final long lookupStartTime;
         private final QueryContext context;
 
-        private Expression exp;
+        private final Expression exp;
 
         RangeQuery(Expression exp, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
         {
@@ -255,6 +255,9 @@ public class TermsReader implements Closeable
                 context.checkpoint();
                 // Because postings are not sorted, we need to eagerly materialize the results and sort them.
                 LongHeap postings = materializeResults(iter);
+
+                listener.onTraversalComplete(System.nanoTime() - lookupStartTime, TimeUnit.NANOSECONDS);
+
                 return new LongHeapPostingList(postings);
             }
             catch (Throwable e)

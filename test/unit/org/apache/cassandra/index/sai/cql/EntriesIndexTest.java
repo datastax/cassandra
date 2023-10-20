@@ -48,7 +48,7 @@ public class EntriesIndexTest extends SAITester
     }
 
     @Test
-    public void basicIntegerEntriesIndexRangeTest()
+    public void basicIntegerEntriesIndexRangeTest() throws Throwable
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
@@ -62,11 +62,8 @@ public class EntriesIndexTest extends SAITester
         execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 50, 'banana': 2, 'orange': 1})");
         execute("INSERT INTO %s (partition, item_cost) VALUES (3, {'apple': 10, 'banana': 1, 'orange': 3})");
 
-        // Test range over both sstable and memtable
-        assertIntRangeQueries();
-        // Make two sstables
-        flush();
-        assertIntRangeQueries();
+        // Test range over both sstable and memtable, then over two sstables
+        beforeAndAfterFlush(this::assertIntRangeQueries);
     }
 
     private void assertIntRangeQueries() {

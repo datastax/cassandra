@@ -224,7 +224,7 @@ public class TrieMemoryIndex extends MemoryIndex
                     cd.processContent(entry.getValue());
             });
         else
-            data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive).values().forEach(cd::processContent);
+            subtrie.values().forEach(cd::processContent);
 
         if (cd.mergedKeys.isEmpty())
         {

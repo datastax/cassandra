@@ -37,6 +37,9 @@ public class EntriesIndexInvalidQueryTest extends SAITester
                              "SELECT partition FROM %s WHERE item_cost['apple'] <= 6 AND item_cost['apple'] < 10");
         assertInvalidMessage("More than one restriction was found for the start bound on item_cost",
                              "SELECT partition FROM %s WHERE item_cost['apple'] > 0 AND item_cost['apple'] > 1");
+        assertInvalidMessage("Column \"item_cost\" cannot be restricted by both an inequality " +
+                             "relation and \"CONTAINS(values=[], keys=[], entryKeys=[6170706c65], entryValues=[00000001])\"",
+                             "SELECT partition FROM %s WHERE item_cost['apple'] > 0 AND item_cost['apple'] = 1");
     }
 
 }

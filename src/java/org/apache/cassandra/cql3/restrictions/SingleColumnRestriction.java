@@ -506,8 +506,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
             checkTrue(otherRestriction instanceof SingleColumnRestriction.MapSliceRestriction,
-                      "Column \"%s\" cannot be restricted by both an equality and an inequality relation",
-                      columnDef.name);
+                      "Column \"%s\" cannot be restricted by both an inequality relation and \"%s\"",
+                      columnDef.name, otherRestriction);
 
             var otherMapSlice = ((SingleColumnRestriction.MapSliceRestriction) otherRestriction);
             // Because the keys are not necessarily bound, we defer on making assertions about boundary violations
