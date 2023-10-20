@@ -67,6 +67,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
+    private final ColumnFamilyStore cfs;
 
     public StorageAttachedIndexSearcher(ColumnFamilyStore cfs,
                                         TableQueryMetrics tableQueryMetrics,
@@ -76,6 +77,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                         long executionQuotaMs)
     {
         this.command = command;
+        this.cfs = cfs;
         this.queryContext = new QueryContext(executionQuotaMs);
         this.controller = new QueryController(cfs, command, filterOperation, indexFeatureSet, queryContext, tableQueryMetrics);
     }
@@ -117,6 +119,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
         // If there are shadowed primary keys, we have to at least query twice.
         // First time to find out there are shadowed keys, second time to find out there are no more shadow keys.
+        int loopsCount = 1;
+        final long startShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
         while (true)
         {
             long lastShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
@@ -125,8 +129,14 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
             long currentShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
             if (lastShadowedKeysCount == currentShadowedKeysCount)
+            {
+                cfs.metric.incShadowedKeys(loopsCount, currentShadowedKeysCount - startShadowedKeysCount);
+                if (loopsCount > 1)
+                    Tracing.trace("No new shadowed keys after query loop {}", loopsCount);
                 return topK;
-            Tracing.trace("Found {} new shadowed keys, rerunning query", currentShadowedKeysCount - lastShadowedKeysCount);
+            }
+            loopsCount++;
+            Tracing.trace("Found {} new shadowed keys, rerunning query (loop {})", currentShadowedKeysCount - lastShadowedKeysCount, loopsCount);
         }
     }
 
