@@ -233,6 +233,8 @@ public class TableMetrics
     public Gauge<Long> diskUsedBytes;
     /** Index file cached bytes for SAI */
     public Gauge<Long> indexFileCacheBytes;
+    /** Memtable index write latency for SAI */
+    public TableLatencyMetrics memtableIndexWriteLatency;
     /** Number of SSTables with old version on disk for this CF */
     public final Gauge<Integer> oldVersionSSTableCount;
     /** Disk space used by SSTables belonging to this table */
@@ -726,14 +728,21 @@ public class TableMetrics
                 if (indexFromList instanceof StorageAttachedIndex){
                     logger.debug("The index named {} is an SAI", indexName);
 
-                    logger.info("SAI metrics ({}, {}, {}, {}, {}, {}) are being logged for the SAI index named {}...", "SSTableCellCount", "MemtableOnHeapIndexBytes", "MemtableOffHeapIndexBytes", "LiveMemtableIndexWriteCount", "DiskUsedBytes", "IndexFileCacheBytes", indexName);
+                    logger.info("SAI metrics ({}, {}, {}, {}, {}, {}, {}) are being logged for the SAI index named {}...",
+                                "SSTableCellCount", "MemtableOnHeapIndexBytes", "MemtableOffHeapIndexBytes",
+                                "LiveMemtableIndexWriteCount", "DiskUsedBytes", "IndexFileCacheBytes", "MemtableIndexWriteLatency",
+                                indexName);
                     ssTableCellCount = createTableGauge("SSTableCellCount", () -> ((StorageAttachedIndex) indexFromList).getIndexContext().getCellCount());
                     memtableOnHeapIndexBytes = createTableGauge("MemtableOnHeapIndexBytes", () ->((StorageAttachedIndex) indexFromList).getIndexContext().estimatedOnHeapMemIndexMemoryUsed());
                     memtableOffHeapIndexBytes = createTableGauge("MemtableOffHeapIndexBytes", () -> ((StorageAttachedIndex) indexFromList).getIndexContext().estimatedOffHeapMemIndexMemoryUsed());
                     liveMemtableIndexWriteCount = createTableGauge("LiveMemtableIndexWriteCount", () ->((StorageAttachedIndex) indexFromList).getIndexContext().liveMemtableWriteCount());
                     diskUsedBytes = createTableGauge("DiskUsedBytes", () -> ((StorageAttachedIndex) indexFromList).getIndexContext().diskUsage());
                     indexFileCacheBytes = createTableGauge("IndexFileCacheBytes", () ->((StorageAttachedIndex) indexFromList).getIndexContext().indexFileCacheSize());
-                    logger.info("SAI metrics ({}, {}, {}, {}, {}, {}) have been logged for the SAI index named {}.", "SSTableCellCount", "MemtableOnHeapIndexBytes", "MemtableOffHeapIndexBytes", "LiveMemtableIndexWriteCount", "DiskUsedBytes", "IndexFileCacheBytes", indexName);
+                    memtableIndexWriteLatency = createLatencyMetrics("MemtableIndexWriteLatency", cfs.getKeyspaceMetrics().memtableIndexWriteLatency, Optional.empty());
+                    logger.info("SAI metrics ({}, {}, {}, {}, {}, {}) have been logged for the SAI index named {}.",
+                                "SSTableCellCount", "MemtableOnHeapIndexBytes", "MemtableOffHeapIndexBytes",
+                                "LiveMemtableIndexWriteCount", "DiskUsedBytes", "IndexFileCacheBytes", "MemtableIndexWriteLatency",
+                                indexName);
                 };
             }
         }

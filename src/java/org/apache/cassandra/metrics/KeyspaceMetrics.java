@@ -45,6 +45,8 @@ public class KeyspaceMetrics
     public final Gauge<Long> memtableOnHeapDataSize;
     /** Total amount of data stored in the memtable that resides off-heap, including column related overhead and partitions overwritten. */
     public final Gauge<Long> memtableOffHeapDataSize;
+    /** Write latency for the memtable index. */
+    public final LatencyMetrics memtableIndexWriteLatency;
     /** Total amount of live data stored in the memtables (2i and pending flush memtables included) that resides off-heap, excluding any data structure overhead */
     public final Gauge<Long> allMemtablesLiveDataSize;
     /** Total amount of data stored in the memtables (2i and pending flush memtables included) that resides on-heap. */
@@ -210,6 +212,7 @@ public class KeyspaceMetrics
         readLatency = createLatencyMetrics("Read");
         writeLatency = createLatencyMetrics("Write");
         rangeLatency = createLatencyMetrics("Range");
+        memtableIndexWriteLatency = createLatencyMetrics("MemtableIndexWriteLatency");
 
         // create histograms for TableMetrics to replicate updates to
         sstablesPerReadHistogram = createKeyspaceHistogram("SSTablesPerReadHistogram", true);
