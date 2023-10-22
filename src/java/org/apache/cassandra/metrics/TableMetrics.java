@@ -243,6 +243,14 @@ public class TableMetrics
     public Gauge<Long> memtableIndexFlushErrors;
     /** Compaction segment flush errors for SAI */
     public Gauge<Long> compactionSegmentFlushErrors;
+    /** Compaction segment cells per second for SAI */
+    public TableHistogram compactionSegmentCellsPerSecond;
+    /** Compaction segment bytes per second for SAI */
+    public TableHistogram compactionSegmentBytesPerSecond;
+    /** Memtable index flush cells per second for SAI */
+    public TableHistogram memtableIndexFlushCellsPerSecond;
+    /** Segments per compaction for SAI */
+    public TableHistogram segmentsPerCompaction;
     /** Number of SSTables with old version on disk for this CF */
     public final Gauge<Integer> oldVersionSSTableCount;
     /** Disk space used by SSTables belonging to this table */
@@ -736,11 +744,13 @@ public class TableMetrics
                 if (indexFromList instanceof StorageAttachedIndex){
                     logger.debug("The index named {} is an SAI", indexName);
 
-                    logger.info("SAI metrics ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) are being logged for the SAI index named {}...",
+                    logger.info("SAI metrics ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) are being logged for the SAI index named {}...",
                                 "SSTableCellCount", "MemtableOnHeapIndexBytes", "MemtableOffHeapIndexBytes",
                                 "LiveMemtableIndexWriteCount", "DiskUsedBytes", "IndexFileCacheBytes",
                                 "MemtableIndexWriteLatency", "MemtableIndexFlushCount", "CompactionCount",
                                 "MemtableIndexFlushErrors", "CompactionSegmentFlushErrors",
+                                "CompactionSegmentCellsPerSecond", "CompactionSegmentBytesPerSecond",
+                                "MemtableIndexFlushCellsPerSecond", "SegmentsPerCompaction",
                                 indexName);
                     ssTableCellCount = createTableGauge("SSTableCellCount", () -> ((StorageAttachedIndex) indexFromList).getIndexContext().getCellCount());
                     memtableOnHeapIndexBytes = createTableGauge("MemtableOnHeapIndexBytes", () ->((StorageAttachedIndex) indexFromList).getIndexContext().estimatedOnHeapMemIndexMemoryUsed());
@@ -753,10 +763,16 @@ public class TableMetrics
                     compactionCount = createTableGauge("CompactionCount", () -> cfs.getKeyspaceMetrics().compactionCount.getValue());
                     memtableIndexFlushErrors = createTableGauge("MemtableIndexFlushErrors", () -> cfs.getKeyspaceMetrics().memtableIndexFlushErrors.getValue());
                     compactionSegmentFlushErrors = createTableGauge("CompactionSegmentFlushErrors", () -> cfs.getKeyspaceMetrics().compactionSegmentFlushErrors.getValue());
-                    logger.info("SAI metrics ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) have been logged for the SAI index named {}.",
+                    compactionSegmentCellsPerSecond = createTableHistogram("CompactionSegmentCellsPerSecond", cfs.getKeyspaceMetrics().compactionSegmentCellsPerSecond, false);
+                    compactionSegmentBytesPerSecond = createTableHistogram("CompactionSegmentBytesPerSecond", cfs.getKeyspaceMetrics().compactionSegmentBytesPerSecond, false);
+                    memtableIndexFlushCellsPerSecond = createTableHistogram("MemtableIndexFlushCellsPerSecond", cfs.getKeyspaceMetrics().memtableIndexFlushCellsPerSecond, true);
+                    segmentsPerCompaction = createTableHistogram("SegmentsPerCompaction", cfs.getKeyspaceMetrics().segmentsPerCompaction, false);
+                    logger.info("SAI metrics ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) have been logged for the SAI index named {}.",
                                 "SSTableCellCount", "MemtableOnHeapIndexBytes", "MemtableOffHeapIndexBytes",
                                 "LiveMemtableIndexWriteCount", "DiskUsedBytes", "IndexFileCacheBytes", "MemtableIndexWriteLatency",
                                 "MemtableIndexFlushCount", "CompactionCount", "MemtableIndexFlushErrors", "CompactionSegmentFlushErrors",
+                                "CompactionSegmentCellsPerSecond", "CompactionSegmentBytesPerSecond",
+                                "MemtableIndexFlushCellsPerSecond", "SegmentsPerCompaction",
                                 indexName);
                 };
             }

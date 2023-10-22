@@ -95,6 +95,14 @@ public class KeyspaceMetrics
     public final Histogram liveScannedHistogram;
     /** Column update time delta on this Keyspace */
     public final Histogram colUpdateTimeDeltaHistogram;
+    /** Histogram of the number of compaction segment cells per second */
+    public final Histogram compactionSegmentCellsPerSecond;
+    /** Histogram of the number of compaction segment bytes per second */
+    public final Histogram compactionSegmentBytesPerSecond;
+    /** Histogram of the number of memtable index flush cells per second */
+    public final Histogram memtableIndexFlushCellsPerSecond;
+    /** Histogram of the number of segments per compaction */
+    public final Histogram segmentsPerCompaction;
     /** time taken acquiring the partition lock for materialized view updates on this keyspace */
     public final Timer viewLockAcquireTime;
     /** time taken during the local read of a materialized view update */
@@ -235,6 +243,11 @@ public class KeyspaceMetrics
         tombstoneScannedHistogram = createKeyspaceHistogram("TombstoneScannedHistogram", false);
         liveScannedHistogram = createKeyspaceHistogram("LiveScannedHistogram", false);
         colUpdateTimeDeltaHistogram = createKeyspaceHistogram("ColUpdateTimeDeltaHistogram", false);
+        compactionSegmentCellsPerSecond = createKeyspaceHistogram("CompactionSegmentCellsPerSecond", false);
+        compactionSegmentBytesPerSecond = createKeyspaceHistogram("CompactionSegmentBytesPerSecond", false);
+        memtableIndexFlushCellsPerSecond = createKeyspaceHistogram("MemtableIndexFlushCellsPerSecond", true);
+        segmentsPerCompaction = createKeyspaceHistogram("SegmentsPerCompaction", false);
+
         viewLockAcquireTime = createKeyspaceTimer("ViewLockAcquireTime");
         viewReadTime = createKeyspaceTimer("ViewReadTime");
 
