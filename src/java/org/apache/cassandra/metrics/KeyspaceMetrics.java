@@ -47,6 +47,14 @@ public class KeyspaceMetrics
     public final Gauge<Long> memtableOffHeapDataSize;
     /** Write latency for the memtable index. */
     public final LatencyMetrics memtableIndexWriteLatency;
+    /** Count of the memtable index flushes. */
+    public final Gauge<Long> memtableIndexFlushCount;
+    /** Count of the compactions. */
+    public final Gauge<Long> compactionCount;
+    /** Count of the memtable index flush errors. */
+    public final Gauge<Long> memtableIndexFlushErrors;
+    /** Count of the compaction segment flush errors. */
+    public final Gauge<Long> compactionSegmentFlushErrors;
     /** Total amount of live data stored in the memtables (2i and pending flush memtables included) that resides off-heap, excluding any data structure overhead */
     public final Gauge<Long> allMemtablesLiveDataSize;
     /** Total amount of data stored in the memtables (2i and pending flush memtables included) that resides on-heap. */
@@ -207,6 +215,14 @@ public class KeyspaceMetrics
                 metric -> metric.indexSummaryOffHeapMemoryUsed.getValue());
         compressionMetadataOffHeapMemoryUsed = createKeyspaceGauge("CompressionMetadataOffHeapMemoryUsed",
                 metric -> metric.compressionMetadataOffHeapMemoryUsed.getValue());
+        memtableIndexFlushCount = createKeyspaceGauge("MemtableIndexFlushCount",
+                metric -> metric.memtableIndexFlushCount.getValue());
+        compactionCount = createKeyspaceGauge("CompactionCount",
+                metric -> metric.compactionCount.getValue());
+        memtableIndexFlushErrors = createKeyspaceGauge("MemtableIndexFlushErrors",
+                metric -> metric.memtableIndexFlushErrors.getValue());
+        compactionSegmentFlushErrors = createKeyspaceGauge("CompactionSegmentFlushErrors",
+                metric -> metric.compactionSegmentFlushErrors.getValue());
 
         // latency metrics for TableMetrics to update
         readLatency = createLatencyMetrics("Read");

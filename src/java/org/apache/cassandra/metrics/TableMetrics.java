@@ -235,6 +235,14 @@ public class TableMetrics
     public Gauge<Long> indexFileCacheBytes;
     /** Memtable index write latency for SAI */
     public TableLatencyMetrics memtableIndexWriteLatency;
+    /** Memtable index flush count for SAI */
+    public Gauge<Long> memtableIndexFlushCount;
+    /** Compaction count for SAI */
+    public Gauge<Long> compactionCount;
+    /** Memtable index flush errors for SAI */
+    public Gauge<Long> memtableIndexFlushErrors;
+    /** Compaction segment flush errors for SAI */
+    public Gauge<Long> compactionSegmentFlushErrors;
     /** Number of SSTables with old version on disk for this CF */
     public final Gauge<Integer> oldVersionSSTableCount;
     /** Disk space used by SSTables belonging to this table */
@@ -728,9 +736,11 @@ public class TableMetrics
                 if (indexFromList instanceof StorageAttachedIndex){
                     logger.debug("The index named {} is an SAI", indexName);
 
-                    logger.info("SAI metrics ({}, {}, {}, {}, {}, {}, {}) are being logged for the SAI index named {}...",
+                    logger.info("SAI metrics ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) are being logged for the SAI index named {}...",
                                 "SSTableCellCount", "MemtableOnHeapIndexBytes", "MemtableOffHeapIndexBytes",
-                                "LiveMemtableIndexWriteCount", "DiskUsedBytes", "IndexFileCacheBytes", "MemtableIndexWriteLatency",
+                                "LiveMemtableIndexWriteCount", "DiskUsedBytes", "IndexFileCacheBytes",
+                                "MemtableIndexWriteLatency", "MemtableIndexFlushCount", "CompactionCount",
+                                "MemtableIndexFlushErrors", "CompactionSegmentFlushErrors",
                                 indexName);
                     ssTableCellCount = createTableGauge("SSTableCellCount", () -> ((StorageAttachedIndex) indexFromList).getIndexContext().getCellCount());
                     memtableOnHeapIndexBytes = createTableGauge("MemtableOnHeapIndexBytes", () ->((StorageAttachedIndex) indexFromList).getIndexContext().estimatedOnHeapMemIndexMemoryUsed());
@@ -739,9 +749,14 @@ public class TableMetrics
                     diskUsedBytes = createTableGauge("DiskUsedBytes", () -> ((StorageAttachedIndex) indexFromList).getIndexContext().diskUsage());
                     indexFileCacheBytes = createTableGauge("IndexFileCacheBytes", () ->((StorageAttachedIndex) indexFromList).getIndexContext().indexFileCacheSize());
                     memtableIndexWriteLatency = createLatencyMetrics("MemtableIndexWriteLatency", cfs.getKeyspaceMetrics().memtableIndexWriteLatency, Optional.empty());
-                    logger.info("SAI metrics ({}, {}, {}, {}, {}, {}) have been logged for the SAI index named {}.",
+                    memtableIndexFlushCount = createTableGauge("MemtableIndexFlushCount", () -> cfs.getKeyspaceMetrics().memtableIndexFlushCount.getValue());
+                    compactionCount = createTableGauge("CompactionCount", () -> cfs.getKeyspaceMetrics().compactionCount.getValue());
+                    memtableIndexFlushErrors = createTableGauge("MemtableIndexFlushErrors", () -> cfs.getKeyspaceMetrics().memtableIndexFlushErrors.getValue());
+                    compactionSegmentFlushErrors = createTableGauge("CompactionSegmentFlushErrors", () -> cfs.getKeyspaceMetrics().compactionSegmentFlushErrors.getValue());
+                    logger.info("SAI metrics ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) have been logged for the SAI index named {}.",
                                 "SSTableCellCount", "MemtableOnHeapIndexBytes", "MemtableOffHeapIndexBytes",
                                 "LiveMemtableIndexWriteCount", "DiskUsedBytes", "IndexFileCacheBytes", "MemtableIndexWriteLatency",
+                                "MemtableIndexFlushCount", "CompactionCount", "MemtableIndexFlushErrors", "CompactionSegmentFlushErrors",
                                 indexName);
                 };
             }
