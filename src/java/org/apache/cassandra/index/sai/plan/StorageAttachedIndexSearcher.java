@@ -65,6 +65,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
+    private final ColumnFamilyStore cfs;
 
     public StorageAttachedIndexSearcher(ColumnFamilyStore cfs,
                                         TableQueryMetrics tableQueryMetrics,
@@ -74,6 +75,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                         long executionQuotaMs)
     {
         this.command = command;
+        this.cfs = cfs;
         this.queryContext = new QueryContext(executionQuotaMs);
         this.controller = new QueryController(cfs, command, filterOperation, indexFeatureSet, queryContext, tableQueryMetrics);
     }
@@ -108,12 +110,15 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     @Override
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
+        // VSTODO see about switching to use an order op instead of ann
         Supplier<ResultRetriever> queryIndexes = () -> new ResultRetriever(analyze(), analyzeFilter(), controller, executionController, queryContext, command.isTopK());
         if (!command.isTopK())
             return queryIndexes.get();
 
         // If there are shadowed primary keys, we have to at least query twice.
         // First time to find out there are shadowed keys, second time to find out there are no more shadow keys.
+        int loopsCount = 1;
+        final long startShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
         while (true)
         {
             long lastShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
@@ -122,8 +127,14 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
             long currentShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
             if (lastShadowedKeysCount == currentShadowedKeysCount)
+            {
+                cfs.metric.incShadowedKeys(loopsCount, currentShadowedKeysCount - startShadowedKeysCount);
+                if (loopsCount > 1)
+                    Tracing.trace("No new shadowed keys after query loop {}", loopsCount);
                 return topK;
-            Tracing.trace("Found {} new shadowed keys, rerunning query", currentShadowedKeysCount - lastShadowedKeysCount);
+            }
+            loopsCount++;
+            Tracing.trace("Found {} new shadowed keys, rerunning query (loop {})", currentShadowedKeysCount - lastShadowedKeysCount, loopsCount);
         }
     }
 
@@ -132,7 +143,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
      *
      * @return operation
      */
-    private RangeIterator<PrimaryKey> analyze()
+    private RangeIterator analyze()
     {
         return Operation.buildIterator(controller);
     }
@@ -158,7 +169,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final Iterator<DataRange> keyRanges;
         private AbstractBounds<PartitionPosition> currentKeyRange;
 
-        private final RangeIterator<PrimaryKey> operation;
+        private final RangeIterator operation;
         private final FilterTree filterTree;
         private final QueryController controller;
         private final ReadExecutionController executionController;
@@ -168,7 +179,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
         private PrimaryKey lastKey;
 
-        private ResultRetriever(RangeIterator<PrimaryKey> operation,
+        private ResultRetriever(RangeIterator operation,
                                 FilterTree filterTree,
                                 QueryController controller,
                                 ReadExecutionController executionController,

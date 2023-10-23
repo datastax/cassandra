@@ -138,19 +138,19 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     @Override
-    public long rowIdFromPrimaryKey(PrimaryKey key)
+    public long exactRowIdForPrimaryKey(PrimaryKey key)
     {
         return rowIdToToken.findTokenRowID(key.token().getLongValue());
     }
 
     @Override
-    public long firstRowIdFromPrimaryKey(PrimaryKey key)
+    public long ceiling(PrimaryKey key)
     {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public long lastRowIdFromPrimaryKey(PrimaryKey key)
+    public long floor(PrimaryKey key)
     {
         throw new UnsupportedOperationException();
     }

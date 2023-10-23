@@ -250,6 +250,11 @@ public class TableMetrics
     public final Gauge<Long> compressionMetadataOffHeapMemoryUsed;
     /** Key cache hit rate  for this CF */
     public final Gauge<Double> keyCacheHitRate;
+
+    /** Shadowed keys scan metrics **/
+    public final TableHistogram shadowedKeysScannedHistogram;
+    public final TableHistogram shadowedKeysLoopsHistogram;
+
     /** Tombstones scanned in queries on this CF */
     public final TableHistogram tombstoneScannedHistogram;
     public final Counter tombstoneScannedCounter;
@@ -973,11 +978,13 @@ public class TableMetrics
             }
         }, null);
         tombstoneScannedHistogram = createTableHistogram("TombstoneScannedHistogram", cfs.getKeyspaceMetrics().tombstoneScannedHistogram, false);
+        shadowedKeysScannedHistogram = createTableHistogram("ShadowedKeysScannedHistogram", cfs.getKeyspaceMetrics().shadowedKeysScannedHistogram, false);
+        shadowedKeysLoopsHistogram = createTableHistogram("ShadowedKeysLoopsHistogram", cfs.getKeyspaceMetrics().shadowedKeysLoopsHistogram, false);
         tombstoneScannedCounter = createTableCounter("TombstoneScannedCounter");
         liveScannedHistogram = createTableHistogram("LiveScannedHistogram", cfs.getKeyspaceMetrics().liveScannedHistogram, false);
         colUpdateTimeDeltaHistogram = createTableHistogram("ColUpdateTimeDeltaHistogram", cfs.getKeyspaceMetrics().colUpdateTimeDeltaHistogram, false);
         coordinatorReadLatency = createTableTimer("CoordinatorReadLatency", cfs.getKeyspaceMetrics().coordinatorReadLatency);
-        coordinatorScanLatency = createTableTimer("CoordinatorScanLatency", cfs.getKeyspaceMetrics().coordinatorReadLatency);
+        coordinatorScanLatency = createTableTimer("CoordinatorScanLatency", cfs.getKeyspaceMetrics().coordinatorScanLatency);
         coordinatorWriteLatency = createTableTimer("CoordinatorWriteLatency", cfs.getKeyspaceMetrics().coordinatorWriteLatency);
         waitingOnFreeMemtableSpace = createTableHistogram("WaitingOnFreeMemtableSpace", cfs.getKeyspaceMetrics().waitingOnFreeMemtableSpace, false);
         coordinatorReadSize = createTableHistogram("CoordinatorReadSize", cfs.getKeyspaceMetrics().coordinatorReadSize, false);
@@ -1068,6 +1075,12 @@ public class TableMetrics
     public void incLiveRows(long liveRows)
     {
         liveScannedHistogram.update(liveRows);
+    }
+
+    public void incShadowedKeys(long numLoops, long numShadowedKeys)
+    {
+        shadowedKeysLoopsHistogram.update(numLoops);
+        shadowedKeysScannedHistogram.update(numShadowedKeys);
     }
 
     public void incTombstones(long tombstones, boolean triggerWarning)

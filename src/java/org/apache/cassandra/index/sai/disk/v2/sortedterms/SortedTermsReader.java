@@ -30,6 +30,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.MonotonicBlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
+import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.Pair;
@@ -71,6 +72,7 @@ import static org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWrit
 @ThreadSafe
 public class SortedTermsReader
 {
+    private static final long NOT_FOUND = -1;
     private final FileHandle termsData;
     private final SortedTermsMeta meta;
     private final FileHandle termsTrie;
@@ -104,13 +106,12 @@ public class SortedTermsReader
     }
 
     /**
-     * Returns the point id (ordinal) of the target term or the next greater if no exact match found.
-     * If reached the end of the terms file, returns <code>Long.MAX_VALUE</code>.
-     * Complexity of this operation is O(log n).
-     *
-     * @param term target term to lookup
+     * Returns the point id (ordinal) associated with the least term greater than or equal to the given term, or
+     * a negative value if there is no such term.
+     * @param term
+     * @return
      */
-    public long getPointId(@Nonnull ByteComparable term)
+    public long ceiling(@Nonnull ByteComparable term)
     {
         Preconditions.checkNotNull(term, "term null");
 
@@ -122,18 +123,34 @@ public class SortedTermsReader
                                                               true))
         {
             final Iterator<Pair<ByteSource, Long>> iterator = reader.iterator();
-            return iterator.hasNext() ? iterator.next().right : Long.MAX_VALUE;
+            return iterator.hasNext() ? iterator.next().right : NOT_FOUND;
         }
     }
 
     /**
-     * Returns the last point id (ordinal) of the target term or the next smaller if no exact match found.
-     * If reached the end of the terms file, returns <code>Long.MAX_VALUE</code>.
+     * Returns the point id (ordinal) of the target term or a negative value if there is no such term.
      * Complexity of this operation is O(log n).
      *
      * @param term target term to lookup
      */
-    public long getLastPointId(@Nonnull ByteComparable term)
+    public long getExactPointId(@Nonnull ByteComparable term)
+    {
+        Preconditions.checkNotNull(term, "term null");
+        try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(), meta.trieFP))
+        {
+            long result = reader.exactMatch(term);
+            return result < 0 ? NOT_FOUND : result;
+        }
+    }
+
+    /**
+     * Returns the point id (ordinal) associated with the greatest term less than or equal to the given term, or
+     * a negative value if there is no such term.
+     * Complexity of this operation is O(log n).
+     *
+     * @param term target term to lookup
+     */
+    public long floor(@Nonnull ByteComparable term)
     {
         Preconditions.checkNotNull(term, "term null");
 

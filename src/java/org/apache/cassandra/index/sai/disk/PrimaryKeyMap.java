@@ -61,28 +61,30 @@ public interface PrimaryKeyMap extends Closeable
     PrimaryKey primaryKeyFromRowId(long sstableRowId);
 
     /**
-     * Returns a row Id for a {@link PrimaryKey}
+     * Returns a row Id for a {@link PrimaryKey}. If there is no such term, returns a negative value.
      *
      * @param key the {@link PrimaryKey} to lookup
      * @return the row Id associated with the {@link PrimaryKey}
      */
-    long rowIdFromPrimaryKey(PrimaryKey key);
+    long exactRowIdForPrimaryKey(PrimaryKey key);
 
     /**
-     * Returns the first row Id for a given {@link PrimaryKey}
+     * Returns the sstable row id associated with the least {@link PrimaryKey} greater than or equal to the given
+     * {@link PrimaryKey}. If there is no such term, returns a negative value.
      *
      * @param key the {@link PrimaryKey} to lookup
      * @return the first row Id associated with the {@link PrimaryKey}
      */
-    long firstRowIdFromPrimaryKey(PrimaryKey key);
+    long ceiling(PrimaryKey key);
 
     /**
-     * Returns the last row Id for a given {@link PrimaryKey}
+     * Returns the sstable row id associated with the greatest {@link PrimaryKey} less than or equal to the given
+     * {@link PrimaryKey}. If there is no such term, returns a negative value.
      *
      * @param key the {@link PrimaryKey} to lookup
-     * @return the last row Id associated with the {@link PrimaryKey}
+     * @return an sstable row id
      */
-    long lastRowIdFromPrimaryKey(PrimaryKey key);
+    long floor(PrimaryKey key);
 
     @Override
     default void close() throws IOException
