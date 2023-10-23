@@ -194,7 +194,7 @@ public class QueryController
             throw new IllegalArgumentException("non-null key required");
 
         SinglePartitionReadCommand partition = getPartitionReadCommand(key, executionController);
-        return initPartitionReadCommand(partition, executionController);
+        return executePartitionReadCommand(partition, executionController);
     }
 
     public SinglePartitionReadCommand getPartitionReadCommand(PrimaryKey key, ReadExecutionController executionController)
@@ -211,7 +211,7 @@ public class QueryController
                                                  makeFilter(key));
     }
 
-    public UnfilteredRowIterator initPartitionReadCommand(SinglePartitionReadCommand command, ReadExecutionController executionController)
+    public UnfilteredRowIterator executePartitionReadCommand(SinglePartitionReadCommand command, ReadExecutionController executionController)
     {
         try
         {
@@ -222,7 +222,6 @@ public class QueryController
             queryContext.checkpoint();
         }
     }
-
 
     /**
      * Build a {@link RangeIterator.Builder} from the given list of expressions by applying given operation (OR/AND).

@@ -23,14 +23,12 @@ import java.util.AbstractQueue;
 import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
@@ -40,7 +38,9 @@ import org.apache.commons.lang3.tuple.Triple;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.concurrent.ImmediateExecutor;
+import org.apache.cassandra.concurrent.LocalAwareExecutorService;
+import org.apache.cassandra.concurrent.SharedExecutorPool;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -48,7 +48,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.partitions.BasePartitionIterator;
-import org.apache.cassandra.db.partitions.ParallelizablePartitionIterator;
+import org.apache.cassandra.db.partitions.ParallelCommandProcessor;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.BaseRowIterator;
@@ -83,7 +83,7 @@ import org.apache.cassandra.utils.Pair;
 public class VectorTopKProcessor
 {
     protected static final Logger logger = LoggerFactory.getLogger(VectorTopKProcessor.class);
-    private static final Stage PARALLEL_STAGE = getParallelStage();
+    private static final LocalAwareExecutorService PARALLEL_EXECUTOR = getExecutor();
     private final ReadCommand command;
     private final IndexContext indexContext;
     private final float[] queryVector;
@@ -115,18 +115,18 @@ public class VectorTopKProcessor
      *
      * @return stage to use, default INDEX_READ
      */
-    private static Stage getParallelStage()
+    private static LocalAwareExecutorService getExecutor()
     {
-        String prop = System.getProperty("IndexReadStage.cassandra.stage", "INDEX_READ").toUpperCase();
-        try
+        boolean isParallel = Boolean.parseBoolean(System.getProperty("IndexRead.cassandra.parallel", "true"));
+
+        if (isParallel)
         {
-            return Stage.valueOf(prop);
+            String conf = System.getProperty("IndexRead.cassandra.parallel.threadnum");
+            int numThreads = Strings.isNullOrEmpty(conf) ? FBUtilities.getAvailableProcessors() * 2 : Integer.parseInt(conf);
+            return SharedExecutorPool.SHARED.newExecutor(numThreads, maximumPoolSize -> {}, "request", "IndexParallelRead");
         }
-        catch (IllegalArgumentException iae)
-        {
-            logger.error("Cannot get stage for the property -DIndexReadStage.cassandra.stage={}; falling back to INDEX_READ", prop);
-            return Stage.INDEX_READ;
-        }
+        else
+            return ImmediateExecutor.INSTANCE;
     }
 
     /**
@@ -141,8 +141,8 @@ public class VectorTopKProcessor
         // to store top-k results in primary key order
         TreeMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition = new TreeMap<>(Comparator.comparing(p -> p.key));
 
-        if (PARALLEL_STAGE != Stage.IMMEDIATE && partitions instanceof ParallelizablePartitionIterator) {
-            ParallelizablePartitionIterator pIter = (ParallelizablePartitionIterator) partitions;
+        if (PARALLEL_EXECUTOR != ImmediateExecutor.INSTANCE && partitions instanceof ParallelCommandProcessor) {
+            ParallelCommandProcessor pIter = (ParallelCommandProcessor) partitions;
             var commands = pIter.getUninitializedCommands();
             List<CompletableFuture<List<Triple<PartitionInfo, Row, Float>>>> results = new LinkedList<>();
 
@@ -153,12 +153,12 @@ public class VectorTopKProcessor
 
                 // run last command immediately, others in parallel (if possible)
                 count--;
-                var executor = count == 0 ? Stage.IMMEDIATE : PARALLEL_STAGE;
+                var executor = count == 0 ? ImmediateExecutor.INSTANCE : PARALLEL_EXECUTOR;
 
                 executor.maybeExecuteImmediately(() -> {
-                    try (var part = pIter.commandToIterator(command.left(), command.right()))
+                    try (var partitionRowIterator = pIter.commandToIterator(command.left(), command.right()))
                     {
-                        future.complete(part == null ? null : processPart(part, unfilteredByPartition, topK, true));
+                        future.complete(partitionRowIterator == null ? null : processPartition(partitionRowIterator, unfilteredByPartition, true));
                     }
                     catch (Throwable t)
                     {
@@ -181,7 +181,7 @@ public class VectorTopKProcessor
                 // have to close to move to the next partition, otherwise hasNext() fails
                 try (var part = partitions.next())
                 {
-                    var triples = processPart(part, unfilteredByPartition, topK, false);
+                    var triples = processPartition(part, unfilteredByPartition, false);
                     moveToPq(topK, triples);
                 }
             }
@@ -201,21 +201,20 @@ public class VectorTopKProcessor
         return new InMemoryUnfilteredPartitionIterator(command, unfilteredByPartition);
     }
 
-    private <U extends Unfiltered> List<Triple<PartitionInfo, Row, Float>> processPart(BaseRowIterator<U> part,
-                                                    SortedMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition,
-                                                    AbstractQueue<Triple<PartitionInfo, Row, Float>> topK,
-                                                    boolean isParallel)
+    private <U extends Unfiltered> List<Triple<PartitionInfo, Row, Float>> processPartition(BaseRowIterator<U> partitionRowIterator,
+                                                                                            SortedMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition,
+                                                                                            boolean isParallel)
     {
         // compute key and static row score once per partition
-        DecoratedKey key = part.partitionKey();
-        Row staticRow = part.staticRow();
-        final PartitionInfo partitionInfo = PartitionInfo.create(part);
+        DecoratedKey key = partitionRowIterator.partitionKey();
+        Row staticRow = partitionRowIterator.staticRow();
+        final PartitionInfo partitionInfo = PartitionInfo.create(partitionRowIterator);
         final float keyAndStaticScore = getScoreForRow(key, staticRow);
 
         List<Triple<PartitionInfo, Row, Float>> res = new LinkedList<>();
-        while (part.hasNext())
+        while (partitionRowIterator.hasNext())
         {
-            Unfiltered unfiltered = part.next();
+            Unfiltered unfiltered = partitionRowIterator.next();
             // Always include tombstones for coordinator. It relies on ReadCommand#withMetricsRecording to throw
             // TombstoneOverwhelmingException to prevent OOM.
             if (!unfiltered.isRow())

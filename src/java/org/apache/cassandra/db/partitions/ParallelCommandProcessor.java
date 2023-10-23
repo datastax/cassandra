@@ -26,7 +26,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.Pair;
 
 /**
- * An "iterator" over a number of unfiltered partitions (i.e. partitions containing deletion informations).
+ * An "processor" over a number of unfiltered partitions (i.e. partitions containing deletion information).
  *
  * Unlike {@link UnfilteredPartitionIterator}, this is designed to be used concurrently.
  *
@@ -44,7 +44,7 @@ import org.apache.cassandra.utils.Pair;
  *        var iter = partitions.commandToIterator(tuple.left(), tuple.right());
  *    }
  */
-public interface ParallelizablePartitionIterator
+public interface ParallelCommandProcessor
 {
     /**
      * Single-threaded call to get all commands and corresponding keys.
@@ -54,12 +54,12 @@ public interface ParallelizablePartitionIterator
     List<Pair<PrimaryKey, SinglePartitionReadCommand>> getUninitializedCommands();
 
     /**
-     *
+     * Get an iterator for a given command and key.
+     * This method can be called concurrently for reulst of getUninitializedCommands().
      *
      * @param command
      * @param key
      * @return
      */
     UnfilteredRowIterator commandToIterator(PrimaryKey key, SinglePartitionReadCommand command);
-
 }

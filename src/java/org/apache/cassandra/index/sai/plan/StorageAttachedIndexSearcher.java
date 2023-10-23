@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.function.Supplier;
@@ -40,7 +39,7 @@ import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.partitions.ParallelizablePartitionIterator;
+import org.apache.cassandra.db.partitions.ParallelCommandProcessor;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
@@ -174,7 +173,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     }
 
     private static class ResultRetriever extends AbstractIterator<UnfilteredRowIterator>
-                implements UnfilteredPartitionIterator, ParallelizablePartitionIterator
+                implements UnfilteredPartitionIterator, ParallelCommandProcessor
     {
         private final PrimaryKey firstPrimaryKey;
         private final PrimaryKey lastPrimaryKey;
@@ -262,6 +261,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return iterator;
         }
 
+        /**
+         * Eagerly collects all the keys.
+         * @return List of keys
+         */
         private @Nullable List<PrimaryKey> getKeys()
         {
             List<PrimaryKey> keys = new ArrayList<>();
@@ -289,6 +292,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return keys;
         }
 
+        /**
+         * Returns a list of commands that need to be executed to retrieve the data.
+         * @return list of (key, command) tuples
+         */
         @Override
         public List<Pair<PrimaryKey, SinglePartitionReadCommand>> getUninitializedCommands()
         {
@@ -298,10 +305,13 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                        .collect(Collectors.toList());
         }
 
+        /**
+         * Executes the given command and returns an iterator.
+         */
         @Override
         public UnfilteredRowIterator commandToIterator(PrimaryKey key, SinglePartitionReadCommand command)
         {
-            try (UnfilteredRowIterator partition = controller.initPartitionReadCommand(command, executionController))
+            try (UnfilteredRowIterator partition = controller.executePartitionReadCommand(command, executionController))
             {
                 queryContext.addPartitionsRead(1);
 
