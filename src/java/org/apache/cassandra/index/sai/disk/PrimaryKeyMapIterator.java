@@ -84,6 +84,7 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     @Override
     protected PrimaryKey computeNext()
     {
+        // currentRowId may be less than 0 if there are no keys within the keyRange passed at construction
         return currentRowId >= 0 && currentRowId < keys.count()
                ? keys.primaryKeyFromRowId(currentRowId++)
                : endOfData();
