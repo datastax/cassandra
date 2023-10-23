@@ -20,9 +20,6 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 
-import javax.annotation.Nonnull;
-
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
@@ -65,16 +62,14 @@ public final class PrimaryKeyMapIterator extends RangeIterator
         Token maxToken = keyRange.right.getToken();
         PrimaryKey minKeyBound = pkFactory.createTokenOnly(minToken);
         PrimaryKey maxKeyBound = pkFactory.createTokenOnly(maxToken);
-        PrimaryKey sstableMinKey = count > 0 ? keys.primaryKeyFromRowId(0) : null;
-        PrimaryKey sstableMaxKey = count > 0 ? keys.primaryKeyFromRowId(count - 1) : null;
-        PrimaryKey minKey = (sstableMinKey == null || minKeyBound.compareTo(sstableMinKey) > 0)
+        PrimaryKey sstableMinKey = keys.primaryKeyFromRowId(0);
+        PrimaryKey sstableMaxKey = keys.primaryKeyFromRowId(count - 1);
+        PrimaryKey minKey = (minKeyBound.compareTo(sstableMinKey) > 0)
                             ? minKeyBound
                             : sstableMinKey;
-        PrimaryKey maxKey = (sstableMaxKey == null || !maxToken.isMinimum() && maxKeyBound.compareTo(sstableMaxKey) < 0)
+        PrimaryKey maxKey = (!maxToken.isMinimum() && maxKeyBound.compareTo(sstableMaxKey) < 0)
                             ? maxKeyBound
                             : sstableMaxKey;
-        assert sstableMinKey != null;
-        assert sstableMaxKey != null;
 
         long startRowId = minToken.isMinimum() ? 0 : keys.ceiling(minKey);
         return new PrimaryKeyMapIterator(keys, minKey, maxKey, startRowId);
