@@ -571,7 +571,7 @@ public class LuceneAnalyzerTest extends SAITester
 
         waitForIndexQueryable();
 
-        execute("INSERT INTO %s (id, val) VALUES (0, 'abcdedfghijklmnopqrstuvwxyz')");
+        execute("INSERT INTO %s (id, val) VALUES (0, 'abcdedfghijklmnopqrstuvwxyz abcdedfghijklmnopqrstuvwxyz')");
         execute("INSERT INTO %s (id, val) VALUES (1, 'a')");
 
         // Verify that we get only PK 1 and not PK 0 since it is too large
