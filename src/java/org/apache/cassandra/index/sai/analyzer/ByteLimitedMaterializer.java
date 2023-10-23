@@ -64,7 +64,7 @@ public class ByteLimitedMaterializer
         {
             analyzer.reset(term);
             if (!analyzer.transformValue())
-                return List.of(analyzer.next());
+                return analyzer.hasNext() ? List.of(analyzer.next()) : List.of();
 
             List<ByteBuffer> tokens = new ArrayList<>();
             int bytesCount = 0;
