@@ -559,4 +559,28 @@ public class LuceneAnalyzerTest extends SAITester
 
         waitForIndexQueryable();
     }
+
+    @Test
+    public void testAnalyzerThatProducesTooManyBytesMustNotIndexTokens() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'{" +
+                    "\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"1\", \"maxGramSize\":\"26\"}},\n" +
+                    "\"filters\":[{\"name\":\"lowercase\"}]}'}");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES (0, 'abcdedfghijklmnopqrstuvwxyz')");
+        execute("INSERT INTO %s (id, val) VALUES (1, 'a')");
+
+        // Verify that we get only PK 1 and not PK 0 since it is too large
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT id FROM %s WHERE val : 'a'"), row(1));
+        });
+
+        // Also verify that compaction does not reintroduce the entry into the index.
+        compact();
+        assertRows(execute("SELECT id FROM %s WHERE val : 'a'"), row(1));
+    }
 }

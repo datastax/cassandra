@@ -26,6 +26,7 @@ package org.apache.cassandra.index.sai.memory;
 
 import java.nio.ByteBuffer;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.SortedSet;
@@ -45,6 +46,7 @@ import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.analyzer.ByteLimitedMaterializer;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
@@ -89,49 +91,44 @@ public class TrieMemoryIndex extends MemoryIndex
                                  LongConsumer onHeapAllocationsTracker,
                                  LongConsumer offHeapAllocationsTracker)
     {
-        AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
-        try
+        final AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
+        final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
+        value = TypeUtil.encode(value, indexContext.getValidator()).duplicate();
+        List<ByteBuffer> terms = ByteLimitedMaterializer.materializeTokens(analyzer, value, indexContext, primaryKey);
+
+        if (terms.isEmpty())
+            return;
+
+        final long initialSizeOnHeap = data.sizeOnHeap();
+        final long initialSizeOffHeap = data.sizeOffHeap();
+        final long reducerHeapSize = primaryKeysReducer.heapAllocations();
+
+        for (ByteBuffer term : terms)
         {
-            value = TypeUtil.encode(value, indexContext.getValidator());
-            analyzer.reset(value.duplicate());
-            final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
-            final long initialSizeOnHeap = data.sizeOnHeap();
-            final long initialSizeOffHeap = data.sizeOffHeap();
-            final long reducerHeapSize = primaryKeysReducer.heapAllocations();
+            setMinMaxTerm(term.duplicate());
 
-            while (analyzer.hasNext())
+            final ByteComparable encodedTerm = encode(term.duplicate());
+
+            try
             {
-                final ByteBuffer term = analyzer.next();
-
-                setMinMaxTerm(term.duplicate());
-
-                final ByteComparable encodedTerm = encode(term.duplicate());
-
-                try
+                if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
                 {
-                    if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
-                    {
-                        data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
-                    }
-                    else
-                    {
-                        data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
-                    }
+                    data.putRecursive(encodedTerm, primaryKey, primaryKeysReducer);
                 }
-                catch (MemtableTrie.SpaceExhaustedException e)
+                else
                 {
-                    Throwables.throwAsUncheckedException(e);
+                    data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
                 }
             }
+            catch (MemtableTrie.SpaceExhaustedException e)
+            {
+                Throwables.throwAsUncheckedException(e);
+            }
+        }
 
-            onHeapAllocationsTracker.accept((data.sizeOnHeap() - initialSizeOnHeap) +
-                                            (primaryKeysReducer.heapAllocations() - reducerHeapSize));
-            offHeapAllocationsTracker.accept(data.sizeOffHeap() - initialSizeOffHeap);
-        }
-        finally
-        {
-            analyzer.end();
-        }
+        onHeapAllocationsTracker.accept((data.sizeOnHeap() - initialSizeOnHeap) +
+                                        (primaryKeysReducer.heapAllocations() - reducerHeapSize));
+        offHeapAllocationsTracker.accept(data.sizeOffHeap() - initialSizeOffHeap);
     }
 
     @Override
