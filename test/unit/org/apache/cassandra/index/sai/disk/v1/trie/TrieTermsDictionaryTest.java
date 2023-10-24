@@ -178,6 +178,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             writer.add(asByteComparable("abcd"), 3);
             writer.add(asByteComparable("abd"), 4);
             writer.add(asByteComparable("ca"), 5);
+            writer.add(asByteComparable("caaaaa"), 6);
             fp = writer.complete(new MutableLong());
         }
 
@@ -185,14 +186,15 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
         {
             assertEquals(NOT_FOUND, reader.floor(asByteComparable("a")));
-            assertEquals(5, reader.floor(asByteComparable("z")));
+            assertEquals(6, reader.floor(asByteComparable("z")));
             assertEquals(0, reader.floor(asByteComparable("ab")));
             assertEquals(2, reader.floor(asByteComparable("abc")));
-            assertEquals(1, reader.floor(asByteComparable("abca")));
+            assertEquals(2, reader.floor(asByteComparable("abca")));
             assertEquals(1, reader.floor(asByteComparable("abb")));
-            assertEquals(NOT_FOUND, reader.floor(asByteComparable("abba")));
-            assertEquals(3, reader.floor(asByteComparable("abda")));
+            assertEquals(1, reader.floor(asByteComparable("abba")));
+            assertEquals(4, reader.floor(asByteComparable("abda")));
             assertEquals(4, reader.floor(asByteComparable("c")));
+            assertEquals(5, reader.floor(asByteComparable("caaaa")));
         }
     }
 
@@ -361,6 +363,10 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
 
     private ByteComparable asByteComparable(String s)
     {
-        return ByteComparable.fixedLength(ByteBufferUtil.bytes(s));
+        // It is important that we use this method and not ByteComparable.fixedLength(ByteBufferUtil.bytes(s))
+        // because they give us different results when comparing in the trie. See the javadoc of fixedLength
+        // for more details, but the tl;dr is that fixedLength only returns correct results for types that are
+        // all the same number of bytes, which is not the case for the strings used in this test.
+        return ByteComparable.of(s);
     }
 }
