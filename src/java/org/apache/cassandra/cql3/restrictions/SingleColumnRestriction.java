@@ -467,6 +467,11 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             }
         }
 
+        private ContainsRestriction(ColumnMetadata columnDef)
+        {
+            super(columnDef);
+        }
+
         @Override
         MultiColumnRestriction toMultiColumnRestriction()
         {
@@ -658,11 +663,6 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             to.negativeEntryKeys.addAll(from.negativeEntryKeys);
             to.negativeEntryValues.addAll(from.negativeEntryValues);
 
-        }
-
-        private ContainsRestriction(ColumnMetadata columnDef)
-        {
-            super(columnDef);
         }
     }
 
