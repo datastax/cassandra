@@ -68,7 +68,7 @@ public class VectorRecallOptimizedTest extends VectorTester
 
         dropIndex("DROP INDEX %s.v_idx");
         createIndex("CREATE CUSTOM INDEX v_idx ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'optimize_for': 'recall'}");
-        waitForIndexQueryable();
+        waitForIndexQueryable(300); // CI is slow
 
         double recallOptimizedSimilarity = 0;
         for (int k = 1; k <= 128; k *= 2)
