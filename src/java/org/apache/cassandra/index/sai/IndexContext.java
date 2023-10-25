@@ -511,11 +511,6 @@ public class IndexContext
         return TypeUtil.isNonFrozenCollection(column.type);
     }
 
-    public boolean isCollection()
-    {
-        return column.type.isCollection();
-    }
-
     public boolean isFrozen()
     {
         return TypeUtil.isFrozen(column.type);
