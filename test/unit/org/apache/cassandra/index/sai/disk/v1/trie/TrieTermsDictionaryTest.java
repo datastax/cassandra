@@ -179,6 +179,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             writer.add(asByteComparable("abd"), 4);
             writer.add(asByteComparable("ca"), 5);
             writer.add(asByteComparable("caaaaa"), 6);
+            writer.add(asByteComparable("cab"), 7);
             fp = writer.complete(new MutableLong());
         }
 
@@ -186,7 +187,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
         {
             assertEquals(NOT_FOUND, reader.floor(asByteComparable("a")));
-            assertEquals(6, reader.floor(asByteComparable("z")));
+            assertEquals(7, reader.floor(asByteComparable("z")));
             assertEquals(0, reader.floor(asByteComparable("ab")));
             assertEquals(2, reader.floor(asByteComparable("abc")));
             assertEquals(2, reader.floor(asByteComparable("abca")));
@@ -195,6 +196,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             assertEquals(4, reader.floor(asByteComparable("abda")));
             assertEquals(4, reader.floor(asByteComparable("c")));
             assertEquals(5, reader.floor(asByteComparable("caaaa")));
+            assertEquals(7, reader.floor(asByteComparable("cac")));
         }
     }
 
@@ -367,6 +369,6 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         // because they give us different results when comparing in the trie. See the javadoc of fixedLength
         // for more details, but the tl;dr is that fixedLength only returns correct results for types that are
         // all the same number of bytes, which is not the case for the strings used in this test.
-        return ByteComparable.of(s);
+        return ByteComparable.fixedLength(ByteBufferUtil.bytes(s));
     }
 }

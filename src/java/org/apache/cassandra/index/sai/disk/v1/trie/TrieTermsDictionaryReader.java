@@ -125,13 +125,9 @@ public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
      */
     public long floor(ByteComparable key)
     {
-        // followWithLesser positions us at the longest prefix of the key in the trie. We ignore followWithLesser's
-        // result because a prefix or an exact match both satisfy floor's requirement that the result is less than
-        // or equal to the key.
-        followWithLesser(key);
-        long initialResult;
-        if ((initialResult = getCurrentPayload()) != NOT_FOUND)
-            return initialResult;
+        Long result = prefixAndNeighbours(key, TrieTermsDictionaryReader::readPayload);
+        if (result != null && result != NOT_FOUND)
+            return result;
         if (lesserBranch == -1)
             return NOT_FOUND;
         goMax(lesserBranch);
@@ -241,7 +237,16 @@ public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
 
     private long getCurrentPayload()
     {
-        return getPayload(buf, payloadPosition(), payloadFlags());
+        return readPayload(payloadPosition(), payloadFlags());
+    }
+
+    private long readPayload(int payloadPos, int bits)
+    {
+        if (bits == 0)
+        {
+            return NOT_FOUND;
+        }
+        return SizedInts.read(buf, payloadPos, bits);
     }
 
     private long getPayload(ByteBuffer contents, int payloadPos, int bytes)
