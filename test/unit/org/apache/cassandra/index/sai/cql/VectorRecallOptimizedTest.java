@@ -26,6 +26,7 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.UntypedResultSet;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertTrue;
 
 public class VectorRecallOptimizedTest extends VectorTester
 {
@@ -83,6 +84,7 @@ public class VectorRecallOptimizedTest extends VectorTester
             }
         }
 
-        assert latencyOptimizedSimilarity < recallOptimizedSimilarity;
+        assertTrue(String.format("%.1s >= %.1s", latencyOptimizedSimilarity, recallOptimizedSimilarity),
+                   latencyOptimizedSimilarity < recallOptimizedSimilarity);
     }
 }
