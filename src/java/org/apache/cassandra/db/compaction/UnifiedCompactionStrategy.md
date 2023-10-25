@@ -435,11 +435,12 @@ UCS accepts these compaction strategy parameters:
   in this scenario (with base count 4) will reduce the potential number of sstables to ~160 of ~64GiB, which is still
   manageable both as memory overhead and individual compaction duration and space overhead. The balance between the
   two can be further tweaked by increasing $\lambda$ to get fewer but bigger sstables on the top level, and decreasing
-  it to favour a higher count of smaller sstables. The default value is 0, corresponding to a fixed sstable target size.
+  it to favour a higher count of smaller sstables. The default value is 0.333 meaning the sstable size
+  grows with the square root of the growth of the shard count.
 * **min_sstable_size** The minimum sstable size $m$, applicable when the base shard count will result is sstables
   that are considered too small. If set, the strategy will split the space into fewer than the base count shards, to
-  make the estimated sstables size at least as large as this value.
-  The default value is 0, which disables this feature.
+  make the estimated sstables size at least as large as this value. A value of 0 disables this feature.
+  The default value is 100MiB.
 * **expired_sstable_check_frequency_seconds**. Determines how often to check for expired SSTables.  
   The default value is 10 minutes.
 
