@@ -125,7 +125,7 @@ public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
      */
     public long floor(ByteComparable key)
     {
-        Long result = prefixAndNeighbours(key, TrieTermsDictionaryReader::readPayload);
+        Long result = prefixAndNeighbours(key, TrieTermsDictionaryReader::getPayload);
         if (result != null && result != NOT_FOUND)
             return result;
         if (lesserBranch == -1)
@@ -237,16 +237,12 @@ public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
 
     private long getCurrentPayload()
     {
-        return readPayload(payloadPosition(), payloadFlags());
+        return getPayload(payloadPosition(), payloadFlags());
     }
 
-    private long readPayload(int payloadPos, int bits)
+    private long getPayload(int payloadPos, int bits)
     {
-        if (bits == 0)
-        {
-            return NOT_FOUND;
-        }
-        return SizedInts.read(buf, payloadPos, bits);
+        return getPayload(buf, payloadPos, bits);
     }
 
     private long getPayload(ByteBuffer contents, int payloadPos, int bytes)
