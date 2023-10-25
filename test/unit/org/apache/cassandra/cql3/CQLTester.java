@@ -1381,12 +1381,22 @@ public abstract class CQLTester
 
     public void waitForTableIndexesQueryable()
     {
-        waitForTableIndexesQueryable(currentTable());
+        waitForTableIndexesQueryable(currentTable(), 60);
     }
 
-    public void waitForTableIndexesQueryable(String table)
+    public void waitForTableIndexesQueryable(int seconds)
     {
-        waitForTableIndexesQueryable(KEYSPACE, table);
+        waitForTableIndexesQueryable(currentTable(), seconds);
+    }
+
+    public void waitForTableIndexesQueryable(String table, int seconds)
+    {
+        waitForTableIndexesQueryable(KEYSPACE, table, seconds);
+    }
+
+    public void waitForTableIndexesQueryable(String keyspace, String table)
+    {
+        waitForTableIndexesQueryable(keyspace, table, 60);
     }
 
     /**
@@ -1394,10 +1404,11 @@ public abstract class CQLTester
      *
      * @param keyspace the table keyspace name
      * @param table the table name
+     * @param seconds the maximum time to wait for the indexes to be queryable
      */
-    public void waitForTableIndexesQueryable(String keyspace, String table)
+    public void waitForTableIndexesQueryable(String keyspace, String table, int seconds)
     {
-        waitForAssert(() -> Assertions.assertThat(getNotQueryableIndexes(keyspace, table)).isEmpty(), 60, TimeUnit.SECONDS);
+        waitForAssert(() -> Assertions.assertThat(getNotQueryableIndexes(keyspace, table)).isEmpty(), seconds, TimeUnit.SECONDS);
     }
 
     public void waitForIndexQueryable(String index)
