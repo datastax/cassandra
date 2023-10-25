@@ -106,7 +106,8 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             writer.add(asByteComparable.apply("abc"), 2);
             writer.add(asByteComparable.apply("abcd"), 3);
             writer.add(asByteComparable.apply("abd"), 4);
-            writer.add(asByteComparable.apply("cbbb"), 5);
+            writer.add(asByteComparable.apply("cbb"), 5);
+            writer.add(asByteComparable.apply("cbbbb"), 6);
             fp = writer.complete(new MutableLong());
         }
 
@@ -124,7 +125,9 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             assertEquals(2, reader.ceiling(asByteComparable.apply("abba")));
             assertEquals(5, reader.ceiling(asByteComparable.apply("cb")));
             assertEquals(5, reader.ceiling(asByteComparable.apply("c")));
-            assertEquals(NOT_FOUND, reader.ceiling(asByteComparable.apply("cbbbb")));
+            assertEquals(5, reader.ceiling(asByteComparable.apply("cbb")));
+            assertEquals(6, reader.ceiling(asByteComparable.apply("cbbb")));
+            assertEquals(NOT_FOUND, reader.ceiling(asByteComparable.apply("cbbbbb")));
         }
     }
 
