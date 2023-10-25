@@ -1,4 +1,10 @@
 /*
+ * All changes to the original code are Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -22,35 +28,33 @@ import java.nio.ByteBuffer;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.stream.Collectors;
+import java.util.Set;
+
+import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.StringType;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 
 public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
 {
+    public static final Set<AbstractType<?>> ANALYZABLE_TYPES = ImmutableSet.of(UTF8Type.instance, AsciiType.instance);
+
     protected ByteBuffer next = null;
-    protected String nextLiteral = null;
+    String nextLiteral = null;
 
     /**
-     * @return true if index value is transformed, e.g. normalized or lower-cased or tokenized.
+     * @return true if index value is transformed, eg. normalized or lower-cased or tokenized.
      */
     public abstract boolean transformValue();
-
-    /**
-     * Call when tokenization is finished.  Used by the LuceneAnalyzer.
-     */
-    public void end()
-    {
-    }
 
     /**
      * Note: This method does not advance, as we rely on {@link #hasNext()} to buffer the next value.
      *
      * @return the raw value currently buffered by this iterator
      */
-    @Override
     public ByteBuffer next()
     {
         if (next == null)
@@ -58,7 +62,22 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
         return next;
     }
 
-    @Override
+    /**
+     * Note: This method does not advance, as we rely on {@link #hasNext()} to buffer the next value.
+     *
+     * @return the string value currently buffered by this iterator
+     */
+    public String nextLiteral(AbstractType<?> validator)
+    {
+        if (nextLiteral != null)
+        {
+            return nextLiteral;
+        }
+
+        assert next != null;
+        return TypeUtil.getString(next, validator);
+    }
+
     public void remove()
     {
         throw new UnsupportedOperationException();
@@ -74,44 +93,24 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
         resetInternal(input);
     }
 
-    public interface AnalyzerFactory
-    {
-        AbstractAnalyzer create();
-
-        default void close()
-        {
-        }
-    }
-
-    public static AnalyzerFactory fromOptions(AbstractType<?> type, Map<String, String> options)
+    public static AbstractAnalyzer fromOptions(AbstractType<?> type, Map<String, String> options)
     {
         if (hasNonTokenizingOptions(options))
         {
-            if (type instanceof StringType)
+            if (TypeUtil.isIn(type, ANALYZABLE_TYPES))
             {
-                // validate options
-                NonTokenizingOptions.fromMap(options);
-                return () -> new NonTokenizingAnalyzer(type, options);
+                return new NonTokenizingAnalyzer(type, options);
             }
             else
             {
                 throw new InvalidRequestException("CQL type " + type.asCQL3Type() + " cannot be analyzed.");
             }
         }
-
-        return NoOpAnalyzer::new;
+        return new NoOpAnalyzer();
     }
 
     private static boolean hasNonTokenizingOptions(Map<String, String> options)
     {
-        return options.keySet().stream().anyMatch(NonTokenizingOptions::hasOption);
+        return options.get(NonTokenizingOptions.ASCII) != null || options.containsKey(NonTokenizingOptions.CASE_SENSITIVE) || options.containsKey(NonTokenizingOptions.NORMALIZE);
     }
-
-    public static Map<String, String> getAnalyzerOptions(Map<String, String> options)
-    {
-        return options.entrySet().stream()
-                      .filter(e -> NonTokenizingOptions.hasOption(e.getKey()))
-                      .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-    }
-
 }

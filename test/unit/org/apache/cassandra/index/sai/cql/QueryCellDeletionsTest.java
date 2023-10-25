@@ -19,11 +19,11 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
-public class QueryCellDeletionsTest extends AbstractQueryTester
+public class QueryCellDeletionsTest extends IndexQuerySupport
 {
     @Test
     public void testCellDeletions() throws Throwable
     {
-        IndexQuerySupport.cellDeletions(executor, dataModel, sets);
+        cellDeletions();
     }
 }

@@ -1,4 +1,10 @@
 /*
+ * All changes to the original code are Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
+/*
  *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -26,6 +32,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.SortedMap;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Maps;
@@ -33,35 +41,40 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.Tracker;
+import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
+import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
-import org.apache.cassandra.io.sstable.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.SSTableSimpleIterator;
+import org.apache.cassandra.io.sstable.format.RowIndexEntry;
+import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
-import org.apache.cassandra.utils.TimeUUID;
-import org.apache.cassandra.utils.concurrent.CountDownLatch;
+import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.concurrent.Ref;
 
-import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
+import static org.apache.cassandra.db.compaction.CompactionInfo.StopTrigger.TRUNCATE;
 
 /**
  * Multiple storage-attached indexes can start building concurrently. We need to make sure:
- * 1. Per-SSTable index files are built only once
+ * 1. Per-SSTable index files are built only once, eg. {@link IndexComponents#PER_SSTABLE_COMPONENTS}
  *      a. Per-SSTable index files already built, do nothing
  *      b. Per-SSTable index files are currently building, we need to wait until it's built in order to consider index built.
- * 2. Per-column index files are built for each column index
+ * 2. Per-column index files are built for each column index..{@link IndexComponents#perColumnComponents(String, boolean)}
  */
 public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 {
@@ -73,7 +86,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     private final StorageAttachedIndexGroup group;
     private final TableMetadata metadata;
     private final Tracker tracker;
-    private final TimeUUID compactionId = nextTimeUUID();
+    private final UUID compactionId = UUIDGen.getTimeUUID();
     private final boolean isFullRebuild;
     private final boolean isInitialBuild;
 
@@ -82,10 +95,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     private long bytesProcessed = 0;
     private final long totalSizeInBytes;
 
-    StorageAttachedIndexBuilder(StorageAttachedIndexGroup group,
-                                SortedMap<SSTableReader, Set<StorageAttachedIndex>> sstables,
-                                boolean isFullRebuild,
-                                boolean isInitialBuild)
+    StorageAttachedIndexBuilder(StorageAttachedIndexGroup group, SortedMap<SSTableReader, Set<StorageAttachedIndex>> sstables, boolean isFullRebuild, boolean isInitialBuild)
     {
         this.group = group;
         this.metadata = group.metadata();
@@ -99,10 +109,6 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     @Override
     public void build()
     {
-        logger.debug(logMessage(String.format("Starting %s %s index build...",
-                                              isInitialBuild ? "initial" : "non-initial",
-                                              isFullRebuild ? "full" : "partial")));
-
         for (Map.Entry<SSTableReader, Set<StorageAttachedIndex>> e : sstables.entrySet())
         {
             SSTableReader sstable = e.getKey();
@@ -116,12 +122,13 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             }
 
             if (indexSSTable(sstable, existing))
+            {
                 return;
+            }
         }
     }
 
-    private String logMessage(String message)
-    {
+    private String logMessage(String message) {
         return String.format("[%s.%s.*] %s", metadata.keyspace, metadata.name, message);
     }
 
@@ -130,12 +137,10 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
      */
     private boolean indexSSTable(SSTableReader sstable, Set<StorageAttachedIndex> indexes)
     {
-        logger.debug(logMessage("Starting index build on {}"), sstable.descriptor);
-
         CountDownLatch perSSTableFileLock = null;
         StorageAttachedIndexWriter indexWriter = null;
 
-        Ref<? extends SSTableReader> ref = sstable.tryRef();
+        Ref<SSTableReader> ref = sstable.tryRef();
         if (ref == null)
         {
             logger.warn(logMessage("Couldn't acquire reference to the SSTable {}. It may have been removed."), sstable.descriptor);
@@ -143,53 +148,66 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         }
 
         try (RandomAccessReader dataFile = sstable.openDataReader();
-             LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.INDEX_BUILD, sstable))
+             LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.INDEX_BUILD))
         {
-            perSSTableFileLock = shouldWritePerSSTableFiles(sstable);
-            // If we were unable to get the per-SSTable file lock it means that the
-            // per-SSTable components are already being built, so we only want to
-            // build the per-index components
-            boolean perIndexComponentsOnly = perSSTableFileLock == null;
+            perSSTableFileLock = shouldWriteTokenOffsetFiles(sstable);
+            boolean perColumnOnly = perSSTableFileLock == null;
             // remove existing per column index files instead of overwriting
-            IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
-            indexes.forEach(index -> indexDescriptor.deleteColumnIndex(index.getIndexContext()));
+            indexes.forEach(index -> index.deleteIndexFiles(sstable));
 
-            indexWriter = StorageAttachedIndexWriter.createBuilderWriter(indexDescriptor, indexes, txn, perIndexComponentsOnly);
+            final CompressionParams compressionParams = CryptoUtils.getCompressionParams(sstable);
 
+            indexWriter = new StorageAttachedIndexWriter(sstable.descriptor, indexes, txn, perColumnOnly, compressionParams);
+
+            long previousKeyPosition = 0;
             indexWriter.begin();
 
-            long previousBytesRead = 0;
-
-            try (KeyIterator keys = sstable.keyIterator())
+            try (KeyIterator keys = KeyIterator.forSSTable(sstable))
             {
                 while (keys.hasNext())
                 {
                     if (isStopRequested())
                     {
-                        logger.debug(indexDescriptor.logMessage("Index build has been stopped"));
                         throw new CompactionInterruptedException(getCompactionInfo());
                     }
 
-                    DecoratedKey key = keys.next();
+                    final DecoratedKey key = keys.next();
+                    final long keyPosition = keys.getKeyPosition();
 
-                    indexWriter.startPartition(key, -1, -1);
+                    indexWriter.startPartition(key, keyPosition);
 
-                    long position = sstable.getPosition(key, SSTableReader.Operator.EQ);
-                    dataFile.seek(position);
-                    ByteBufferUtil.readWithShortLength(dataFile); // key
+                    RowIndexEntry indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
+                    dataFile.seek(indexEntry.position);
+                    ByteBufferUtil.skipShortLength(dataFile); // key
 
-                    try (SSTableIdentityIterator partition = SSTableIdentityIterator.create(sstable, dataFile, key))
+                    /*
+                     * Not directly using {@link SSTableIdentityIterator#create(SSTableReader, FileDataInput, DecoratedKey)},
+                     * because we need to get position of partition level deletion and static row.
+                     */
+                    long partitionDeletionPosition = dataFile.getFilePointer();
+                    DeletionTime partitionLevelDeletion = DeletionTime.serializer.deserialize(dataFile);
+                    long staticRowPosition = dataFile.getFilePointer();
+
+                    indexWriter.partitionLevelDeletion(partitionLevelDeletion, partitionDeletionPosition);
+
+                    DeserializationHelper helper = new DeserializationHelper(sstable.metadata(), sstable.descriptor.version.correspondingMessagingVersion(), DeserializationHelper.Flag.LOCAL);
+
+                    try (SSTableSimpleIterator iterator = SSTableSimpleIterator.create(sstable.metadata(), dataFile, sstable.header, helper, partitionLevelDeletion);
+                         SSTableIdentityIterator partition = new SSTableIdentityIterator(sstable, key, partitionLevelDeletion, sstable.getFilename(), iterator))
                     {
                         // if the row has statics attached, it has to be indexed separately
                         if (metadata.hasStaticColumns())
-                            indexWriter.nextUnfilteredCluster(partition.staticRow());
+                            indexWriter.nextUnfilteredCluster(partition.staticRow(), staticRowPosition);
 
                         while (partition.hasNext())
-                            indexWriter.nextUnfilteredCluster(partition.next());
+                        {
+                            long unfilteredPosition = dataFile.getFilePointer();
+                            indexWriter.nextUnfilteredCluster(partition.next(), unfilteredPosition);
+                        }
                     }
-                    long bytesRead = keys.getBytesRead();
-                    bytesProcessed += bytesRead - previousBytesRead;
-                    previousBytesRead = bytesRead;
+
+                    bytesProcessed += keyPosition - previousKeyPosition;
+                    previousKeyPosition = keyPosition;
                 }
 
                 completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock);
@@ -206,14 +224,14 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
             if (t instanceof InterruptedException)
             {
+                // TODO: Is there anything that makes more sense than just restoring the interrupt?
                 logger.warn(logMessage("Interrupted while building indexes {} on SSTable {}"), indexes, sstable.descriptor);
                 Thread.currentThread().interrupt();
                 return true;
             }
             else if (t instanceof CompactionInterruptedException)
             {
-                //TODO Shouldn't do this if the stop was interrupted by a truncate
-                if (isInitialBuild)
+                if (isInitialBuild && trigger() != TRUNCATE)
                 {
                     logger.error(logMessage("Stop requested while building initial indexes {} on SSTable {}."), indexes, sstable.descriptor);
                     throw Throwables.unchecked(t);
@@ -237,7 +255,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             if (perSSTableFileLock != null)
             {
                 inProgress.remove(sstable);
-                perSSTableFileLock.decrement();
+                perSSTableFileLock.countDown();
             }
         }
     }
@@ -254,22 +272,19 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     }
 
     /**
-     * if the per sstable index files are already created, no need to write them again, unless found corrupted on rebuild
+     * if the per sstable index files are already created, not need to write it again, unless found corrupted on rebuild
      * if not created, try to acquire a lock, so only one builder will generate per sstable index files
      */
-    private CountDownLatch shouldWritePerSSTableFiles(SSTableReader sstable)
+    private CountDownLatch shouldWriteTokenOffsetFiles(SSTableReader sstable)
     {
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
-
-        // if per-table files are incomplete, full rebuild is requested, or checksum fails
-        if (!indexDescriptor.isPerSSTableIndexBuildComplete()
-            || isFullRebuild
-            || !indexDescriptor.validatePerSSTableComponents(IndexValidation.CHECKSUM))
+        // if per-table files are incomplete or checksum failed during full rebuild.
+        if (!IndexComponents.isGroupIndexComplete(sstable.descriptor) ||
+            (isFullRebuild && !IndexComponents.perSSTable(sstable).validatePerSSTableComponentsChecksum()))
         {
-            CountDownLatch latch = CountDownLatch.newCountDownLatch(1);
+            CountDownLatch latch = new CountDownLatch(1);
             if (inProgress.putIfAbsent(sstable, latch) == null)
             {
-                // lock owner should clean up existing per-SSTable files
+                // lock owner should cleanup existing per-SSTable files
                 group.deletePerSSTableFiles(Collections.singleton(sstable));
                 return latch;
             }
@@ -287,7 +302,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         if (latch != null)
         {
             // current builder owns the lock
-            latch.decrement();
+            latch.countDown();
         }
         else
         {
@@ -308,8 +323,8 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         }
 
         // register custom index components into existing sstables
-        sstable.registerComponents(StorageAttachedIndexGroup.getLiveComponents(sstable, existing), tracker);
-        Set<StorageAttachedIndex> incomplete = group.onSSTableChanged(Collections.emptyList(), Collections.singleton(sstable), existing, IndexValidation.NONE);
+        sstable.registerComponents(group.getComponents(existing), tracker);
+        Set<StorageAttachedIndex> incomplete = group.onSSTableChanged(Collections.emptyList(), Collections.singleton(sstable), existing, false, false);
 
         if (!incomplete.isEmpty())
         {
@@ -319,7 +334,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             // set of indexes for a new added/streamed SSTables, we terminate pessimistically. In
             // other words, we abort the SSTable index write across all column indexes and mark
             // then non-queryable until a restart or other incremental rebuild occurs.
-            throw new RuntimeException(logMessage("Failed to update views on column indexes " + incomplete + " on indexes " + indexes + '.'));
+            throw new RuntimeException(logMessage("Failed to update views on column indexes " + incomplete + " on indexes " + indexes + "."));
         }
     }
 
@@ -342,11 +357,11 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
         if (!dropped.isEmpty())
         {
-            String droppedIndexes = dropped.stream().map(sai -> sai.getIndexContext().getIndexName()).collect(Collectors.toList()).toString();
+            String droppedIndexes = dropped.stream().map(sai -> sai.getContext().getIndexName()).collect(Collectors.toList()).toString();
             if (isFullRebuild)
                 throw new RuntimeException(logMessage(String.format("%s are dropped, will stop index build.", droppedIndexes)));
             else
-                logger.debug(logMessage("Skip building dropped index {} on sstable {}"), droppedIndexes, descriptor.baseFile());
+                logger.debug(logMessage("Skip building dropped index {} on sstable {}"), droppedIndexes, descriptor.baseFilename());
         }
 
         return existing;

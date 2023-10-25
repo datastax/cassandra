@@ -50,6 +50,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.reads.repair.NoopReadRepair;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
@@ -136,7 +137,9 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
             return false;
 
         Index.QueryPlan queryPlan = command.indexQueryPlan();
-        if (queryPlan == null )
+        IndexMetadata indexMetadata = queryPlan == null ? null : queryPlan.getFirst().getIndexMetadata();
+
+        if (indexMetadata == null || !indexMetadata.isCustom()) {
             return true;
 
         return queryPlan.supportsReplicaFilteringProtection(command.rowFilter());

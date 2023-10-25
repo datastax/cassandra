@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
@@ -32,6 +33,8 @@ import org.apache.cassandra.db.MultiCBuilder;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.serializers.ListSerializer;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
@@ -230,7 +233,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                                    QueryOptions options)
         {
             List<ByteBuffer> values = getValues(options);
-            ByteBuffer buffer = ListSerializer.pack(values, values.size());
+            for (ByteBuffer v : values)
+            {
+                checkNotNull(v, "Invalid null value for column %s", columnDef.name);
+                checkBindValueSet(v, "Invalid unset value for column %s", columnDef.name);
+            }
+            ByteBuffer buffer = ListSerializer.pack(values, values.size(), ProtocolVersion.V3);
             filter.add(columnDef, Operator.IN, buffer);
         }
 

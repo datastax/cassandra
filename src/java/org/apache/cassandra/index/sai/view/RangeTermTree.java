@@ -1,4 +1,10 @@
 /*
+ * All changes to the original code are Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,25 +24,27 @@
 
 package org.apache.cassandra.index.sai.view;
 
+import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
-import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.disk.SSTableIndex;
+import org.apache.cassandra.index.sai.ColumnContext;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Interval;
 import org.apache.cassandra.utils.IntervalTree;
 
-public class RangeTermTree
+public class RangeTermTree implements TermTree
 {
-    private static final Logger logger = LoggerFactory.getLogger(RangeTermTree.class);
+    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     protected final ByteBuffer min, max;
     protected final AbstractType<?> comparator;
@@ -51,34 +59,23 @@ public class RangeTermTree
         this.comparator = comparator;
     }
 
-    public List<SSTableIndex> search(Expression e)
+    public Set<SSTableIndex> search(Expression e)
     {
         ByteBuffer minTerm = e.lower == null ? min : e.lower.value.encoded;
         ByteBuffer maxTerm = e.upper == null ? max : e.upper.value.encoded;
 
-        return rangeTree.search(Interval.create(new Term(minTerm, comparator),
-                                                new Term(maxTerm, comparator),
-                                                null));
+        return new HashSet<>(rangeTree.search(Interval.create(new Term(minTerm, comparator),
+                                                              new Term(maxTerm, comparator),
+                                                              null)));
     }
 
-    static class Builder
+    static class Builder extends TermTree.Builder
     {
-        private final AbstractType<?> comparator;
-        private ByteBuffer min, max;
-
         final List<Interval<Term, SSTableIndex>> intervals = new ArrayList<>();
 
         protected Builder(AbstractType<?> comparator)
         {
-            this.comparator = comparator;
-        }
-
-        public final void add(SSTableIndex index)
-        {
-            addIndex(index);
-
-            min = min == null || TypeUtil.compare(min, index.minTerm(), comparator) > 0 ? index.minTerm() : min;
-            max = max == null || TypeUtil.compare(max, index.maxTerm(), comparator) < 0 ? index.maxTerm() : max;
+            super(comparator);
         }
 
         public void addIndex(SSTableIndex index)
@@ -88,7 +85,7 @@ public class RangeTermTree
 
             if (logger.isTraceEnabled())
             {
-                IndexContext context = index.getIndexContext();
+                ColumnContext context = index.getColumnContext();
                 logger.trace(context.logMessage("Adding index for SSTable {} with minTerm={} and maxTerm={}..."), 
                                                 index.getSSTable().descriptor, 
                                                 comparator.compose(index.minTerm()), 
@@ -98,7 +95,7 @@ public class RangeTermTree
             intervals.add(interval);
         }
 
-        public RangeTermTree build()
+        public TermTree build()
         {
             return new RangeTermTree(min, max, IntervalTree.build(intervals), comparator);
         }
@@ -119,16 +116,9 @@ public class RangeTermTree
             this.comparator = comparator;
         }
 
-        @Override
         public int compareTo(Term o)
         {
             return TypeUtil.compare(term, o.term, comparator);
-        }
-
-        @Override
-        public String toString()
-        {
-            return MoreObjects.toStringHelper(this).add("term", comparator.getString(term)).toString();
         }
     }
 }

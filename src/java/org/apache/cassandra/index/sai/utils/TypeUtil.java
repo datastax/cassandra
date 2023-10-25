@@ -1,4 +1,10 @@
 /*
+ * All changes to the original code are Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -24,22 +30,22 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.Set;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import com.googlecode.concurrenttrees.radix.ConcurrentRadixTree;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.IntegerType;
-import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.ReversedType;
-import org.apache.cassandra.db.marshal.StringType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -47,6 +53,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FastByteOperations;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -62,12 +69,6 @@ public class TypeUtil
      * (full) values.
      */
     public static final int DECIMAL_APPROXIMATION_BYTES = 24;
-
-    public static final int BIG_INTEGER_APPROXIMATION_BYTES = 20;
-
-    public static final int INET_ADDRESS_SIZE = 16;
-
-    public static final int DEFAULT_FIXED_LENGTH = 16;
 
     private TypeUtil() {}
 
@@ -106,7 +107,7 @@ public class TypeUtil
      */
     public static ByteBuffer min(ByteBuffer a, ByteBuffer b, AbstractType<?> type)
     {
-        return a == null ? b : (b == null || compare(b, a, type) > 0) ? a : b;
+        return a == null ?  b : (b == null || compare(b, a, type) > 0) ? a : b;
     }
 
     /**
@@ -115,7 +116,7 @@ public class TypeUtil
      */
     public static ByteBuffer max(ByteBuffer a, ByteBuffer b, AbstractType<?> type)
     {
-        return a == null ? b : (b == null || compare(b, a, type) < 0) ? a : b;
+        return a == null ?  b : (b == null || compare(b, a, type) < 0) ? a : b;
     }
 
     /**
@@ -124,7 +125,7 @@ public class TypeUtil
      */
     public static ByteComparable min(ByteComparable a, ByteComparable b)
     {
-        return a == null ? b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS50) > 0) ? a : b;
+        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS41) > 0) ? a : b;
     }
 
     /**
@@ -133,7 +134,7 @@ public class TypeUtil
      */
     public static ByteComparable max(ByteComparable a, ByteComparable b)
     {
-        return a == null ? b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS50) < 0) ? a : b;
+        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS41) < 0) ? a : b;
     }
 
     /**
@@ -145,17 +146,17 @@ public class TypeUtil
         if (type.isValueLengthFixed())
             return type.valueLengthIfFixed();
         else if (isInetAddress(type))
-            return INET_ADDRESS_SIZE;
+            return 16;
         else if (isBigInteger(type))
-            return BIG_INTEGER_APPROXIMATION_BYTES;
-        else if (isBigDecimal(type))
+            return 20;
+        else if (type instanceof DecimalType)
             return DECIMAL_APPROXIMATION_BYTES;
-        return DEFAULT_FIXED_LENGTH;
+        return 16;
     }
 
-    public static AbstractType<?> cellValueType(ColumnMetadata columnMetadata, IndexTarget.Type indexType)
+    public static AbstractType<?> cellValueType(Pair<ColumnMetadata, IndexTarget.Type> target)
     {
-        AbstractType<?> type = columnMetadata.type;
+        AbstractType<?> type = target.left.type;
         if (isNonFrozenCollection(type))
         {
             CollectionType<?> collection = ((CollectionType<?>) type);
@@ -166,7 +167,7 @@ public class TypeUtil
                 case SET:
                     return collection.nameComparator();
                 case MAP:
-                    switch (indexType)
+                    switch (target.right)
                     {
                         case KEYS:
                             return collection.nameComparator();
@@ -209,42 +210,39 @@ public class TypeUtil
     {
         if (type instanceof InetAddressType || type instanceof IntegerType || type instanceof DecimalType)
             return ByteSource.optionalFixedLength(ByteBufferAccessor.instance, value);
-        // The LongType.asComparableBytes uses variableLengthInteger which doesn't play well with
-        // the balanced tree because it is expecting fixed length data. So for SAI we use a optionalSignedFixedLengthNumber
-        // to keep all comparable values the same length
-        else if (type instanceof LongType)
-            return ByteSource.optionalSignedFixedLengthNumber(ByteBufferAccessor.instance, value);
         return type.asComparableBytes(value, version);
     }
 
     /**
      * Fills a byte array with the comparable bytes for a type.
      * <p>
-     * This method expects a {@code value} parameter generated by calling {@link #asIndexBytes(ByteBuffer, AbstractType)}.
+     * This method expects a {@code value} parameter generated by calling {@link #encode(ByteBuffer, AbstractType)}.
      * It is not generally safe to pass the output of other serialization methods to this method.  For instance, it is
      * not generally safe to pass the output of {@link AbstractType#decompose(Object)} as the {@code value} parameter
      * (there are certain types for which this is technically OK, but that doesn't hold for all types).
      *
-     * @param value a value buffer returned by {@link #asIndexBytes(ByteBuffer, AbstractType)}
+     * @param value a value buffer returned by {@link #encode(ByteBuffer, AbstractType)}
      * @param type the type associated with the encoded {@code value} parameter
      * @param bytes this method's output
      */
     public static void toComparableBytes(ByteBuffer value, AbstractType<?> type, byte[] bytes)
     {
         if (isInetAddress(type))
-            ByteBufferUtil.copyBytes(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, INET_ADDRESS_SIZE);
+            ByteBufferUtil.arrayCopy(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, 16);
         else if (isBigInteger(type))
-            ByteBufferUtil.copyBytes(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, BIG_INTEGER_APPROXIMATION_BYTES);
-        else if (isBigDecimal(type))
-            ByteBufferUtil.copyBytes(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, DECIMAL_APPROXIMATION_BYTES);
+            ByteBufferUtil.arrayCopy(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, 20);
+        else if (type instanceof DecimalType)
+            ByteBufferUtil.arrayCopy(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, DECIMAL_APPROXIMATION_BYTES);
         else
-            ByteSourceInverse.copyBytes(asComparableBytes(value, type, ByteComparable.Version.OSS50), bytes);
+            ByteBufferUtil.toBytes(type.asComparableBytes(value, ByteComparable.Version.OSS41), bytes);
     }
 
     /**
-     * Translates the external value of specific types into a format used by the index.
+     * Encode an external term from a memtable index or a compaction. The purpose of this is to
+     * allow terms of particular types to be handled differently and not use the default
+     * {@link ByteComparable} encoding.
      */
-    public static ByteBuffer asIndexBytes(ByteBuffer value, AbstractType<?> type)
+    public static ByteBuffer encode(ByteBuffer value, AbstractType<?> type)
     {
         if (value == null)
             return null;
@@ -270,7 +268,7 @@ public class TypeUtil
             return compareInet(b1, b2);
         // BigInteger values, frozen types and composite types (map entries) use compareUnsigned to maintain
         // a consistent order between the in-memory index and the on-disk index.
-        else if (isBigInteger(type) || isBigDecimal(type) || isCompositeOrFrozen(type))
+        else if (isBigInteger(type) || isBigDecimal(type) || isCompositeOrFrozenCollection(type))
             return FastByteOperations.compareUnsigned(b1, b2);
 
         return type.compare(b1, b2 );
@@ -288,7 +286,7 @@ public class TypeUtil
         if (isInetAddress(type))
             return compareInet(requestedValue.encoded, columnValue.encoded);
         // Override comparisons for frozen collections and composite types (map entries)
-        else if (isCompositeOrFrozen(type))
+        else if (isCompositeOrFrozenCollection(type))
             return FastByteOperations.compareUnsigned(requestedValue.raw, columnValue.raw);
 
         return type.compare(requestedValue.raw, columnValue.raw);
@@ -296,15 +294,14 @@ public class TypeUtil
 
     public static Iterator<ByteBuffer> collectionIterator(AbstractType<?> validator,
                                                           ComplexColumnData cellData,
-                                                          ColumnMetadata columnMetadata,
-                                                          IndexTarget.Type indexType,
-                                                          long nowInSecs)
+                                                          Pair<ColumnMetadata, IndexTarget.Type> target,
+                                                          int nowInSecs)
     {
         if (cellData == null)
             return null;
 
         Stream<ByteBuffer> stream = StreamSupport.stream(cellData.spliterator(), false).filter(cell -> cell != null && cell.isLive(nowInSecs))
-                                                 .map(cell -> cellValue(columnMetadata, indexType, cell));
+                                                 .map(cell -> cellValue(target, cell));
 
         if (isInetAddress(validator))
             stream = stream.sorted((c1, c2) -> compareInet(encodeInetAddress(c1), encodeInetAddress(c2)));
@@ -315,24 +312,25 @@ public class TypeUtil
     public static Comparator<ByteBuffer> comparator(AbstractType<?> type)
     {
         // Override the comparator for BigInteger, frozen collections and composite types
-        if (isBigInteger(type) || isBigDecimal(type) || isCompositeOrFrozen(type))
+        if (isBigInteger(type) || isBigDecimal(type) || isCompositeOrFrozenCollection(type))
             return FastByteOperations::compareUnsigned;
 
         return type;
     }
 
-    private static ByteBuffer cellValue(ColumnMetadata columnMetadata, IndexTarget.Type indexType, Cell<?> cell)
+    private static ByteBuffer cellValue(Pair<ColumnMetadata, IndexTarget.Type> target, Cell cell)
     {
-        if (columnMetadata.type.isCollection() && columnMetadata.type.isMultiCell())
+        if (target.left.type.isCollection() && target.left.type.isMultiCell())
         {
-            switch (((CollectionType<?>) columnMetadata.type).kind)
+            switch (((CollectionType<?>) target.left.type).kind)
             {
                 case LIST:
+                    //TODO Is there any optimisation can be done here with cell values?
                     return cell.buffer();
                 case SET:
                     return cell.path().get(0);
                 case MAP:
-                    switch (indexType)
+                    switch (target.right)
                     {
                         case KEYS:
                             return cell.path().get(0);
@@ -359,7 +357,7 @@ public class TypeUtil
 
     private static boolean isIPv6(ByteBuffer address)
     {
-        return address.remaining() == INET_ADDRESS_SIZE;
+        return address.remaining() == 16;
     }
 
     /**
@@ -374,9 +372,9 @@ public class TypeUtil
         if (value.remaining() == 4)
         {
             int position = value.hasArray() ? value.arrayOffset() + value.position() : value.position();
-            ByteBuffer mapped = ByteBuffer.allocate(INET_ADDRESS_SIZE);
+            ByteBuffer mapped = ByteBuffer.allocate(16);
             System.arraycopy(IPV4_PREFIX, 0, mapped.array(), 0, IPV4_PREFIX.length);
-            ByteBufferUtil.copyBytes(value, position, mapped, IPV4_PREFIX.length, value.remaining());
+            ByteBufferUtil.arrayCopy(value, position, mapped, IPV4_PREFIX.length, value.remaining());
             return mapped;
         }
         return value;
@@ -389,7 +387,7 @@ public class TypeUtil
      *
      * The format of the encoding is:
      *
-     *  The first 4 bytes contain the integer length of the {@link BigInteger} byte array
+     *  The first 4 bytes contain the length of the {@link BigInteger} byte array
      *  with the top bit flipped for positive values.
      *
      *  The remaining 16 bytes contain the 16 most significant bytes of the
@@ -402,18 +400,18 @@ public class TypeUtil
     {
         int size = value.remaining();
         int position = value.hasArray() ? value.arrayOffset() + value.position() : value.position();
-        byte[] bytes = new byte[BIG_INTEGER_APPROXIMATION_BYTES];
-        if (size < BIG_INTEGER_APPROXIMATION_BYTES - Integer.BYTES)
+        byte[] bytes = new byte[20];
+        if (size < 16)
         {
-            ByteBufferUtil.copyBytes(value, position, bytes, bytes.length - size, size);
+            ByteBufferUtil.arrayCopy(value, position, bytes, bytes.length - size, size);
             if ((bytes[bytes.length - size] & 0x80) != 0)
-                Arrays.fill(bytes, Integer.BYTES, bytes.length - size, (byte)0xff);
+                Arrays.fill(bytes, 4, bytes.length - size, (byte)0xff);
             else
-                Arrays.fill(bytes, Integer.BYTES, bytes.length - size, (byte)0x00);
+                Arrays.fill(bytes, 4, bytes.length - size, (byte)0x00);
         }
         else
         {
-            ByteBufferUtil.copyBytes(value, position, bytes, Integer.BYTES, BIG_INTEGER_APPROXIMATION_BYTES - Integer.BYTES);
+            ByteBufferUtil.arrayCopy(value, position, bytes, 4, 16);
         }
         if ((bytes[4] & 0x80) != 0)
         {
@@ -427,43 +425,36 @@ public class TypeUtil
         return ByteBuffer.wrap(bytes);
     }
 
+    /* Type comparison to get rid of ReversedType */
+
     /**
      * Returns <code>true</code> if values of the given {@link AbstractType} should be indexed as literals.
      */
     public static boolean isLiteral(AbstractType<?> type)
     {
-        return isString(type) || isCompositeOrFrozen(type) || baseType(type) instanceof BooleanType;
+        return isUTF8OrAscii(type) || isCompositeOrFrozenCollection(type);
     }
 
     /**
-     * Returns <code>true</code> if given {@link AbstractType} is based on a string, e.g. UTF8 or Ascii
+     * Returns <code>true</code> if given {@link AbstractType} is UTF8 or Ascii
      */
-    public static boolean isString(AbstractType<?> type)
+    public static boolean isUTF8OrAscii(AbstractType<?> type)
     {
         type = baseType(type);
-        return type instanceof StringType;
+        return type instanceof UTF8Type || type instanceof AsciiType;
     }
 
     /**
-     * Returns <code>true</code> if given {@link AbstractType} is a Composite(map entry) or frozen.
+     * Returns <code>true</code> if given {@link AbstractType} is Composite(map entry) or frozen-collection.
      */
-    public static boolean isCompositeOrFrozen(AbstractType<?> type)
+    public static boolean isCompositeOrFrozenCollection(AbstractType<?> type)
     {
         type = baseType(type);
-        return type instanceof CompositeType || isFrozen(type);
+        return type instanceof CompositeType || (type.isCollection() && !type.isMultiCell());
     }
 
     /**
-     * Returns <code>true</code> if given {@link AbstractType} is frozen.
-     */
-    public static boolean isFrozen(AbstractType<?> type)
-    {
-        type = baseType(type);
-        return !type.subTypes().isEmpty() && !type.isMultiCell();
-    }
-
-    /**
-     * Returns <code>true</code> if given {@link AbstractType} is a frozen collection.
+     * Returns <code>true</code> if given {@link AbstractType} is frozen-collection.
      */
     public static boolean isFrozenCollection(AbstractType<?> type)
     {
@@ -472,12 +463,21 @@ public class TypeUtil
     }
 
     /**
-     * Returns <code>true</code> if given {@link AbstractType} is a non-frozen collection.
+     * Returns <code>true</code> if given {@link AbstractType} is non-frozen-collection.
      */
     public static boolean isNonFrozenCollection(AbstractType<?> type)
     {
         type = baseType(type);
         return type.isCollection() && type.isMultiCell();
+    }
+
+    /**
+     * Returns <code>true</code> if given {@link AbstractType} is included in the types.
+     */
+    public static boolean isIn(AbstractType<?> type, Set<AbstractType<?>> types)
+    {
+        type = baseType(type);
+        return types.contains(type);
     }
 
     /**
@@ -526,7 +526,7 @@ public class TypeUtil
 
     public static ByteBuffer encodeDecimal(ByteBuffer value)
     {
-        ByteSource bs = DecimalType.instance.asComparableBytes(value, ByteComparable.Version.OSS50);
+        ByteSource bs = DecimalType.instance.asComparableBytes(value, ByteComparable.Version.OSS41);
         bs = ByteSource.cutOrRightPad(bs, DECIMAL_APPROXIMATION_BYTES, 0);
         return ByteBuffer.wrap(ByteSourceInverse.readBytes(bs, DECIMAL_APPROXIMATION_BYTES));
     }

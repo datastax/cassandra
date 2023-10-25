@@ -215,6 +215,10 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if ((kind == IndexMetadata.Kind.CUSTOM) && !SchemaConstants.isValidName(target.column.toString()))
             throw ire(INVALID_CUSTOM_INDEX_TARGET, target.column, SchemaConstants.NAME_LENGTH);
 
+        if ((kind == IndexMetadata.Kind.CUSTOM) && !SchemaConstants.isValidName(target.column.toString()))
+            throw ire("Column '%s' is longer than the permissible name length of %d characters or" +
+                      " contains non-alphanumeric-underscore characters", target.column, SchemaConstants.NAME_LENGTH);
+
         if (column.type.referencesDuration())
         {
             if (column.type.isCollection())

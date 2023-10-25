@@ -23,10 +23,8 @@ package org.apache.cassandra.index.sai.functional;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
-import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.v1.bbtree.NumericIndexWriter;
+import org.apache.cassandra.index.sai.disk.v1.NumericIndexWriter;
 
 import static org.junit.Assert.assertEquals;
 
@@ -38,6 +36,8 @@ public class FlushingTest extends SAITester
         createTable(CREATE_TABLE_TEMPLATE);
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
 
+        // BDKWriter#valueCount is updated when leaf values are written at BKDWriter#writeLeakBlock on every
+        // BKDWriter#DEFAULT_MAX_POINTS_IN_LEAF_NODE (1024) number of points, see LUCENE-8765
         int overwrites = NumericIndexWriter.MAX_POINTS_IN_LEAF_NODE + 1;
         for (int j = 0; j < overwrites; j++)
         {
@@ -53,8 +53,9 @@ public class FlushingTest extends SAITester
     @Test
     public void testFlushingOverwriteDelete() throws Throwable
     {
+        String table = "flush_overwrite_delete";
         createTable(CREATE_TABLE_TEMPLATE);
-        IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
+        String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
 
         int sstables = 3;
         for (int j = 0; j < sstables; j++)
@@ -66,14 +67,14 @@ public class FlushingTest extends SAITester
 
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 0");
         assertEquals(0, rows.all().size());
-        verifyIndexFiles(numericIndexContext, null, sstables, 0, 0, sstables, 0);
-        verifySSTableIndexes(numericIndexContext.getIndexName(), sstables, 0);
+        verifyIndexFiles(sstables, 0, 0, sstables);
+        verifySSTableIndexes(v1IndexName, sstables, 0);
 
         compact();
-        waitForAssert(() -> verifyIndexFiles(numericIndexContext, null, 1, 0, 0, 1, 0));
+        waitForAssert(() -> verifyIndexFiles(1, 0, 0, 1));
 
         rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 0");
         assertEquals(0, rows.all().size());
-        verifySSTableIndexes(numericIndexContext.getIndexName(), 1, 0);
+        verifySSTableIndexes(v1IndexName, 1, 0);
     }
 }

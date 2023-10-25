@@ -21,15 +21,15 @@ import java.util.concurrent.TimeUnit;
 
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.Timer;
-import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 public abstract class ColumnQueryMetrics extends AbstractMetrics
 {
-    protected ColumnQueryMetrics(IndexContext indexContext)
+    private ColumnQueryMetrics(String indexName, TableMetadata table)
     {
-        super(indexContext.getKeyspace(), indexContext.getTable(), indexContext.getIndexName(), "ColumnQueryMetrics");
+        super(table, indexName, "ColumnQueryMetrics");
     }
 
     public static class TrieIndexMetrics extends ColumnQueryMetrics implements QueryEventListener.TrieIndexEventListener
@@ -43,9 +43,9 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
 
         private final QueryEventListener.PostingListEventListener postingsListener;
 
-        public TrieIndexMetrics(IndexContext indexContext)
+        public TrieIndexMetrics(String indexName, TableMetadata table)
         {
-            super(indexContext);
+            super(indexName, table);
 
             termsTraversalTotalTime = Metrics.timer(createMetricName("TermsLookupLatency"));
 
@@ -70,12 +70,12 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         }
     }
 
-    public static class BalancedTreeIndexMetrics extends ColumnQueryMetrics implements QueryEventListener.BalancedTreeEventListener
+    public static class BKDIndexMetrics extends ColumnQueryMetrics implements QueryEventListener.BKDIndexEventListener
     {
-        private static final String BALANCED_TREE_POSTINGS_TYPE = "BalancedTreePostings";
+        private static final String BKD_POSTINGS_TYPE = "KDTreePostings";
 
         /**
-         * Balanced Tree index metrics.
+         * BKD index metrics.
          */
         private final Timer intersectionLatency;
         private final Meter postingsNumPostings;
@@ -83,16 +83,16 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
 
         private final QueryEventListener.PostingListEventListener postingsListener;
 
-        public BalancedTreeIndexMetrics(IndexContext indexContext)
+        public BKDIndexMetrics(String indexName, TableMetadata table)
         {
-            super(indexContext);
+            super(indexName, table);
 
-            intersectionLatency = Metrics.timer(createMetricName("BalancedTreeIntersectionLatency"));
-            intersectionEarlyExits = Metrics.meter(createMetricName("BalancedTreeIntersectionEarlyExits"));
+            intersectionLatency = Metrics.timer(createMetricName("KDTreeIntersectionLatency"));
+            intersectionEarlyExits = Metrics.meter(createMetricName("KDTreeIntersectionEarlyExits"));
 
-            postingsNumPostings = Metrics.meter(createMetricName("NumPostings", BALANCED_TREE_POSTINGS_TYPE));
+            postingsNumPostings = Metrics.meter(createMetricName("NumPostings", BKD_POSTINGS_TYPE));
 
-            Meter postingDecodes = Metrics.meter(createMetricName("PostingDecodes", BALANCED_TREE_POSTINGS_TYPE));
+            Meter postingDecodes = Metrics.meter(createMetricName("PostingDecodes", BKD_POSTINGS_TYPE));
 
             postingsListener = new PostingListEventsMetrics(postingDecodes);
         }

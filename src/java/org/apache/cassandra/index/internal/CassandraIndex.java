@@ -334,7 +334,7 @@ public abstract class CassandraIndex implements Index
                               final long nowInSec,
                               final WriteContext ctx,
                               final IndexTransaction.Type transactionType,
-                              Memtable memtable)
+                              final Memtable memtable)
     {
         /*
          * Indexes on regular and static columns (the non primary-key ones) only care about updates with live

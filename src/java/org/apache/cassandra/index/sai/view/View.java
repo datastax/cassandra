@@ -1,4 +1,10 @@
 /*
+ * All changes to the original code are Copyright DataStax, Inc.
+ *
+ * Please see the included license file for details.
+ */
+
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,60 +24,64 @@
 
 package org.apache.cassandra.index.sai.view;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.disk.SSTableIndex;
+import org.apache.cassandra.index.sai.ColumnContext;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.Interval;
+import org.apache.cassandra.utils.IntervalTree;
 
-/**
- * The View is an immutable, point in time, view of the avalailable {@link SSTableIndex}es for an index.
- *
- * The view maintains a {@link RangeTermTree} for querying the view by value range. This is used by the
- * {@link org.apache.cassandra.index.sai.plan.QueryViewBuilder} to select the set of {@link SSTableIndex}es
- * to perform a query without needing to query indexes that are known not to contain to the requested
- * expression value range.
- */
 public class View implements Iterable<SSTableIndex>
 {
     private final Map<Descriptor, SSTableIndex> view;
 
-    private final RangeTermTree rangeTermTree;
+    private final TermTree termTree;
+    private final AbstractType<?> keyValidator;
+    private final IntervalTree<Key, SSTableIndex, Interval<Key, SSTableIndex>> keyIntervalTree;
 
-    public View(IndexContext context, Collection<SSTableIndex> indexes)
-    {
+    public View(ColumnContext context, Collection<SSTableIndex> indexes) {
         this.view = new HashMap<>();
+        this.keyValidator = context.keyValidator();
 
-        AbstractType<?> termValidator = context.getValidator();
+        AbstractType<?> validator = context.getValidator();
 
-        RangeTermTree.Builder rangeTermTreeBuilder = new RangeTermTree.Builder(termValidator);
+        TermTree.Builder termTreeBuilder = new RangeTermTree.Builder(validator);
 
+        List<Interval<Key, SSTableIndex>> keyIntervals = new ArrayList<>();
         for (SSTableIndex sstableIndex : indexes)
         {
             this.view.put(sstableIndex.getSSTable().descriptor, sstableIndex);
-            rangeTermTreeBuilder.add(sstableIndex);
+            termTreeBuilder.add(sstableIndex);
+            keyIntervals.add(Interval.create(new Key(sstableIndex.minKey()),
+                                             new Key(sstableIndex.maxKey()),
+                                             sstableIndex));
         }
 
-        this.rangeTermTree = rangeTermTreeBuilder.build();
+        this.termTree = termTreeBuilder.build();
+        this.keyIntervalTree = IntervalTree.build(keyIntervals);
     }
 
-    /**
-     * Search for a list of {@link SSTableIndex}es that contain values within
-     * the value range requested in the {@link Expression}
-     */
-    public List<SSTableIndex> match(Expression expression)
+    public Set<SSTableIndex> match(Expression expression)
     {
-        return rangeTermTree.search(expression);
+        return termTree.search(expression);
     }
 
-    @Override
+    public List<SSTableIndex> match(DecoratedKey minKey, DecoratedKey maxKey)
+    {
+        return keyIntervalTree.search(Interval.create(new Key(minKey), new Key(maxKey), null));
+    }
+
     public Iterator<SSTableIndex> iterator()
     {
         return view.values().iterator();
@@ -92,9 +102,28 @@ public class View implements Iterable<SSTableIndex>
         return view.size();
     }
 
+    /**
+     * This is required since IntervalTree doesn't support custom Comparator
+     * implementations and relied on items to be comparable which "raw" keys are not.
+     */
+    private static class Key implements Comparable<Key>
+    {
+        private final DecoratedKey key;
+
+        public Key(DecoratedKey key)
+        {
+            this.key = key;
+        }
+
+        public int compareTo(Key o)
+        {
+            return key.compareTo(o.key);
+        }
+    }
+
     @Override
     public String toString()
     {
-        return String.format("View{view=%s}", view);
+        return String.format("View{view=%s, keyValidator=%s, keyIntervalTree=%s}", view, keyValidator, keyIntervalTree);
     }
 }

@@ -19,11 +19,11 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
-public class QueryTimeToLiveTest extends AbstractQueryTester
+public class QueryTimeToLiveTest extends IndexQuerySupport
 {
     @Test
     public void testTimeToLive() throws Throwable
     {
-        IndexQuerySupport.timeToLive(executor, dataModel, sets);
+        timeToLive();
     }
 }

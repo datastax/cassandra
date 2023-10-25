@@ -17,34 +17,73 @@
  */
 package org.apache.cassandra.index.sai.disk.format;
 
-import org.junit.BeforeClass;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.ExpectedException;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
-
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class VersionTest
 {
-    @BeforeClass
-    public static void initialise()
+    @Rule
+    public ExpectedException expectedException = ExpectedException.none();
+
+    @Test
+    public void shouldCompareVersions()
     {
-        DatabaseDescriptor.daemonInitialization();
+        final Version aa = new Version('a', 'a');
+        final Version ab = new Version('a', 'b');
+        final Version ba = new Version('b', 'a');
+        final Version bb = new Version('b', 'b');
+
+        assertTrue(bb.onOrAfter(aa));
+        assertTrue(bb.onOrAfter(ab));
+        assertTrue(bb.onOrAfter(ba));
+        assertTrue(bb.onOrAfter(bb));
+
+        assertTrue(ba.onOrAfter(aa));
+        assertTrue(ba.onOrAfter(ab));
+        assertTrue(ba.onOrAfter(ba));
+        assertFalse(ba.onOrAfter(bb));
+
+        assertTrue(ab.onOrAfter(aa));
+        assertTrue(ab.onOrAfter(ab));
+        assertFalse(ab.onOrAfter(ba));
+        assertFalse(ab.onOrAfter(bb));
+
+        assertTrue(aa.onOrAfter(aa));
+        assertFalse(aa.onOrAfter(ab));
+        assertFalse(aa.onOrAfter(ba));
+        assertFalse(aa.onOrAfter(bb));
     }
 
     @Test
-    public void supportedVersionsWillParse()
+    public void shouldFormatVersion()
     {
-        assertEquals(Version.AA, Version.parse("aa"));
+        assertEquals("ac", new Version('a', 'c').toString());
+        assertEquals("ce", new Version('c', 'e').toString());
     }
 
     @Test
-    public void unsupportedOrInvalidVersionsDoNotParse()
+    public void shouldParseVersion()
     {
-        assertThatThrownBy(() -> Version.parse(null)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> Version.parse("ab")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> Version.parse("a")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> Version.parse("abc")).isInstanceOf(IllegalArgumentException.class);
+        assertEquals("ac", Version.parse("ac").toString());
+        assertEquals("ce", Version.parse("ce").toString());
+    }
+
+    @Test
+    public void shouldNotParseTooShortVersion()
+    {
+        expectedException.expect(IllegalArgumentException.class);
+        Version.parse("a");
+    }
+
+    @Test
+    public void shouldNotParseTooLongVersion()
+    {
+        expectedException.expect(IllegalArgumentException.class);
+        Version.parse("aaa");
     }
 }

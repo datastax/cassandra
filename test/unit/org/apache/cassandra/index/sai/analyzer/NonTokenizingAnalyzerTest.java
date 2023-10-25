@@ -26,7 +26,11 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 
+/**
+ * Tests for the non-tokenizing analyzer
+ */
 public class NonTokenizingAnalyzerTest
 {
     @Test
@@ -35,8 +39,23 @@ public class NonTokenizingAnalyzerTest
         NonTokenizingOptions options = NonTokenizingOptions.getDefaultOptions();
         options.setCaseSensitive(false);
         options.setAscii(true);
+        NonTokenizingAnalyzer analyzer = new NonTokenizingAnalyzer(UTF8Type.instance, options);
 
-        assertEquals("eppinger", getAnalyzedString("Éppinger", options));
+        String testString = "Éppinger";
+        ByteBuffer toAnalyze = ByteBuffer.wrap(testString.getBytes());
+        analyzer.reset(toAnalyze);
+        ByteBuffer analyzed = null;
+
+        while (analyzer.hasNext())
+        {
+            analyzed = analyzer.next();
+        }
+
+        String good = "eppinger";
+
+        String result = ByteBufferUtil.string(analyzed);
+
+        assertEquals(good, result);
     }
 
     @Test
@@ -45,8 +64,23 @@ public class NonTokenizingAnalyzerTest
         NonTokenizingOptions options = NonTokenizingOptions.getDefaultOptions();
         options.setCaseSensitive(true);
         options.setAscii(false);
+        NonTokenizingAnalyzer analyzer = new NonTokenizingAnalyzer(UTF8Type.instance, options);
 
-        assertEquals("Éppinger", getAnalyzedString("Éppinger", options));
+        String testString = "Éppinger";
+        ByteBuffer toAnalyze = ByteBuffer.wrap(testString.getBytes());
+        analyzer.reset(toAnalyze);
+        ByteBuffer analyzed = null;
+
+        while (analyzer.hasNext())
+        {
+            analyzed = analyzer.next();
+        }
+
+        String good = "Éppinger";
+
+        String result = ByteBufferUtil.string(analyzed);
+
+        assertEquals(good, result);
     }
 
     @Test
@@ -54,22 +88,37 @@ public class NonTokenizingAnalyzerTest
     {
         NonTokenizingOptions options = NonTokenizingOptions.getDefaultOptions();
         options.setCaseSensitive(false);
+        NonTokenizingAnalyzer analyzer = new NonTokenizingAnalyzer(UTF8Type.instance, options);
 
-        assertEquals("nip it in the bud", getAnalyzedString("Nip it in the bud", options));
+        String testString = "Nip it in the bud";
+        ByteBuffer toAnalyze = ByteBuffer.wrap(testString.getBytes());
+        analyzer.reset(toAnalyze);
+        ByteBuffer analyzed = null;
+        
+        while (analyzer.hasNext())
+        {
+            analyzed = analyzer.next();
+        }
+        
+        assertEquals(testString.toLowerCase(), ByteBufferUtil.string(analyzed));
     }
 
     @Test
     public void caseSensitiveAnalyzer() throws Exception
     {
         NonTokenizingOptions options = NonTokenizingOptions.getDefaultOptions();
-
-        assertEquals("Nip it in the bud", getAnalyzedString("Nip it in the bud", options));
-    }
-
-    private String getAnalyzedString(String input, NonTokenizingOptions options) throws Exception
-    {
         NonTokenizingAnalyzer analyzer = new NonTokenizingAnalyzer(UTF8Type.instance, options);
-        analyzer.reset(ByteBuffer.wrap(input.getBytes()));
-        return analyzer.hasNext() ? ByteBufferUtil.string(analyzer.next) : null;
+
+        String testString = "Nip it in the bud";
+        ByteBuffer toAnalyze = ByteBuffer.wrap(testString.getBytes());
+        analyzer.reset(toAnalyze);
+        ByteBuffer analyzed = null;
+        
+        while (analyzer.hasNext())
+        {
+            analyzed = analyzer.next();
+        }
+        
+        assertNotEquals(testString.toLowerCase(), ByteBufferUtil.string(analyzed));
     }
 }

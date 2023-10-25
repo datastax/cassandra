@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai.disk.v1;
 
+import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -24,49 +25,29 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
-import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
-import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
-import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.index.CorruptIndexException;
-import org.apache.lucene.store.DataInput;
+import org.apache.lucene.store.IndexInput;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-
-public class MetadataTest extends SAIRandomizedTester
+public class MetadataTest extends NdiRandomizedTest
 {
     @Rule
     public final ExpectedException expectedException = ExpectedException.none();
-
-    private IndexDescriptor indexDescriptor;
-    private IndexContext indexContext;
-
-    @Before
-    public void setup() throws Throwable
-    {
-        indexDescriptor = newIndexDescriptor();
-        String index = newIndex();
-        indexContext = SAITester.createIndexContext(index, UTF8Type.instance);
-    }
 
     @Test
     public void shouldReadWrittenMetadata() throws Exception
     {
         final Map<String, byte[]> data = new HashMap<>();
-        try (MetadataWriter writer = new MetadataWriter(indexDescriptor.openPerIndexOutput(IndexComponent.META, indexContext)))
+        final IndexComponents components = newIndexComponents();
+        try (MetadataWriter writer = new MetadataWriter(components.createOutput(components.meta)))
         {
             int num = nextInt(1, 50);
             for (int x = 0; x < num; x++)
@@ -82,13 +63,14 @@ public class MetadataTest extends SAIRandomizedTester
                 }
             }
         }
-        MetadataSource reader = MetadataSource.loadColumnMetadata(indexDescriptor, indexContext);
+        MetadataSource reader = MetadataSource.loadColumnMetadata(components);
 
         for (Map.Entry<String, byte[]> entry : data.entrySet())
         {
-            final DataInput input = reader.get(entry.getKey());
+            final IndexInput input = reader.get(entry.getKey());
             assertNotNull(input);
             final byte[] expectedBytes = entry.getValue();
+            assertEquals(expectedBytes.length, input.length());
             final byte[] actualBytes = new byte[expectedBytes.length];
             input.readBytes(actualBytes, 0, expectedBytes.length);
             assertArrayEquals(expectedBytes, actualBytes);
@@ -98,7 +80,8 @@ public class MetadataTest extends SAIRandomizedTester
     @Test
     public void shouldFailWhenFileHasNoHeader() throws IOException
     {
-        try (IndexOutputWriter out = indexDescriptor.openPerIndexOutput(IndexComponent.META, indexContext))
+        IndexComponents components = newIndexComponents();
+        try (IndexOutputWriter out = components.createOutput(components.meta))
         {
             final byte[] bytes = nextBytes(13, 29);
             out.writeBytes(bytes, bytes.length);
@@ -106,73 +89,73 @@ public class MetadataTest extends SAIRandomizedTester
 
         expectedException.expect(CorruptIndexException.class);
         expectedException.expectMessage("codec header mismatch");
-        MetadataSource.loadColumnMetadata(indexDescriptor, indexContext);
+        MetadataSource.loadColumnMetadata(components);
     }
 
     @Test
     public void shouldFailCrcCheckWhenFileIsTruncated() throws IOException
     {
-        try (IndexOutputWriter output = writeRandomBytes())
+        final IndexComponents components = newIndexComponents();
+        final IndexOutputWriter output = writeRandomBytes(components);
+
+        final File indexFile = new File(output.getPath());
+        final long length = indexFile.length();
+        assertTrue(length > 0);
+        final File renamed = temporaryFolder.newFile();
+        FileUtils.renameWithConfirm(indexFile, renamed);
+        assertFalse(new File(output.getPath()).exists());
+
+        try (FileOutputStream outputStream = new FileOutputStream(output.getPath());
+             RandomAccessFile input = new RandomAccessFile(renamed, "r"))
         {
-            File indexFile = output.getFile();
-            long length = indexFile.length();
-            assertTrue(length > 0);
-            File renamed = new File(temporaryFolder.newFile());
-            indexFile.move(renamed);
-            assertFalse(output.getFile().exists());
-
-            try (FileOutputStream outputStream = new FileOutputStream(output.getFile().toJavaIOFile());
-                 RandomAccessFile input = new RandomAccessFile(renamed.toJavaIOFile(), "r"))
-            {
-                // skip last byte when copying
-                copyTo(input, outputStream, Math.toIntExact(length - 1));
-            }
-
-            expectedException.expect(CorruptIndexException.class);
-            expectedException.expectMessage("misplaced codec footer (file truncated?)");
-            MetadataSource.loadColumnMetadata(indexDescriptor, indexContext);
+            // skip last byte when copying
+            FileUtils.copyTo(input, outputStream, Math.toIntExact(length - 1));
         }
+
+        expectedException.expect(CorruptIndexException.class);
+        expectedException.expectMessage("misplaced codec footer (file truncated?)");
+        MetadataSource.loadColumnMetadata(components);
     }
 
     @Test
     public void shouldFailCrcCheckWhenFileIsCorrupted() throws IOException
     {
-        try (IndexOutputWriter output = writeRandomBytes())
+        final IndexComponents components = newIndexComponents();
+        final IndexOutputWriter output = writeRandomBytes(components);
+
+        final File indexFile = new File(output.getPath());
+        final long length = indexFile.length();
+        assertTrue(length > 0);
+        final File renamed = temporaryFolder.newFile();
+        FileUtils.renameWithConfirm(indexFile, renamed);
+        assertFalse(new File(output.getPath()).exists());
+
+        try (FileOutputStream outputStream = new FileOutputStream(output.getPath());
+             RandomAccessFile file = new RandomAccessFile(renamed, "r"))
         {
-            File indexFile = output.getFile();
-            long length = indexFile.length();
-            assertTrue(length > 0);
-            File renamed = new File(temporaryFolder.newFile());
-            indexFile.move(renamed);
-            assertFalse(output.getFile().exists());
+            // copy most of the file untouched
+            final byte[] buffer = new byte[Math.toIntExact(length - 1 - CodecUtil.footerLength())];
+            file.read(buffer);
+            outputStream.write(buffer);
 
-            try (FileOutputStream outputStream = new FileOutputStream(output.getFile().toJavaIOFile());
-                 RandomAccessFile file = new RandomAccessFile(renamed.toJavaIOFile(), "r"))
-            {
-                // copy most of the file untouched
-                final byte[] buffer = new byte[Math.toIntExact(length - 1 - CodecUtil.footerLength())];
-                file.read(buffer);
-                outputStream.write(buffer);
+            // corrupt a single byte at the end
+            final byte last = (byte) file.read();
+            outputStream.write(~last);
 
-                // corrupt a single byte at the end
-                final byte last = (byte) file.read();
-                outputStream.write(~last);
-
-                // copy footer
-                final byte[] footer = new byte[CodecUtil.footerLength()];
-                file.read(footer);
-                outputStream.write(footer);
-            }
-
-            expectedException.expect(CorruptIndexException.class);
-            expectedException.expectMessage("checksum failed");
-            MetadataSource.loadColumnMetadata(indexDescriptor, indexContext);
+            // copy footer
+            final byte[] footer = new byte[CodecUtil.footerLength()];
+            file.read(footer);
+            outputStream.write(footer);
         }
+
+        expectedException.expect(CorruptIndexException.class);
+        expectedException.expectMessage("checksum failed");
+        MetadataSource.loadColumnMetadata(components);
     }
 
-    private IndexOutputWriter writeRandomBytes() throws IOException
+    private IndexOutputWriter writeRandomBytes(IndexComponents indexComponents) throws IOException
     {
-        final IndexOutputWriter output = indexDescriptor.openPerIndexOutput(IndexComponent.META, indexContext);
+        final IndexOutputWriter output = indexComponents.createOutput(indexComponents.meta);
         try (MetadataWriter writer = new MetadataWriter(output))
         {
             byte[] bytes = nextBytes(11, 1024);

@@ -26,35 +26,29 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.marshal.InetAddressType;
-import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.serializers.SimpleDateSerializer;
 import org.apache.cassandra.serializers.TimeSerializer;
-import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.UUIDGen;
 
 import static org.apache.cassandra.index.sai.cql.types.IndexingTypeSupport.NUMBER_OF_VALUES;
 
-public abstract class DataSet<T> extends SAITester
+public abstract class DataSet<T> extends CQLTester
 {
     public T[] values;
-
-    public void init()
-    {
-        // used to create UDT
-    }
 
     public abstract QuerySet querySet();
 
     public Collection<String> decorateIndexColumn(String column)
     {
-        return Collections.singletonList(column);
+        return Arrays.asList(column);
     }
 
     public static abstract class NumericDataSet<T extends Number> extends DataSet<T>
@@ -66,13 +60,14 @@ public abstract class DataSet<T> extends SAITester
             for (int index = 0; index < values.length; index += 2)
             {
                 T value1, value2;
-                do
+                while (true)
                 {
                     value1 = nextValue();
                     value1 = getRandom().nextBoolean() ? negate(value1) : abs(value1);
                     value2 = increment(value1);
+                    if (!list.contains(value1) && !list.contains(value2))
+                        break;
                 }
-                while (list.contains(value1) || list.contains(value2));
                 values[index] = value1;
                 values[index + 1] = value2;
             }
@@ -91,7 +86,7 @@ public abstract class DataSet<T> extends SAITester
 
         public QuerySet querySet()
         {
-            return new QuerySet.NumericQuerySet();
+            return new QuerySet.NumericQuerySet(this);
         }
     }
 
@@ -409,11 +404,12 @@ public abstract class DataSet<T> extends SAITester
             for (int index = 0; index < values.length; index++)
             {
                 String value;
-                do
+                while (true)
                 {
                     value = getRandom().nextAsciiString(8, 256);
+                    if (!list.contains(value))
+                        break;
                 }
-                while (list.contains(value));
                 values[index] = value;
             }
         }
@@ -421,35 +417,12 @@ public abstract class DataSet<T> extends SAITester
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.LiteralQuerySet();
+            return new QuerySet.LiteralQuerySet(this);
         }
 
         public String toString()
         {
             return "ascii";
-        }
-    }
-
-    public static class BooleanDataSet extends DataSet<Boolean>
-    {
-        public BooleanDataSet()
-        {
-            values = new Boolean[NUMBER_OF_VALUES];
-            for (int index = 0; index < values.length; index++)
-            {
-                values[index] = getRandom().nextBoolean();
-            }
-        }
-
-        @Override
-        public QuerySet querySet()
-        {
-            return new QuerySet.BooleanQuerySet();
-        }
-
-        public String toString()
-        {
-            return "boolean";
         }
     }
 
@@ -462,11 +435,12 @@ public abstract class DataSet<T> extends SAITester
             for (int index = 0; index < values.length; index++)
             {
                 String value;
-                do
+                while (true)
                 {
                     value = getRandom().nextTextString(8, 256);
+                    if (!list.contains(value))
+                        break;
                 }
-                while (list.contains(value));
                 values[index] = value;
             }
         }
@@ -474,7 +448,7 @@ public abstract class DataSet<T> extends SAITester
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.LiteralQuerySet();
+            return new QuerySet.LiteralQuerySet(this);
         }
 
         public String toString()
@@ -495,12 +469,13 @@ public abstract class DataSet<T> extends SAITester
 
             for (int index = 0; index < values.length; index++)
             {
-                int value;
-                do
+                Integer value;
+                while (true)
                 {
                     value = SimpleDateSerializer.timeInMillisToDay(min + Math.round(getRandom().nextDouble() * range));
+                    if (!list.contains(value))
+                        break;
                 }
-                while (list.contains(value));
                 values[index] = value;
             }
         }
@@ -508,7 +483,7 @@ public abstract class DataSet<T> extends SAITester
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.LiteralQuerySet();
+            return new QuerySet.LiteralQuerySet(this);
         }
 
         public String toString()
@@ -526,15 +501,16 @@ public abstract class DataSet<T> extends SAITester
             for (int index = 0; index < values.length; index++)
             {
                 Long value;
-                do
+                while (true)
                 {
                     int hours = getRandom().nextIntBetween(0, 23);
                     int minutes = getRandom().nextIntBetween(0, 59);
                     int seconds = getRandom().nextIntBetween(0, 59);
                     long nanos = getRandom().nextIntBetween(0, 1000000000);
                     value = TimeSerializer.timeStringToLong(String.format("%s:%s:%s.%s", hours, minutes, seconds, nanos));
+                    if (!list.contains(value))
+                        break;
                 }
-                while (list.contains(value));
                 values[index] = value;
             }
             Arrays.sort(values);
@@ -543,7 +519,7 @@ public abstract class DataSet<T> extends SAITester
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.NumericQuerySet();
+            return new QuerySet.NumericQuerySet(this);
         }
 
         public String toString()
@@ -565,11 +541,12 @@ public abstract class DataSet<T> extends SAITester
             for (int index = 0; index < values.length; index++)
             {
                 Date value;
-                do
+                while (true)
                 {
                     value = Date.from(Instant.ofEpochSecond(min + Math.round(getRandom().nextDouble() * range)));
+                    if (!list.contains(value))
+                        break;
                 }
-                while (list.contains(value));
                 values[index] = value;
             }
         }
@@ -577,7 +554,7 @@ public abstract class DataSet<T> extends SAITester
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.LiteralQuerySet();
+            return new QuerySet.LiteralQuerySet(this);
         }
 
         public String toString()
@@ -596,11 +573,12 @@ public abstract class DataSet<T> extends SAITester
             for (int index = 0; index < values.length; index++)
             {
                 UUID value;
-                do
+                while (true)
                 {
                     value = UUID.randomUUID();
+                    if (!list.contains(value))
+                        break;
                 }
-                while (list.contains(value));
                 values[index] = value;
             }
         }
@@ -608,7 +586,7 @@ public abstract class DataSet<T> extends SAITester
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.LiteralQuerySet();
+            return new QuerySet.LiteralQuerySet(this);
         }
 
         public String toString()
@@ -617,21 +595,22 @@ public abstract class DataSet<T> extends SAITester
         }
     }
 
-    public static class TimeuuidDataSet extends DataSet<TimeUUID>
+    public static class TimeuuidDataSet extends DataSet<UUID>
     {
         public TimeuuidDataSet()
         {
-            values = new TimeUUID[NUMBER_OF_VALUES];
-            List<TimeUUID> list = Arrays.asList(values);
+            values = new UUID[NUMBER_OF_VALUES];
+            List<UUID> list = Arrays.asList(values);
 
             for (int index = 0; index < values.length; index++)
             {
-                TimeUUID value;
-                do
+                UUID value;
+                while (true)
                 {
-                    value = TimeUUID.Generator.nextTimeUUID();
+                    value = UUIDGen.getTimeUUID();
+                    if (!list.contains(value))
+                        break;
                 }
-                while (list.contains(value));
                 values[index] = value;
             }
         }
@@ -639,7 +618,7 @@ public abstract class DataSet<T> extends SAITester
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.LiteralQuerySet();
+            return new QuerySet.LiteralQuerySet(this);
         }
 
         public String toString()
@@ -658,7 +637,7 @@ public abstract class DataSet<T> extends SAITester
             for (int index = 0; index < values.length; index++)
             {
                 InetAddress value;
-                do
+                while (true)
                 {
                     byte[] bytes;
                     if (getRandom().nextBoolean())
@@ -674,19 +653,22 @@ public abstract class DataSet<T> extends SAITester
                     {
                         throw new RuntimeException(e);
                     }
+                    if (!list.contains(value))
+                        break;
                 }
-                while (list.contains(value));
                 values[index] = value;
             }
-            Arrays.sort(values, (o1, o2) -> TypeUtil.compare(TypeUtil.asIndexBytes(ByteBuffer.wrap(o1.getAddress()), InetAddressType.instance),
-                                                             TypeUtil.asIndexBytes(ByteBuffer.wrap(o2.getAddress()), InetAddressType.instance),
-                                                             InetAddressType.instance));
+            Arrays.sort(values, (o1, o2) -> {
+                return TypeUtil.compare(TypeUtil.encode(ByteBuffer.wrap(o1.getAddress()), InetAddressType.instance),
+                                        TypeUtil.encode(ByteBuffer.wrap(o2.getAddress()), InetAddressType.instance),
+                                        InetAddressType.instance);
+            });
         }
 
         @Override
         public QuerySet querySet()
         {
-            return new QuerySet.NumericQuerySet();
+            return new QuerySet.NumericQuerySet(this);
         }
 
         public String toString()

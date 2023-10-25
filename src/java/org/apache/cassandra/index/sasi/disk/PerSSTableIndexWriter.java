@@ -32,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorPlus;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -112,7 +113,13 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
     }
 
     @Override
-    public void staticRow(Row staticRow)
+    public void partitionLevelDeletion(DeletionTime deletionTime, long position)
+    {
+        // do nothing
+    }
+
+    @Override
+    public void staticRow(Row staticRow, long position)
     {
         nextUnfilteredCluster(staticRow);
     }

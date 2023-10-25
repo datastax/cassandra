@@ -23,15 +23,13 @@ package org.apache.cassandra.index.sai.functional;
 import org.junit.Assert;
 import org.junit.Test;
 
-import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
-import org.assertj.core.api.Assertions;
+
+import static org.junit.Assert.assertFalse;
 
 public class NodeRestartTest extends SAITester
 {
@@ -65,7 +63,7 @@ public class NodeRestartTest extends SAITester
         // We should have completed no actual SSTable validations:
         assertValidationCount(0, 0);
 
-        Assertions.assertThat(getNotQueryableIndexes()).isNotEmpty();
+        assertFalse(isIndexQueryable());
     }
 
     // We don't allow the node to actually join the ring before a valid index is ready to accept queries.
@@ -104,30 +102,30 @@ public class NodeRestartTest extends SAITester
     }
 
     @Test
-    public void shouldRestartWithExistingIndexComponents() throws Throwable
+    public void shouldRestartWithExistingNDIComponents() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
-        verifyNoIndexFiles();
+        verifyIndexFiles(0, 0);
 
         execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
         flush();
 
-        IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
-        IndexContext literalIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2")), UTF8Type.instance);
-        waitForTableIndexesQueryable();
-        verifyIndexFiles(numericIndexContext,literalIndexContext, 1, 1);
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+        waitForIndexQueryable();
+        verifyIndexFiles(1, 1);
         assertNumRows(1, "SELECT * FROM %%s WHERE v1 >= 0");
         assertNumRows(1, "SELECT * FROM %%s WHERE v2 = '0'");
         assertValidationCount(0, 0);
 
         simulateNodeRestart();
 
-        verifyIndexFiles(numericIndexContext, literalIndexContext, 1, 1);
+        verifyIndexFiles(1, 1);
 
         assertNumRows(1, "SELECT * FROM %%s WHERE v1 >= 0");
         assertNumRows(1, "SELECT * FROM %%s WHERE v2 = '0'");
 
-        waitForTableIndexesQueryable();
+        waitForIndexQueryable();
 
         // index components are included after restart
         verifyIndexComponentsIncludedInSSTable();
@@ -169,14 +167,14 @@ public class NodeRestartTest extends SAITester
     void createSingleRowIndex() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
-        verifyNoIndexFiles();
+        verifyIndexFiles(0, 0);
 
         execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
         flush();
 
-        IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
-        waitForTableIndexesQueryable();
-        verifyIndexFiles(numericIndexContext, null, 1, 0);
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        waitForIndexQueryable();
+        verifyIndexFiles(1, 0);
         assertNumRows(1, "SELECT * FROM %%s WHERE v1 >= 0");
         assertValidationCount(0, 0);
     }

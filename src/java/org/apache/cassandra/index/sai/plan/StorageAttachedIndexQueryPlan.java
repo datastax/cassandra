@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.index.sai.plan;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -38,19 +40,19 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     private final ColumnFamilyStore cfs;
     private final TableQueryMetrics queryMetrics;
     private final RowFilter postIndexFilter;
-    private final RowFilter filterOperation;
+    private final List<RowFilter.Expression> expressions;
     private final Set<Index> indexes;
 
     private StorageAttachedIndexQueryPlan(ColumnFamilyStore cfs,
                                           TableQueryMetrics queryMetrics,
                                           RowFilter postIndexFilter,
-                                          RowFilter filterOperation,
+                                          List<RowFilter.Expression> expressions,
                                           ImmutableSet<Index> indexes)
     {
         this.cfs = cfs;
         this.queryMetrics = queryMetrics;
         this.postIndexFilter = postIndexFilter;
-        this.filterOperation = filterOperation;
+        this.expressions = expressions;
         this.indexes = indexes;
     }
 
@@ -61,14 +63,16 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
                                                        RowFilter rowFilter)
     {
         ImmutableSet.Builder<Index> selectedIndexesBuilder = ImmutableSet.builder();
+        List<RowFilter.Expression> acceptedExpressions = new ArrayList<>();
 
-        for (RowFilter.Expression expression : rowFilter)
+        for (RowFilter.Expression expression : rowFilter.getExpressions())
         {
             // we ignore user-defined expressions here because we don't have a way to translate their #isSatifiedBy
             // method, they will be included in the filter returned by QueryPlan#postIndexQueryFilter()
             if (expression.isUserDefined())
                 continue;
 
+            acceptedExpressions.add(expression);
             for (StorageAttachedIndex index : indexes)
             {
                 if (index.supportsExpression(expression.column(), expression.operator()))
@@ -84,11 +88,11 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
 
         /*
          * postIndexFilter comprised by those expressions in the read command row filter that can't be handled by
-         * {@link FilterTree#satisfiedBy(Unfiltered, Row, boolean)}. This includes expressions targeted
-         * at {@link RowFilter.UserExpression}s.
+         * {@link FilterTree#satisfiedBy(Unfiltered, Row, boolean)}. That includes expressions targeted
+         * at {@link RowFilter.UserExpression}s like those used by RLAC.
          */
-        RowFilter postIndexFilter = rowFilter.restrict(RowFilter.Expression::isUserDefined);
-        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, rowFilter, selectedIndexes);
+        RowFilter postIndexFilter = rowFilter.restrict(e -> e.isUserDefined());
+        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, acceptedExpressions, selectedIndexes);
     }
 
     @Override
@@ -115,11 +119,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     @Override
     public Index.Searcher searcherFor(ReadCommand command)
     {
-        return new StorageAttachedIndexSearcher(cfs,
-                                                queryMetrics,
-                                                command,
-                                                filterOperation,
-                                                DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
+        return new StorageAttachedIndexSearcher(cfs, queryMetrics, command, expressions, DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
     }
 
     /**
@@ -132,4 +132,11 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     {
         return postIndexFilter;
     }
+
+    //TODO Do we need to support this
+//    @Override
+//    public boolean supportsMultiRangeReadCommand()
+//    {
+//        return true;
+//    }
 }

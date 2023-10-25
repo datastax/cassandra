@@ -17,81 +17,30 @@
  */
 package org.apache.cassandra.index.sai.disk.format;
 
-import java.util.Comparator;
-import java.util.SortedSet;
-import java.util.TreeSet;
-import java.util.stream.Collectors;
-
-import com.google.common.base.Objects;
-
-import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
-import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.Descriptor;
+import static com.google.common.base.Preconditions.checkArgument;
 
 /**
  * Format version of indexing component, denoted as [major][minor]. Same forward-compatibility rules apply as to
  * {@link org.apache.cassandra.io.sstable.format.Version}.
  */
-public class Version implements Comparable<Version>
+public class Version
 {
-    public static final String SAI_DESCRIPTOR = "SAI";
-    public static final String SAI_SEPARATOR = "+";
-
-    // Current version
-    public static final Version AA = new Version("aa", V1OnDiskFormat.instance, (c, i) -> defaultFileNameFormat(c, i, "aa"));
-
-    // These should be added in reverse order so that the latest version is used first. Version matching tests
-    // are more likely to match the latest version, so we want to test that one first.
-    public static final SortedSet<Version> ALL = new TreeSet<Version>(Comparator.reverseOrder()) {{
-        add(AA);
-    }};
+    private static final Version AA = new Version('a', 'a');
 
     public static final Version EARLIEST = AA;
-    // The latest version can be configured to be an earlier version to support partial upgrades that don't
-    // write newer versions of the on-disk formats.
-    public static final Version LATEST = CassandraRelevantProperties.SAI_LATEST_VERSION.convert(Version::parse);
+    public static final Version LATEST = AA;
 
     private final String version;
-    private final OnDiskFormat onDiskFormat;
-    private final FileNameFormatter fileNameFormatter;
 
-    private Version(String version, OnDiskFormat onDiskFormat, FileNameFormatter fileNameFormatter)
+    public Version(char major, char minor)
     {
-        this.version = version;
-        this.onDiskFormat = onDiskFormat;
-        this.fileNameFormatter = fileNameFormatter;
+        this.version = major + "" + minor;
     }
 
-    public static Version parse(String versionString)
+    public static Version parse(String input)
     {
-        for (Version version : ALL)
-            if (version.version.equals(versionString))
-                return version;
-        throw new IllegalArgumentException("The version string " + versionString + " does not represent a valid SAI version. " +
-                                           "It should be one of " + ALL.stream().map(Version::toString).collect(Collectors.joining(", ")));
-    }
-
-    @Override
-    public int compareTo(Version other)
-    {
-        return version.compareTo(other.version);
-    }
-
-    @Override
-    public int hashCode()
-    {
-        return Objects.hashCode(version);
-    }
-
-    @Override
-    public boolean equals(Object o)
-    {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Version other = (Version)o;
-        return Objects.equal(version, other.version);
+        checkArgument(input.length() == 2);
+        return new Version(input.charAt(0), input.charAt(1));
     }
 
     @Override
@@ -103,51 +52,5 @@ public class Version implements Comparable<Version>
     public boolean onOrAfter(Version other)
     {
         return version.compareTo(other.version) >= 0;
-    }
-
-    public OnDiskFormat onDiskFormat()
-    {
-        return onDiskFormat;
-    }
-
-    public Component makePerSSTableComponent(IndexComponent indexComponent)
-    {
-        return indexComponent.type.createComponent(fileNameFormatter.format(indexComponent, null));
-    }
-
-    public Component makePerIndexComponent(IndexComponent indexComponent, IndexContext indexContext)
-    {
-        return indexComponent.type.createComponent(fileNameFormatter.format(indexComponent, indexContext));
-    }
-
-    public FileNameFormatter fileNameFormatter()
-    {
-        return fileNameFormatter;
-    }
-
-    public interface FileNameFormatter
-    {
-        String format(IndexComponent indexComponent, IndexContext indexContext);
-    }
-
-    /**
-     * SAI default filename formatter. This is the current SAI on-disk filename format
-     *
-     * Format: <sstable descriptor>-SAI+<version>(+<index name>)+<component name>.db
-     * Note: The index name is excluded for per-SSTable index files that are shared
-     * across all the per-column indexes for the SSTable.
-     */
-    private static String defaultFileNameFormat(IndexComponent indexComponent, IndexContext indexContext, String version)
-    {
-        StringBuilder stringBuilder = new StringBuilder();
-
-        stringBuilder.append(SAI_DESCRIPTOR);
-        stringBuilder.append(SAI_SEPARATOR).append(version);
-        if (indexContext != null)
-            stringBuilder.append(SAI_SEPARATOR).append(indexContext.getIndexName());
-        stringBuilder.append(SAI_SEPARATOR).append(indexComponent.name);
-        stringBuilder.append(Descriptor.EXTENSION);
-
-        return stringBuilder.toString();
     }
 }
