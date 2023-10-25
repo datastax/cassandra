@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
-import java.util.AbstractQueue;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -67,6 +66,8 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+
+import static java.lang.Math.min;
 
 /**
  * Processor that scans all rows from given partitions and selects rows with top-k scores based on vector indexes.
@@ -135,9 +136,9 @@ public class VectorTopKProcessor
      */
     public <U extends Unfiltered, R extends BaseRowIterator<U>, P extends BasePartitionIterator<R>> BasePartitionIterator<?> filter(P partitions)
     {
-        // priority queue ordered by score in ascending order. We fill the queue with at most limit + 1 rows, so that we
-        // can then remove the lowest score row when exceeding limit. The capacity is limit + 1 to prevent resizing.
-        PriorityQueue<Triple<PartitionInfo, Row, Float>> topK = new PriorityQueue<>(limit + 1, Comparator.comparing(Triple::getRight));
+        // priority queue ordered by score in descending order
+        PriorityQueue<Triple<PartitionInfo, Row, Float>> topK =
+                new PriorityQueue<>(limit, Comparator.comparing((Triple<PartitionInfo, Row, Float> t) -> t.getRight()).reversed());
         // to store top-k results in primary key order
         TreeMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition = new TreeMap<>(Comparator.comparing(p -> p.key));
 
@@ -171,7 +172,7 @@ public class VectorTopKProcessor
                 PartitionResults pr = triplesFuture.join();
                 if (pr == null)
                     continue;
-                moveToPq(topK, pr.rows);
+                topK.addAll(pr.rows);
                 for (var uf: pr.tombstones)
                     addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
             }
@@ -184,19 +185,20 @@ public class VectorTopKProcessor
                 try (var partitionRowIterator = partitions.next())
                 {
                     PartitionResults pr = processPartition(partitionRowIterator);
-                    moveToPq(topK, pr.rows);
+                    topK.addAll(pr.rows);
                     for (var uf: pr.tombstones)
                         addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
                 }
             }
         }
 
-        assert topK.size() <= limit;
         partitions.close();
 
         // reorder rows in partition/clustering order
-        for (Triple<PartitionInfo, Row, Float> triple : topK)
+        for (int i = 0; i < min(topK.size(), limit); i++) {
+            var triple = topK.poll();
             addUnfiltered(unfilteredByPartition, triple.getLeft(), triple.getMiddle());
+        }
 
         if (partitions instanceof PartitionIterator)
             return new InMemoryPartitionIterator(command, unfilteredByPartition);
@@ -258,16 +260,6 @@ public class VectorTopKProcessor
     {
         var map = unfilteredByPartition.computeIfAbsent(partitionInfo, k -> new TreeSet<>(command.metadata().comparator));
         map.add(unfiltered);
-    }
-
-    private void moveToPq(AbstractQueue<Triple<PartitionInfo, Row, Float>> topK, List<Triple<PartitionInfo, Row, Float>> res)
-    {
-        for (var triple : res)
-        {
-            topK.add(triple);
-            if (topK.size() > limit)
-                topK.poll();
-        }
     }
 
     /**
