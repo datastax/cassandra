@@ -27,7 +27,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
-import org.apache.cassandra.db.MultiCBuilder;
+import org.apache.cassandra.db.MultiClusteringBuilder;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.serializers.ListSerializer;
@@ -179,9 +179,9 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
-            List<MultiCBuilder.Element> element = Collections.singletonList(MultiCBuilder.Element.point(term.bindAndGet(options)));
+            List<MultiClusteringBuilder.ClusteringElements> element = Collections.singletonList(MultiClusteringBuilder.ClusteringElements.point(term.bindAndGet(options)));
             builder.extend(element, getColumnDefs());
             checkFalse(builder.containsNull(), "Invalid null value in condition for column %s", columnDef.name);
             checkFalse(builder.containsUnset(), "Invalid unset value for column %s", columnDef.name);
@@ -236,12 +236,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             List<ByteBuffer> values = this.terms.bindAndGet(options, columnDef.name);
-            List<MultiCBuilder.Element> elements = new ArrayList<>(values.size());
+            List<MultiClusteringBuilder.ClusteringElements> elements = new ArrayList<>(values.size());
             for (ByteBuffer value: values)
-                elements.add(MultiCBuilder.Element.point(value));
+                elements.add(MultiClusteringBuilder.ClusteringElements.point(value));
             builder.extend(elements, getColumnDefs());
             checkFalse(builder.containsNull(), "Invalid null value in condition for column %s", columnDef.name);
             checkFalse(builder.containsUnset(), "Invalid unset value for column %s", columnDef.name);
@@ -326,7 +326,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             throw new UnsupportedOperationException();
         }
@@ -338,20 +338,20 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendBoundTo(MultiCBuilder builder, Bound bound, QueryOptions options)
+        public MultiClusteringBuilder appendBoundTo(MultiClusteringBuilder builder, Bound bound, QueryOptions options)
         {
             Bound b = bound.reverseIfNeeded(getFirstColumn());
 
-            List<MultiCBuilder.Element> toAdd = new ArrayList<>(skippedValues.size() + 1);
+            List<MultiClusteringBuilder.ClusteringElements> toAdd = new ArrayList<>(skippedValues.size() + 1);
             if (hasBound(b))
             {
                 ByteBuffer value = slice.bound(b).bindAndGet(options);
                 checkBindValueSet(value, "Invalid unset value for column %s", columnDef.name);
-                toAdd.add(MultiCBuilder.Element.bound(value, bound, slice.isInclusive(b)));
+                toAdd.add(MultiClusteringBuilder.ClusteringElements.bound(value, bound, slice.isInclusive(b)));
             }
             else
             {
-                toAdd.add(bound.isStart() ? MultiCBuilder.Element.BOTTOM : MultiCBuilder.Element.TOP);
+                toAdd.add(bound.isStart() ? MultiClusteringBuilder.ClusteringElements.BOTTOM : MultiClusteringBuilder.ClusteringElements.TOP);
             }
 
             for (MarkerOrTerms markerOrTerms : skippedValues)
@@ -359,7 +359,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                 for (ByteBuffer value: markerOrTerms.bindAndGet(options, columnDef.name))
                 {
                     checkBindValueSet(value, "Invalid unset value for column %s", columnDef.name);
-                    toAdd.add(MultiCBuilder.Element.bound(value, bound, false));
+                    toAdd.add(MultiClusteringBuilder.ClusteringElements.bound(value, bound, false));
                 }
             }
             return builder.extend(toAdd, getColumnDefs());
@@ -485,7 +485,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             throw new UnsupportedOperationException();
         }
@@ -620,7 +620,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendBoundTo(MultiCBuilder builder, Bound bound, QueryOptions options)
+        public MultiClusteringBuilder appendBoundTo(MultiClusteringBuilder builder, Bound bound, QueryOptions options)
         {
             throw new UnsupportedOperationException();
         }
@@ -700,7 +700,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             throw new UnsupportedOperationException("Cannot use IS NOT NULL restriction for slicing");
         }
@@ -782,7 +782,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             // LIKE can be used with clustering columns, but as it doesn't
             // represent an actual clustering value, it can't be used in a
@@ -891,7 +891,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             throw new UnsupportedOperationException();
         }
@@ -1069,7 +1069,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             throw new UnsupportedOperationException();
         }
