@@ -51,7 +51,6 @@ public class MemtableRangeIterator extends RangeIterator
     private UnfilteredPartitionIterator partitionIterator;
     private UnfilteredRowIterator rowIterator;
 
-
     public MemtableRangeIterator(Memtable memtable,
                                  PrimaryKey.Factory pkFactory,
                                  AbstractBounds<PartitionPosition> keyRange)
