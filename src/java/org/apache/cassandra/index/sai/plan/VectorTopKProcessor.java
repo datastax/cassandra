@@ -20,12 +20,14 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
 import java.util.AbstractQueue;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.SortedMap;
+import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
@@ -144,11 +146,11 @@ public class VectorTopKProcessor
         if (PARALLEL_EXECUTOR != ImmediateExecutor.INSTANCE && partitions instanceof ParallelCommandProcessor) {
             ParallelCommandProcessor pIter = (ParallelCommandProcessor) partitions;
             var commands = pIter.getUninitializedCommands();
-            List<CompletableFuture<List<Triple<PartitionInfo, Row, Float>>>> results = new LinkedList<>();
+            List<CompletableFuture<PartitionResults>> results = new ArrayList<>(commands.size());
 
             int count = commands.size();
             for (var command: commands) {
-                CompletableFuture<List<Triple<PartitionInfo, Row, Float>>> future = new CompletableFuture<>();
+                CompletableFuture<PartitionResults> future = new CompletableFuture<>();
                 results.add(future);
 
                 // run last command immediately, others in parallel (if possible)
@@ -158,7 +160,7 @@ public class VectorTopKProcessor
                 executor.maybeExecuteImmediately(() -> {
                     try (var partitionRowIterator = pIter.commandToIterator(command.left(), command.right()))
                     {
-                        future.complete(partitionRowIterator == null ? null : processPartition(partitionRowIterator, unfilteredByPartition, true));
+                        future.complete(partitionRowIterator == null ? null : processPartition(partitionRowIterator));
                     }
                     catch (Throwable t)
                     {
@@ -167,11 +169,13 @@ public class VectorTopKProcessor
                 });
             }
 
-            for (var triplesFuture: results) {
-                var triples = triplesFuture.join();
-                if (triples == null)
+            for (CompletableFuture<PartitionResults> triplesFuture: results) {
+                PartitionResults pr = triplesFuture.join();
+                if (pr == null)
                     continue;
-                moveToPq(topK, triples);
+                moveToPq(topK, pr.rows);
+                for (var uf: pr.tombstones)
+                    addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
             }
         } else {
             // FilteredPartitions does not implement ParallelizablePartitionIterator.
@@ -179,10 +183,12 @@ public class VectorTopKProcessor
             while (partitions.hasNext())
             {
                 // have to close to move to the next partition, otherwise hasNext() fails
-                try (var part = partitions.next())
+                try (var partitionRowIterator = partitions.next())
                 {
-                    var triples = processPartition(part, unfilteredByPartition, false);
-                    moveToPq(topK, triples);
+                    PartitionResults pr = processPartition(partitionRowIterator);
+                    moveToPq(topK, pr.rows);
+                    for (var uf: pr.tombstones)
+                        addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
                 }
             }
         }
@@ -201,45 +207,55 @@ public class VectorTopKProcessor
         return new InMemoryUnfilteredPartitionIterator(command, unfilteredByPartition);
     }
 
-    private <U extends Unfiltered> List<Triple<PartitionInfo, Row, Float>> processPartition(BaseRowIterator<U> partitionRowIterator,
-                                                                                            SortedMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition,
-                                                                                            boolean isParallel)
-    {
-        // compute key and static row score once per partition
+    private class PartitionResults {
+        final PartitionInfo partitionInfo;
+        SortedSet<Unfiltered> tombstones = Collections.emptySortedSet();
+        final List<Triple<PartitionInfo, Row, Float>> rows = new ArrayList<>();
+
+        PartitionResults(PartitionInfo partitionInfo) {
+            this.partitionInfo = partitionInfo;
+        }
+
+        void addTombstone(Unfiltered uf)
+        {
+            if (tombstones.isEmpty())
+                tombstones = new TreeSet<>(command.metadata().comparator);
+            tombstones.add(uf);
+        }
+
+        void addRow(Triple<PartitionInfo, Row, Float> triple) {
+            rows.add(triple);
+        }
+    }
+
+    /**
+     * Processes a single partition, calculating scores for rows and extracting tombstones.
+     */
+    private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator) {
+        // Compute key and static row score once per partition
         DecoratedKey key = partitionRowIterator.partitionKey();
         Row staticRow = partitionRowIterator.staticRow();
-        final PartitionInfo partitionInfo = PartitionInfo.create(partitionRowIterator);
-        final float keyAndStaticScore = getScoreForRow(key, staticRow);
+        PartitionInfo partitionInfo = PartitionInfo.create(partitionRowIterator);
+        float keyAndStaticScore = getScoreForRow(key, staticRow);
+        var pr = new PartitionResults(partitionInfo);
 
-        List<Triple<PartitionInfo, Row, Float>> res = new LinkedList<>();
         while (partitionRowIterator.hasNext())
         {
             Unfiltered unfiltered = partitionRowIterator.next();
             // Always include tombstones for coordinator. It relies on ReadCommand#withMetricsRecording to throw
             // TombstoneOverwhelmingException to prevent OOM.
-            if (!unfiltered.isRow())
+            if (unfiltered.isRangeTombstoneMarker())
             {
-                if (isParallel)
-                {
-                    synchronized (unfilteredByPartition)
-                    {
-                        addUnfiltered(unfilteredByPartition, partitionInfo, unfiltered);
-                    }
-                }
-                else
-                {
-                    addUnfiltered(unfilteredByPartition, partitionInfo, unfiltered);
-                }
+                pr.addTombstone(unfiltered);
                 continue;
             }
 
             Row row = (Row) unfiltered;
             float rowScore = getScoreForRow(null, row);
-            var triple = Triple.of(partitionInfo, row, keyAndStaticScore + rowScore);
-            res.add(triple);
+            pr.addRow(Triple.of(partitionInfo, row, keyAndStaticScore + rowScore));
         }
 
-        return res;
+        return pr;
     }
 
     private void addUnfiltered(SortedMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition, PartitionInfo partitionInfo, Unfiltered unfiltered)
