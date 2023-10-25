@@ -92,8 +92,6 @@ public class VectorTopKProcessor
 
     private final int limit;
 
-    private int rowCount = 0;
-
     public VectorTopKProcessor(ReadCommand command)
     {
         this.command = command;
@@ -200,8 +198,6 @@ public class VectorTopKProcessor
         for (Triple<PartitionInfo, Row, Float> triple : topK)
             addUnfiltered(unfilteredByPartition, triple.getLeft(), triple.getMiddle());
 
-        rowCount = topK.size();
-
         if (partitions instanceof PartitionIterator)
             return new InMemoryPartitionIterator(command, unfilteredByPartition);
         return new InMemoryUnfilteredPartitionIterator(command, unfilteredByPartition);
@@ -272,14 +268,6 @@ public class VectorTopKProcessor
             if (topK.size() > limit)
                 topK.poll();
         }
-    }
-
-    /**
-     * @return num of collected rows
-     */
-    public int rowCount()
-    {
-        return rowCount;
     }
 
     /**
