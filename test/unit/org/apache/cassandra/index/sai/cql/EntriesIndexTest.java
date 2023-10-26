@@ -20,8 +20,12 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
+
+import static org.junit.Assert.assertEquals;
 
 public class EntriesIndexTest extends SAITester
 {
@@ -383,6 +387,59 @@ public class EntriesIndexTest extends SAITester
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 1"));
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['orange'] < 1"), row(1));
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['orange'] >= 3"), row(4), row(3));
+    }
+
+    @Test
+    public void testLWTConditionalDelete() throws Throwable
+    {
+        createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 1, 'orange': -2})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 2, 'orange': 1})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (3, {'apple': 10000, 'orange': 1})");
+        flush();
+
+        // Attempt to delete rows, but the conditional is not satisfied
+        execute("DELETE FROM %s WHERE partition = 2 IF item_cost['apple'] > 2");
+
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 0"), row(1), row(2), row(3));
+
+        // Actually delete row 2 this time
+        execute("DELETE FROM %s WHERE partition = 2 IF item_cost['apple'] > 1");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 0"), row(1), row(3));
+            assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 1"), row(3));
+            // Show that it also works for the other map entry
+            assertRows(execute("SELECT partition FROM %s WHERE item_cost['orange'] > 0"), row(3));
+        });
+    }
+
+    @Test
+    public void testLWTConditionalUpdate()
+    {
+        createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 1, 'orange': -2})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 2, 'orange': 1})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (3, {'apple': 10000, 'orange': 1})");
+        flush();
+
+        var row3 = execute("SELECT item_cost FROM %s WHERE partition = 3");
+        assertEquals("{apple=10000, orange=1}", row3.one().getMap("item_cost", UTF8Type.instance, Int32Type.instance).toString());
+
+        // Attempt to update rows, but only one of the updates is successful in updating the value of apple
+        execute("UPDATE %s SET item_cost['apple'] = 3 WHERE partition = 2 IF item_cost['apple'] > 100");
+        execute("UPDATE %s SET item_cost['apple'] = 3 WHERE partition = 3 IF item_cost['apple'] > 100");
+
+        // observe the change
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] = 3"), row(3));
+        row3 = execute("SELECT item_cost FROM %s WHERE partition = 3");
+        assertEquals("{apple=3, orange=1}", row3.one().getMap("item_cost", UTF8Type.instance, Int32Type.instance).toString());
     }
 
     @Test
