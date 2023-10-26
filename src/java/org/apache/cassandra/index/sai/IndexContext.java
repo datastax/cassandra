@@ -60,7 +60,6 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.disk.EmptyIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
@@ -71,6 +70,7 @@ import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -408,14 +408,14 @@ public class IndexContext
                             .orElse(null);
     }
 
-
     public RangeIterator searchMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         if (e.getOp().isNonEquality())
         {
-            // For negative searches we return everything and rely on anti-join / post filtering
-            // to do the exclusion
-            return scanMemtables(keyRange);
+            Expression negExpression = e.negated();
+            RangeIterator allKeys = scanMemtable(keyRange);
+            RangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
+            return RangeAntiJoinIterator.create(allKeys, matchedKeys);
         }
 
         Collection<MemtableIndex> memtables = liveMemtables.values();
@@ -435,7 +435,7 @@ public class IndexContext
         return builder.build();
     }
 
-    private RangeIterator scanMemtables(AbstractBounds<PartitionPosition> keyRange)
+    private RangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
     {
         Collection<Memtable> memtables = liveMemtables.keySet();
         if (memtables.isEmpty())

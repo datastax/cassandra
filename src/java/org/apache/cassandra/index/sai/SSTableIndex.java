@@ -39,6 +39,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
@@ -146,11 +147,24 @@ public class SSTableIndex implements SegmentOrdering
                                 boolean defer,
                                 int limit) throws IOException
     {
-        // for NEQ, NOT_CONTAINS_KEY, NOT_CONTAINS_VALUE we return everything
-        // and AntiJoin + post-filtering at the top level will filter out the unnecesary keys
-        return expression.getOp().isNonEquality()
-                ? allSSTableKeys(keyRange)
-                : searchableIndex.search(expression, keyRange, context, defer, limit);
+        if (expression.getOp().isNonEquality())
+        {
+            // For NEQ, NOT_CONTAINS_KEY, NOT_CONTAINS_VALUE we return everything minus the keys matching
+            // the expression.
+            //
+            // keys k such that row(k) not contains v = (all keys) \ (keys k such that row(k) contains v)
+            //
+            // Note that we will not match rows in other indexes,
+            // so this can return false positives, but they are not a problem as post-filtering would get rid of them.
+            // We could not safely substract the keys matched in other indexes as indexes may contain false positives
+            // caused by deletes and updates.
+            Expression negExpression = expression.negated();
+            RangeIterator allKeys = allSSTableKeys(keyRange);
+            RangeIterator matchedKeys = searchableIndex.search(negExpression, keyRange, context, defer, Integer.MAX_VALUE);
+            return RangeAntiJoinIterator.create(allKeys, matchedKeys);
+        }
+
+        return searchableIndex.search(expression, keyRange, context, defer, limit);
     }
 
     public void populateSegmentView(SimpleDataSet dataSet)

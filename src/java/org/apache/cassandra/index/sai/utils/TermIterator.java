@@ -73,22 +73,6 @@ public class TermIterator extends RangeIterator
     public static TermIterator build(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
     {
         RangeIterator rangeIterator = buildRangeIterator(e, perSSTableIndexes, keyRange, queryContext, defer, limit);
-
-        // For NOT CONTAINS or NOT CONTAINS KEY it is not enough to just return the primary keys
-        // for values not matching the value being queried.
-        //
-        // keys k such that row(k) not contains v =
-        // (keys k such that row(k) contains x != v || row(k) empty) \ (keys k such that row(k) contains v)
-        //
-        if (e.getOp() == Expression.Op.NOT_EQ
-            || e.getOp() == Expression.Op.NOT_CONTAINS_KEY
-            || e.getOp() == Expression.Op.NOT_CONTAINS_VALUE)
-        {
-            Expression negExpression = e.negated();
-            RangeIterator negIterator = buildRangeIterator(negExpression, perSSTableIndexes, keyRange, queryContext, defer, Integer.MAX_VALUE);
-            rangeIterator = RangeAntiJoinIterator.create(rangeIterator, negIterator);
-        }
-
         return new TermIterator(rangeIterator, perSSTableIndexes, queryContext);
     }
 
