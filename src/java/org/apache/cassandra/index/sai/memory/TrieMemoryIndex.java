@@ -217,7 +217,8 @@ public class TrieMemoryIndex extends MemoryIndex
         Trie<PrimaryKeys> subtrie = data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive);
         if (expression.validator instanceof CompositeType)
             subtrie.entrySet().forEach(entry -> {
-                // TODO why do we decode here and not when we read from disk? (just curious to know how it works)
+                // When stored in memory, the keys of the trie are encoded, so we must decode them before we can
+                // compare them to the expression.
                 ByteComparable decoded = decode(entry.getKey());
                 byte[] key = ByteSourceInverse.readBytes(decoded.asComparableBytes(ByteComparable.Version.OSS41));
                 if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
