@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2.sortedterms;
+package org.apache.cassandra.index.sai.disk.v1.trie;
 
 
 import java.nio.ByteBuffer;
@@ -26,7 +26,6 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.collect.AbstractIterator;
 
-import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
 import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.Pair;
@@ -39,7 +38,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * The payload may be changed to something else.
  */
 @NotThreadSafe
-class TrieRangeIterator extends Walker<TrieRangeIterator>
+public class TrieRangeIterator extends Walker<TrieRangeIterator>
 {
     private final ByteSource limit;
     private final TrieTermsDictionaryReader.TransitionBytesCollector collector = new TrieTermsDictionaryReader.TransitionBytesCollector();
@@ -179,6 +178,7 @@ class TrieRangeIterator extends Walker<TrieRangeIterator>
 
             childIndex = -1 - childIndex - 1;
 
+            System.out.println("position " + position + " payload node " + payloadedNode);
             stack = new IterationPosition(position, childIndex, limitByte, prev);
 
             // Advancing now gives us first match if we didn't find one already.
