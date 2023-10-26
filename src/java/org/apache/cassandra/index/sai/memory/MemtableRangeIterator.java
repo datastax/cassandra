@@ -37,6 +37,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -86,7 +87,8 @@ public class MemtableRangeIterator extends RangeIterator
                                                                                   this.keyRange.right,
                                                                                   this.keyRange.inclusiveRight());
         DataRange dataRange = new DataRange(partitionBounds, new ClusteringIndexSliceFilter(Slices.ALL, false));
-        this.partitionIterator = memtable.makePartitionIterator(columns, dataRange);
+        FileUtils.closeQuietly(partitionIterator);
+        partitionIterator = memtable.makePartitionIterator(columns, dataRange);
         if (partitionIterator.hasNext())
         {
             this.rowIterator = partitionIterator.next();
@@ -94,6 +96,7 @@ public class MemtableRangeIterator extends RangeIterator
             {
                 Slice slice = Slice.make(nextKey.clustering(), Clustering.EMPTY);
                 Slices slices = Slices.with(memtable.metadata().comparator, slice);
+                FileUtils.closeQuietly(rowIterator);
                 rowIterator = memtable.getPartition(nextKey.partitionKey()).unfilteredIterator(columns, slices, false);
             }
         }
@@ -102,9 +105,7 @@ public class MemtableRangeIterator extends RangeIterator
     @Override
     public void close() throws IOException
     {
-        partitionIterator.close();
-        if (rowIterator != null)
-            rowIterator.close();
+        FileUtils.close(partitionIterator, rowIterator);
     }
 
     @Override
@@ -114,6 +115,7 @@ public class MemtableRangeIterator extends RangeIterator
         {
             if (!hasNextRow(rowIterator))
             {
+                FileUtils.closeQuietly(rowIterator);
                 rowIterator = partitionIterator.next();
                 continue;
             }
