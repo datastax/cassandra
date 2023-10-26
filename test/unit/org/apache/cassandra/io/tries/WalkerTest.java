@@ -161,6 +161,56 @@ public class WalkerTest extends AbstractTrieTestBase
     }
 
     @Test
+    public void testWithBoundsWithNoPayloadAtSourceTerminationAdmitPrefix() throws IOException
+    {
+        DataOutputBuffer buf = new AbstractTrieTestBase.DataOutputBufferPaged();
+        IncrementalTrieWriter<Integer> builder = newTrieWriter(serializer, buf);
+        dump = true;
+        builder.add(source("1"), 1);
+        builder.add(source("111"), 2);
+        builder.add(source("1111"), 3);
+        long rootPos = builder.complete();
+
+        Rebufferer source = new ByteBufRebufferer(buf.asNewBuffer());
+
+        // Payload is chosen to specifically test the case when the source is exhausted at a node without a payload
+        InternalIterator it = new InternalIterator(source, rootPos, source("11"), source("2"), true);
+        long pos;
+        assertNotEquals(-1, pos = it.nextPayloadedNode());
+        assertEquals(1, TrieNode.at(buf.asNewBuffer(), (int) pos).payloadFlags(buf.asNewBuffer(), (int) pos));
+        assertNotEquals(-1, pos = it.nextPayloadedNode());
+        assertEquals(2, TrieNode.at(buf.asNewBuffer(), (int) pos).payloadFlags(buf.asNewBuffer(), (int) pos));
+        assertNotEquals(-1, pos = it.nextPayloadedNode());
+        assertEquals(3, TrieNode.at(buf.asNewBuffer(), (int) pos).payloadFlags(buf.asNewBuffer(), (int) pos));
+
+        assertEquals(-1, it.nextPayloadedNode());
+    }
+
+    @Test
+    public void testWithBoundsWithNoPayloadAtSourceTerminationNotAdmitPrefix() throws IOException
+    {
+        DataOutputBuffer buf = new AbstractTrieTestBase.DataOutputBufferPaged();
+        IncrementalTrieWriter<Integer> builder = newTrieWriter(serializer, buf);
+        dump = true;
+        builder.add(source("1"), 1);
+        builder.add(source("111"), 2);
+        builder.add(source("1111"), 3);
+        long rootPos = builder.complete();
+
+        Rebufferer source = new ByteBufRebufferer(buf.asNewBuffer());
+
+        // Payload is chosen to specifically test the case when the source is exhausted at a node without a payload
+        InternalIterator it = new InternalIterator(source, rootPos, source("11"), source("2"), false);
+        long pos;
+        assertNotEquals(-1, pos = it.nextPayloadedNode());
+        assertEquals(2, TrieNode.at(buf.asNewBuffer(), (int) pos).payloadFlags(buf.asNewBuffer(), (int) pos));
+        assertNotEquals(-1, pos = it.nextPayloadedNode());
+        assertEquals(3, TrieNode.at(buf.asNewBuffer(), (int) pos).payloadFlags(buf.asNewBuffer(), (int) pos));
+
+        assertEquals(-1, it.nextPayloadedNode());
+    }
+
+    @Test
     public void testPartialTail() throws IOException
     {
         DataOutputBuffer buf = new AbstractTrieTestBase.DataOutputBufferPaged();
