@@ -194,7 +194,8 @@ public class VectorTopKProcessor
         partitions.close();
 
         // reorder rows in partition/clustering order
-        for (int i = 0; i < min(topK.size(), limit); i++) {
+        final int numResults = min(topK.size(), limit);
+        for (int i = 0; i < numResults; i++) {
             var triple = topK.poll();
             addUnfiltered(unfilteredByPartition, triple.getLeft(), triple.getMiddle());
         }
@@ -206,7 +207,7 @@ public class VectorTopKProcessor
 
     private class PartitionResults {
         final PartitionInfo partitionInfo;
-        SortedSet<Unfiltered> tombstones = Collections.emptySortedSet();
+        final SortedSet<Unfiltered> tombstones = new TreeSet<>(command.metadata().comparator);
         final List<Triple<PartitionInfo, Row, Float>> rows = new ArrayList<>();
 
         PartitionResults(PartitionInfo partitionInfo) {
@@ -215,8 +216,6 @@ public class VectorTopKProcessor
 
         void addTombstone(Unfiltered uf)
         {
-            if (tombstones.isEmpty())
-                tombstones = new TreeSet<>(command.metadata().comparator);
             tombstones.add(uf);
         }
 
