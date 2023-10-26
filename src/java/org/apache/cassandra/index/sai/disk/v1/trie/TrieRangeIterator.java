@@ -125,6 +125,10 @@ public class TrieRangeIterator extends Walker<TrieRangeIterator>
         {
             first = false;
             if (stack == null) return -1;
+            // The top of the stack is behind, which appears to happen when the lower bound is both a prefix of the next
+            // greatest term and a base of the next lesser term (that term is a prefix of the lower bound).
+            if (stack.node < next)
+                return advanceNode();
             return stack.node;
         }
         long toReturn = next;
