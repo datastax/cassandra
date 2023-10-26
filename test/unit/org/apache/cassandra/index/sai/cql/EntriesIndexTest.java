@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 
 public class EntriesIndexTest extends SAITester
@@ -422,5 +423,17 @@ public class EntriesIndexTest extends SAITester
         String query = "SELECT partition FROM %s WHERE item_cost[?] < ?";
         prepare(query);
         assertRows(execute(query, "apple", 6), row(0));
+    }
+
+    @Test
+    public void testRangeQueriesOnClusteringColumn() throws Throwable
+    {
+        // If we ever support using non-frozen collections as clustering columns, we need to determine
+        // if range queries should work when the column is a clustering column.
+        assertInvalidThrow(InvalidRequestException.class,
+                           String.format(
+                           "CREATE TABLE %s.%s (partition int, item_cost map<text, int>, PRIMARY KEY (partition, item_cost))",
+                           KEYSPACE,
+                           createTableName()));
     }
 }
