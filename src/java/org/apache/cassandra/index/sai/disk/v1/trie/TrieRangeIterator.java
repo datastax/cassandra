@@ -182,7 +182,6 @@ public class TrieRangeIterator extends Walker<TrieRangeIterator>
 
             childIndex = -1 - childIndex - 1;
 
-            System.out.println("position " + position + " payload node " + payloadedNode);
             stack = new IterationPosition(position, childIndex, limitByte, prev);
 
             // Advancing now gives us first match if we didn't find one already.
