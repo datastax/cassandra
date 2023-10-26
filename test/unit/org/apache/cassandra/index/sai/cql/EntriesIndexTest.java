@@ -389,6 +389,8 @@ public class EntriesIndexTest extends SAITester
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['orange'] >= 3"), row(4), row(3));
     }
 
+    // NOTE: this works without touching the SAI code. This is worth testing to make sure we don't need to reject
+    // these queries.
     @Test
     public void testLWTConditionalDelete() throws Throwable
     {
@@ -417,6 +419,8 @@ public class EntriesIndexTest extends SAITester
         });
     }
 
+    // NOTE: this works without touching the SAI code. This is worth testing to make sure we don't need to reject
+    // these queries.
     @Test
     public void testLWTConditionalUpdate()
     {
