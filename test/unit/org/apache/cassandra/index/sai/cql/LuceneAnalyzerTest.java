@@ -139,7 +139,7 @@ public class LuceneAnalyzerTest extends SAITester
         assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(c1) USING 'StorageAttachedIndex' WITH OPTIONS = " +
                     "{'query_analyzer': 'whitespace'}"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasRootCauseMessage("Cannot specify query_analyzer without an index_analyzer option or any combination of " +
+        .hasMessageContaining("Cannot specify query_analyzer without an index_analyzer option or any combination of " +
                              "case_sensitive, normalize, or ascii options. options={query_analyzer=whitespace, target=c1}");;
     }
 
