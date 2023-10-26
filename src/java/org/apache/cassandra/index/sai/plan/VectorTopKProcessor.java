@@ -42,6 +42,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.concurrent.ImmediateExecutor;
 import org.apache.cassandra.concurrent.LocalAwareExecutorService;
 import org.apache.cassandra.concurrent.SharedExecutorPool;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -106,24 +107,22 @@ public class VectorTopKProcessor
     }
 
     /**
-     * Stage to use for parallel index reads.
-     * Defined by -DIndexReadStage.cassandra.stage=<value> where value matches one of the Stage enum values.
-     * INDEX_READ is default, READ is a possibility, or IMMEDIATE to disable parallel reads.
-     * Others are not recommended.
-     * @see org.apache.cassandra.concurrent.Stage
+     * Executor to use for parallel index reads.
+     * Defined by -Dcassandra.index_read.parallele=true/false, true by default.
      *
-     * INDEX_READ uses 2 * cpus threads by default but can be overridden with -DIndexReadStage.cassandra.threads=<value>
+     * INDEX_READ uses 2 * cpus threads by default but can be overridden with -Dcassandra.index_read.parallel_thread_num=<value>
      *
      * @return stage to use, default INDEX_READ
      */
     private static LocalAwareExecutorService getExecutor()
     {
-        boolean isParallel = Boolean.parseBoolean(System.getProperty("IndexRead.cassandra.parallel", "true"));
+        boolean isParallel = CassandraRelevantProperties.USE_PARALLEL_INDEX_READ.getBoolean();
 
         if (isParallel)
         {
-            String conf = System.getProperty("IndexRead.cassandra.parallel.threadnum");
-            int numThreads = Strings.isNullOrEmpty(conf) ? FBUtilities.getAvailableProcessors() * 2 : Integer.parseInt(conf);
+            int numThreads = CassandraRelevantProperties.PARALLEL_INDEX_READ_NUM_THREADS.isPresent()
+                                ? CassandraRelevantProperties.PARALLEL_INDEX_READ_NUM_THREADS.getInt()
+                                : FBUtilities.getAvailableProcessors() * 2;
             return SharedExecutorPool.SHARED.newExecutor(numThreads, maximumPoolSize -> {}, "request", "IndexParallelRead");
         }
         else
