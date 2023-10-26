@@ -491,15 +491,32 @@ public class AllowFilteringTest extends SAITester
 
         // Insert data for later
         execute("INSERT INTO %s (partition, item_cost) VALUES (0, {'apple': 2, 'orange': 1})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (1, {'apple': 1, 'orange': 3})");
+        flush();
+        execute("INSERT INTO %s (partition, item_cost) VALUES (2, {'apple': 4, 'orange': 2})");
+        execute("INSERT INTO %s (partition, item_cost) VALUES (3, {'apple': 3, 'orange': 1})");
 
         // Gen an ALLOW FILTERING recommendation.
         assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "item_cost"),
                              "SELECT partition FROM %s WHERE item_cost['apple'] < 6");
 
+        // Show that filtering works correctly
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] > 1 ALLOW FILTERING"),
+                   row(0), row(2), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] >= 1 ALLOW FILTERING"),
+                   row(1), row(0), row(2), row(3));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 3 ALLOW FILTERING"),
+                   row(1), row(0));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= 3 ALLOW FILTERING"),
+                   row(1), row(0), row(3));
+
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 3 AND item_cost['apple'] > 1 ALLOW FILTERING"), row(0));
+
+
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
 
         // Show that we're now able to execute the query.
-        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] <= 6"), row(0));
+        assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 3 AND item_cost['apple'] > 1"), row(0));
     }
 }
