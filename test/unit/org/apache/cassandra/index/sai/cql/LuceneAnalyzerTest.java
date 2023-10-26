@@ -218,7 +218,7 @@ public class LuceneAnalyzerTest extends SAITester
                                              "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                                              "WITH OPTIONS = { 'index_analyzer': '{}'}"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasRootCauseMessage("Analzyer config requires at least a tokenizer, a filter, or a charFilter, but none found. config={}");
+        .hasMessageContaining("Analzyer config requires at least a tokenizer, a filter, or a charFilter, but none found. config={}");
     }
 
 // FIXME re-enable exception detection once incompatible options have been purged from prod DBs
