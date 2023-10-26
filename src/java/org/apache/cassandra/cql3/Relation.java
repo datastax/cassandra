@@ -97,7 +97,7 @@ public abstract class Relation
     }
 
     /**
-     * Checks if the operator of this relation is a <code>CONTAINS_KEY</code>.
+     * Checks if the operator of this relation is a <code>NOT_CONTAINS_KEY</code>.
      * @return <code>true</code>  if the operator of this relation is a <code>NOT_CONTAINS_KEY</code>, <code>false</code>
      * otherwise.
      */
