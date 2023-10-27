@@ -31,7 +31,8 @@ class PathBasedFilterFactory {
 
     private final static Pattern DOT_SEPARATOR = Pattern.compile("\\.");
 
-    private final static TokenFilter EMPTY_DOC_FILTER = IncludeNothingFilter.instance;
+    // Accessed from same package, tests
+    final static TokenFilter EMPTY_DOC_FILTER = IncludeNothingFilter.instance;
 
     /**
      * Main factory method for constructing {@link TokenFilter} for including
