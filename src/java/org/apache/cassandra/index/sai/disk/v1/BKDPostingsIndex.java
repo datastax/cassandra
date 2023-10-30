@@ -24,7 +24,6 @@ import com.carrotsearch.hppc.IntLongMap;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
-import org.github.jamm.MemoryLayoutSpecification;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.validate;
