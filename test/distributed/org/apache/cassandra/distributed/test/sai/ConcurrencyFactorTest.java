@@ -30,9 +30,9 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.service.reads.range.RangeCommandIterator;
 
-import static junit.framework.TestCase.assertEquals;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
+import static org.junit.Assert.assertEquals;
 
 public class ConcurrencyFactorTest extends TestBaseImpl
 {

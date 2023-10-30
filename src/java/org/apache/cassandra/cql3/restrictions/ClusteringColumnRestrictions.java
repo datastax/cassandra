@@ -19,8 +19,6 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.util.*;
 
-import javax.annotation.Nullable;
-
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;

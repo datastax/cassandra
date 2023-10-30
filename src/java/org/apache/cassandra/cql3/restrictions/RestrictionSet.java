@@ -18,7 +18,6 @@
 package org.apache.cassandra.cql3.restrictions;
 
 import java.util.*;
-import java.util.function.Consumer;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;

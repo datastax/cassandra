@@ -27,7 +27,6 @@ import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.MultiCBuilder;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.service.ClientState;
 
