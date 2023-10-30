@@ -137,11 +137,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private int topKFor(int limit)
     {
         // compute the factor `n` to multiply limit by to increase the number of results from the index.
+        // The functions become less than 1 at the 997.325... and 1583.4 points, respectively.
         var n = indexContext.getIndexWriterConfig().getOptimizeFor() == OptimizeFor.LATENCY
-                ? 0.979 + 4.021 * pow(limit, -0.761)  // f(1) =  5.0, f(100) = 1.1, f(1000) = 1.0
-                : 0.509 + 9.491 * pow(limit, -0.402); // f(1) = 10.0, f(100) = 2.0, f(1000) = 1.1
-        // In some edge cases, n is less than 1.
-        return (int) (Math.max(n, 1) * limit);
+                ? (limit > 997) ? limit : 0.979 + 4.021 * pow(limit, -0.761)  // f(1) =  5.0, f(100) = 1.1, f(1000) = 1.0
+                : (limit > 1583) ? limit : 0.509 + 9.491 * pow(limit, -0.402); // f(1) = 10.0, f(100) = 2.0, f(1000) = 1.1
+        return (int) (n * limit);
     }
 
     /**
