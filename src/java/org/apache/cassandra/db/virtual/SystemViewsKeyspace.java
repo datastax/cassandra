@@ -22,6 +22,7 @@ import com.google.common.collect.ImmutableList;
 import org.apache.cassandra.index.sai.virtual.IndexesSystemView;
 import org.apache.cassandra.index.sai.virtual.SSTablesSystemView;
 import org.apache.cassandra.index.sai.virtual.SegmentsSystemView;
+import org.apache.cassandra.index.sai.virtual.StorageAttachedIndexTables;
 
 import static org.apache.cassandra.schema.SchemaConstants.VIRTUAL_VIEWS;
 

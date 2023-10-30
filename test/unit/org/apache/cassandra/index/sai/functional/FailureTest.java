@@ -22,7 +22,6 @@ package org.apache.cassandra.index.sai.functional;
 
 import org.junit.Test;
 
-import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableContext;
