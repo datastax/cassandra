@@ -35,8 +35,10 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.vector.VectorUtil;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -197,7 +199,7 @@ public class Expression
             case ANN:
                 operation = Op.ANN;
                 lower = new Bound(value, validator, true);
-                upper = lower;
+                // Upper bound is only set when there is a range query
                 break;
         }
 
@@ -208,7 +210,8 @@ public class Expression
 
     public boolean isSatisfiedBy(ByteBuffer columnValue)
     {
-        if (validator.isVector())
+        // When upper is null, all vectors are valid
+        if (validator.isVector() && upper == null)
             return true;
 
         if (!TypeUtil.isValid(columnValue, validator))
@@ -218,6 +221,14 @@ public class Expression
         }
 
         Value value = new Value(columnValue, validator);
+
+        if (validator.isVector())
+        {
+            // TODO which distance function are we using?
+            float similarityScore = VectorUtil.squareDistance(lower.value.vector, value.vector);
+            float limit = FloatType.instance.compose(upper.value.raw);
+            return upperInclusive ? similarityScore <= limit : similarityScore < limit;
+        }
 
         if (lower != null)
         {

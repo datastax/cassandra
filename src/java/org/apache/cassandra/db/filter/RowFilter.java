@@ -303,6 +303,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             add(new MapEqualityExpression(def, key, op, value));
         }
 
+        public void addGeoDistanceExpression(ColumnMetadata def, ByteBuffer point, Operator op, ByteBuffer distance)
+        {
+            add(new GeoDistanceExpression(def, point, op, distance));
+        }
+
         public void addCustomIndexExpression(TableMetadata metadata, IndexMetadata targetIndex, ByteBuffer value)
         {
             add(CustomExpression.build(metadata, targetIndex, value));
@@ -604,7 +609,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         // and this is why we have some UNUSEDX for values we don't use anymore
         // (we could clean those on a major protocol update, but it's not worth
         // the trouble for now)
-        protected enum Kind { SIMPLE, MAP_EQUALITY, UNUSED1, CUSTOM, USER }
+        protected enum Kind { SIMPLE, MAP_EQUALITY, UNUSED1, CUSTOM, USER, VECTOR_RADIUS }
 
         protected abstract Kind kind();
         protected final ColumnMetadata column;
@@ -833,6 +838,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                     case USER:
                         size += UserExpression.serializedSize((UserExpression)expression, version);
                         break;
+                    case VECTOR_RADIUS:
+                        throw new RuntimeException("implement me");
                 }
                 return size;
             }
@@ -1078,6 +1085,81 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         protected Kind kind()
         {
             return Kind.MAP_EQUALITY;
+        }
+    }
+
+
+    // VSTODO make generic?
+    public static class GeoDistanceExpression extends Expression
+    {
+        private final ByteBuffer distance;
+        private final Operator distanceOperator;
+
+        public GeoDistanceExpression(ColumnMetadata column, ByteBuffer point, Operator operator, ByteBuffer distance)
+        {
+            super(column, Operator.ANN, point);
+            assert column.type instanceof VectorType && (operator == Operator.LTE || operator == Operator.LT);
+            this.distanceOperator = operator;
+            this.distance = distance;
+        }
+
+
+        public Operator getDistanceOperator()
+        {
+            return distanceOperator;
+        }
+
+        public ByteBuffer getDistance()
+        {
+            return distance;
+        }
+
+        @Override
+        public void validate() throws InvalidRequestException
+        {
+            checkBindValueSet(distance, "Unsupported unset distance for column %s", column.name);
+            checkBindValueSet(value, "Unsupported unset vector value for column %s", column.name);
+        }
+
+        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
+        {
+            throw new UnsupportedOperationException("Filtering not supported for vector radius expressions");
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("GEO_DISTANCE(%s, %s) %s %s", column.name, column.type.getString(value),
+                                 distanceOperator, FloatType.instance.getString(distance));
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o)
+                return true;
+
+            if (!(o instanceof GeoDistanceExpression))
+                return false;
+
+            GeoDistanceExpression that = (GeoDistanceExpression)o;
+
+            return Objects.equal(this.column.name, that.column.name)
+                   && Objects.equal(this.distanceOperator, that.distanceOperator)
+                   && Objects.equal(this.distance, that.distance)
+                   && Objects.equal(this.value, that.value);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hashCode(column.name, distanceOperator, value, distance);
+        }
+
+        @Override
+        protected Kind kind()
+        {
+            return Kind.VECTOR_RADIUS;
         }
     }
 

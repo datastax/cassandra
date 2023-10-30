@@ -809,11 +809,20 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     public static final class AnnRestriction extends SingleColumnRestriction
     {
         private final Term value;
+        private final Term distance;
+        private final boolean isInclusive;
 
         public AnnRestriction(ColumnMetadata columnDef, Term value)
         {
+            this(columnDef, value, null, false);
+        }
+
+        public AnnRestriction(ColumnMetadata columnDef, Term value, Term distance, boolean isInclusive)
+        {
             super(columnDef);
             this.value = value;
+            this.distance = distance;
+            this.isInclusive = isInclusive;
         }
 
         public ByteBuffer value(QueryOptions options)
@@ -825,6 +834,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addFunctionsTo(List<Function> functions)
         {
             value.addFunctionsTo(functions);
+            if (distance != null)
+                distance.addFunctionsTo(functions);
         }
 
         @Override
@@ -838,7 +849,10 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                                    IndexRegistry indexRegistry,
                                    QueryOptions options)
         {
-            filter.add(columnDef, Operator.ANN, value.bindAndGet(options));
+            if (distance != null)
+                filter.addGeoDistanceExpression(columnDef, value.bindAndGet(options), isInclusive ? Operator.LTE : Operator.LT, distance.bindAndGet(options));
+            else
+                filter.add(columnDef, Operator.ANN, value.bindAndGet(options));
         }
 
         @Override

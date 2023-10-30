@@ -61,6 +61,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         this.filterOperation = filterOperation;
         this.indexes = indexes;
         this.indexFeatureSet = indexFeatureSet;
+        // TODO do we need to revisit for geo distance?
         this.isTopK = indexes.stream().anyMatch(i -> i instanceof StorageAttachedIndex && ((StorageAttachedIndex) i).getIndexContext().isVector());
     }
 

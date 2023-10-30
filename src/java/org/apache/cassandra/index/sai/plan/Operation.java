@@ -138,6 +138,14 @@ public class Operation
                         while (analyzer.hasNext());
                     }
                 }
+                else if (e instanceof RowFilter.GeoDistanceExpression)
+                {
+                    var distance = ((RowFilter.GeoDistanceExpression) e);
+                    var expression = new Expression(indexContext)
+                                     .add(distance.getDistanceOperator(), distance.getDistance().duplicate())
+                                     .add(Operator.ANN, e.getIndexValue().duplicate());
+                    perColumn.add(expression);
+                }
                 else
                 // "range" or not-equals operator, combines both bounds together into the single expression,
                 // if operation of the group is AND, otherwise we are forced to create separate expressions,
@@ -208,6 +216,7 @@ public class Operation
 
     static RangeIterator buildIterator(QueryController controller)
     {
+        // TODO revisit this logic to make geo distance work for nested predicates.
         var filterOperation = controller.filterOperation();
         var orderings = filterOperation.expressions()
                                        .stream().filter(e -> e.operator() == Operator.ANN).collect(Collectors.toList());
