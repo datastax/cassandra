@@ -475,6 +475,7 @@ public enum CassandraRelevantProperties
     /** Enabled/disable TCP_NODELAY for intradc connections. Defaults is enabled. */
     OTC_INTRADC_TCP_NODELAY("cassandra.otc_intradc_tcp_nodelay", "true"),
     OVERRIDE_DECOMMISSION("cassandra.override_decommission"),
+    PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num"),
     PARENT_REPAIR_STATUS_CACHE_SIZE("cassandra.parent_repair_status_cache_size", "100000"),
     PARENT_REPAIR_STATUS_EXPIRY_SECONDS("cassandra.parent_repair_status_expiry_seconds", convertToString(TimeUnit.SECONDS.convert(1, TimeUnit.DAYS))),
     PARTITIONER("cassandra.partitioner"),
@@ -755,6 +756,8 @@ public enum CassandraRelevantProperties
     /** When enabled, recursive directory deletion will be executed using a unix command `rm -rf` instead of traversing
      * and removing individual files. This is now used only tests, but eventually we will make it true by default.*/
     USE_NIX_RECURSIVE_DELETE("cassandra.use_nix_recursive_delete"),
+    // Enables parallel index read.
+    USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
     USE_RANDOM_ALLOCATION_IF_NOT_SUPPORTED("cassandra.token_allocation.use_random_if_not_supported"),
     /** Gossiper compute expiration timeout. Default value 3 days. */
     VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("cassandra.sai.validate_max_term_size_at_coordinator"),

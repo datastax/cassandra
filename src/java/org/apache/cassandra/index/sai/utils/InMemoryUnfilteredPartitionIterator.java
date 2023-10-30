@@ -20,7 +20,7 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.Iterator;
 import java.util.Map;
-import java.util.TreeMap;
+import java.util.SortedMap;
 import java.util.TreeSet;
 
 import org.apache.cassandra.db.DecoratedKey;
@@ -39,7 +39,7 @@ public class InMemoryUnfilteredPartitionIterator implements UnfilteredPartitionI
     private final ReadCommand command;
     private final Iterator<Map.Entry<PartitionInfo, TreeSet<Unfiltered>>> partitions;
 
-    public InMemoryUnfilteredPartitionIterator(ReadCommand command, TreeMap<PartitionInfo, TreeSet<Unfiltered>> rowsByPartitions)
+    public InMemoryUnfilteredPartitionIterator(ReadCommand command, SortedMap<PartitionInfo, TreeSet<Unfiltered>> rowsByPartitions)
     {
         this.command = command;
         this.partitions = rowsByPartitions.entrySet().iterator();
