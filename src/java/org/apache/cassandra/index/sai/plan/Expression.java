@@ -225,7 +225,7 @@ public class Expression
         if (validator.isVector())
         {
             // TODO which distance function are we using?
-            float similarityScore = VectorUtil.squareDistance(lower.value.vector, value.vector);
+            double similarityScore = Math.sqrt(VectorUtil.squareDistance(lower.value.vector, value.vector));
             float limit = FloatType.instance.compose(upper.value.raw);
             return upperInclusive ? similarityScore <= limit : similarityScore < limit;
         }
