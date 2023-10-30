@@ -46,7 +46,7 @@ public class NativeFunctions
             BytesConversionFcts.addFunctionsTo(this);
             MathFcts.addFunctionsTo(this);
             MaskingFcts.addFunctionsTo(this);
-            VectorFcts.addFunctionsTo(this);
+//            VectorFcts.addFunctionsTo(this);
         }
     };
 
