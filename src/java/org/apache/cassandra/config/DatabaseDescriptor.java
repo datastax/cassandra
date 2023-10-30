@@ -4908,11 +4908,6 @@ public class DatabaseDescriptor
         return conf != null ? conf.default_compaction : null;
     }
 
-    public static DataStorageSpec.IntMebibytesBound getSAISegmentWriteBufferSpace()
-    {
-        return conf.sai_options.segment_write_buffer_size;
-    }
-
     public static RepairRetrySpec getRepairRetrySpec()
     {
         return conf == null ? new RepairRetrySpec() : conf.repair.retries;
