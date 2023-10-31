@@ -780,7 +780,7 @@ public class StatementRestrictions
 
     public boolean hasAnnRestriction()
     {
-        return nonPrimaryKeyRestrictions.getColumnDefs().stream().anyMatch(c -> c.type.isVector());
+        return nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isAnn);
     }
 
     public void throwRequiresAllowFilteringError(TableMetadata table)

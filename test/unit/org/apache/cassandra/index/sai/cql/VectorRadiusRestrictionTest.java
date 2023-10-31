@@ -25,7 +25,7 @@ public class VectorRadiusRestrictionTest extends VectorTester
     @Test
     public void testBasicGeoDistanceQuery() throws Throwable
     {
-        createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 2>, PRIMARY KEY(pk))");
+        createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
 
@@ -41,6 +41,49 @@ public class VectorRadiusRestrictionTest extends VectorTester
                                     row(1), row(2), row(3));
             assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [5,5]) <= 5"),
                                     row(0), row(1), row(2), row(3), row(4));
+        });
+    }
+
+    @Test
+    public void testIntersectedPredicateWithGeoDistanceQuery() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, num int, v vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, num, v) VALUES (0, 0, [1, 2])"); // distance is 5 from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (1, 1, [4, 4])"); // distance is root 2 from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (2, 2, [5, 5])"); // distance is 0 from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (3, 3, [6, 6])"); // distance is root 2 from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (4, 4, [8, 9])"); // distance is 5 from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (5, 5, [10, 10])"); // distance is greater than 5 from [5,5]
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [5,5]) < 5 AND num < 2"), row(1));
+            assertRows(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [5,5]) <= 5 AND num > 3"), row(4));
+            assertRows(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [5,5]) <= 5 AND num = 3"), row(3));
+        });
+    }
+
+    @Test
+    public void testNestedGeoDistanceQueries() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, num int, v vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, num, v) VALUES (0, 0, [1, 2])"); // distance is 5 from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (1, 1, [4, 4])"); // distance is root 2 from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (2, 2, [5, 5])"); // distance is 0 from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (3, 3, [6, 6])"); // distance is root 2 from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (4, 4, [8, 9])"); // distance is 5 from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (5, 5, [10, 10])"); // distance is greater than 5 from [5,5]
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [10,10]) < 1 OR GEO_DISTANCE(v, [1,2]) < 1"),
+                       row(5), row(0));
         });
     }
 }
