@@ -272,6 +272,13 @@ public enum Operator
             return true;
         }
     },
+    /**
+     * An operator that performs a distance bounded approximate nearest neighbor search against a vector column such
+     * that all result vectors are within a given distance of the query vector. The notable difference between this
+     * operator and {@link #ANN} is that it does not introduce an arbitrary limit on the number of results returned,
+     * and as a consequence, it can be logically combined with other predicates and even unioned with other
+     * {@link #BOUNDED_ANN} predicates.
+     */
     BOUNDED_ANN(16)
     {
         @Override
