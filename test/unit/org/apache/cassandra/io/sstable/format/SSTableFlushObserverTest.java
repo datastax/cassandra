@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.io.sstable.format;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -33,7 +32,10 @@ import java.util.Objects;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Clustering;
@@ -61,8 +63,12 @@ import static org.apache.cassandra.db.rows.RangeTombstoneBoundMarker.exclusiveCl
 import static org.apache.cassandra.db.rows.RangeTombstoneBoundMarker.exclusiveOpen;
 import static org.apache.cassandra.db.rows.RangeTombstoneBoundaryMarker.exclusiveCloseInclusiveOpen;
 import static org.apache.cassandra.db.rows.RangeTombstoneBoundaryMarker.inclusiveCloseExclusiveOpen;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class SSTableFlushObserverTest
 {
@@ -77,7 +83,7 @@ public class SSTableFlushObserverTest
     private static final String KS_NAME = "test";
 
     private final long now = System.currentTimeMillis();
-    private final int nowInSec = FBUtilities.nowInSeconds();
+    private final long nowInSec = FBUtilities.nowInSeconds();
 
     /**
      * Test {@link SSTableFlushObserver} when the schema doesn't have a clustering key.
@@ -94,19 +100,19 @@ public class SSTableFlushObserverTest
 
         Map<PartitionHeader, List<Unfiltered>> partitions = new LinkedHashMap<>();
 
-        partitions.put(header(decompose("key1"), new DeletionTime(1, 10), Rows.EMPTY_STATIC_ROW),
+        partitions.put(header(decompose("key1"), DeletionTime.build(1, 10), Rows.EMPTY_STATIC_ROW),
                        unfiltereds(row(Clustering.EMPTY,
                                        liveCell(metadata, "age", decompose(27)),
                                        liveCell(metadata, "height", decompose(183L)),
                                        liveCell(metadata, "name", decompose("jack")))));
 
-        partitions.put(header(decompose("key3"), new DeletionTime(2, 20), Rows.EMPTY_STATIC_ROW),
+        partitions.put(header(decompose("key3"), DeletionTime.build(2, 20), Rows.EMPTY_STATIC_ROW),
                        unfiltereds(row(Clustering.EMPTY,
                                        liveCell(metadata, "age", decompose(30)),
                                        liveCell(metadata, "height", decompose(178L)),
                                        liveCell(metadata, "name", decompose("ken")))));
 
-        partitions.put(header(decompose("key2"), new DeletionTime(3, 30), Rows.EMPTY_STATIC_ROW),
+        partitions.put(header(decompose("key2"), DeletionTime.build(3, 30), Rows.EMPTY_STATIC_ROW),
                        unfiltereds(row(Clustering.EMPTY,
                                        liveCell(metadata, "age", decompose(30)),
                                        liveCell(metadata, "height", decompose(180L)),
@@ -130,7 +136,7 @@ public class SSTableFlushObserverTest
 
         Map<PartitionHeader, List<Unfiltered>> partitions = new LinkedHashMap<>();
 
-        partitions.put(header(decompose("key1"), new DeletionTime(1, 10), Rows.EMPTY_STATIC_ROW),
+        partitions.put(header(decompose("key1"), DeletionTime.build(1, 10), Rows.EMPTY_STATIC_ROW),
                        unfiltereds(row(clustering(decompose("kim")),
                                        liveCell(metadata, "age", decompose(27)),
                                        liveCell(metadata, "height", decompose(183L))),
@@ -141,7 +147,7 @@ public class SSTableFlushObserverTest
                                        liveCell(metadata, "age", decompose(54)),
                                        liveCell(metadata, "height", decompose(181L)))));
 
-        partitions.put(header(decompose("key2"), new DeletionTime(2, 20), Rows.EMPTY_STATIC_ROW),
+        partitions.put(header(decompose("key2"), DeletionTime.build(2, 20), Rows.EMPTY_STATIC_ROW),
                        unfiltereds(row(clustering(decompose("kim")),
                                        liveCell(metadata, "age", decompose(36)),
                                        liveCell(metadata, "height", decompose(172L))),
@@ -172,20 +178,20 @@ public class SSTableFlushObserverTest
 
         Map<PartitionHeader, List<Unfiltered>> partitions = new LinkedHashMap<>();
 
-        partitions.put(header(decompose("key0"), new DeletionTime(1, 10),
+        partitions.put(header(decompose("key0"), DeletionTime.build(1, 10),
                               staticRow(liveCell(metadata, "static_1", decompose("static_1_0")))),
                        unfiltereds());
 
-        partitions.put(header(decompose("key1"), new DeletionTime(2, 20),
+        partitions.put(header(decompose("key1"), DeletionTime.build(2, 20),
                               staticRow(liveCell(metadata, "static_2", decompose("static_2_1")))),
                        unfiltereds());
 
-        partitions.put(header(decompose("key4"), new DeletionTime(3, 30),
+        partitions.put(header(decompose("key4"), DeletionTime.build(3, 30),
                               staticRow(liveCell(metadata, "static_1", decompose("static_1_4")),
                                         liveCell(metadata, "static_2", decompose("static_2_4")))),
                        unfiltereds());
 
-        partitions.put(header(decompose("key3"), new DeletionTime(4, 40), staticRow()),
+        partitions.put(header(decompose("key3"), DeletionTime.build(4, 40), staticRow()),
                        unfiltereds(row(clustering(decompose("bob")),
                                        liveCell(metadata, "age", decompose(36)),
                                        liveCell(metadata, "height", decompose(172L))),
@@ -193,7 +199,7 @@ public class SSTableFlushObserverTest
                                        liveCell(metadata, "age", decompose(41)),
                                        liveCell(metadata, "height", decompose(183L)))));
 
-        partitions.put(header(decompose("key2"), new DeletionTime(5, 50),
+        partitions.put(header(decompose("key2"), DeletionTime.build(5, 50),
                               staticRow(liveCell(metadata, "static_1", decompose("static_1_2")),
                                         liveCell(metadata, "static_2", decompose("static_2_2")))),
                        unfiltereds(row(clustering(decompose("kim")),
@@ -221,19 +227,19 @@ public class SSTableFlushObserverTest
 
         Map<PartitionHeader, List<Unfiltered>> partitions = new LinkedHashMap<>();
 
-        partitions.put(header(decompose("key1"), new DeletionTime(1, 10), Rows.EMPTY_STATIC_ROW),
+        partitions.put(header(decompose("key1"), DeletionTime.build(1, 10), Rows.EMPTY_STATIC_ROW),
                        unfiltereds(row(Clustering.EMPTY,
                                        tombstone(metadata, "age"),
                                        liveCell(metadata, "height", decompose(183L)),
                                        liveCell(metadata, "name", decompose("jack")))));
 
-        partitions.put(header(decompose("key3"), new DeletionTime(2, 20), Rows.EMPTY_STATIC_ROW),
+        partitions.put(header(decompose("key3"), DeletionTime.build(2, 20), Rows.EMPTY_STATIC_ROW),
                        unfiltereds(row(Clustering.EMPTY,
                                        liveCell(metadata, "age", decompose(30)),
                                        liveCell(metadata, "height", decompose(178L)),
                                        tombstone(metadata, "name"))));
 
-        partitions.put(header(decompose("key2"), new DeletionTime(3, 30), Rows.EMPTY_STATIC_ROW),
+        partitions.put(header(decompose("key2"), DeletionTime.build(3, 30), Rows.EMPTY_STATIC_ROW),
                        unfiltereds(row(Clustering.EMPTY,
                                        tombstone(metadata, "age"),
                                        tombstone(metadata, "height"),
@@ -254,7 +260,7 @@ public class SSTableFlushObserverTest
                                               .addRegularColumn("age", Int32Type.instance)
                                               .build();
 
-        DeletionTime dt = new DeletionTime(now, nowInSec);
+        DeletionTime dt = DeletionTime.build(now, nowInSec);
         Map<PartitionHeader, List<Unfiltered>> partitions = new LinkedHashMap<>();
 
         partitions.put(header(decompose("key1"), dt, Rows.EMPTY_STATIC_ROW),
@@ -274,11 +280,11 @@ public class SSTableFlushObserverTest
 
     private static void testFlushObserver(TableMetadata metadata, Map<PartitionHeader, List<Unfiltered>> partitions)
     {
-        for (SSTableFormat.Type type : SSTableFormat.Type.values())
+        for (SSTableFormat<?,?> type : DatabaseDescriptor.getSSTableFormats().values())
             testFlushObserver(type, metadata, partitions);
     }
 
-    private static void testFlushObserver(SSTableFormat.Type type,
+    private static void testFlushObserver(SSTableFormat<?,?> format,
                                           TableMetadata metadata,
                                           Map<PartitionHeader, List<Unfiltered>> partitions)
     {
@@ -286,28 +292,38 @@ public class SSTableFlushObserverTest
         FlushObserver observer = new FlushObserver();
 
         String sstableDirectory = DatabaseDescriptor.getAllDataFileLocations()[0];
-        File directory = new File(sstableDirectory, metadata.keyspace + File.separator + metadata.name);
-        directory.deleteOnExit();
+        File directory = new File(sstableDirectory, metadata.keyspace + File.pathSeparator() + metadata.name);
+        directory.deleteRecursiveOnExit();
 
-        if (!directory.exists() && !directory.mkdirs())
+        if (!directory.exists() && !PathUtils.tryCreateDirectories(directory.toPath()))
             throw new FSWriteError(new IOException("failed to create tmp directory"), directory);
 
-        SSTableFormat format = type.info;
         Descriptor descriptor = new Descriptor(format.getLatestVersion(),
                                                directory,
                                                metadata.keyspace,
                                                metadata.name,
-                                               new SequenceBasedSSTableId(0),
-                                               type);
+                                               new SequenceBasedSSTableId(0));
 
-        SSTableWriter writer = format.getWriterFactory()
-                                     .open(descriptor,
-                                           10L, 0L, null, false, TableMetadataRef.forOfflineTools(metadata),
-                                           new MetadataCollector(metadata.comparator).sstableLevel(0),
-                                           new SerializationHeader(true, metadata, metadata.regularAndStaticColumns(), EncodingStats.NO_STATS),
-                                           Collections.singletonList(observer),
-                                           transaction,
-                                           Collections.emptySet());
+
+        Index.Group indexGroup = mock(Index.Group.class);
+        when(indexGroup.getFlushObserver(any(), any(), any())).thenReturn(observer);
+
+        SSTableWriter.Builder<?, ?> writerBuilder = format.getWriterFactory().builder(descriptor)
+                                                          .setKeyCount(10)
+                                                          .setRepairedAt(0)
+                                                          .setPendingRepair(null)
+                                                          .setTransientSSTable(false)
+                                                          .setTableMetadataRef(TableMetadataRef.forOfflineTools(metadata))
+                                                          .setMetadataCollector(new MetadataCollector(metadata.comparator).sstableLevel(0))
+                                                          .setSerializationHeader(new SerializationHeader(true, metadata, metadata.regularAndStaticColumns(), EncodingStats.NO_STATS))
+                                                          .setSecondaryIndexGroups(Collections.singleton(indexGroup))
+                                                          .addDefaultComponents(Collections.emptySet());
+
+        assertThat(observer.isComplete).isFalse();
+
+        SSTableWriter writer = writerBuilder.build(transaction, null);
+
+        assertThat(observer.isComplete).isFalse();
 
         SSTableReader reader;
         try
@@ -330,14 +346,14 @@ public class SSTableFlushObserverTest
         {
             for (FlushObserver.HeaderEntry e : observer.headers)
             {
-                assertEquals(e.key, reader.keyAt(e.keyPosition));
+                assertEquals(e.key, reader.keyAtPositionFromSecondaryIndex(e.keyPosition));
                 assertEquals(e.deletionTime, reader.partitionLevelDeletionAt(e.deletionTimePosition));
                 assertEquals(e.staticRow, reader.staticRowAt(e.staticRowPosition, columnFilter));
             }
 
             for (FlushObserver.UnfilteredEntry e : observer.unfiltereds)
             {
-                assertEquals(e.key, reader.keyAt(e.keyPosition));
+                assertEquals(e.key, reader.keyAtPositionFromSecondaryIndex(e.keyPosition));
                 assertEquals(e.unfiltered.clustering(), reader.clusteringAt(e.unfilteredPosition));
                 assertEquals(e.unfiltered, reader.unfilteredAt(e.unfilteredPosition, columnFilter));
             }
