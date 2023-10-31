@@ -196,5 +196,10 @@ public class VectorInvalidQueryTest extends SAITester
         assertThatThrownBy(() -> execute("SELECT num FROM %s WHERE pk=3 AND num = 4 ORDER BY v ANN OF [1,1] LIMIT 1"))
         .isInstanceOf(InvalidRequestException.class)
         .hasMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
+
+        // Cover the alternative code path
+        createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+        assertRows(execute("SELECT num FROM %s WHERE pk=3 AND num > 3 ORDER BY v ANN OF [1,1] LIMIT 1"), row(4));
     }
 }

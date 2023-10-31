@@ -579,6 +579,11 @@ public class StatementRestrictions
             if (isKeyRange && hasQueriableClusteringColumnIndex)
                 usesSecondaryIndexing = true;
 
+            // Because an ANN queries limit the result set based within the SAI, clustering column restrictions
+            // must be added to the filter restrictions.
+            if (nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isAnn))
+                usesSecondaryIndexing = true;
+
             if (usesSecondaryIndexing || clusteringColumnsRestrictions.needFiltering())
                 filterRestrictionsBuilder.add(clusteringColumnsRestrictions);
 
