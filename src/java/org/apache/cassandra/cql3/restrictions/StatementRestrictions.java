@@ -76,7 +76,7 @@ public class StatementRestrictions
 
     public static final String ANN_REQUIRES_INDEX_MESSAGE = "ANN ordering by vector requires the column to be indexed";
     public static final String ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE =
-    "ANN ordering by vector requires each restricted column to be indexed unless it is the partition key column";
+    "ANN ordering by vector requires each restricted column to be indexed except for fully-specified partition keys";
 
     public static final String VECTOR_INDEXES_ANN_ONLY_MESSAGE = "Vector indexes only support ANN queries";
 
