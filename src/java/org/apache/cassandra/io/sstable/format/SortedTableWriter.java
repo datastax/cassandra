@@ -261,7 +261,7 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
 
     protected void onStaticRow(Row row)
     {
-        notifyObservers(o -> o.staticRow(row));
+        notifyObservers(o -> o.staticRow(row, partitionWriter.getInitialPosition()));
     }
 
     protected void onRow(Row row)
