@@ -19,7 +19,9 @@ package org.apache.cassandra.io.util;
 
 import java.io.BufferedWriter;
 import java.io.Closeable;
+import java.io.DataInput;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
@@ -531,6 +533,26 @@ public final class FileUtils
             logger.error("Error while getting {} folder size. {}", folder, e.getMessage());
         }
         return sizeArr[0];
+    }
+
+    public static void copyTo(DataInput in, OutputStream out, int length) throws IOException
+    {
+        byte[] buffer = new byte[64 * 1024];
+        int copiedBytes = 0;
+
+        while (copiedBytes + buffer.length < length)
+        {
+            in.readFully(buffer);
+            out.write(buffer);
+            copiedBytes += buffer.length;
+        }
+
+        if (copiedBytes < length)
+        {
+            int left = length - copiedBytes;
+            in.readFully(buffer, 0, left);
+            out.write(buffer, 0, left);
+        }
     }
 
     public static void append(File file, String ... lines)
