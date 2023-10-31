@@ -156,9 +156,13 @@ public class VectorMemtableIndex implements MemtableIndex
     @Override
     public RangeIterator search(QueryContext queryContext, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
-        assert expr.getOp() == Expression.Op.ANN : "Only ANN is supported for vector search, received " + expr.getOp();
+        assert expr.getOp() == Expression.Op.ANN || expr.getOp() == Expression.Op.BOUNDED_ANN : "Only ANN is supported for vector search, received " + expr.getOp();
 
         float[] qv = expr.lower.value.vector;
+        float[] boundary = expr.upper.value.vector;
+        // TODO remove this hack once we are able to pass in the boundary
+        if (boundary != null)
+            limit = 1000;
 
         Bits bits = null;
         if (RangeUtil.coversFullRing(keyRange))

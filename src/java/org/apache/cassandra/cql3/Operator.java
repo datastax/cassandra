@@ -272,6 +272,20 @@ public enum Operator
             return true;
         }
     },
+    BOUNDED_ANN(16)
+    {
+        @Override
+        public String toString()
+        {
+            return "BOUNDED_ANN";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return true;
+        }
+    },
     /**
      * An operator that only performs matching against analyzed columns.
      */

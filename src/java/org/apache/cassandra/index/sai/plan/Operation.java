@@ -143,7 +143,7 @@ public class Operation
                     var distance = ((RowFilter.GeoDistanceExpression) e);
                     var expression = new Expression(indexContext)
                                      .add(distance.getDistanceOperator(), distance.getDistance().duplicate())
-                                     .add(Operator.ANN, e.getIndexValue().duplicate());
+                                     .add(Operator.BOUNDED_ANN, e.getIndexValue().duplicate());
                     perColumn.add(expression);
                 }
                 else

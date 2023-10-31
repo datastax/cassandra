@@ -114,9 +114,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
 
-        if (exp.getOp() != Expression.Op.ANN)
+        if (exp.getOp() != Expression.Op.ANN && exp.getOp() != Expression.Op.BOUNDED_ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + exp));
 
+        float[] boundary = exp.upper.value.vector;
+        // TODO remove this hack once we are able to pass in the boundary
+        if (boundary != null)
+            limit = 1000;
         int topK = topKFor(limit);
         BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, topK);
         if (bitsOrPostingList.skipANN())

@@ -445,8 +445,8 @@ public class IndexContext
 
         // ANN is only supported against vectors, and vector indexes only support ANN
         if (column.type instanceof VectorType)
-            return op == Operator.ANN;
-        if (op == Operator.ANN)
+            return op == Operator.ANN || op == Operator.BOUNDED_ANN;
+        if (op == Operator.ANN || op == Operator.BOUNDED_ANN)
             return false;
 
         Expression.Op operator = Expression.Op.valueOf(op);

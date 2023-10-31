@@ -1097,7 +1097,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
         public GeoDistanceExpression(ColumnMetadata column, ByteBuffer point, Operator operator, ByteBuffer distance)
         {
-            super(column, Operator.ANN, point);
+            super(column, Operator.BOUNDED_ANN, point);
             assert column.type instanceof VectorType && (operator == Operator.LTE || operator == Operator.LT);
             this.distanceOperator = operator;
             this.distance = distance;

@@ -50,7 +50,7 @@ public class Expression
 
     public enum Op
     {
-        EQ, MATCH, PREFIX, NOT_EQ, RANGE, CONTAINS_KEY, CONTAINS_VALUE, IN, ANN;
+        EQ, MATCH, PREFIX, NOT_EQ, RANGE, CONTAINS_KEY, CONTAINS_VALUE, IN, ANN, BOUNDED_ANN;
 
         public static Op valueOf(Operator operator)
         {
@@ -86,6 +86,9 @@ public class Expression
 
                 case ANN:
                     return ANN;
+
+                case BOUNDED_ANN:
+                    return BOUNDED_ANN;
 
                 default:
                     return null;
@@ -199,7 +202,11 @@ public class Expression
             case ANN:
                 operation = Op.ANN;
                 lower = new Bound(value, validator, true);
-                // Upper bound is only set when there is a range query
+                upper = lower;
+                break;
+            case BOUNDED_ANN:
+                operation = Op.BOUNDED_ANN;
+                lower = new Bound(value, validator, true);
                 break;
         }
 
@@ -210,8 +217,8 @@ public class Expression
 
     public boolean isSatisfiedBy(ByteBuffer columnValue)
     {
-        // When upper is null, all vectors are valid
-        if (validator.isVector() && upper == null)
+        // ANN accepts all results
+        if (operation == Op.ANN)
             return true;
 
         if (!TypeUtil.isValid(columnValue, validator))
@@ -222,12 +229,12 @@ public class Expression
 
         Value value = new Value(columnValue, validator);
 
-        if (validator.isVector())
+        if (operation == Op.BOUNDED_ANN)
         {
             // TODO which distance function are we using?
-            double similarityScore = Math.sqrt(VectorUtil.squareDistance(lower.value.vector, value.vector));
+            double distance = Math.sqrt(VectorUtil.squareDistance(lower.value.vector, value.vector));
             float limit = FloatType.instance.compose(upper.value.raw);
-            return upperInclusive ? similarityScore <= limit : similarityScore < limit;
+            return upperInclusive ? distance <= limit : distance < limit;
         }
 
         if (lower != null)

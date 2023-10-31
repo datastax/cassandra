@@ -96,7 +96,7 @@ public class GeoDistanceRelation extends Relation
         var vectorRadius = new ColumnSpecification(columnDef.ksName, columnDef.cfName,
                                                    new ColumnIdentifier("radius", true), FloatType.instance);
         Term distanceTerm = toTerm(Collections.singletonList(vectorRadius), distance, table.keyspace, boundNames);
-        return new SingleColumnRestriction.AnnRestriction(columnDef, pointTerm, distanceTerm, inclusive);
+        return new SingleColumnRestriction.BoundedAnnRestriction(columnDef, pointTerm, distanceTerm, inclusive);
     }
 
     @Override
