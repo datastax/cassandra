@@ -235,7 +235,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
                 checkNotNull(v, "Invalid null value for column %s", columnDef.name);
                 checkBindValueSet(v, "Invalid unset value for column %s", columnDef.name);
             }
-            ByteBuffer buffer = ListSerializer.pack(values, values.size(), ProtocolVersion.V3);
+            ByteBuffer buffer = ListSerializer.pack(values, values.size());
             filter.add(columnDef, Operator.IN, buffer);
         }
 

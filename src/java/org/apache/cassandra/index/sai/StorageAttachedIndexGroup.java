@@ -165,7 +165,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     public Index.Indexer indexerFor(Predicate<Index> indexSelector,
                                     DecoratedKey key,
                                     RegularAndStaticColumns columns,
-                                    int nowInSec,
+                                    long nowInSec,
                                     WriteContext ctx,
                                     IndexTransaction.Type transactionType,
                                     Memtable memtable)

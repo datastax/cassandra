@@ -33,7 +33,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS41;
+import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS50;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.compare;
 
 public class TrieTermsDictionaryTest extends NdiRandomizedTest
@@ -60,7 +60,7 @@ public class TrieTermsDictionaryTest extends NdiRandomizedTest
         }
 
         try (FileHandle input = components.createFileHandle(components.termsData);
-             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(null), fp))
         {
             assertEquals(TrieTermsDictionaryReader.NOT_FOUND, reader.exactMatch(asByteComparable("a")));
             assertEquals(0, reader.exactMatch(asByteComparable("ab")));
@@ -93,7 +93,7 @@ public class TrieTermsDictionaryTest extends NdiRandomizedTest
         }
 
         try (FileHandle input = components.createFileHandle(components.termsData);
-             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(null), fp))
         {
             final Iterator<Pair<ByteComparable, Long>> iterator = reader.iterator();
             final Iterator<ByteComparable> expected = byteComparables.iterator();
@@ -103,7 +103,7 @@ public class TrieTermsDictionaryTest extends NdiRandomizedTest
                 assertTrue(expected.hasNext());
                 final Pair<ByteComparable, Long> actual = iterator.next();
 
-                assertEquals(0, compare(expected.next(), actual.left, OSS41));
+                assertEquals(0, compare(expected.next(), actual.left, OSS50));
                 assertEquals(offset++, actual.right.longValue());
             }
             assertFalse(expected.hasNext());
@@ -132,15 +132,15 @@ public class TrieTermsDictionaryTest extends NdiRandomizedTest
         }
 
         try (FileHandle input = components.createFileHandle(components.termsData);
-             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(null), fp))
         {
             final ByteComparable expectedMaxTerm = byteComparables.get(byteComparables.size() - 1);
             final ByteComparable actualMaxTerm = reader.getMaxTerm();
-            assertEquals(0, compare(expectedMaxTerm, actualMaxTerm, OSS41));
+            assertEquals(0, compare(expectedMaxTerm, actualMaxTerm, OSS50));
 
             final ByteComparable expectedMinTerm = byteComparables.get(0);
             final ByteComparable actualMinTerm = reader.getMinTerm();
-            assertEquals(0, compare(expectedMinTerm, actualMinTerm, OSS41));
+            assertEquals(0, compare(expectedMinTerm, actualMinTerm, OSS50));
         }
     }
 

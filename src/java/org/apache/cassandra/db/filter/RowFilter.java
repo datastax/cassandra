@@ -274,7 +274,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
     private RowFilter fromExpressions(List<Expression> expressions)
     {
-        return expressions.isEmpty() ? NONE : withNewExpressions(expressions);
+        return expressions.isEmpty() ? none() : withNewExpressions(expressions);
     }
 
     protected abstract RowFilter withNewExpressions(List<Expression> expressions);

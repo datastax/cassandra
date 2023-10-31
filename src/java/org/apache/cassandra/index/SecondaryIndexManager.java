@@ -177,7 +177,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     // store per-endpoint index status: the key of inner map is identifier "keyspace.index"
     public static final Map<InetAddressAndPort, Map<String, Index.Status>> peerIndexStatus = new ConcurrentHashMap<>();
     // executes index status propagation task asynchronously to avoid potential deadlock on SIM
-    private static final ExecutorService statusPropagationExecutor = Executors.newSingleThreadExecutor();
+    private static final ExecutorService statusPropagationExecutor = executorFactory()
+            .sequential("SecondaryIndexManagementStatusPropagation");
 
     /**
      * All registered indexes.
@@ -329,22 +330,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             return reloadIndex(indexDef);
         else
             return createIndex(indexDef, isNewCF);
-    }
-
-    /**
-     * Throws an {@link IndexNotAvailableException} if any of the indexes in the specified {@link Index.QueryPlan} is
-     * not queryable, as it's defined by {@link #isIndexQueryable(Index)}.
-     *
-     * @param queryPlan a query plan
-     * @throws IndexNotAvailableException if the query plan has any index that is not queryable
-     */
-    public void checkQueryability(Index.QueryPlan queryPlan)
-    {
-        for (Index index : queryPlan.getIndexes())
-        {
-            if (!isIndexQueryable(index))
-                throw new IndexNotAvailableException(index);
-        }
     }
 
     /**
@@ -1947,7 +1932,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             if (endpoint.equals(FBUtilities.getBroadcastAddressAndPort()))
                 return;
 
-            Map<String, String> peerStatus = (Map<String, String>) JSONValue.parseWithException(versionedValue.value);
+            Map<String, String> peerStatus = JsonUtils.fromJsonMap(versionedValue.value);
             
             Map<String, Index.Status> indexStatus = new ConcurrentHashMap<>();
 
@@ -1980,8 +1965,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             else
                 states.put(keyspaceIndex, status);
 
-            String newStatus = JSONValue.toJSONString(states.entrySet().stream()
-                                                            .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().toString())));
+            String newStatus = JsonUtils.JSON_OBJECT_MAPPER.writeValueAsString(states.entrySet().stream()
+                    .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().toString())));
             statusPropagationExecutor.submit(() -> {
                 // schedule gossiper update asynchronously to avoid potential deadlock when another thread is holding
                 // gossiper taskLock.

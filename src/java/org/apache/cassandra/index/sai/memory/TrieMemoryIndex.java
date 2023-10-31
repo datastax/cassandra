@@ -40,7 +40,7 @@ import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.ColumnContext;
@@ -63,7 +63,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
 
 
-    private final MemtableTrie<PrimaryKeys> data;
+    private final InMemoryTrie<PrimaryKeys> data;
     private final ClusteringComparator clusteringComparator;
     private final PrimaryKeysReducer primaryKeysReducer;
     private final AbstractAnalyzer analyzer;
@@ -84,7 +84,7 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         super(columnContext);
         //TODO Do we need to follow a setting for this?
-        this.data = new MemtableTrie<>(BufferType.OFF_HEAP);
+        this.data = new InMemoryTrie<>(BufferType.OFF_HEAP);
         this.clusteringComparator = columnContext.clusteringComparator();
         this.primaryKeysReducer = new PrimaryKeysReducer();
         // MemoryIndex is per-core, so analyzer should be thread-safe..
@@ -124,7 +124,7 @@ public class TrieMemoryIndex extends MemoryIndex
                         data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
                     }
                 }
-                catch (MemtableTrie.SpaceExhaustedException e)
+                catch (InMemoryTrie.SpaceExhaustedException e)
                 {
                     //TODO Handle this properly
                     throw new RuntimeException(e);
@@ -315,7 +315,7 @@ public class TrieMemoryIndex extends MemoryIndex
         return new KeyRangeIterator(cd.minimumTokenValue, cd.maximumTokenValue, cd.mergedKeys);
     }
 
-    private class PrimaryKeysReducer implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    private class PrimaryKeysReducer implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations = new LongAdder();
 

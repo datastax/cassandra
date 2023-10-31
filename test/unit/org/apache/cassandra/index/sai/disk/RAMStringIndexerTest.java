@@ -93,7 +93,7 @@ public class RAMStringIndexerTest extends NdiRandomizedTest
         while (terms.hasNext())
         {
             term = terms.next();
-            final ByteBuffer decoded = ByteBuffer.wrap(ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41)));
+            final ByteBuffer decoded = ByteBuffer.wrap(ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS50)));
             assertEquals(String.format("%04d", termOrd), string(decoded));
 
             try (PostingList postingList = terms.postings())

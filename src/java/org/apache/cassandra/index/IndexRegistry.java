@@ -219,7 +219,7 @@ public interface IndexRegistry
 
             @Nullable
             @Override
-            public Index.Indexer indexerFor(Predicate<Index> indexSelector, DecoratedKey key, RegularAndStaticColumns columns, int nowInSec, WriteContext ctx, IndexTransaction.Type transactionType, Memtable memtable)
+            public Index.Indexer indexerFor(Predicate<Index> indexSelector, DecoratedKey key, RegularAndStaticColumns columns, long nowInSec, WriteContext ctx, IndexTransaction.Type transactionType, Memtable memtable)
             {
                 return null;
             }

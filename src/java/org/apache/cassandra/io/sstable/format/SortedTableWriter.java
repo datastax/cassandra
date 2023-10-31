@@ -256,7 +256,7 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
 
     protected void onStartPartition(DecoratedKey key)
     {
-        notifyObservers(o -> o.startPartition(key, partitionWriter.getInitialPosition(), partitionWriter.getInitialPosition()));
+        notifyObservers(o -> o.startPartition(key, partitionWriter.getInitialPosition()));
     }
 
     protected void onStaticRow(Row row)
