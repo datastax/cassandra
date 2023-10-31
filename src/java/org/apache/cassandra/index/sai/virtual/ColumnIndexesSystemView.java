@@ -29,7 +29,7 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
-import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.ColumnContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -95,7 +95,7 @@ public class ColumnIndexesSystemView extends AbstractVirtualTable
                 {
                     for (Index index : group.getIndexes())
                     {
-                        IndexContext context = ((StorageAttachedIndex) index).getIndexContext();
+                        ColumnContext context = ((StorageAttachedIndex) index).getContext();
                         String indexName = context.getIndexName();
 
                         dataset.row(ks.name, indexName)
@@ -104,7 +104,7 @@ public class ColumnIndexesSystemView extends AbstractVirtualTable
                                .column(IS_QUERYABLE, manager.isIndexQueryable(index))
                                .column(IS_BUILDING, manager.isIndexBuilding(indexName))
                                .column(IS_STRING, context.isLiteral())
-                               .column(ANALYZER, context.getAnalyzerFactory().toString());
+                               .column(ANALYZER, context.getAnalyzer().toString());
                     }
                 }
             }

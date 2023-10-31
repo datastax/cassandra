@@ -28,8 +28,8 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.disk.SSTableIndex;
+import org.apache.cassandra.index.sai.ColumnContext;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -102,7 +102,7 @@ public class SSTableIndexesSystemView extends AbstractVirtualTable
 
                     for (Index index : group.getIndexes())
                     {
-                        IndexContext indexContext = ((StorageAttachedIndex)index).getIndexContext();
+                        ColumnContext indexContext = ((StorageAttachedIndex)index).getContext();
 
                         for (SSTableIndex sstableIndex : indexContext.getView())
                         {
