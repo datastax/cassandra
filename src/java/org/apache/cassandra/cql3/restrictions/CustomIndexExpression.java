@@ -78,17 +78,6 @@ public class CustomIndexExpression
         return String.format("expr(%s,%s)", targetIndex.toCQLString(), valueRaw.getText());
     }
 
-    public boolean needsFiltering(Index.Group indexGroup)
-    {
-        String indexName = targetIndex.getName();
-
-        for (Index index : indexGroup.getIndexes())
-            if (index.getIndexMetadata().name.equals(indexName))
-                return false;
-
-        return true;
-    }
-
     @Override
     public String toString()
     {

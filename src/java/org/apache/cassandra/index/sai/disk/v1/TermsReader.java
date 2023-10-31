@@ -43,6 +43,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.store.IndexInput;
 
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.validate;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 /**
  * Synchronous reader of terms dictionary and postings lists to produce a {@link PostingList} with matching row ids.
@@ -141,7 +142,7 @@ public class TermsReader implements Closeable
             postingsInput = indexComponents.openInput(postingsFile);
             postingsSummaryInput = indexComponents.openInput(postingsFile);
             this.term = term;
-            lookupStartTime = System.nanoTime();
+            lookupStartTime = nanoTime();
             this.context = context;
         }
 
@@ -181,11 +182,11 @@ public class TermsReader implements Closeable
 
         public long lookupTermDictionary(ByteComparable term)
         {
-            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot))
+            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null), termDictionaryRoot))
             {
                 final long offset = reader.exactMatch(term);
 
-                listener.onTraversalComplete(System.nanoTime() - lookupStartTime, TimeUnit.NANOSECONDS);
+                listener.onTraversalComplete(nanoTime() - lookupStartTime, TimeUnit.NANOSECONDS);
 
                 if (offset == TrieTermsDictionaryReader.NOT_FOUND)
                     return PostingList.OFFSET_NOT_FOUND;
@@ -214,10 +215,10 @@ public class TermsReader implements Closeable
 
         private TermsScanner(long segmentOffset, QueryEventListener.TrieIndexEventListener listener)
         {
-            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot);
+            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null), termDictionaryRoot);
 
-            this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(ByteComparable.Version.OSS41)));
-            this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(ByteComparable.Version.OSS41)));
+            this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(ByteComparable.Version.OSS50)));
+            this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(ByteComparable.Version.OSS50)));
             this.iterator = termsDictionaryReader.iterator();
             this.listener = listener;
             this.segmentOffset = segmentOffset;

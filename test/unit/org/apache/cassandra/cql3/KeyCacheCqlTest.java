@@ -119,7 +119,7 @@ public class KeyCacheCqlTest extends CQLTester
     }
 
     @Override
-    protected UntypedResultSet execute(String query, Object... values)
+    public UntypedResultSet execute(String query, Object... values)
     {
         return executeFormattedQuery(formatQuery(KEYSPACE_PER_TEST, query), values);
     }

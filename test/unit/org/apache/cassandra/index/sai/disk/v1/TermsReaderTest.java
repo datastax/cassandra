@@ -85,7 +85,7 @@ public class TermsReaderTest extends NdiRandomizedTest
                 for (ByteComparable term = actualTermsEnum.next(); term != null; term = actualTermsEnum.next())
                 {
                     final ByteComparable expected = termsEnum.get(i++).left;
-                    assertEquals(0, ByteComparable.compare(expected, term, ByteComparable.Version.OSS41));
+                    assertEquals(0, ByteComparable.compare(expected, term, ByteComparable.Version.OSS50));
                 }
             }
         }
@@ -112,7 +112,7 @@ public class TermsReaderTest extends NdiRandomizedTest
         {
             for (Pair<ByteComparable, IntArrayList> pair : termsEnum)
             {
-                final byte[] bytes = ByteSourceInverse.readBytes(pair.left.asComparableBytes(ByteComparable.Version.OSS41));
+                final byte[] bytes = ByteSourceInverse.readBytes(pair.left.asComparableBytes(ByteComparable.Version.OSS50));
                 try (PostingList actualPostingList = reader.exactMatch(ByteComparable.fixedLength(bytes), NO_OP_TRIE_LISTENER, new QueryContext()))
                 {
                     final IntArrayList expectedPostingList = pair.right;

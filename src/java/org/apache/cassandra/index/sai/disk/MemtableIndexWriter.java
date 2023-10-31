@@ -43,6 +43,8 @@ import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+
 /**
  * Column index writer that flushes indexed data directly from the corresponding Memtable index, without buffering index
  * data in memory.
@@ -91,7 +93,7 @@ public class MemtableIndexWriter implements ColumnIndexWriter
     @Override
     public void flush() throws IOException
     {
-        long start = System.nanoTime();
+        long start = nanoTime();
 
         try
         {
@@ -117,7 +119,7 @@ public class MemtableIndexWriter implements ColumnIndexWriter
 
                 context.getIndexMetrics().memtableIndexFlushCount.inc();
 
-                long durationMillis = Math.max(1, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+                long durationMillis = Math.max(1, TimeUnit.NANOSECONDS.toMillis(nanoTime() - start));
 
                 if (logger.isTraceEnabled())
                 {

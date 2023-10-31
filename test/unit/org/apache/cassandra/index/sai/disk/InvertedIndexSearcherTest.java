@@ -198,6 +198,6 @@ public class InvertedIndexSearcherTest extends NdiRandomizedTest
 
     private ByteBuffer wrap(ByteComparable bc)
     {
-        return ByteBuffer.wrap(ByteSourceInverse.readBytes(bc.asComparableBytes(ByteComparable.Version.OSS41)));
+        return ByteBuffer.wrap(ByteSourceInverse.readBytes(bc.asComparableBytes(ByteComparable.Version.OSS50)));
     }
 }

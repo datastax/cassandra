@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.cassandra.io.util.File;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -131,7 +132,7 @@ public class KDTreeSegmentMergerTest extends SAITester
                     postings = new ArrayList<>();
                     expected.put(value, postings);
                 }
-                postings.add(new Long(docID));
+                postings.add(Long.valueOf(docID));
             }
             segmentIterators.add(createReader(buffer, maxSegmentRowId, generation).iteratorState());
             if (compaction)
@@ -182,7 +183,7 @@ public class KDTreeSegmentMergerTest extends SAITester
                     postings = new ArrayList<>();
                     expected.put(value, postings);
                 }
-                postings.add(new Long(docID));
+                postings.add(Long.valueOf(docID));
                 totalRows++;
             }
             segmentIterators.add(createReader(buffer, maxSegmentRowId, generation).iteratorState());
@@ -192,7 +193,7 @@ public class KDTreeSegmentMergerTest extends SAITester
 
         MergeOneDimPointValues merger = new MergeOneDimPointValues(segmentIterators, Integer.BYTES);
 
-        IndexComponents components = IndexComponents.create("test", new Descriptor(temporaryFolder.newFolder(), "test", "test", new SequenceBasedSSTableId(20)), null);
+        IndexComponents components = IndexComponents.create("test", new Descriptor(new File(temporaryFolder.newFolder()), "test", "test", new SequenceBasedSSTableId(20)), null);
 
         try (NumericIndexWriter indexWriter = new NumericIndexWriter(components, Integer.BYTES, maxSegmentRowId, totalRows, IndexWriterConfig.defaultConfig("test"), false))
         {
@@ -229,7 +230,7 @@ public class KDTreeSegmentMergerTest extends SAITester
 
     private BKDReader createReader(BKDTreeRamBuffer buffer, int maxSegmentRowId, int id) throws Throwable
     {
-        IndexComponents components = IndexComponents.create("test", new Descriptor(temporaryFolder.newFolder(), "test", "test", new SequenceBasedSSTableId(id)), null);
+        IndexComponents components = IndexComponents.create("test", new Descriptor(new File(temporaryFolder.newFolder()), "test", "test", new SequenceBasedSSTableId(id)), null);
 
         final NumericIndexWriter writer = new NumericIndexWriter(components, Integer.BYTES, maxSegmentRowId, buffer.numRows(), IndexWriterConfig.defaultConfig("test"), false);
 

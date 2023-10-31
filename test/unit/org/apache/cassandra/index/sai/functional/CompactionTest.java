@@ -94,8 +94,8 @@ public class CompactionTest extends SAITester
              Refs<SSTableReader> refs = Refs.ref(sstables))
         {
             InetAddressAndPort endpoint = InetAddressAndPort.getByName("10.0.0.1");
-            UUID parentRepairSession = UUID.randomUUID();
-            ActiveRepairService.instance.registerParentRepairSession(parentRepairSession,
+            TimeUUID parentRepairSession = nextTimeUUID();
+            ActiveRepairService.instance().registerParentRepairSession(parentRepairSession,
                                                                      endpoint,
                                                                      Lists.newArrayList(cfs),
                                                                      Collections.singleton(range),

@@ -46,9 +46,9 @@ import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
@@ -152,8 +152,8 @@ public class IndexViewManagerTest extends SAITester
         store.getLiveSSTables().forEach(reader -> copySSTable(reader, tmpDir));
 
         List<SSTableReader> sstables = IntStream.rangeClosed(1, 4)
-                                                .mapToObj(i -> new Descriptor(tmpDir.toFile(), KEYSPACE, tableName, new SequenceBasedSSTableId(i)))
-                                                .map(SSTableReader::open)
+                                                .mapToObj(i -> new Descriptor(new File(tmpDir), KEYSPACE, tableName, new SequenceBasedSSTableId(i)))
+                                                .map(desc -> SSTableReader.open(store, desc))
                                                 .collect(Collectors.toList());
 
         List<SSTableReader> none = Collections.emptyList();
@@ -236,7 +236,7 @@ public class IndexViewManagerTest extends SAITester
 
     private static void copySSTable(SSTableReader table, Path destDir)
     {
-        for (Component component : SSTable.componentsFor(table.descriptor))
+        for (Component component : table.descriptor.version.format.allComponents())
         {
             Path src = table.descriptor.fileFor(component).toPath();
             Path dst = destDir.resolve(src.getFileName());

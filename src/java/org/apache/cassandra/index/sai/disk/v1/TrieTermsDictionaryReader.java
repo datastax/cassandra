@@ -163,7 +163,7 @@ class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
         };
     }
 
-    ByteComparable getMaxTerm()
+    public ByteComparable getMaxTerm()
     {
         final TransitionBytesCollector collector = new ImmutableTransitionBytesCollector();
         go(root);
@@ -180,7 +180,7 @@ class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
         }
     }
 
-    ByteComparable getMinTerm()
+    public ByteComparable getMinTerm()
     {
         final TransitionBytesCollector collector = new ImmutableTransitionBytesCollector();
         go(root);

@@ -58,13 +58,6 @@ class BKDPostingsIndex
         }
     }
 
-    public long memoryUsage()
-    {
-        // IntLongHashMap uses two arrays: one for keys, one for values.
-        return MemoryLayoutSpecification.sizeOfArray(index.size(), 4L)
-               + MemoryLayoutSpecification.sizeOfArray(index.size(), 8L);
-    }
-
     /**
      * Returns <tt>true</tt> if given node ID has an auxiliary posting list.
      */

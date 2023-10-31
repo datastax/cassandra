@@ -216,12 +216,17 @@ public class BtiTableReader extends SSTableReaderWithFilter
         try (RandomAccessReader reader = openDataReader())
         {
             reader.seek(keyPositionFromSecondaryIndex);
-            if (reader.isEOF())
-                return null;
-            return decorateKey(ByteBufferUtil.readWithShortLength(reader));
+            return keyAt(reader);
         }
     }
 
+    @Override
+    public DecoratedKey keyAt(FileDataInput reader) throws IOException {
+        if (reader.isEOF())
+            return null;
+        return decorateKey(ByteBufferUtil.readWithShortLength(reader));
+    }
+    
     TrieIndexEntry getExactPosition(DecoratedKey dk,
                                     SSTableReadsListener listener,
                                     boolean updateStats)

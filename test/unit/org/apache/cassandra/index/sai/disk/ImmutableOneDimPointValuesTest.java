@@ -86,7 +86,7 @@ public class ImmutableOneDimPointValuesTest
                 final ByteComparable actualTerm = ByteComparable.fixedLength(packedValue);
                 final ByteComparable expectedTerm = ByteComparable.of(term);
 
-                assertEquals(0, ByteComparable.compare(actualTerm, expectedTerm, ByteComparable.Version.OSS41));
+                assertEquals(0, ByteComparable.compare(actualTerm, expectedTerm, ByteComparable.Version.OSS50));
                 assertEquals(postingCounter, docID);
 
                 if (postingCounter >= 2)
