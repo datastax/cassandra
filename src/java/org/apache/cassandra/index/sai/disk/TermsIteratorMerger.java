@@ -26,6 +26,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.disk.v1.MergePostingList;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 public class TermsIteratorMerger implements TermsIterator
@@ -49,14 +50,14 @@ public class TermsIteratorMerger implements TermsIterator
     @Override
     public ByteBuffer getMinTerm()
     {
-        byte[] bytes = ByteSourceInverse.readBytes(minTerm.asPeekableBytes(ByteComparable.Version.OSS41));
+        byte[] bytes = ByteSourceInverse.readBytes(ByteSource.peekable(minTerm.asComparableBytes(ByteComparable.Version.OSS50)));
         return ByteBuffer.wrap(bytes);
     }
 
     @Override
     public ByteBuffer getMaxTerm()
     {
-        byte[] bytes = ByteSourceInverse.readBytes(maxTerm.asPeekableBytes(ByteComparable.Version.OSS41));
+        byte[] bytes = ByteSourceInverse.readBytes(ByteSource.peekable(maxTerm.asComparableBytes(ByteComparable.Version.OSS50)));
         return ByteBuffer.wrap(bytes);
     }
 

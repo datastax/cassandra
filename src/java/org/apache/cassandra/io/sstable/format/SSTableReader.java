@@ -276,8 +276,8 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
     private volatile double crcCheckChance;
 
-    protected final DecoratedKey first;
-    protected final DecoratedKey last;
+    public final DecoratedKey first;
+    public final DecoratedKey last;
     public final AbstractBounds<Token> bounds;
 
     /**
@@ -1040,6 +1040,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      * @return key if found, {@code null} otherwise
      */
     public abstract DecoratedKey keyAtPositionFromSecondaryIndex(long keyPositionFromSecondaryIndex) throws IOException;
+
     public DecoratedKey keyAt(RandomAccessReader indexFileReader, long indexPosition) throws IOException
     {
         indexFileReader.seek(indexPosition);

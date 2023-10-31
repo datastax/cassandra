@@ -164,7 +164,7 @@ public class IndexStreamingFailureTest extends TestBaseImpl
         }
 
         @SuppressWarnings("unused")
-        public static SegmentMetadata flush(IndexDescriptor indexDescriptor, IndexContext indexContext, @SuperCall Callable<SegmentMetadata> zuper) throws IOException
+        public static SegmentMetadata flush(final IndexComponents indexComponents, @SuperCall Callable<SegmentMetadata> zuper) throws IOException
         {
             if (failFlush)
                 throw new IOException(TEST_ERROR_MESSAGE);

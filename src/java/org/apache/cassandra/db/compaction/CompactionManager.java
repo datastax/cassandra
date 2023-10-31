@@ -2412,12 +2412,12 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         if (waitForInterruption)
         {
             // wait at most 2 minutes
-            long start = System.nanoTime();
+            long start = nanoTime();
             long wait = TimeUnit.MINUTES.toNanos(2);
 
             for (Holder operation : interrupted)
             {
-                while (active.isActive(operation) && System.nanoTime() - start < wait)
+                while (active.isActive(operation) && nanoTime() - start < wait)
                     Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
 
                 if (active.isActive(operation))

@@ -64,6 +64,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     }
 
     @Override
+    public ReadCommand command()
+    {
+        return command;
+    }
+
+    @Override
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
         return  new ResultRetriever(analyze(), controller, executionController, queryContext);

@@ -106,10 +106,10 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
     {}
 
     @Override
-    public void startPartition(DecoratedKey key, long keyPosition, long KeyPositionForSASI)
+    public void startPartition(DecoratedKey key, long keyPosition)
     {
         currentKey = key;
-        currentKeyPosition = KeyPositionForSASI;
+        currentKeyPosition = keyPosition;
     }
 
     @Override

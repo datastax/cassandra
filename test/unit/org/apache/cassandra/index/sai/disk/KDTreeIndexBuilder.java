@@ -243,7 +243,7 @@ public class KDTreeIndexBuilder
                 postings.add(currentSegmentRowId++);
                 assertTrue(terms.hasNext());
 
-                final ByteSource encoded = TypeUtil.asComparableBytes(terms.next(), type, ByteComparable.Version.OSS41);
+                final ByteSource encoded = TypeUtil.asComparableBytes(terms.next(), type, ByteComparable.Version.OSS50);
                 return Pair.create(v -> encoded, postings);
             }
         };

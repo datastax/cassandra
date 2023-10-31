@@ -29,6 +29,8 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+
 /**
  * Tracks state relevant to the execution of a single query, including metrics and timeout monitoring.
  *
@@ -73,12 +75,12 @@ public class QueryContext
     public QueryContext(long executionQuotaMs)
     {
         this.executionQuotaNano = TimeUnit.MILLISECONDS.toNanos(executionQuotaMs);
-        queryStartTimeNanos = System.nanoTime();
+        queryStartTimeNanos = nanoTime();
     }
 
     public long totalQueryTimeNs()
     {
-        return System.nanoTime() - queryStartTimeNanos;
+        return nanoTime() - queryStartTimeNanos;
     }
 
     public void incSstablesHit()
