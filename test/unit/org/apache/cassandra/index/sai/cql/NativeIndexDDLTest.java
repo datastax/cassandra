@@ -69,6 +69,7 @@ import org.apache.cassandra.utils.Throwables;
 import org.mockito.Mockito;
 
 import static java.util.Collections.singletonList;
+import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_ENCRYPTION;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.when;
@@ -881,7 +882,7 @@ public class NativeIndexDDLTest extends SAITester
                                              boolean failedNumericIndex,
                                              boolean rebuild) throws Throwable
     {
-        boolean encrypted = Boolean.parseBoolean(System.getProperty("cassandra.test.encryption", "false"));
+        boolean encrypted = TEST_ENCRYPTION.getBoolean();
 
         // The completion markers are valid if they exist on the file system so we only need to test
         // their removal. If we are testing with encryption then we don't want to test any components

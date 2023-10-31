@@ -214,7 +214,7 @@ public class TypeUtilTest extends NdiRandomizedTest
             // simulate: saving into on-disk trie
             ByteComparable t0 = ByteComparable.fixedLength(b0);
             ByteComparable t1 = ByteComparable.fixedLength(b1);
-            assertTrue("#" + i, ByteComparable.compare(t0, t1, ByteComparable.Version.OSS41) <= 0);
+            assertTrue("#" + i, ByteComparable.compare(t0, t1, ByteComparable.Version.OSS50) <= 0);
         }
     }
 

@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.index.sai.disk.io;
 
-import java.io.File;
 import java.util.Collection;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -26,6 +25,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.lucene.store.Directory;
@@ -59,7 +60,7 @@ public class BKDTempFilesDirectory extends Directory
     public IndexOutput createTempOutput(String prefix, String suffix, IOContext context)
     {
         final String name = prefix + "_" + Long.toString(nextTempFileCounter.getAndIncrement(), Character.MAX_RADIX) + "_" + suffix;
-        final File file = delegate.descriptor.tmpFileFor(new Component(Component.Type.CUSTOM,
+        final File file = delegate.descriptor.tmpFileFor(new Component(SSTableFormat.Components.Types.CUSTOM,
                                                                        String.format(PER_COLUMN_FILE_NAME_FORMAT,
                                                                                      delegate.indexName,
                                                                                      name)));
@@ -71,13 +72,11 @@ public class BKDTempFilesDirectory extends Directory
     {
         final File indexInput = getTmpFileByName(name);
         
-        try (FileHandle.Builder builder = new FileHandle.Builder(indexInput.getPath()))
-        {
-            final FileHandle handle = builder.complete();
-            final RandomAccessReader reader = handle.createReader();
+        FileHandle.Builder builder = new FileHandle.Builder(indexInput);
+        final FileHandle handle = builder.complete();
+        final RandomAccessReader reader = handle.createReader();
 
-            return IndexInputReader.create(reader, handle::close);
-        }
+        return IndexInputReader.create(reader, handle::close);
     }
 
     @Override
@@ -90,9 +89,9 @@ public class BKDTempFilesDirectory extends Directory
     public void deleteFile(String name)
     {
         final File file = getTmpFileByName(name);
-        if (!file.delete())
+        if (!file.tryDelete())
         {
-            logger.warn(delegate.logMessage("Unable to delete file {}"), file.getAbsolutePath());
+            logger.warn(delegate.logMessage("Unable to delete file {}"), file.absolutePath());
         }
     }
 

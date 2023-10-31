@@ -36,13 +36,18 @@ import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.serializers.SimpleDateSerializer;
 import org.apache.cassandra.serializers.TimeSerializer;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.index.sai.cql.types.IndexingTypeSupport.NUMBER_OF_VALUES;
 
 public abstract class DataSet<T> extends CQLTester
 {
     public T[] values;
+
+    public void init()
+    {
+        // used to create UDT
+    }
 
     public abstract QuerySet querySet();
 
@@ -426,6 +431,29 @@ public abstract class DataSet<T> extends CQLTester
         }
     }
 
+    public static class BooleanDataSet extends DataSet<Boolean>
+    {
+        public BooleanDataSet()
+        {
+            values = new Boolean[NUMBER_OF_VALUES];
+            for (int index = 0; index < values.length; index++)
+            {
+                values[index] = getRandom().nextBoolean();
+            }
+        }
+
+        @Override
+        public QuerySet querySet()
+        {
+            return new QuerySet.BooleanQuerySet(this);
+        }
+
+        public String toString()
+        {
+            return "boolean";
+        }
+    }
+
     public static class TextDataSet extends DataSet<String>
     {
         public TextDataSet()
@@ -595,22 +623,21 @@ public abstract class DataSet<T> extends CQLTester
         }
     }
 
-    public static class TimeuuidDataSet extends DataSet<UUID>
+    public static class TimeuuidDataSet extends DataSet<TimeUUID>
     {
         public TimeuuidDataSet()
         {
-            values = new UUID[NUMBER_OF_VALUES];
-            List<UUID> list = Arrays.asList(values);
+            values = new TimeUUID[NUMBER_OF_VALUES];
+            List<TimeUUID> list = Arrays.asList(values);
 
             for (int index = 0; index < values.length; index++)
             {
-                UUID value;
-                while (true)
+                TimeUUID value;
+                do
                 {
-                    value = UUIDGen.getTimeUUID();
-                    if (!list.contains(value))
-                        break;
+                    value = TimeUUID.Generator.nextTimeUUID();
                 }
+                while (list.contains(value));
                 values[index] = value;
             }
         }

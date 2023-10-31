@@ -40,6 +40,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -50,7 +51,7 @@ import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.KeyIterator;
+import org.apache.cassandra.io.sstable.KeyReader;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -82,7 +83,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
     private final StorageAttachedIndexGroup group;
     private final TableMetadata metadata;
     private final Tracker tracker;
-    private final UUID compactionId = UUIDGen.getTimeUUID();
+    private final TimeUUID compactionId = nextTimeUUID();
     private final boolean isFullRebuild;
     private final boolean isInitialBuild;
 
@@ -158,22 +159,21 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             long previousKeyPosition = 0;
             indexWriter.begin();
 
-            try (KeyIterator keys = KeyIterator.forSSTable(sstable))
+            try (KeyReader keys = sstable.keyReader())
             {
-                while (keys.hasNext())
+                while (!keys.isExhausted())
                 {
                     if (isStopRequested())
                     {
                         throw new CompactionInterruptedException(getCompactionInfo());
                     }
 
-                    final DecoratedKey key = keys.next();
-                    final long keyPosition = keys.getKeyPosition();
+                    final DecoratedKey key = sstable.decorateKey(keys.key());
+                    final long keyPosition = keys.keyPositionForSecondaryIndex();
 
                     indexWriter.startPartition(key, keyPosition);
 
-                    RowIndexEntry indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
-                    dataFile.seek(indexEntry.position);
+                    dataFile.seek(keys.dataPosition());
                     ByteBufferUtil.skipShortLength(dataFile); // key
 
                     /*
@@ -186,10 +186,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
                     indexWriter.partitionLevelDeletion(partitionLevelDeletion, partitionDeletionPosition);
 
-                    DeserializationHelper helper = new DeserializationHelper(sstable.metadata(), sstable.descriptor.version.correspondingMessagingVersion(), DeserializationHelper.Flag.LOCAL);
-
-                    try (SSTableSimpleIterator iterator = SSTableSimpleIterator.create(sstable.metadata(), dataFile, sstable.header, helper, partitionLevelDeletion);
-                         SSTableIdentityIterator partition = new SSTableIdentityIterator(sstable, key, partitionLevelDeletion, sstable.getFilename(), iterator))
+                    try (SSTableIdentityIterator partition = SSTableIdentityIterator.create(sstable, dataFile, key))
                     {
                         // if the row has statics attached, it has to be indexed separately
                         if (metadata.hasStaticColumns())
@@ -251,7 +248,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             if (perSSTableFileLock != null)
             {
                 inProgress.remove(sstable);
-                perSSTableFileLock.countDown();
+                perSSTableFileLock.decrement();
             }
         }
     }
@@ -277,7 +274,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         if (!IndexComponents.isGroupIndexComplete(sstable.descriptor) ||
             (isFullRebuild && !IndexComponents.perSSTable(sstable).validatePerSSTableComponentsChecksum()))
         {
-            CountDownLatch latch = new CountDownLatch(1);
+            CountDownLatch latch = CountDownLatch.newCountDownLatch(1);
             if (inProgress.putIfAbsent(sstable, latch) == null)
             {
                 // lock owner should cleanup existing per-SSTable files
@@ -298,7 +295,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         if (latch != null)
         {
             // current builder owns the lock
-            latch.countDown();
+            latch.decrement();
         }
         else
         {
@@ -357,7 +354,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             if (isFullRebuild)
                 throw new RuntimeException(logMessage(String.format("%s are dropped, will stop index build.", droppedIndexes)));
             else
-                logger.debug(logMessage("Skip building dropped index {} on sstable {}"), droppedIndexes, descriptor.baseFilename());
+                logger.debug(logMessage("Skip building dropped index {} on sstable {}"), droppedIndexes, descriptor.baseFile());
         }
 
         return existing;

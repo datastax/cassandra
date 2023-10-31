@@ -95,7 +95,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                         final DecoratedKey key = sstable.decorateKey(keys.key());
                         final long keyPosition = keys.keyPositionForSecondaryIndex();
 
-                        indexWriter.startPartition(key, keys.dataPosition(), keyPosition);
+                        indexWriter.startPartition(key, keys.dataPosition());
 
                         dataFile.seek(keys.dataPosition());
                         ByteBufferUtil.readWithShortLength(dataFile); // key

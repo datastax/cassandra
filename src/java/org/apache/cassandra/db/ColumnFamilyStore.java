@@ -1597,13 +1597,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return ranges;
     }
 
-    private UpdateTransaction newUpdateTransaction(PartitionUpdate update, CassandraWriteContext context, boolean updateIndexes, Memtable memtable)
-    {
-        return updateIndexes
-               ? indexManager.newUpdateTransaction(update, context, FBUtilities.nowInSeconds(), memtable)
-               : UpdateTransaction.NO_OP;
-    }
-
     /**
      * @param sstables
      * @return sstables whose key range overlaps with that of the given sstables, not including itself.
@@ -2785,8 +2778,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                                                    "Stopping parent sessions {} due to truncation of tableId="+metadata.id);
                 data.notifyTruncated(truncatedAt);
 
-            if (!noSnapshot && isAutoSnapshotEnabled())
-                snapshot(Keyspace.getTimestampedSnapshotNameWithPrefix(name, SNAPSHOT_TRUNCATE_PREFIX), DatabaseDescriptor.getAutoSnapshotTtl());
+                if (!noSnapshot && isAutoSnapshotEnabled())
+                    snapshot(Keyspace.getTimestampedSnapshotNameWithPrefix(name, SNAPSHOT_TRUNCATE_PREFIX), DatabaseDescriptor.getAutoSnapshotTtl());
 
                 discardSSTables(truncatedAt);
 
@@ -2836,12 +2829,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return runWithCompactionsDisabled(callable, (sstable) -> true, operationType, interruptValidation, interruptViews, true);
     }
 
-    public <V> V runWithCompactionsDisabled(Callable<V> callable, boolean interruptValidation, boolean interruptViews, CompactionInfo.StopTrigger trigger)
+    public <V> V runWithCompactionsDisabled(Callable<V> callable, OperationType operationType, boolean interruptValidation, boolean interruptViews, CompactionInfo.StopTrigger trigger)
     {
         return runWithCompactionsDisabled(callable, (sstable) -> true, operationType, interruptValidation, interruptViews, true, trigger);
     }
 
-    public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<SSTableReader> sstablesPredicate, boolean interruptValidation, boolean interruptViews, boolean interruptIndexes)
+    public <V> V runWithCompactionsDisabled(Callable<V> callable, Predicate<SSTableReader> sstablesPredicate, OperationType operationType, boolean interruptValidation, boolean interruptViews, boolean interruptIndexes)
     {
         return runWithCompactionsDisabled(callable, sstablesPredicate, operationType, interruptValidation, interruptViews, interruptIndexes, CompactionInfo.StopTrigger.NONE);
     }

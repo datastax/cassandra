@@ -44,6 +44,7 @@ import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.Cell;
@@ -125,7 +126,7 @@ public class TypeUtil
      */
     public static ByteComparable min(ByteComparable a, ByteComparable b)
     {
-        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS41) > 0) ? a : b;
+        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS50) > 0) ? a : b;
     }
 
     /**
@@ -134,7 +135,7 @@ public class TypeUtil
      */
     public static ByteComparable max(ByteComparable a, ByteComparable b)
     {
-        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS41) < 0) ? a : b;
+        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS50) < 0) ? a : b;
     }
 
     /**
@@ -210,6 +211,11 @@ public class TypeUtil
     {
         if (type instanceof InetAddressType || type instanceof IntegerType || type instanceof DecimalType)
             return ByteSource.optionalFixedLength(ByteBufferAccessor.instance, value);
+        // The LongType.asComparableBytes uses variableLengthInteger which doesn't play well with
+        // the balanced tree because it is expecting fixed length data. So for SAI we use a optionalSignedFixedLengthNumber
+        // to keep all comparable values the same length
+        else if (type instanceof LongType)
+            return ByteSource.optionalSignedFixedLengthNumber(ByteBufferAccessor.instance, value);
         return type.asComparableBytes(value, version);
     }
 
@@ -234,7 +240,7 @@ public class TypeUtil
         else if (type instanceof DecimalType)
             ByteBufferUtil.arrayCopy(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, DECIMAL_APPROXIMATION_BYTES);
         else
-            ByteBufferUtil.toBytes(type.asComparableBytes(value, ByteComparable.Version.OSS41), bytes);
+            ByteBufferUtil.toBytes(asComparableBytes(value, type, ByteComparable.Version.OSS50), bytes);
     }
 
     /**
@@ -295,7 +301,7 @@ public class TypeUtil
     public static Iterator<ByteBuffer> collectionIterator(AbstractType<?> validator,
                                                           ComplexColumnData cellData,
                                                           Pair<ColumnMetadata, IndexTarget.Type> target,
-                                                          int nowInSecs)
+                                                          long nowInSecs)
     {
         if (cellData == null)
             return null;
@@ -526,7 +532,7 @@ public class TypeUtil
 
     public static ByteBuffer encodeDecimal(ByteBuffer value)
     {
-        ByteSource bs = DecimalType.instance.asComparableBytes(value, ByteComparable.Version.OSS41);
+        ByteSource bs = DecimalType.instance.asComparableBytes(value, ByteComparable.Version.OSS50);
         bs = ByteSource.cutOrRightPad(bs, DECIMAL_APPROXIMATION_BYTES, 0);
         return ByteBuffer.wrap(ByteSourceInverse.readBytes(bs, DECIMAL_APPROXIMATION_BYTES));
     }

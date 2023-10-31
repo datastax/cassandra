@@ -132,7 +132,7 @@ public class PaxosKeyState implements UncommittedPaxosKey
             return mostRecent;
         }
 
-        protected void onKeyChange()
+        public void onKeyChange()
         {
             super.onKeyChange();
             mostRecent = null;

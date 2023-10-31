@@ -36,6 +36,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT;
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertEquals;
@@ -51,7 +52,7 @@ public class SegmentMergerTest extends SAITester
     @Before
     public void setup() throws Throwable
     {
-        System.setProperty("cassandra.test.sai.segment_build_memory_limit", "70000");
+        SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT.setString("70000");
         requireNetwork();
         SEGMENT_BUILD_COUNTER.reset();
     }

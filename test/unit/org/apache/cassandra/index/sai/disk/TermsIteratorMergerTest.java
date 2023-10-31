@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -80,7 +81,7 @@ public class TermsIteratorMergerTest extends SAITester
         TermsIteratorMerger merger = new TermsIteratorMerger(iterators, UTF8Type.instance);
         while (merger.hasNext())
         {
-            String term = UTF8Type.instance.compose(UTF8Type.instance.fromComparableBytes(merger.next().asPeekableBytes(ByteComparable.Version.OSS41), ByteComparable.Version.OSS41));
+            String term = UTF8Type.instance.compose(UTF8Type.instance.fromComparableBytes(ByteSource.peekable(merger.next().asComparableBytes(ByteComparable.Version.OSS50)), ByteComparable.Version.OSS50));
             assertTrue(expected.containsKey(term));
             List<Long> expectedPostings = expected.get(term);
             PostingList postings = merger.postings();

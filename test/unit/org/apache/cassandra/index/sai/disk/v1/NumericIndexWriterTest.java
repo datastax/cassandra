@@ -153,7 +153,7 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
                     final ByteComparable actualTerm = ByteComparable.fixedLength(packedValue);
                     final ByteComparable expectedTerm = ByteComparable.of(Math.toIntExact(visited.get()));
                     assertEquals("Point value mismatch after visiting " + visited.get() + " entries.", 0,
-                                 ByteComparable.compare(actualTerm, expectedTerm, ByteComparable.Version.OSS41));
+                                 ByteComparable.compare(actualTerm, expectedTerm, ByteComparable.Version.OSS50));
 
                     visited.addAndGet(1);
                     return true;
@@ -191,7 +191,7 @@ public class NumericIndexWriterTest extends NdiRandomizedTest
                 final ByteBuffer term = Int32Type.instance.decompose(currentTerm++);
                 final IntArrayList postings = new IntArrayList();
                 postings.add(currentRowId++);
-                final ByteSource encoded = Int32Type.instance.asComparableBytes(term, ByteComparable.Version.OSS41);
+                final ByteSource encoded = Int32Type.instance.asComparableBytes(term, ByteComparable.Version.OSS50);
                 return Pair.create(v -> encoded, postings);
             }
         };

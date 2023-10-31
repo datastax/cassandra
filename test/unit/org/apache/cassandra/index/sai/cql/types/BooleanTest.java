@@ -24,6 +24,10 @@ import org.junit.runners.Parameterized;
 
 public class BooleanTest extends IndexingTypeSupport
 {
+    public BooleanTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario) {
+        super(dataset, widePartitions, scenario);
+    }
+
     @Parameterized.Parameters(name = "dataset={0},wide={1},scenario={2}")
     public static Collection<Object[]> generateParameters()
     {

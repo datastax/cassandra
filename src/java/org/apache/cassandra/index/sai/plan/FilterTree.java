@@ -177,7 +177,7 @@ public class FilterTree
         if (currentCluster == null || !currentCluster.isRow())
             return false;
 
-        final int now = FBUtilities.nowInSeconds();
+        final long now = FBUtilities.nowInSeconds();
         boolean result = op == OperationType.AND;
 
         Iterator<ColumnMetadata> columnIterator = expressions.keySet().iterator();

@@ -185,7 +185,7 @@ public final class IndexRestrictions
                 return true;
         }
 
-        for (CustomIndexExpression restriction : customExpressions)
+        for (CustomIndexExpression restriction : externalRestrictions)
         {
             if (restriction.needsFiltering(indexGroup))
                 return true;

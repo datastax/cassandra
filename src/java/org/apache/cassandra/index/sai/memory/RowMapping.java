@@ -27,7 +27,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.index.sai.disk.SegmentBuilder;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
@@ -59,7 +59,7 @@ public class RowMapping
         public void add(DecoratedKey key, Unfiltered unfiltered, long sstableRowId) {}
     };
 
-    private final MemtableTrie<Integer> rowMapping = new MemtableTrie<>(BufferType.OFF_HEAP);
+    private final InMemoryTrie<Integer> rowMapping = new InMemoryTrie<>(BufferType.OFF_HEAP);
 
     private volatile boolean complete = false;
 
@@ -158,7 +158,7 @@ public class RowMapping
             {
                 rowMapping.apply(Trie.singleton(byteComparable, segmentRowId), (existing, neww) -> neww);
             }
-            catch (MemtableTrie.SpaceExhaustedException e)
+            catch (InMemoryTrie.SpaceExhaustedException e)
             {
                 //TODO Work out how to handle this properly
                 throw new RuntimeException(e);

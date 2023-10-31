@@ -45,6 +45,7 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -79,7 +80,7 @@ public class IndexComponents
 
         private IndexComponent(NDIType ndiType, String name)
         {
-            super(Type.CUSTOM, name);
+            super(SSTableFormat.Components.Types.CUSTOM, name);
             this.ndiType = ndiType;
         }
     }
@@ -234,7 +235,7 @@ public class IndexComponents
 
     private static final SequentialWriterOption defaultWriterOption = SequentialWriterOption.newBuilder()
                                                                                             .trickleFsync(DatabaseDescriptor.getTrickleFsync())
-                                                                                            .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024)
+                                                                                            .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKiB() * 1024)
                                                                                             .bufferType(BufferType.OFF_HEAP)
                                                                                             .finishOnClose(true)
                                                                                             .build();
@@ -428,10 +429,8 @@ public class IndexComponents
             logger.trace(logMessage("Opening {} file handle for {} ({})"), temporary ? "temporary" : "", file, FBUtilities.prettyPrintMemory(file.length()));
         }
 
-        try (final FileHandle.Builder builder = new FileHandle.Builder(file.getAbsolutePath()).mmapped(true))
-        {
-            return builder.complete();
-        }
+        final FileHandle.Builder builder = new FileHandle.Builder(file.toAbsolute()).mmapped(true);
+        return builder.complete();
     }
 
     public boolean validatePerSSTableComponentsChecksum()
@@ -489,13 +488,11 @@ public class IndexComponents
         if (logger.isTraceEnabled())
             logger.trace(logMessage("Opening blocking index input for file {} ({})"), file, FBUtilities.prettyPrintMemory(file.length()));
 
-        try (final FileHandle.Builder builder = new FileHandle.Builder(file.getAbsolutePath()))
-        {
-            final FileHandle fileHandle = builder.complete();
-            final RandomAccessReader randomReader = fileHandle.createReader();
+        final FileHandle.Builder builder = new FileHandle.Builder(file.toAbsolute());
+        final FileHandle fileHandle = builder.complete();
+        final RandomAccessReader randomReader = fileHandle.createReader();
 
-            return IndexInputReader.create(randomReader, fileHandle::close);
-        }
+        return IndexInputReader.create(randomReader, fileHandle::close);
     }
 
     public IndexOutputWriter createOutput(IndexComponent component) throws IOException
@@ -539,7 +536,7 @@ public class IndexComponents
         final File file = descriptor.tmpFileFor(component);
 
         if (file.exists())
-            if (!file.delete())
+            if (!file.tryDelete())
                 logger.warn("Failed to delete temporary file " + file);
     }
 
@@ -564,12 +561,12 @@ public class IndexComponents
 
     public void createGroupCompletionMarker() throws IOException
     {
-        Files.touch(descriptor.fileFor(groupCompletionMarker));
+        Files.touch(descriptor.fileFor(groupCompletionMarker).toJavaIOFile());
     }
 
     public void createColumnCompletionMarker() throws IOException
     {
-        Files.touch(descriptor.fileFor(columnCompletionMarker));
+        Files.touch(descriptor.fileFor(columnCompletionMarker).toJavaIOFile());
     }
 
     @Override
