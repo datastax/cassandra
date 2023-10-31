@@ -191,6 +191,6 @@ public class VectorInvalidQueryTest extends SAITester
         // columns are not yet available to restrict the ANN result set.
         assertThatThrownBy(() -> execute("SELECT num FROM %s WHERE pk=3 AND num > 3 ORDER BY v ANN OF [1,1] LIMIT 1"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_COLUMNS_INDEXED_MESSAGE);
+        .hasMessage(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
     }
 }

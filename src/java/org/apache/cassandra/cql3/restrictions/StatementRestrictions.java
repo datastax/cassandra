@@ -75,8 +75,8 @@ public class StatementRestrictions
     "Restriction on partition key column %s must not be nested under OR operator";
 
     public static final String ANN_REQUIRES_INDEX_MESSAGE = "ANN ordering by vector requires the column to be indexed";
-    public static final String ANN_REQUIRES_ALL_RESTRICTED_COLUMNS_INDEXED_MESSAGE =
-    "ANN ordering by vector requires all restricted column(s) to be indexed";
+    public static final String ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE =
+    "ANN ordering by vector requires each restricted column to be indexed unless it is the partition key column";
 
     public static final String VECTOR_INDEXES_ANN_ONLY_MESSAGE = "Vector indexes only support ANN queries";
 
@@ -781,7 +781,7 @@ public class StatementRestrictions
     public void throwRequiresAllowFilteringError(TableMetadata table)
     {
         if (hasAnnRestriction())
-            throw invalidRequest(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_COLUMNS_INDEXED_MESSAGE);
+            throw invalidRequest(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
         Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table);
         if (unsupported.isEmpty())
         {
