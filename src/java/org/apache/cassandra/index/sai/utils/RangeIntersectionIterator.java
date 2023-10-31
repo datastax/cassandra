@@ -32,6 +32,8 @@ import org.apache.cassandra.index.sai.Token;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT;
+
 /**
  * Modified from {@link org.apache.cassandra.index.sasi.utils.RangeIntersectionIterator} to support:
  * 1. no generic type to reduce allocation
@@ -43,9 +45,9 @@ public class RangeIntersectionIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    // The cassandra.sai.intersection.clause.limit (default: 2) controls the maximum number of range iterator that
+    // The cassandra.sai.intersection_clause_limit (default: 2) controls the maximum number of range iterator that
     // will be used in the final intersection of a query operation.
-    private static final int INTERSECTION_CLAUSE_LIMIT = Integer.getInteger("cassandra.sai.intersection.clause.limit", 2);
+    private static final int INTERSECTION_CLAUSE_LIMIT = SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
 
     static
     {
