@@ -428,12 +428,6 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
 
         DecoratedKey key = decorateKey(ByteBufferUtil.readWithShortLength(reader));
 
-        // hint read path about key location if caching is enabled
-        // this saves index summary lookup and index file iteration which whould be pretty costly
-        // especially in presence of promoted column indexes
-        if (isKeyCacheEnabled())
-            cacheKey(key, rowIndexEntrySerializer.deserialize(reader));
-
         return key;
     }
 
