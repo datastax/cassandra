@@ -232,7 +232,7 @@ public class SSTableContext extends SharedCloseableImpl
         @Override
         public RandomAccessReader createReader()
         {
-            return sstable.openIndexReader();
+            return sstable.openDataReader();
         }
 
         @Override
