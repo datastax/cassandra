@@ -20,7 +20,6 @@
  */
 package org.apache.cassandra.index.sai;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.channels.FileChannel;
@@ -43,6 +42,7 @@ import javax.management.ObjectName;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
+import org.apache.cassandra.io.sstable.format.TOCComponent;
 import org.junit.After;
 import org.junit.Assert;
 
@@ -68,10 +68,12 @@ import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.service.snapshot.SnapshotManifest;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.codecs.CodecUtil;
@@ -119,7 +121,7 @@ public class SAITester extends CQLTester
                     @Override
                     public void corrupt(File file) throws IOException
                     {
-                        if (!file.delete())
+                        if (!file.tryDelete())
                             throw new IOException("Unable to delete file: " + file);
                     }
                 },
@@ -161,7 +163,7 @@ public class SAITester extends CQLTester
                     @Override
                     public void corrupt(File file) throws IOException
                     {
-                        try (RandomAccessFile raf = new RandomAccessFile(file, "rw"))
+                        try (RandomAccessFile raf = new RandomAccessFile(file.toJavaIOFile(), "rw"))
                         {
                             raf.seek(file.length());
 
@@ -287,7 +289,7 @@ public class SAITester extends CQLTester
     protected static void assertFailureReason(ReadFailureException e, RequestFailureReason reason)
     {
         int expected = reason.codeForNativeProtocol();
-        int actual = e.getFailuresMap().get(FBUtilities.getBroadcastAddressAndPort().address);
+        int actual = e.getFailuresMap().get(FBUtilities.getBroadcastAddressAndPort().getAddress());
         assertEquals(expected, actual);
     }
 
@@ -333,7 +335,7 @@ public class SAITester extends CQLTester
         Iterable<ColumnFamilyStore> tables = StorageService.instance.getValidColumnFamilies(true, false, KEYSPACE, currentTable());
         tables.forEach(table ->
         {
-            int gcBefore = CompactionManager.getDefaultGcBefore(table, FBUtilities.nowInSeconds());
+            long gcBefore = CompactionManager.getDefaultGcBefore(table, FBUtilities.nowInSeconds());
             CompactionManager.instance.submitMaximal(table, gcBefore, false);
         });
     }
@@ -473,9 +475,9 @@ public class SAITester extends CQLTester
         {
             List<File> files = cfs.getDirectories().getCFDirectories()
                     .stream()
-                    .flatMap(dir -> Arrays.stream(dir.listFiles()))
+                    .flatMap(dir -> Arrays.stream(dir.tryList()))
                     .filter(File::isFile)
-                    .filter(f -> f.getName().endsWith(component.name))
+                    .filter(f -> f.name().endsWith(component.name))
                     .collect(Collectors.toList());
             indexFiles.addAll(files);
         }
@@ -593,11 +595,11 @@ public class SAITester extends CQLTester
                          .build();
     }
 
-    protected int snapshot(String snapshotName)
+    protected int snapshot(String snapshotName) throws IOException
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        Set<SSTableReader> snapshottedSSTables = cfs.snapshot(snapshotName);
-        return snapshottedSSTables.size();
+        SnapshotManifest manifest = SnapshotManifest.deserializeFromJsonFile(cfs.getDirectories().getSnapshotManifestFile(snapshotName));
+        return manifest.getFiles().size();
     }
 
     protected List<String> restoreSnapshot(String snapshot)
@@ -614,9 +616,9 @@ public class SAITester extends CQLTester
         List<String> fileNames = new ArrayList<>();
         for (File file : lister.listFiles())
         {
-            if (file.renameTo(new File(dataDirectory.getAbsoluteFile() + File.separator + file.getName())))
+            if (file.tryMove(new File(dataDirectory.absolutePath() + File.pathSeparator() + file.name())))
             {
-                fileNames.add(file.getName());
+                fileNames.add(file.name());
             }
         }
         cfs.loadNewSSTables();
@@ -666,20 +668,20 @@ public class SAITester extends CQLTester
             else
                 assertFalse("Expect no index components, but got " + components, components.toString().contains(IndexComponents.TYPE_PREFIX));
 
-            Set<Component> tocContents = SSTable.readTOC(sstable.descriptor);
+            Set<Component> tocContents = TOCComponent.loadTOC(sstable.descriptor);
             assertEquals(components, tocContents);
         }
     }
 
     private Set<File> componentFiles(Collection<File> indexFiles, Component component)
     {
-        return indexFiles.stream().filter(c -> c.getName().endsWith(component.name)).collect(Collectors.toSet());
+        return indexFiles.stream().filter(c -> c.name().endsWith(component.name)).collect(Collectors.toSet());
     }
 
     private Set<File> componentFiles(Collection<File> indexFiles, String shortName)
     {
         String suffix = String.format("_%s.db", shortName);
-        return indexFiles.stream().filter(c -> c.getName().endsWith(suffix)).collect(Collectors.toSet());
+        return indexFiles.stream().filter(c -> c.name().endsWith(suffix)).collect(Collectors.toSet());
     }
 
     /**

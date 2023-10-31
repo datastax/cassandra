@@ -80,6 +80,8 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+
 /**
  * Manage metadata for each column index.
  */
@@ -199,9 +201,9 @@ public class ColumnContext
         // call to computeIfAbsent() if it's not. (see https://bugs.openjdk.java.net/browse/JDK-8161372)
         MemtableIndex target = (current != null)
                                ? current
-                               : liveMemtables.computeIfAbsent(mt, memtable -> new MemtableIndex(this, mt));
+                               : liveMemtables.computeIfAbsent(mt, memtable -> new MemtableIndex(this));
 
-        long start = System.nanoTime();
+        long start = nanoTime();
 
         long bytes = 0;
 
@@ -222,7 +224,7 @@ public class ColumnContext
             ByteBuffer value = getValueOf(key, row, FBUtilities.nowInSeconds());
             target.index(key, row.clustering(), value);
         }
-        indexMetrics.memtableIndexWriteLatency.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+        indexMetrics.memtableIndexWriteLatency.update(nanoTime() - start, TimeUnit.NANOSECONDS);
         return bytes;
     }
 
@@ -246,7 +248,7 @@ public class ColumnContext
     public MemtableIndex getPendingMemtableIndex(LifecycleNewTracker tracker)
     {
         return liveMemtables.keySet().stream()
-                            .filter(m -> tracker.equals(m.tracker()))
+                            .filter(m -> tracker.equals(m.getFlushTransaction()))
                             .findFirst()
                             .map(liveMemtables::get)
                             .orElse(null);
@@ -396,7 +398,7 @@ public class ColumnContext
         return (operator != null) && !(TypeUtil.isLiteral(validator) && operator == Expression.Op.RANGE);
     }
 
-    public ByteBuffer getValueOf(DecoratedKey key, Row row, int nowInSecs)
+    public ByteBuffer getValueOf(DecoratedKey key, Row row, long nowInSecs)
     {
         if (row == null)
             return null;
@@ -425,7 +427,7 @@ public class ColumnContext
         }
     }
 
-    public Iterator<ByteBuffer> getValuesOf(Row row, int nowInSecs)
+    public Iterator<ByteBuffer> getValuesOf(Row row, long nowInSecs)
     {
         if (row == null)
             return null;

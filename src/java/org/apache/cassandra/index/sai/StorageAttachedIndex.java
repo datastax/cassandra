@@ -113,10 +113,13 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT;
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
 
 public class StorageAttachedIndex implements Index
 {
+    public static final String NAME = "sai";
+
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
 
     /**
@@ -131,8 +134,8 @@ public class StorageAttachedIndex implements Index
      * ex. If there is one column index building per table across 8 compactors, each index will be
      *     eligible to flush once it reaches (segment_write_buffer_space_mb / 8) MBs.
      */
-    public static final long SEGMENT_BUILD_MEMORY_LIMIT = Long.getLong("cassandra.test.sai.segment_build_memory_limit",
-                                                          1024L * 1024L * (long) DatabaseDescriptor.getSAISegmentWriteBufferSpace());
+    public static final long SEGMENT_BUILD_MEMORY_LIMIT = SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT
+            .getLong(1024L * 1024L * (long) DatabaseDescriptor.getSAISegmentWriteBufferSpace());
 
     public static final NamedMemoryLimiter SEGMENT_BUILD_MEMORY_LIMITER =
             new NamedMemoryLimiter(SEGMENT_BUILD_MEMORY_LIMIT, "SSTable-attached Index Segment Builder");
@@ -350,7 +353,7 @@ public class StorageAttachedIndex implements Index
         // In case of offline scrub, there is no live memtables.
         if (!baseCfs.getTracker().getView().liveMemtables.isEmpty())
         {
-            baseCfs.forceBlockingFlush();
+            baseCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.INDEX_BUILD_STARTED);
         }
 
         // It is now safe to flush indexes directly from flushing Memtables.
@@ -611,7 +614,7 @@ public class StorageAttachedIndex implements Index
 
         void adjustMemtableSize(long additionalSpace, OpOrder.Group opGroup)
         {
-            mt.allocateExtraOnHeap(additionalSpace, opGroup);
+            mt.markExtraOnHeapUsed(additionalSpace, opGroup);
         }
     }
 
@@ -678,7 +681,7 @@ public class StorageAttachedIndex implements Index
     @Override
     public Indexer indexerFor(DecoratedKey key,
                               RegularAndStaticColumns columns,
-                              int nowInSec,
+                              long nowInSec,
                               WriteContext writeContext,
                               IndexTransaction.Type transactionType,
                               Memtable memtable)

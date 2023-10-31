@@ -2053,14 +2053,6 @@ public class ClusteringColumnRestrictionsTest
         return Iterables.get(set, i);
     }
     
-    private static ClusteringColumnRestrictions restrictions(TableMetadata table, Restriction... restrictions)
-    {
-        ClusteringColumnRestrictions clusteringColumnRestrictions = new ClusteringColumnRestrictions(table, false);
-        for (Restriction restriction : restrictions)
-            clusteringColumnRestrictions = clusteringColumnRestrictions.mergeWith(restriction, null);
-        return clusteringColumnRestrictions;
-    }
-
     private enum Sort
     {
         ASC,

@@ -45,7 +45,7 @@ public class DeletionTime implements Comparable<DeletionTime>, IMeasurableMemory
      */
     public static final DeletionTime LIVE = new DeletionTime(Long.MIN_VALUE, Long.MAX_VALUE);
 
-    private static final Serializer serializer = new Serializer();
+    public static final Serializer serializer = new Serializer();
     private static final Serializer legacySerializer = new LegacySerializer();
 
     private final long markedForDeleteAt;

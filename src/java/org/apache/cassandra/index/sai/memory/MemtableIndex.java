@@ -49,7 +49,7 @@ public class MemtableIndex
     private final LongAdder writeCount = new LongAdder();
     private final LongAdder estimatedMemoryUsed = new LongAdder();
 
-    public MemtableIndex(ColumnContext columnContext, Memtable mt)
+    public MemtableIndex(ColumnContext columnContext)
     {
         this.index = new TrieMemoryIndex(columnContext);
         this.validator = columnContext.getValidator();

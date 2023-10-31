@@ -82,14 +82,6 @@ public interface Restriction
     boolean needsFiltering(Index.Group indexGroup);
 
     /**
-     * Returns whether this restriction would need filtering if the specified index group were used.
-     *
-     * @param indexGroup an index group
-     * @return {@code true} if this would need filtering if {@code indexGroup} were used, {@code false} otherwise
-     */
-    public boolean needsFiltering(Index.Group indexGroup);
-
-    /**
      * Adds to the specified row filter the expressions corresponding to this <code>Restriction</code>.
      *
      * @param filter the row filter to add expressions to
