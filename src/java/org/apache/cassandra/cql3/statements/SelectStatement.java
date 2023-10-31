@@ -1479,6 +1479,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 {
                     restrictions.throwRequiresAllowFilteringError(table);
                 }
+                if (restrictions.hasClusteringColumnsRestrictions()
+                    && restrictions.hasAnnRestriction()
+                    && restrictions.hasClusterColumnRestrictionWithoutSupportingIndex(table))
+                        restrictions.throwRequiresAllowFilteringError(table);
             }
         }
 

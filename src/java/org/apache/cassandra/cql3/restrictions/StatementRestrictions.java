@@ -1120,6 +1120,21 @@ public class StatementRestrictions
     }
 
     /**
+     * Checks if the query has any cluster column restrictions that do not also have a supporting index.
+     * @param table the table metadata
+     * @return <code>true</code> if the query has any cluster column restrictions that do not also have a supporting index,
+     * <code>false</code> otherwise.
+     */
+    public boolean hasClusterColumnRestrictionWithoutSupportingIndex(TableMetadata table)
+    {
+        IndexRegistry registry = IndexRegistry.obtain(table);
+        for (Restriction restriction : clusteringColumnsRestrictions.restrictions())
+            if (!restriction.hasSupportingIndex(registry))
+                return true;
+        return false;
+    }
+
+    /**
      * Returns the requested clustering columns.
      *
      * @param options the query options
