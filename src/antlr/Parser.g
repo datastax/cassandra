@@ -1702,7 +1702,7 @@ relation[WhereClause.Builder clauses]
     | name=cident K_IS K_NOT K_NULL { $clauses.add(new SingleColumnRelation(name, Operator.IS_NOT, Constants.NULL_LITERAL)); }
     | K_TOKEN l=tupleOfIdentifiers type=relationType t=term
         { $clauses.add(new TokenRelation(l, type, t)); }
-    | K_GEO_DISTANCE '(' name=cident ',' point=listLiteral ')' type=relationType distance=term
+    | K_GEO_DISTANCE '(' name=cident ',' point=term ')' type=relationType distance=term
         { $clauses.add(new GeoDistanceRelation(name, point, type, distance)); }
     | name=cident K_IN marker=inMarker
         { $clauses.add(new SingleColumnRelation(name, Operator.IN, marker)); }
