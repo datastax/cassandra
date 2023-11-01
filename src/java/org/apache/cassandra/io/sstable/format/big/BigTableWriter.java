@@ -89,7 +89,7 @@ public class BigTableWriter extends SortedTableWriter<BigFormatPartitionWriter, 
     @Override
     protected void onStartPartition(DecoratedKey key)
     {
-        notifyObservers(o -> o.startPartition(key, partitionWriter.getInitialPosition()));
+        notifyObservers(o -> o.startPartition(key, indexWriter.writer.position()));
     }
 
     @Override
