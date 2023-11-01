@@ -439,6 +439,12 @@ public class SSTableFlushObserverTest
         }
 
         @Override
+        public void nextUnfilteredCluster(Unfiltered unfiltered)
+        {
+            nextUnfilteredCluster(unfiltered, -1);
+        }
+        
+        @Override
         public void complete()
         {
             isComplete = true;
