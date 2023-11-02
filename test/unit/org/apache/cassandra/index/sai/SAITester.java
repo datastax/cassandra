@@ -253,10 +253,10 @@ public class SAITester extends CQLTester
 
     protected boolean isIndexQueryable()
     {
-        return isIndexQueryable(KEYSPACE, currentTable());
+        return isIndexQueryableByTable(KEYSPACE, currentTable());
     }
 
-    protected boolean isIndexQueryable(String keyspace, String table)
+    protected boolean isIndexQueryableByTable(String keyspace, String table)
     {
         ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         for (Index index : cfs.indexManager.listIndexes())
@@ -322,10 +322,10 @@ public class SAITester extends CQLTester
 
     public void waitForIndexQueryable()
     {
-        waitForIndexQueryable(KEYSPACE, currentTable());
+        waitForIndexQueryableByTable(KEYSPACE, currentTable());
     }
 
-    public void waitForIndexQueryable(String keyspace, String table)
+    public void waitForIndexQueryableByTable(String keyspace, String table)
     {
         waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, table)), 60, TimeUnit.SECONDS);
     }
