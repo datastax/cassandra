@@ -146,4 +146,32 @@ public class VectorRadiusRestrictionTest extends VectorTester
         assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.7128, -74.0060]) < 500000"),
                                 row("Boston"), row("New York City"), row("Washington DC"));
     }
+
+    @Test
+    public void testCloseRangeGeoDistanceWithRealLocationsQuery() throws Throwable
+    {
+        createTable("CREATE TABLE %s (city text primary key, coordinates vector<float, 2>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(coordinates) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
+        waitForIndexQueryable();
+
+        // coordinates are [latitude, longitude]
+        // These are from NYC's Central Park
+        execute("INSERT INTO %s (city, coordinates) VALUES ('Rec Center', [40.791186,-73.959591])");
+        execute("INSERT INTO %s (city, coordinates) VALUES ('Baseball Field 11', [40.791597,-73.958059])");
+        execute("INSERT INTO %s (city, coordinates) VALUES ('Baseball Field 7', [40.792847,-73.957105])");
+        execute("INSERT INTO %s (city, coordinates) VALUES ('Baseball Field 6', [40.793018,-73.957565])");
+        execute("INSERT INTO %s (city, coordinates) VALUES ('Baseball Field 5', [40.793193,-73.958644])");
+
+        // Point within 40 meters of field 6
+        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 40"),
+                                row("Baseball Field 6"));
+
+        // Point within 43 meters of field 6 (field 7 is 43 meters away)
+        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 43"),
+                                row("Baseball Field 6"), row("Baseball Field 7"));
+
+        // Point within 95 meters of field 6 (field 5 is 93 meters away)
+        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 95"),
+                                row("Baseball Field 6"), row("Baseball Field 7"), row("Baseball Field 5"));
+    }
 }
