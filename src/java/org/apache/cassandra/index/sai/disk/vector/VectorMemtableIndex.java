@@ -159,7 +159,7 @@ public class VectorMemtableIndex implements MemtableIndex
         assert expr.getOp() == Expression.Op.ANN || expr.getOp() == Expression.Op.BOUNDED_ANN : "Only ANN is supported for vector search, received " + expr.getOp();
 
         float[] qv = expr.lower.value.vector;
-        float[] boundary = expr.upper.value.vector;
+        ByteBuffer boundary = expr.upper.value.raw;
         // TODO remove this hack once we are able to pass in the boundary
         if (boundary != null)
             limit = 1000;

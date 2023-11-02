@@ -38,6 +38,7 @@ import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -108,6 +109,7 @@ public class IndexContext
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
     private final boolean isAnalyzed;
+    private final boolean hasEuclideanSimilarityFunc;
     private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
     private final AbstractAnalyzer.AnalyzerFactory queryAnalyzerFactory;
     private final PrimaryKey.Factory primaryKeyFactory;
@@ -150,6 +152,7 @@ public class IndexContext
                                         ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
                                         : this.analyzerFactory;
             this.segmentCompactionEnabled = Boolean.parseBoolean(config.options.getOrDefault(ENABLE_SEGMENT_COMPACTION_OPTION_NAME, "false"));
+            this.hasEuclideanSimilarityFunc = VectorSimilarityFunction.EUCLIDEAN.name().equalsIgnoreCase(config.options.get(IndexWriterConfig.SIMILARITY_FUNCTION));
         }
         else
         {
@@ -158,6 +161,7 @@ public class IndexContext
             this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), Collections.EMPTY_MAP);
             this.queryAnalyzerFactory = this.analyzerFactory;
             this.segmentCompactionEnabled = true;
+            this.hasEuclideanSimilarityFunc = false;
         }
 
         logger.debug(logMessage("Initialized index context with index writer config: {}"), indexWriterConfig);
@@ -443,9 +447,11 @@ public class IndexContext
         // The only supported operator is ANALYZER_MATCHES.
         if (isAnalyzed) return op == Operator.ANALYZER_MATCHES;
 
-        // ANN is only supported against vectors, and vector indexes only support ANN
+        // ANN is only supported against vectors.
+        // BOUNDED_ANN is only supported against vectors with a Euclidean similarity function.
+        // Vector indexes only support ANN and BOUNDED_ANN
         if (column.type instanceof VectorType)
-            return op == Operator.ANN || op == Operator.BOUNDED_ANN;
+            return op == Operator.ANN || (op == Operator.BOUNDED_ANN && hasEuclideanSimilarityFunc);
         if (op == Operator.ANN || op == Operator.BOUNDED_ANN)
             return false;
 

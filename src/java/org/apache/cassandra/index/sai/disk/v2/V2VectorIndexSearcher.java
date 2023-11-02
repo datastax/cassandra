@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.v2;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
@@ -117,7 +118,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (exp.getOp() != Expression.Op.ANN && exp.getOp() != Expression.Op.BOUNDED_ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + exp));
 
-        float[] boundary = exp.upper.value.vector;
+        ByteBuffer boundary = exp.upper.value.raw;
         // TODO remove this hack once we are able to pass in the boundary
         if (boundary != null)
             limit = 1000;
