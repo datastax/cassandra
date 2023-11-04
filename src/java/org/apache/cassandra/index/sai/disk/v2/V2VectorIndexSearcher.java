@@ -121,7 +121,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         ByteBuffer boundary = exp.upper.value.raw;
         // TODO remove this hack once we are able to pass in the boundary
         if (boundary != null)
-            limit = 1000;
+            limit = 10000
         int topK = topKFor(limit);
         BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, topK);
         if (bitsOrPostingList.skipANN())
