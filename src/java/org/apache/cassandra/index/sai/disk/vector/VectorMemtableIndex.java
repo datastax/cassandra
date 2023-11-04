@@ -162,7 +162,7 @@ public class VectorMemtableIndex implements MemtableIndex
         ByteBuffer boundary = expr.upper.value.raw;
         // TODO remove this hack once we are able to pass in the boundary
         if (boundary != null)
-            limit = 10000
+            limit = 10000;
 
         Bits bits = null;
         if (RangeUtil.coversFullRing(keyRange))

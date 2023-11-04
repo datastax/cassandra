@@ -35,7 +35,7 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorUtil;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.FloatType;
@@ -116,7 +116,7 @@ public class Expression
     protected Op operation;
 
     public Bound lower, upper;
-    public double boundedAnnLowerBound = 0;
+    public double boundedAnnUpperBound = 0;
     public int topK;
     public boolean upperInclusive, lowerInclusive;
 
@@ -212,7 +212,7 @@ public class Expression
                 assert upper != null;
                 // We calculate the minimum because Euclidean distance is inverted
                 float searchRadius = FloatType.instance.compose(upper.value.raw);
-                boundedAnnLowerBound = GeoUtil.minimumBoundForEuclideanSimilarity(lower.value.vector, searchRadius);
+                boundedAnnUpperBound = GeoUtil.maximumBoundForEuclideanSimilarity(lower.value.vector, searchRadius);
                 break;
         }
 
@@ -237,8 +237,8 @@ public class Expression
 
         if (operation == Op.BOUNDED_ANN)
         {
-            float euclideanDistance = VectorSimilarityFunction.EUCLIDEAN.compare(lower.value.vector, value.vector);
-            return upperInclusive ? boundedAnnLowerBound <= euclideanDistance : boundedAnnLowerBound < euclideanDistance;
+            float squareDistance = VectorUtil.squareDistance(lower.value.vector, value.vector);
+            return upperInclusive ? squareDistance <= boundedAnnUpperBound : squareDistance < boundedAnnUpperBound;
         }
 
         if (lower != null)

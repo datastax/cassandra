@@ -36,20 +36,18 @@ public class GeoUtil
     }
 
     /**
-     * Calculate the minimum bound for Euclidean similarity as determined by
-     * {@link io.github.jbellis.jvector.vector.VectorSimilarityFunction#EUCLIDEAN}.
+     * Calculate the maximum bound for a squared distance between lat/long points on the earth.
      * @param vector search vector
      * @param distanceInMeters the search radius
      * @return
      */
-    public static double minimumBoundForEuclideanSimilarity(float[] vector, float distanceInMeters)
+    public static double maximumBoundForEuclideanSimilarity(float[] vector, float distanceInMeters)
     {
         // Get the conversion ratio for meters to degrees at the given latitude.
         double distanceBetweenDegreeLatitude = metersToDegreesRatioForLatitude(vector);
         // Calculate the number of degrees that the search radius represents.
         double degrees = distanceInMeters / distanceBetweenDegreeLatitude;
-        // Calculate the minimum bound for Euclidean similarity by applying the Euclidean similarity function to the
-        // number of degrees.
-        return 1.0 / (1 + Math.pow(degrees, 2));
+        // Calculate the maximum bound for Euclidean similarity. The simplest way to do this is to square the degrees.
+        return Math.pow(degrees, 2);
     }
 }
