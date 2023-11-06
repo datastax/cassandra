@@ -134,8 +134,8 @@ public class VectorRadiusRestrictionTest extends VectorTester
         assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [42.3601, -71.0589]) < 5"),
                    row("Boston"));
 
-        // Cities within 328 km of Washington DC
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [38.8951, -77.0364]) < 328000"),
+        // Cities within 328.4 km of Washington DC
+        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [38.8951, -77.0364]) < 328400"),
                                 row("New York City"), row("Washington DC"));
 
         // Cities within 500 km of New York City
@@ -166,8 +166,8 @@ public class VectorRadiusRestrictionTest extends VectorTester
         assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 40"),
                                 row("Baseball Field 6"));
 
-        // Point within 43 meters of field 6 (field 7 is 43 meters away)
-        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 43"),
+        // Point within 43 meters of field 6 (field 7 is 43.14 meters away)
+        assertRowsIgnoringOrder(execute("SELECT city FROM %s WHERE GEO_DISTANCE(coordinates, [40.793018,-73.957565]) < 43.5"),
                                 row("Baseball Field 6"), row("Baseball Field 7"));
 
         // Point within 95 meters of field 6 (field 5 is 93 meters away)
