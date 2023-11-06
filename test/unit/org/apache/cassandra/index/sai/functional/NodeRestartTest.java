@@ -112,7 +112,6 @@ public class NodeRestartTest extends SAITester
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        waitForIndexQueryable();
         verifyIndexFiles(1, 1);
         assertNumRows(1, "SELECT * FROM %%s WHERE v1 >= 0");
         assertNumRows(1, "SELECT * FROM %%s WHERE v2 = '0'");
@@ -124,8 +123,6 @@ public class NodeRestartTest extends SAITester
 
         assertNumRows(1, "SELECT * FROM %%s WHERE v1 >= 0");
         assertNumRows(1, "SELECT * FROM %%s WHERE v2 = '0'");
-
-        waitForIndexQueryable();
 
         // index components are included after restart
         verifyIndexComponentsIncludedInSSTable();
@@ -173,7 +170,6 @@ public class NodeRestartTest extends SAITester
         flush();
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-        waitForIndexQueryable();
         verifyIndexFiles(1, 0);
         assertNumRows(1, "SELECT * FROM %%s WHERE v1 >= 0");
         assertValidationCount(0, 0);
