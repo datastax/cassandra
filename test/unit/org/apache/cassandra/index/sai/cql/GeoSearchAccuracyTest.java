@@ -93,6 +93,7 @@ public class GeoSearchAccuracyTest extends VectorTester
     // accuracy. This is the strict formula.
     private double strictHaversineDistance(float lat1, float lon1, float lat2, float lon2)
     {
+        // This implementation is based on information from https://www.movable-type.co.uk/scripts/latlong.html
         double phi1 = lat1 * Math.PI/180; // phi, lambda in radians
         double phi2 = lat2 * Math.PI/180;
         double deltaPhi = (lat2 - lat1) * Math.PI/180;
