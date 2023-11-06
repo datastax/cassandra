@@ -24,16 +24,16 @@ import java.util.stream.IntStream;
 import org.junit.Test;
 
 import org.apache.cassandra.utils.Pair;
-import org.apache.lucene.util.SloppyMath;
+import org.apache.lucene.geo.GeoUtils;
 
 import static org.junit.Assert.assertTrue;
 
 public class GeoSearchAccuracyTest extends VectorTester
 {
-    // Number indicates that 70% of the search results are truly within the searched distance
-    // In testing, it appeared to be around 75% for NYC and 80% for LA. The accuracy improves as the latitude
+    // Number indicates that 98% of the search results are truly within the searched distance
+    // In testing, it appeared to be around 99.9% for NYC. The accuracy improves as the latitude
     // approaches the equator.
-    private final static float EXPECTED_ACCURACY = 0.70f;
+    private final static float EXPECTED_ACCURACY = 0.98f;
 
     @Test
     public void testRandomVectorsAgainstHaversineDistance()
@@ -78,7 +78,7 @@ public class GeoSearchAccuracyTest extends VectorTester
 
     private boolean isWithinDistance(float[] vector, float[] searchVector, int distanceInMeters)
     {
-        return SloppyMath.haversinMeters(vector[0], vector[1], searchVector[0], searchVector[1]) < distanceInMeters;
+        return strictHaversineDistance(vector[0], vector[1], searchVector[0], searchVector[1]) < distanceInMeters;
     }
 
     private float[] createRandomNYCVector()
@@ -87,5 +87,22 @@ public class GeoSearchAccuracyTest extends VectorTester
         var lat = getRandom().nextFloatBetween(39, 41);
         var lon = getRandom().nextFloatBetween(-74, -72);
         return new float[] {lat, lon};
+    }
+
+    // In the production code, we use a haversine distance formula from lucene, which prioritizes speed over some
+    // accuracy. This is the strict formula.
+    private double strictHaversineDistance(float lat1, float lon1, float lat2, float lon2)
+    {
+        double phi1 = lat1 * Math.PI/180; // phi, lambda in radians
+        double phi2 = lat2 * Math.PI/180;
+        double deltaPhi = (lat2 - lat1) * Math.PI/180;
+        double deltaLambda = (lon2 - lon1) * Math.PI/180;
+
+        double a = Math.sin(deltaPhi / 2.0) * Math.sin(deltaPhi / 2.0) +
+                   Math.cos(phi1) * Math.cos(phi2) *
+                   Math.sin(deltaLambda / 2.0) * Math.sin(deltaLambda / 2.0);
+        double c = 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
+
+        return GeoUtils.EARTH_MEAN_RADIUS_METERS * c; // in meters
     }
 }
