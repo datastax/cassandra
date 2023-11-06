@@ -123,7 +123,7 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
                 Map.Entry<DecoratedKey, Row> key = keyIterator.next();
 
 
-                indexWriter.startPartition(key.getKey(), position);
+                indexWriter.startPartition(key.getKey(), position, position);
                 position++;
                 indexWriter.nextUnfilteredCluster(key.getValue());
             }

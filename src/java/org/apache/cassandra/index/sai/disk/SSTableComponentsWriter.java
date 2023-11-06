@@ -81,12 +81,12 @@ public class SSTableComponentsWriter
         currentKeyPartitionOffset = position;
     }
 
-    public void nextUnfilteredCluster(Unfiltered unfiltered, long position) throws IOException
+    public void nextUnfilteredCluster(Unfiltered unfiltered) throws IOException
     {
         recordCurrentTokenOffset();
     }
 
-    public void staticRow(Row staticRow, long position) throws IOException
+    public void staticRow(Row staticRow) throws IOException
     {
         recordCurrentTokenOffset();
     }
@@ -118,7 +118,7 @@ public class SSTableComponentsWriter
     public static final SSTableComponentsWriter NONE = new SSTableComponentsWriter() {
 
         @Override
-        public void nextUnfilteredCluster(Unfiltered unfiltered, long position)
+        public void nextUnfilteredCluster(Unfiltered unfiltered)
         {
         }
 
@@ -128,7 +128,7 @@ public class SSTableComponentsWriter
         }
 
         @Override
-        public void staticRow(Row staticRow, long position)
+        public void staticRow(Row staticRow)
         {
         }
 

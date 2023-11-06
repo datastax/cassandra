@@ -29,14 +29,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.schema.CompressionParams;
 
 /**
@@ -89,7 +88,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     }
 
     @Override
-    public void startPartition(DecoratedKey key, long position)
+    public void startPartition(DecoratedKey key, long position, long keyPositionForSASI)
     {
         if (aborted) return;
         
@@ -98,7 +97,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     }
 
     @Override
-    public void nextUnfilteredCluster(Unfiltered unfiltered, long position)
+    public void nextUnfilteredCluster(Unfiltered unfiltered)
     {
         if (aborted) return;
         
@@ -107,7 +106,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
             // Ignore range tombstones...
             if (unfiltered.isRow())
             {
-                sstableComponentsWriter.nextUnfilteredCluster(unfiltered, position);
+                sstableComponentsWriter.nextUnfilteredCluster(unfiltered);
                 rowMapping.add(currentKey, unfiltered, sstableRowId);
 
                 for (ColumnIndexWriter w : columnIndexWriters)
@@ -126,13 +125,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     }
 
     @Override
-    public void partitionLevelDeletion(DeletionTime deletionTime, long position)
-    {
-        // Deletions (including partition deletions) are accounted for during reads.
-    }
-
-    @Override
-    public void staticRow(Row staticRow, long position)
+    public void staticRow(Row staticRow)
     {
         if (aborted) return;
         
@@ -141,7 +134,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
         try
         {
-            sstableComponentsWriter.staticRow(staticRow, position);
+            sstableComponentsWriter.staticRow(staticRow);
             rowMapping.add(currentKey, staticRow, sstableRowId);
 
             for (ColumnIndexWriter w : columnIndexWriters)

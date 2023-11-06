@@ -70,7 +70,6 @@ public class IndexViewManagerTest extends SAITester
     {
         createTable("CREATE TABLE %S (k INT PRIMARY KEY, v INT)");
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         ColumnContext columnContext = columnIndex(getCurrentColumnFamilyStore(), indexName);
         View initialView = columnContext.getView();
@@ -89,7 +88,6 @@ public class IndexViewManagerTest extends SAITester
     {
         createTable("CREATE TABLE %S (k INT PRIMARY KEY, v INT)");
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         ColumnFamilyStore store = getCurrentColumnFamilyStore();
         ColumnContext columnContext = columnIndex(store, indexName);
@@ -121,7 +119,6 @@ public class IndexViewManagerTest extends SAITester
     {
         String tableName = createTable("CREATE TABLE %S (k INT PRIMARY KEY, v INT)");
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         ColumnFamilyStore store = getCurrentColumnFamilyStore();
         ColumnContext columnContext = columnIndex(store, indexName);

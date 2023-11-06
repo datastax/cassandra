@@ -104,7 +104,7 @@ import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
@@ -525,6 +525,12 @@ public class StorageAttachedIndex implements Index
     public boolean supportsExpression(ColumnMetadata column, Operator operator)
     {
         return dependsOn(column) && context.supports(operator);
+    }
+
+    @Override
+    public boolean filtersMultipleContains()
+    {
+        return false;
     }
 
     @Override

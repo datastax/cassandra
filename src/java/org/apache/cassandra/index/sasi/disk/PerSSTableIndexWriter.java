@@ -32,7 +32,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorPlus;
-import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -44,7 +43,7 @@ import org.apache.cassandra.index.sasi.utils.CombinedTermIterator;
 import org.apache.cassandra.index.sasi.utils.TypeUtil;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -106,20 +105,14 @@ public class PerSSTableIndexWriter implements SSTableFlushObserver
     {}
 
     @Override
-    public void startPartition(DecoratedKey key, long keyPosition)
+    public void startPartition(DecoratedKey key, long keyPosition, long keyPositionForSASI)
     {
         currentKey = key;
-        currentKeyPosition = keyPosition;
+        currentKeyPosition = keyPositionForSASI;
     }
 
     @Override
-    public void partitionLevelDeletion(DeletionTime deletionTime, long position)
-    {
-        // do nothing
-    }
-
-    @Override
-    public void staticRow(Row staticRow, long position)
+    public void staticRow(Row staticRow)
     {
         nextUnfilteredCluster(staticRow);
     }

@@ -50,7 +50,6 @@ public class SnapshotTest extends SAITester
         // Insert some initial data and create the index over it
         execute("INSERT INTO %s (id1, v1) VALUES ('0', 0);");
         String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-        waitForIndexQueryable();
         flush();
         verifyIndexFiles(1, 0);
         assertValidationCount(0, 0);
@@ -126,7 +125,6 @@ public class SnapshotTest extends SAITester
 
         // create index
         String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-        waitForIndexQueryable();
         verifyIndexFiles(2, 0);
         assertValidationCount(0, 0);
 

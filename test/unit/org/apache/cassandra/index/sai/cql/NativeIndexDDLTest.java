@@ -262,7 +262,6 @@ public class NativeIndexDDLTest extends SAITester
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Camel')");
 
@@ -277,7 +276,6 @@ public class NativeIndexDDLTest extends SAITester
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : true }");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Camel')");
 
@@ -292,7 +290,6 @@ public class NativeIndexDDLTest extends SAITester
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : false }");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Camel')");
 
@@ -305,7 +302,6 @@ public class NativeIndexDDLTest extends SAITester
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
@@ -321,7 +317,6 @@ public class NativeIndexDDLTest extends SAITester
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'normalize' : false }");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
@@ -337,7 +332,6 @@ public class NativeIndexDDLTest extends SAITester
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'normalize' : true }");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
@@ -350,7 +344,6 @@ public class NativeIndexDDLTest extends SAITester
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'normalize' : true, 'case_sensitive' : false}");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Cam\u00E1l')");
 
@@ -363,7 +356,6 @@ public class NativeIndexDDLTest extends SAITester
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = { 'ascii' : true, 'case_sensitive' : false}");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'Éppinger')");
 
@@ -537,7 +529,6 @@ public class NativeIndexDDLTest extends SAITester
         flush();
 
         executeNet("CREATE CUSTOM INDEX index_1 ON %s(v1) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // same name
         assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX index_1 ON %s(v1) USING 'StorageAttachedIndex'"))
@@ -568,7 +559,6 @@ public class NativeIndexDDLTest extends SAITester
             execute("INSERT INTO %s (id1, v1, v2) VALUES ('" + i + "', " + i + ", '0')");
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-        waitForIndexQueryable();
 
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(rowCount, rows.all().size());
@@ -594,8 +584,6 @@ public class NativeIndexDDLTest extends SAITester
 
         // Allow the initialization task, which builds the index, to continue:
         delayInitializationTask.countDown();
-
-        waitForIndexQueryable();
 
         ResultSet rows = executeNet("SELECT id FROM %s WHERE val = 'Camel'");
         assertEquals(1, rows.all().size());
@@ -703,7 +691,6 @@ public class NativeIndexDDLTest extends SAITester
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        waitForIndexQueryable();
         verifyIndexFiles(2, 2);
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(2, rows.all().size());
@@ -729,13 +716,11 @@ public class NativeIndexDDLTest extends SAITester
         verifyIndexFiles(0, 0);
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-        waitForIndexQueryable();
         verifyIndexFiles(2, 0);
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(2, rows.all().size());
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        waitForIndexQueryable();
         verifyIndexFiles(2, 2);
         rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(2, rows.all().size());
@@ -820,7 +805,6 @@ public class NativeIndexDDLTest extends SAITester
             String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
             String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
             truncate(true);
-            waitForIndexQueryable();
         }
         else
         {
@@ -1124,7 +1108,6 @@ public class NativeIndexDDLTest extends SAITester
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        waitForIndexQueryable();
 
         populateData.run();
         verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 2, 0);
@@ -1185,7 +1168,6 @@ public class NativeIndexDDLTest extends SAITester
 
         // create index again, it should succeed
         indexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-        waitForIndexQueryable();
         verifySSTableIndexes(indexName, 1);
 
         ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
