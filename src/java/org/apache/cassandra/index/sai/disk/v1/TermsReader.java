@@ -268,7 +268,7 @@ public class TermsReader implements Closeable
         private LongHeap materializeResults(Iterator<Pair<ByteSource,Long>> trieEntries) throws IOException
         {
             assert trieEntries.hasNext();
-            var heap = new LongHeap(1);
+            LongHeap heap = null;
             try (var postingsInput = IndexFileUtils.instance.openInput(postingsFile);
                  var postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile))
             {
@@ -286,6 +286,8 @@ public class TermsReader implements Closeable
                                                                blocksSummary,
                                                                listener.postingListEventListener(),
                                                                PostingsReader.InputCloser.NOOP);
+                        if (heap == null)
+                            heap = new LongHeap((int) currentReader.size());
                         while (true)
                         {
                             long nextPosting = currentReader.nextPosting();
@@ -295,7 +297,7 @@ public class TermsReader implements Closeable
                         }
                     }
                 } while (trieEntries.hasNext());
-                return heap;
+                return heap != null ? heap : new LongHeap(1);
             }
         }
     }
