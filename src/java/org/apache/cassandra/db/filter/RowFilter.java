@@ -772,6 +772,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                         ByteBufferUtil.writeWithShortLength(mexpr.key, out);
                         ByteBufferUtil.writeWithShortLength(mexpr.value, out);
                         break;
+                    case VECTOR_RADIUS:
+                        GeoDistanceExpression gexpr = (GeoDistanceExpression)expression;
+                        gexpr.distanceOperator.writeTo(out);
+                        ByteBufferUtil.writeWithShortLength(gexpr.distance, out);
+                        ByteBufferUtil.writeWithShortLength(gexpr.value, out);
                 }
             }
 
@@ -807,6 +812,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
                         ByteBuffer value = ByteBufferUtil.readWithShortLength(in);
                         return new MapEqualityExpression(column, key, operator, value);
+                    case VECTOR_RADIUS:
+                        Operator boundaryOperator = Operator.readFrom(in);
+                        ByteBuffer distance = ByteBufferUtil.readWithShortLength(in);
+                        ByteBuffer searchVector = ByteBufferUtil.readWithShortLength(in);
+                        return new GeoDistanceExpression(column, searchVector, boundaryOperator, distance);
                 }
                 throw new AssertionError();
             }
@@ -839,7 +849,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                         size += UserExpression.serializedSize((UserExpression)expression, version);
                         break;
                     case VECTOR_RADIUS:
-                        throw new RuntimeException("implement me");
+                        GeoDistanceExpression geoDistanceRelation = (GeoDistanceExpression) expression;
+                        size += ByteBufferUtil.serializedSizeWithShortLength(geoDistanceRelation.distance)
+                                + ByteBufferUtil.serializedSizeWithShortLength(geoDistanceRelation.value)
+                                + geoDistanceRelation.distanceOperator.serializedSize();
+                        break;
                 }
                 return size;
             }
@@ -1123,7 +1137,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
         public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
-            throw new UnsupportedOperationException("Filtering not supported for vector radius expressions");
+            // Filtering is not supported, accept any row
+            return true;
         }
 
         @Override

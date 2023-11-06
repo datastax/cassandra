@@ -33,7 +33,6 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 
@@ -44,6 +43,7 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.cql.GeoSearchAccuracyTest;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
@@ -69,6 +69,7 @@ public class VectorDistributedTest extends TestBaseImpl
     private static final String INVALID_LIMIT_MESSAGE = "Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than 1000";
 
     private static final double MIN_RECALL = 0.8;
+    private static final double MIN_GEO_SEARCH_RECALL = 0.98;
 
     private static final int NUM_REPLICAS = 3;
     private static final int RF = 2;
@@ -199,6 +200,46 @@ public class VectorDistributedTest extends TestBaseImpl
         assertDescendingScore(queryVector, resultVectors);
         double recall = getRecall(allVectors, queryVector, getVectors(result));
         assertThat(recall).isGreaterThanOrEqualTo(MIN_RECALL);
+    }
+
+    @Test
+    public void testBasicGeoSearch()
+    {
+        dimensionCount = 2;
+        cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
+        // geo requries euclidean similarity function
+        cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val") + " WITH OPTIONS = {'similarity_function' : 'euclidean'}"));
+        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        // disable compaction
+        String tableName = table;
+        cluster.forEach(n -> n.runOnInstance(() -> {
+            Keyspace keyspace = Keyspace.open(KEYSPACE);
+            keyspace.getColumnFamilyStore(tableName).disableAutoCompaction();
+        }));
+
+        int vectorCountPerSSTable = getRandom().nextIntBetween(3000, 5000);
+        int sstableCount = getRandom().nextIntBetween(7, 10);
+        List<float[]> allVectors = new ArrayList<>(sstableCount * vectorCountPerSSTable);
+
+        int pk = 0;
+        for (int i = 0; i < sstableCount; i++)
+        {
+            List<float[]> vectors = generateUSBoundedGeoVectors(vectorCountPerSSTable);
+            for (float[] vector : vectors)
+                execute("INSERT INTO %s (pk, val) VALUES (" + (pk++) + ", " + vectorString(vector) + " )");
+
+            allVectors.addAll(vectors);
+            cluster.forEach(n -> n.flush(KEYSPACE));
+        }
+
+        // query multiple sstable indexes in multiple node
+        int searchRadiusMeters = getRandom().nextIntBetween(500, 20000);
+        float[] queryVector = randomUSVector();
+        Object[][] result = execute("SELECT val FROM %s WHERE GEO_DISTANCE(val, " + Arrays.toString(queryVector) + ") < " + searchRadiusMeters);
+
+        // expect recall to be at least 0.97
+        double recall = getGeoRecall(allVectors, queryVector, searchRadiusMeters, getVectors(result));
+        assertThat(recall).isGreaterThanOrEqualTo(MIN_GEO_SEARCH_RECALL);
     }
 
     @Test
@@ -435,6 +476,36 @@ public class VectorDistributedTest extends TestBaseImpl
         }
         return rawVector;
     }
+
+    private List<float[]> generateUSBoundedGeoVectors(int vectorCount)
+    {
+        return IntStream.range(0, vectorCount).mapToObj(s -> randomUSVector()).collect(Collectors.toList());
+    }
+
+    private float[] randomUSVector()
+    {
+        // Approximate bounding box for contiguous US locations
+        var lat = getRandom().nextFloatBetween(24, 49);
+        var lon = getRandom().nextFloatBetween(-124, -67);
+        return new float[] {lat, lon};
+    }
+
+    private double getGeoRecall(List<float[]> allVectors, float[] query, float distance, List<float[]> result)
+    {
+        assertThat(allVectors).containsAll(result);
+        AtomicInteger matches = new AtomicInteger();
+        var expected = allVectors.stream().filter(v -> GeoSearchAccuracyTest.isWithinDistance(v, query, distance))
+                                 .collect(Collectors.toSet());
+        result.forEach(v -> {
+            if (expected.contains(v))
+                matches.getAndIncrement();
+        });
+        if (expected.isEmpty() && result.isEmpty())
+            return 1.0;
+        // The
+        return Math.min(expected.size() * 1.0 / result.size(), result.size() * 1.0 / expected.size());
+    }
+
 
     private static Object[][] execute(String query)
     {

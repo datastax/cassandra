@@ -76,14 +76,14 @@ public class GeoSearchAccuracyTest extends VectorTester
                    observedAccuracy > EXPECTED_ACCURACY);
     }
 
-    private boolean isWithinDistance(float[] vector, float[] searchVector, int distanceInMeters)
+    public static boolean isWithinDistance(float[] vector, float[] searchVector, float distanceInMeters)
     {
         return strictHaversineDistance(vector[0], vector[1], searchVector[0], searchVector[1]) < distanceInMeters;
     }
 
     private float[] createRandomNYCVector()
     {
-        // Approximate bounding box for contiguous US locations
+        // Approximate bounding box for contiguous NYC locations
         var lat = getRandom().nextFloatBetween(39, 41);
         var lon = getRandom().nextFloatBetween(-74, -72);
         return new float[] {lat, lon};
@@ -91,7 +91,7 @@ public class GeoSearchAccuracyTest extends VectorTester
 
     // In the production code, we use a haversine distance formula from lucene, which prioritizes speed over some
     // accuracy. This is the strict formula.
-    private double strictHaversineDistance(float lat1, float lon1, float lat2, float lon2)
+    private static double strictHaversineDistance(float lat1, float lon1, float lat2, float lon2)
     {
         // This implementation is based on information from https://www.movable-type.co.uk/scripts/latlong.html
         double phi1 = lat1 * Math.PI/180; // phi, lambda in radians
