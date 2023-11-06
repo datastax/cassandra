@@ -35,12 +35,13 @@ import java.util.SortedMap;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Maps;
+
+import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.utils.TimeUUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -51,9 +52,8 @@ import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexComponents;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.KeyReader;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
-import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.CompressionParams;
@@ -63,7 +63,6 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.CountDownLatch;
 import org.apache.cassandra.utils.concurrent.Ref;
 
-import static org.apache.cassandra.db.compaction.CompactionInfo.StopTrigger.TRUNCATE;
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
 /**
@@ -145,7 +144,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         }
 
         try (RandomAccessReader dataFile = sstable.openDataReader();
-             LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.INDEX_BUILD))
+             LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.INDEX_BUILD, sstable))
         {
             perSSTableFileLock = shouldWriteTokenOffsetFiles(sstable);
             boolean perColumnOnly = perSSTableFileLock == null;
@@ -156,51 +155,39 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
             indexWriter = new StorageAttachedIndexWriter(sstable.descriptor, indexes, txn, perColumnOnly, compressionParams);
 
-            long previousKeyPosition = 0;
             indexWriter.begin();
 
-            try (KeyReader keys = sstable.keyReader())
+            long previousBytesRead = 0;
+
+            try (KeyIterator keys = sstable.keyIterator())
             {
-                while (!keys.isExhausted())
+                while (keys.hasNext())
                 {
                     if (isStopRequested())
                     {
                         throw new CompactionInterruptedException(getCompactionInfo());
                     }
 
-                    final DecoratedKey key = sstable.decorateKey(keys.key());
-                    final long keyPosition = keys.keyPositionForSecondaryIndex();
+                    DecoratedKey key = keys.next();
 
-                    indexWriter.startPartition(key, keyPosition);
+                    indexWriter.startPartition(key, -1, -1);
 
-                    dataFile.seek(keys.dataPosition());
-                    ByteBufferUtil.skipShortLength(dataFile); // key
-
-                    /*
-                     * Not directly using {@link SSTableIdentityIterator#create(SSTableReader, FileDataInput, DecoratedKey)},
-                     * because we need to get position of partition level deletion and static row.
-                     */
-                    long partitionDeletionPosition = dataFile.getFilePointer();
-                    DeletionTime partitionLevelDeletion = DeletionTime.serializer.deserialize(dataFile);
-                    long staticRowPosition = dataFile.getFilePointer();
-
-                    indexWriter.partitionLevelDeletion(partitionLevelDeletion, partitionDeletionPosition);
+                    long position = sstable.getPosition(key, SSTableReader.Operator.EQ);
+                    dataFile.seek(position);
+                    ByteBufferUtil.readWithShortLength(dataFile); // key
 
                     try (SSTableIdentityIterator partition = SSTableIdentityIterator.create(sstable, dataFile, key))
                     {
                         // if the row has statics attached, it has to be indexed separately
                         if (metadata.hasStaticColumns())
-                            indexWriter.nextUnfilteredCluster(partition.staticRow(), staticRowPosition);
+                            indexWriter.nextUnfilteredCluster(partition.staticRow());
 
                         while (partition.hasNext())
-                        {
-                            long unfilteredPosition = dataFile.getFilePointer();
-                            indexWriter.nextUnfilteredCluster(partition.next(), unfilteredPosition);
-                        }
+                            indexWriter.nextUnfilteredCluster(partition.next());
                     }
-
-                    bytesProcessed += keyPosition - previousKeyPosition;
-                    previousKeyPosition = keyPosition;
+                    long bytesRead = keys.getBytesRead();
+                    bytesProcessed += bytesRead - previousBytesRead;
+                    previousBytesRead = bytesRead;
                 }
 
                 completeSSTable(indexWriter, sstable, indexes, perSSTableFileLock);
@@ -217,14 +204,14 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
             if (t instanceof InterruptedException)
             {
-                // TODO: Is there anything that makes more sense than just restoring the interrupt?
                 logger.warn(logMessage("Interrupted while building indexes {} on SSTable {}"), indexes, sstable.descriptor);
                 Thread.currentThread().interrupt();
                 return true;
             }
             else if (t instanceof CompactionInterruptedException)
             {
-                if (isInitialBuild && trigger() != TRUNCATE)
+                //TODO Shouldn't do this if the stop was interrupted by a truncate
+                if (isInitialBuild)
                 {
                     logger.error(logMessage("Stop requested while building initial indexes {} on SSTable {}."), indexes, sstable.descriptor);
                     throw Throwables.unchecked(t);

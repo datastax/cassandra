@@ -44,7 +44,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(2, execute("SELECT * FROM %s WHERE value CONTAINS 'v1'").size());
     }
 
@@ -53,7 +52,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(2, execute("SELECT * FROM %s WHERE value CONTAINS KEY 1").size());
     }
 
@@ -62,7 +60,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(VALUES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(2, execute("SELECT * FROM %s WHERE value CONTAINS 'v1'").size());
     }
 
@@ -71,7 +68,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(2, execute("SELECT * FROM %s WHERE value[1] = 'v1'").size());
         assertEquals(1, execute("SELECT * FROM %s WHERE value[1] = 'v1' AND value[2] = 'v2'").size());
     }
@@ -81,7 +77,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedFrozenList();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(2, execute("SELECT * FROM %s WHERE value = ?", Arrays.asList(1, 2, 3)).size());
     }
 
@@ -90,7 +85,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedFrozenMap();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertEquals(1, execute("SELECT * FROM %s WHERE value = ?", new HashMap<Integer, String>() {{
             put(1, "v1");
             put(2, "v2");
@@ -103,7 +97,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedFrozenMap();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value contains key 1");
         assertEquals(2, execute("SELECT * FROM %s WHERE value contains key 1 ALLOW FILTERING").size());
     }
@@ -113,7 +106,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedFrozenMap();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value contains 'v1'");
         assertEquals(2, execute("SELECT * FROM %s WHERE value contains 'v1' ALLOW FILTERING").size());
     }
@@ -123,7 +115,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedFrozenMap();
         createIndex("CREATE CUSTOM INDEX ON %s(FULL(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertInvalidMessage("Map-entry equality predicates on frozen map column value are not supported",
                 "SELECT * FROM %s WHERE value[1] = 'v1'");
     }
@@ -133,7 +124,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertInvalidMessage("Collection column 'value' (map<int, text>) cannot be restricted by a '=' relation",
                 "SELECT * FROM %s WHERE value = ?", Arrays.asList(1, 2));
     }
@@ -143,7 +133,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value contains key 1");
         assertEquals(2, execute("SELECT * FROM %s WHERE value contains key 1 ALLOW FILTERING").size());
     }
@@ -153,7 +142,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value contains 'v1'");
         assertEquals(2, execute("SELECT * FROM %s WHERE value contains 'v1' ALLOW FILTERING").size());
     }
@@ -163,7 +151,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertInvalidMessage("Collection column 'value' (map<int, text>) cannot be restricted by a '=' relation",
                 "SELECT * FROM %s WHERE value = ?", Arrays.asList(1, 2));
     }
@@ -173,7 +160,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value contains 'v1'");
         assertEquals(2, execute("SELECT * FROM %s WHERE value contains 'v1' ALLOW FILTERING").size());
     }
@@ -183,7 +169,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value[1] = 'v1'");
         assertEquals(2, execute("SELECT * FROM %s WHERE value[1] = 'v1' ALLOW FILTERING").size());
     }
@@ -193,7 +178,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(VALUES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertInvalidMessage("Collection column 'value' (map<int, text>) cannot be restricted by a '=' relation",
                 "SELECT * FROM %s WHERE value = ?", Arrays.asList(1, 2));
     }
@@ -203,7 +187,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(VALUES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value contains key 1");
         assertEquals(2, execute("SELECT * FROM %s WHERE value contains key 1 ALLOW FILTERING").size());
     }
@@ -213,7 +196,6 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(VALUES(value)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         assertUnsupportedIndexOperator("SELECT * FROM %s WHERE value[1] = 'v1'");
         assertEquals(2, execute("SELECT * FROM %s WHERE value[1] = 'v1' ALLOW FILTERING").size());
     }

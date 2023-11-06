@@ -220,7 +220,7 @@ public class SAITester extends CQLTester
         cfs.indexManager.executePreJoinTasksBlocking(true);
         if (wait)
         {
-            waitForIndexQueryable();
+            waitForTableIndexesQueryable();
         }
     }
 
@@ -318,16 +318,6 @@ public class SAITester extends CQLTester
             throw new RuntimeException(e);
         }
         return metricValue;
-    }
-
-    public void waitForIndexQueryable()
-    {
-        waitForIndexQueryableByTable(KEYSPACE, currentTable());
-    }
-
-    public void waitForIndexQueryableByTable(String keyspace, String table)
-    {
-        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, table)), 60, TimeUnit.SECONDS);
     }
 
     protected void startCompaction() throws Throwable

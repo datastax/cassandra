@@ -39,6 +39,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.restrictions.IndexRestrictions;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.db.ColumnFamilyStore.FlushReason;
@@ -55,7 +56,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -198,39 +199,39 @@ public class CustomIndexTest extends CQLTester
                     " PRIMARY KEY(k,c))");
 
         assertInvalidMessage("Cannot create keys() index on frozen column fmap. " +
-                             "Frozen collections are immutable and must be fully indexed by using the 'full(fmap)' modifier",
+                             "Frozen collections are immutable and must be fully indexed",
                              String.format("CREATE CUSTOM INDEX ON %%s(c, keys(fmap)) USING'%s'",
                                            StubIndex.class.getName()));
         assertInvalidMessage("Cannot create entries() index on frozen column fmap. " +
-                             "Frozen collections are immutable and must be fully indexed by using the 'full(fmap)' modifier",
+                             "Frozen collections are immutable and must be fully indexed",
                              String.format("CREATE CUSTOM INDEX ON %%s(c, entries(fmap)) USING'%s'",
                                            StubIndex.class.getName()));
         assertInvalidMessage("Cannot create values() index on frozen column fmap. " +
-                             "Frozen collections are immutable and must be fully indexed by using the 'full(fmap)' modifier",
+                             "Frozen collections are immutable and must be fully indexed",
                              String.format("CREATE CUSTOM INDEX ON %%s(c, fmap) USING'%s'", StubIndex.class.getName()));
 
         assertInvalidMessage("Cannot create keys() index on frozen column flist. " +
-                             "Frozen collections are immutable and must be fully indexed by using the 'full(flist)' modifier",
+                             "Frozen collections are immutable and must be fully indexed",
                              String.format("CREATE CUSTOM INDEX ON %%s(c, keys(flist)) USING'%s'",
                                            StubIndex.class.getName()));
         assertInvalidMessage("Cannot create entries() index on frozen column flist. " +
-                             "Frozen collections are immutable and must be fully indexed by using the 'full(flist)' modifier",
+                             "Frozen collections are immutable and must be fully indexed",
                              String.format("CREATE CUSTOM INDEX ON %%s(c, entries(flist)) USING'%s'",
                                            StubIndex.class.getName()));
         assertInvalidMessage("Cannot create values() index on frozen column flist. " +
-                             "Frozen collections are immutable and must be fully indexed by using the 'full(flist)' modifier",
+                             "Frozen collections are immutable and must be fully indexed",
                              String.format("CREATE CUSTOM INDEX ON %%s(c, flist) USING'%s'", StubIndex.class.getName()));
 
         assertInvalidMessage("Cannot create keys() index on frozen column fset. " +
-                             "Frozen collections are immutable and must be fully indexed by using the 'full(fset)' modifier",
+                             "Frozen collections are immutable and must be fully indexed",
                              String.format("CREATE CUSTOM INDEX ON %%s(c, keys(fset)) USING'%s'",
                                            StubIndex.class.getName()));
         assertInvalidMessage("Cannot create entries() index on frozen column fset. " +
-                             "Frozen collections are immutable and must be fully indexed by using the 'full(fset)' modifier",
+                             "Frozen collections are immutable and must be fully indexed",
                              String.format("CREATE CUSTOM INDEX ON %%s(c, entries(fset)) USING'%s'",
                                            StubIndex.class.getName()));
         assertInvalidMessage("Cannot create values() index on frozen column fset. " +
-                             "Frozen collections are immutable and must be fully indexed by using the 'full(fset)' modifier",
+                             "Frozen collections are immutable and must be fully indexed",
                              String.format("CREATE CUSTOM INDEX ON %%s(c, fset) USING'%s'", StubIndex.class.getName()));
 
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c, full(fmap)) USING'%s'", StubIndex.class.getName()));
@@ -398,7 +399,11 @@ public class CustomIndexTest extends CQLTester
                                   String.format("SELECT * FROM %%s WHERE expr(%s, 'foo') AND expr(other_custom_index, 'bar')",
                                                 indexName));
 
-        assertRows(execute(String.format("SELECT * FROM %%s WHERE expr(%s, 'foo') AND d=0", indexName)), row);
+        assertInvalidThrowMessage(Optional.of(ProtocolVersion.CURRENT),
+                                  StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                  QueryValidationException.class,
+                                  String.format("SELECT * FROM %%s WHERE expr(%s, 'foo') AND d=0", indexName));
+        assertRows(execute(String.format("SELECT * FROM %%s WHERE expr(%s, 'foo') AND d=0 ALLOW FILTERING", indexName)), row);
     }
 
     /**
@@ -1186,7 +1191,6 @@ public class CustomIndexTest extends CQLTester
 
         assertEquals(0, index.beginFlushCalls.get());
         assertEquals(0, index.flushedPartitions.get());
-        assertEquals(0, index.flushedPartitionDeletions.get());
         assertEquals(0, index.flushedStaticRows.get());
         assertEquals(0, index.flushedUnfiltereds.get());
         assertEquals(0, index.completeFlushCalls.get());
@@ -1195,7 +1199,6 @@ public class CustomIndexTest extends CQLTester
 
         assertEquals(1, index.beginFlushCalls.get());
         assertEquals(2, index.flushedPartitions.get());
-        assertEquals(2, index.flushedPartitionDeletions.get());
         assertEquals(2, index.flushedStaticRows.get());
         assertEquals(4, index.flushedUnfiltereds.get());
         assertEquals(1, index.completeFlushCalls.get());
@@ -1207,7 +1210,6 @@ public class CustomIndexTest extends CQLTester
 
         assertEquals(1, index.beginFlushCalls.get());
         assertEquals(2, index.flushedPartitions.get());
-        assertEquals(2, index.flushedPartitionDeletions.get());
         assertEquals(0, index.flushedStaticRows.get()); // flushed data has no static values..
         assertEquals(2, index.flushedUnfiltereds.get());
         assertEquals(1, index.completeFlushCalls.get());
@@ -1221,7 +1223,6 @@ public class CustomIndexTest extends CQLTester
 
         AtomicInteger beginFlushCalls = new AtomicInteger();
         AtomicInteger flushedPartitions = new AtomicInteger();
-        AtomicInteger flushedPartitionDeletions = new AtomicInteger();
         AtomicInteger flushedStaticRows = new AtomicInteger();
         AtomicInteger flushedUnfiltereds = new AtomicInteger();
         AtomicInteger completeFlushCalls = new AtomicInteger();
@@ -1237,7 +1238,6 @@ public class CustomIndexTest extends CQLTester
             super.reset();
             beginFlushCalls.set(0);
             flushedPartitions.set(0);
-            flushedPartitionDeletions.set(0);
             flushedStaticRows.set(0);
             flushedUnfiltereds.set(0);
             completeFlushCalls.set(0);
@@ -1255,25 +1255,19 @@ public class CustomIndexTest extends CQLTester
                 }
 
                 @Override
-                public void startPartition(DecoratedKey key, long position)
+                public void startPartition(DecoratedKey key, long keyPosition, long keyPositionForSASI)
                 {
                     flushedPartitions.incrementAndGet();
                 }
 
                 @Override
-                public void partitionLevelDeletion(DeletionTime deletionTime, long position)
-                {
-                    flushedPartitionDeletions.incrementAndGet();
-                }
-
-                @Override
-                public void staticRow(Row staticRow, long position)
+                public void staticRow(Row staticRow)
                 {
                     flushedStaticRows.incrementAndGet();
                 }
 
                 @Override
-                public void nextUnfilteredCluster(Unfiltered unfiltered, long position)
+                public void nextUnfilteredCluster(Unfiltered unfiltered)
                 {
                     flushedUnfiltereds.incrementAndGet();
                 }
@@ -1376,7 +1370,6 @@ public class CustomIndexTest extends CQLTester
         // verify that the flush observer calls get only once to the group
         assertEquals(1, group.beginFlushCalls.get());
         assertEquals(3, group.flushedPartitions.get());
-        assertEquals(3, group.flushedPartitionDeletions.get());
         assertEquals(3, group.flushedStaticRows.get());
         assertEquals(6, group.flushedUnfiltereds.get());
         assertEquals(1, group.completeFlushCalls.get());
@@ -1495,7 +1488,6 @@ public class CustomIndexTest extends CQLTester
 
             AtomicInteger beginFlushCalls = new AtomicInteger();
             AtomicInteger flushedPartitions = new AtomicInteger();
-            AtomicInteger flushedPartitionDeletions = new AtomicInteger();
             AtomicInteger flushedStaticRows = new AtomicInteger();
             AtomicInteger flushedUnfiltereds = new AtomicInteger();
             AtomicInteger completeFlushCalls = new AtomicInteger();
@@ -1511,7 +1503,6 @@ public class CustomIndexTest extends CQLTester
                 rowsUpdated.set(0);
                 beginFlushCalls.set(0);
                 flushedPartitions.set(0);
-                flushedPartitionDeletions.set(0);
                 flushedStaticRows.set(0);
                 flushedUnfiltereds.set(0);
                 completeFlushCalls.set(0);
@@ -1636,31 +1627,24 @@ public class CustomIndexTest extends CQLTester
                     }
 
                     @Override
-                    public void startPartition(DecoratedKey key, long position)
+                    public void startPartition(DecoratedKey key, long position, long keyPositionForSASI)
                     {
                         flushedPartitions.incrementAndGet();
-                        observers.forEach(o -> o.startPartition(key, position));
+                        observers.forEach(o -> o.startPartition(key, position, keyPositionForSASI));
                     }
 
                     @Override
-                    public void partitionLevelDeletion(DeletionTime deletionTime, long position)
-                    {
-                        flushedPartitionDeletions.incrementAndGet();
-                        observers.forEach(o -> o.partitionLevelDeletion(deletionTime, position));
-                    }
-
-                    @Override
-                    public void staticRow(Row staticRow, long position)
+                    public void staticRow(Row staticRow)
                     {
                         flushedStaticRows.incrementAndGet();
-                        observers.forEach(o -> o.staticRow(staticRow, position));
+                        observers.forEach(o -> o.staticRow(staticRow));
                     }
 
                     @Override
-                    public void nextUnfilteredCluster(Unfiltered unfiltered, long position)
+                    public void nextUnfilteredCluster(Unfiltered unfiltered)
                     {
                         flushedUnfiltereds.incrementAndGet();
-                        observers.forEach(o -> o.nextUnfilteredCluster(unfiltered, position));
+                        observers.forEach(o -> o.nextUnfilteredCluster(unfiltered));
                     }
 
                     @Override

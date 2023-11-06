@@ -67,7 +67,6 @@ public class IndexGroupMetricsTest extends AbstractMetricsTest
 
         // create second index
         String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        waitForIndexQueryable();
 
         // same number of sstables, but more string index files.
         int stringIndexOpenFileCount = sstables * InvertedIndexSearcher.openPerIndexFiles();

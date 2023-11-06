@@ -122,7 +122,6 @@ public class CompactionTest extends SAITester
         createTable(CREATE_TABLE_TEMPLATE);
         String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        waitForIndexQueryable();
 
         int num = 10;
         for (int i = 0; i < num; i++)
@@ -255,7 +254,6 @@ public class CompactionTest extends SAITester
                             // build indexes on SSTables that will be compacted soon
                             createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
                             createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-                            waitForIndexQueryable();
 
                             // continue in-progress compaction
                             compactionLatch.countDown();

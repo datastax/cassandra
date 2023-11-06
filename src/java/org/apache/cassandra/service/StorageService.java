@@ -148,9 +148,9 @@ import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.gms.TokenSerializer;
 import org.apache.cassandra.gms.VersionedValue;
+import org.apache.cassandra.index.IndexStatusManager;
 import org.apache.cassandra.io.sstable.IScrubber;
 import org.apache.cassandra.io.sstable.IVerifier;
-import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.sstable.SSTableLoader;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.File;
@@ -2798,7 +2798,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private void updateIndexStatus(InetAddressAndPort endpoint, VersionedValue versionedValue)
     {
-        SecondaryIndexManager.receivePeerIndexStatus(endpoint, versionedValue);
+        IndexStatusManager.instance.receivePeerIndexStatus(endpoint, versionedValue);
     }
 
     private void updateNetVersion(InetAddressAndPort endpoint, VersionedValue value)

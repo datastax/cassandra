@@ -84,7 +84,6 @@ public class IndexesSystemViewTest extends SAITester
         // unblock the long build and verify that there is an finished empty record in the virtual table
         blockIndexBuild.countDown();
         blockIndexBuild.disable();
-        waitForIndexQueryable();
         assertRows(execute(SELECT), row(v1IndexName, "v1", true, false, false, 0, 0L));
 
         // insert some data and verify that virtual table record is still empty since we haven't flushed yet
@@ -103,7 +102,6 @@ public class IndexesSystemViewTest extends SAITester
 
         // create a second index, this should create a new additional entry in the table
         String v2IndexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v2) USING '%s'", StorageAttachedIndex.class.getName()));
-        waitForIndexQueryable();
         assertRows(execute(SELECT),
                    row(v1IndexName, "v1", true, false, false, 2, 3L),
                    row(v2IndexName, "v2", true, false, true, 2, 3L));

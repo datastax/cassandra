@@ -102,7 +102,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
     public void addCustomIndexExpression(TableMetadata metadata, IndexMetadata targetIndex, ByteBuffer value)
     {
-        add(CustomExpression.build(metadata, targetIndex, value));
+        add(new CustomExpression(metadata, targetIndex, value));
     }
 
     private void add(Expression expression)
@@ -591,9 +591,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 // custom expressions (3.0+ only) do not contain a column or operator, only a value
                 if (kind == Kind.CUSTOM)
                 {
-                    return CustomExpression.build(metadata,
-                                                  IndexMetadata.serializer.deserialize(in, version, metadata),
-                                                  ByteBufferUtil.readWithShortLength(in));
+                    return new CustomExpression(metadata,
+                                                IndexMetadata.serializer.deserialize(in, version, metadata),
+                                                ByteBufferUtil.readWithShortLength(in));
                 }
 
                 if (kind == Kind.USER)
@@ -915,12 +915,6 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             super(makeDefinition(table, targetIndex), Operator.EQ, value);
             this.targetIndex = targetIndex;
             this.table = table;
-        }
-
-        public static CustomExpression build(TableMetadata metadata, IndexMetadata targetIndex, ByteBuffer value)
-        {
-            // delegate the expression creation to the target custom index
-            return Keyspace.openAndGetStore(metadata).indexManager.getIndex(targetIndex).customExpressionFor(metadata, value);
         }
 
         private static ColumnMetadata makeDefinition(TableMetadata table, IndexMetadata index)
