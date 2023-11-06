@@ -36,7 +36,6 @@ import org.apache.cassandra.index.sai.disk.v1.postings.LongHeapPostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.ScanningPostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
-import org.apache.cassandra.index.sai.disk.v2.sortedterms.TrieRangeIterator;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
@@ -277,11 +276,11 @@ public class TermsReader implements Closeable
                 {
                     Pair<ByteSource, Long> nextTrieEntry = trieEntries.next();
                     ByteSource key = nextTrieEntry.left;
-                    long rowId = nextTrieEntry.right;
+                    long postingsOffset = nextTrieEntry.right;
                     byte[] nextBytes = ByteSourceInverse.readBytes(key);
                     if (exp.isSatisfiedBy(ByteBuffer.wrap(nextBytes)))
                     {
-                        var blocksSummary = new PostingsReader.BlocksSummary(postingsSummaryInput, rowId, PostingsReader.InputCloser.NOOP);
+                        var blocksSummary = new PostingsReader.BlocksSummary(postingsSummaryInput, postingsOffset, PostingsReader.InputCloser.NOOP);
                         @SuppressWarnings("resource")
                         var currentReader = new PostingsReader(postingsInput,
                                                                blocksSummary,

@@ -27,7 +27,7 @@ import org.apache.cassandra.index.sai.SAITester;
 
 import static org.junit.Assert.assertEquals;
 
-public class EntriesIndexTest extends SAITester
+public class MapEntriesIndexTest extends SAITester
 {
     @Test
     public void createEntriesIndexEqualityTest()

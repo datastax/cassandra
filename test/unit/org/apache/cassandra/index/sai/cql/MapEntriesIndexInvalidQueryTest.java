@@ -22,7 +22,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.index.sai.SAITester;
 
-public class EntriesIndexInvalidQueryTest extends SAITester
+public class MapEntriesIndexInvalidQueryTest extends SAITester
 {
 
     @Test

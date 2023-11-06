@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v2.sortedterms;
+package org.apache.cassandra.index.sai.disk.v1;
 
 
 import java.nio.ByteBuffer;
