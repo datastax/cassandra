@@ -32,6 +32,7 @@ import com.google.common.base.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.vector.VectorUtil;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
@@ -46,6 +47,8 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.utils.GeoUtil;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
@@ -55,6 +58,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.lucene.util.SloppyMath;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkBindValueSet;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
@@ -1108,6 +1112,10 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     {
         private final ByteBuffer distance;
         private final Operator distanceOperator;
+        private final float searchRadiusMeters;
+        private final float searchRadiusDegreesSquared;
+        private final float searchLat;
+        private final float searchLong;
 
         public GeoDistanceExpression(ColumnMetadata column, ByteBuffer point, Operator operator, ByteBuffer distance)
         {
@@ -1115,6 +1123,12 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             assert column.type instanceof VectorType && (operator == Operator.LTE || operator == Operator.LT);
             this.distanceOperator = operator;
             this.distance = distance;
+            searchRadiusMeters = FloatType.instance.compose(distance);
+            searchRadiusDegreesSquared = (float) GeoUtil.maximumSquareDistanceForCorrectLatLongSimilarity(searchRadiusMeters);
+            var pointVector = TypeUtil.decomposeVector(column.type, point.duplicate());
+            assert pointVector.length == 2 : "Geo search only works for vectors of size 2.";
+            searchLat = pointVector[0];
+            searchLong = pointVector[1];
         }
 
 
@@ -1137,8 +1151,25 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
         public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
-            // Filtering is not supported, accept any row
-            return true;
+            ByteBuffer foundValue = getValue(metadata, partitionKey, row);
+            if (foundValue == null)
+                return false;
+            double squareDistance = VectorUtil.squareDistance(foundValue.array(), value.array());
+            // If we are within the search radius degrees, then we are within the search radius meters.
+            // This relies on the fact that lat/long distort distance by making close points further apart.
+            if (squareDistance <= searchRadiusDegreesSquared)
+                return true;
+            var foundVector = TypeUtil.decomposeVector(column.type, foundValue.duplicate());
+            double haversineDistance = SloppyMath.haversinMeters(foundVector[0], foundVector[1], searchLat, searchLong);
+            switch (distanceOperator)
+            {
+                case LTE:
+                    return haversineDistance <= searchRadiusMeters;
+                case LT:
+                    return haversineDistance < searchRadiusMeters;
+                default:
+                    throw new AssertionError("Unsupported operator: " + operator);
+            }
         }
 
         @Override
