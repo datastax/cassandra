@@ -48,17 +48,17 @@ public class JsonFieldExtractorTest {
     @Test
     public void testSimpleObjectInclusion() throws Exception {
         verifyInclusion("{'a':1,'b':2,'c':3}", "a",
-                "{'a':1}",
-                "1 ");
+                        "{'a':1}",
+                        "1");
         verifyInclusion("{'a':{'b':1,'c':true,'x':false},'d':'xyz'}", "a.c",
                         "{'a':{'c':true}}",
-                "true ");
+                        "true");
         verifyInclusion("{'a':{'b':1,'c':true,'x':false},'d':'xyz'}", "a.b, a.x",
                         "{'a':{'b':1,'x':false}}",
-                                "1 false ");
+                        "1 false");
         verifyInclusion("{'a':{'b':1,'c':true,'x':false},'d':'xyz'}", "d, a.b",
                         "{'a':{'b':1},'d':'xyz'}",
-                "1 xyz ");
+                        "1 xyz");
     }
 
     /*
@@ -102,23 +102,23 @@ public class JsonFieldExtractorTest {
     @Test
     public void testLongerPathLast() throws Exception {
         verifyInclusion("{'a':1,'b':{'x':1,'y':2},'c':true}", "b, b.y",
-                "{'b':{'x':1,'y':2}}",
-                "1 2 ");
+                        "{'b':{'x':1,'y':2}}",
+                        "1 2");
     }
 
     @Test
     public void testLongerPathFirst() throws Exception {
         verifyInclusion("{'a':1,'b':{'x':1,'y':2},'c':true}", "b.x, b",
-                "{'b':{'x':1,'y':2}}",
-                "1 2 ");
+                        "{'b':{'x':1,'y':2}}",
+                        "1 2");
     }
 
     @Test
     public void testMultiLevelMatching() throws Exception {
         verifyInclusion("{'first':123,'a':{'b':{'x':{'z':'value'}},'c':true},'y':2}",
-                "a, a.b, a.b.x",
-                "{'a':{'b':{'x':{'z':'value'}},'c':true}}",
-                "value true ");
+                        "a, a.b, a.b.x",
+                        "{'a':{'b':{'x':{'z':'value'}},'c':true}}",
+                        "value true");
     }
 
     /*
@@ -130,26 +130,26 @@ public class JsonFieldExtractorTest {
     @Test
     public void testSimpleArrayInclusion() throws Exception {
         verifyInclusion("{'a':'123','arr': ['abc', 'def']}", "arr",
-                "{'arr':['abc','def']}",
-                "abc def ");
+                        "{'arr':['abc','def']}",
+                        "abc def");
         verifyInclusion("{'a':'123','arr': ['abc', 'def']}", "a, ",
-                "{'a':'123'}",
-                "123 ");
+                        "{'a':'123'}",
+                        "123");
         verifyInclusion("{'a':{'b':{'arr': ['abc', 'def']}}, 'z':3 }", "a.b ",
-                "{'a':{'b':{'arr':['abc','def']}}}",
-                "abc def ");
+                        "{'a':{'b':{'arr':['abc','def']}}}",
+                        "abc def");
     }
 
     @Test
     public void testNestedInArrayInclusion() throws Exception {
         verifyInclusion("{'arr': [{'name':'Bob','age':20},{'name':'Jack','age':30}]}",
-                "arr.name",
-                "{'arr':[{'name':'Bob'},{'name':'Jack'}]}",
-                "Bob Jack ");
+                        "arr.name",
+                        "{'arr':[{'name':'Bob'},{'name':'Jack'}]}",
+                        "Bob Jack");
         verifyInclusion("{'arr': [{'name':'Bob','age':20},{'name':'Jack','age':30}]}",
-                "arr.age",
-                "{'arr':[{'age':20},{'age':30}]}",
-                "20 30 ");
+                        "arr.age",
+                        "{'arr':[{'age':20},{'age':30}]}",
+                        "20 30");
     }
 
     /*
@@ -165,17 +165,17 @@ public class JsonFieldExtractorTest {
         try (InputStream in = getClass().getResourceAsStream("/jmh/docsapi-example.json")) {
             try (JsonParser p = extr.extractingParser(in)) {
                 String str = extr._extractAsString(p, 1000);
-                assertThat(str).isEqualTo("pear 0.89 ");
+                assertThat(str).isEqualTo("pear 0.89");
             }
         }
 
         // Use the buildExtractor that takes pre-split Paths
         extr = EXTRACTOR_FACTORY.buildExtractor(Arrays.asList("products.food.Apple",
-                "products.food.Orange "));
+                                                              "products.food.Orange "));
         try (InputStream in = getClass().getResourceAsStream("/jmh/docsapi-example.json")) {
             try (JsonParser p = extr.extractingParser(in)) {
                 String str = extr._extractAsString(p, 1000);
-                assertThat(str).isEqualTo("apple 0.99 100100010101001 orange 600.01 ");
+                assertThat(str).isEqualTo("apple 0.99 100100010101001 orange 600.01");
             }
         }
     }
