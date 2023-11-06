@@ -75,7 +75,6 @@ public class SSTablesSystemViewTest extends SAITester
     {
         createTable("CREATE TABLE %s (k int, c int, v1 int, v2 int, PRIMARY KEY (k, c))");
         String v1IndexName = createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         String insert = "INSERT INTO %s(k, c, v1, v2) VALUES (?, ?, ?, ?)";
 
@@ -100,7 +99,6 @@ public class SSTablesSystemViewTest extends SAITester
 
         // create a second index, this should create a new additional entry in the table for each sstable
         String v2IndexName = createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         Object[] row3 = row(v2IndexName, 1, "v2", 1L, 0L, 0L);
         Object[] row4 = row(v2IndexName, 2, "v2", 2L, 0L, 1L);
         assertRows(execute(SELECT), row1, row2, row3, row4);

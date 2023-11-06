@@ -17,12 +17,9 @@
  */
 package org.apache.cassandra.index.sai.cql;
 
-import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.index.ExpressionFilteringIndex;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 
@@ -70,8 +67,6 @@ public class MixedIndexImplementationsTest extends SAITester
         execute(insert, 2, 1, 0);
         execute(insert, 3, 1, 1);
 
-        waitForIndexQueryable();
-
         String ossSelect = "SELECT * FROM %s WHERE v1 = ?";
         assertRowsIgnoringOrder(execute(ossSelect, 0), new Object[][]{{0, 0, 0}, {1, 0, 1}});
         assertRowsIgnoringOrder(execute(ossSelect, 1), new Object[][]{{2, 1, 0}, {3, 1, 1}});
@@ -81,49 +76,6 @@ public class MixedIndexImplementationsTest extends SAITester
         assertRowsIgnoringOrder(execute(ndiSelect, 0, 1), new Object[]{1, 0, 1});
         assertRowsIgnoringOrder(execute(ndiSelect, 1, 0), new Object[]{2, 1, 0});
         assertRowsIgnoringOrder(execute(ndiSelect, 1, 1), new Object[]{3, 1, 1});
-    }
-
-    /**
-     * Tests that storage-attached indexes are not selected when the query contains a custom expression targeted to another index.
-     */
-    @Test
-    public void shouldNotBeSelectedForCustomExpressions() throws Throwable
-    {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int)");
-
-        createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
-        String indexName = createIndex(
-                String.format("CREATE CUSTOM INDEX ON %%s(v2) USING '%s'", ExpressionFilteringIndex.class.getName()));
-
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        ExpressionFilteringIndex customIndex = (ExpressionFilteringIndex) cfs.indexManager.getIndexByName(indexName);
-
-        String insert = "INSERT INTO %s(k, v1, v2) VALUES (?, ?, ?)";
-        execute(insert, 0, 0, 0);
-        execute(insert, 1, 0, 1);
-        execute(insert, 2, 1, 0);
-        execute(insert, 3, 1, 1);
-
-        waitForIndexQueryable();
-
-        String ndiSelect = "SELECT * FROM %s WHERE v1 = ?";
-        assertRowsIgnoringOrder(execute(ndiSelect, 0), new Object[][]{{0, 0, 0}, {1, 0, 1}});
-        assertRowsIgnoringOrder(execute(ndiSelect, 1), new Object[][]{{2, 1, 0}, {3, 1, 1}});
-        Assert.assertEquals(0, customIndex.searches.get());
-
-        String mixedSelect = "SELECT * FROM %s WHERE v1 = ? AND v2 = ? ALLOW FILTERING";
-        assertRowsIgnoringOrder(execute(mixedSelect, 0, 0), new Object[]{0, 0, 0});
-        assertRowsIgnoringOrder(execute(mixedSelect, 0, 1), new Object[]{1, 0, 1});
-        assertRowsIgnoringOrder(execute(mixedSelect, 1, 0), new Object[]{2, 1, 0});
-        assertRowsIgnoringOrder(execute(mixedSelect, 1, 1), new Object[]{3, 1, 1});
-        Assert.assertEquals(0, customIndex.searches.get());
-
-        String exprSelect = String.format("SELECT * FROM %%s WHERE v1 = ? AND expr(%s, ?) ALLOW FILTERING", indexName);
-        assertRowsIgnoringOrder(execute(exprSelect, 0, 0), new Object[]{0, 0, 0});
-        assertRowsIgnoringOrder(execute(exprSelect, 0, 1), new Object[]{1, 0, 1});
-        assertRowsIgnoringOrder(execute(exprSelect, 1, 0), new Object[]{2, 1, 0});
-        assertRowsIgnoringOrder(execute(exprSelect, 1, 1), new Object[]{3, 1, 1});
-        Assert.assertEquals(4, customIndex.searches.get());
     }
 
     @Test
