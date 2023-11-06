@@ -210,7 +210,6 @@ public class Expression
                 operation = Op.BOUNDED_ANN;
                 lower = new Bound(value, validator, true);
                 assert upper != null;
-                // We calculate the minimum because Euclidean distance is inverted
                 float searchRadius = FloatType.instance.compose(upper.value.raw);
                 boundedAnnUpperBound = GeoUtil.maximumBoundForEuclideanSimilarity(lower.value.vector, searchRadius);
                 break;
