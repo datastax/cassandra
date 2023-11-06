@@ -24,6 +24,9 @@ public class GeoUtil
     // and therefore include more results.
     private static final double DISTANCE_PER_DEGREE_LONGITUDE_AT_EQUATOR = 110_000;
 
+    // A conservative estimate of the distance in meters between two lines of latitude.
+    private static final double DISTANCE_PER_DEGREE_LATITUDE = 111_000;
+
     /**
      * Determines the worst ratio for meters to degrees for a given latitude. The worst ratio will be the distance in
      * meters of 1 degree longitude.
@@ -43,7 +46,7 @@ public class GeoUtil
      * @param distanceInMeters the search radius
      * @return
      */
-    public static double maximumBoundForEuclideanSimilarity(float[] vector, float distanceInMeters)
+    public static double maximumAmplifiedSquareDistanceForEuclideanSimilarity(float[] vector, float distanceInMeters)
     {
         // Get the conversion ratio for meters to degrees at the given latitude.
         double distanceBetweenDegreeLatitude = metersToDegreesRatioForLatitude(vector);
@@ -53,5 +56,16 @@ public class GeoUtil
         double degrees = distanceInMeters / distanceBetweenDegreeLatitude;
 
         return Math.pow(degrees, 2);
+    }
+
+    /**
+     * Caclulate the maximum bound such that if the distance between two points is less than the bound, then the
+     * points are within the search radius.
+     * @param distanceInMeters
+     * @return
+     */
+    public static double maximumSquareDistanceForCorrectLatLongSimilarity(float distanceInMeters)
+    {
+        return Math.pow(distanceInMeters / DISTANCE_PER_DEGREE_LATITUDE, 2);
     }
 }

@@ -44,6 +44,7 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.utils.GeoUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.lucene.util.SloppyMath;
 
 public class Expression
 {
@@ -117,6 +118,8 @@ public class Expression
 
     public Bound lower, upper;
     public double boundedAnnUpperBound = 0;
+    public float searchRadiusMeters = 0;
+    public float searchRadiusDegreesSquared = 0;
     public int topK;
     public boolean upperInclusive, lowerInclusive;
 
@@ -210,8 +213,9 @@ public class Expression
                 operation = Op.BOUNDED_ANN;
                 lower = new Bound(value, validator, true);
                 assert upper != null;
-                float searchRadius = FloatType.instance.compose(upper.value.raw);
-                boundedAnnUpperBound = GeoUtil.maximumBoundForEuclideanSimilarity(lower.value.vector, searchRadius);
+                searchRadiusMeters = FloatType.instance.compose(upper.value.raw);
+                searchRadiusDegreesSquared = (float) GeoUtil.maximumSquareDistanceForCorrectLatLongSimilarity(searchRadiusMeters);
+                boundedAnnUpperBound = GeoUtil.maximumAmplifiedSquareDistanceForEuclideanSimilarity(lower.value.vector, searchRadiusMeters);
                 break;
         }
 
@@ -236,8 +240,13 @@ public class Expression
 
         if (operation == Op.BOUNDED_ANN)
         {
-            float squareDistance = VectorUtil.squareDistance(lower.value.vector, value.vector);
-            return upperInclusive ? squareDistance <= boundedAnnUpperBound : squareDistance < boundedAnnUpperBound;
+            double squareDistance = VectorUtil.squareDistance(lower.value.vector, value.vector);
+            // If we are within the search radius degrees, then we are within the search radius meters.
+            // This relies on the fact that lat/long distort distance by making close points further apart.
+            if (squareDistance <= searchRadiusDegreesSquared)
+                return true;
+            double haversineDistance = SloppyMath.haversinMeters(lower.value.vector[0], lower.value.vector[1], value.vector[0], value.vector[1]);
+            return upperInclusive ? haversineDistance <= searchRadiusMeters : haversineDistance < searchRadiusMeters;
         }
 
         if (lower != null)
