@@ -84,7 +84,6 @@ public abstract class IndexingTypeSupport extends SAITester
         {
             for (String index : dataset.decorateIndexColumn("value"))
                 createIndex(String.format("CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", index));
-            waitForIndexQueryable();
         }
 
         insertData(this, allRows, scenario);
@@ -102,7 +101,6 @@ public abstract class IndexingTypeSupport extends SAITester
                 flush();
                 for (String index : dataset.decorateIndexColumn("value"))
                     createIndex(String.format("CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", index));
-                waitForIndexQueryable();
                 break;
         }
 

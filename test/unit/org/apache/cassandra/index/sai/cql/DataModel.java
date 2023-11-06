@@ -228,7 +228,7 @@ public interface DataModel
                 if (!skipColumns.contains(column.left))
                 {
                     executeLocalIndexed(tester, String.format(template, column.left, indexedTable, column.left));
-                    tester.waitForIndexQueryable();
+                    tester.waitForTableIndexesQueryable();
                 }
             }
         }
@@ -466,7 +466,7 @@ public interface DataModel
                 if (!skipColumns.contains(column.left))
                 {
                     executeLocalIndexed(tester, String.format(template, column.left, indexedTable, column.left));
-                    tester.waitForIndexQueryable();
+                    tester.waitForTableIndexesQueryable();
                 }
             }
         }
