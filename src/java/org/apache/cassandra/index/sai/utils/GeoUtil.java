@@ -22,7 +22,7 @@ public class GeoUtil
 {
     // The distance in meters between two lines of longitude at the equator. We round down slightly to be more conservative
     // and therefore include more results.
-    private static final double DISTANCE_PER_DEGREE_LONGITUDE = 110_000;
+    private static final double DISTANCE_PER_DEGREE_LONGITUDE_AT_EQUATOR = 110_000;
 
     /**
      * Determines the worst ratio for meters to degrees for a given latitude. The worst ratio will be the distance in
@@ -32,7 +32,9 @@ public class GeoUtil
      */
     private static double metersToDegreesRatioForLatitude(float[] vector)
     {
-        return Math.cos(Math.toRadians(vector[0])) * DISTANCE_PER_DEGREE_LONGITUDE;
+        // Got this formula from https://sciencing.com/what-parallels-maps-4689046.html. It seems
+        // to produce accurate results, but it'd be good to find additional support for its correctness.
+        return Math.cos(Math.toRadians(vector[0])) * DISTANCE_PER_DEGREE_LONGITUDE_AT_EQUATOR;
     }
 
     /**
@@ -45,9 +47,18 @@ public class GeoUtil
     {
         // Get the conversion ratio for meters to degrees at the given latitude.
         double distanceBetweenDegreeLatitude = metersToDegreesRatioForLatitude(vector);
-        // Calculate the number of degrees that the search radius represents.
+
+        // Calculate the number of degrees that the search radius represents because we're finding the distance between
+        // two points that are also using degrees as their units.
         double degrees = distanceInMeters / distanceBetweenDegreeLatitude;
-        // Calculate the maximum bound for Euclidean similarity. The simplest way to do this is to square the degrees.
-        return Math.pow(degrees, 2);
+
+        // Using the law of sines, project the arc length of the search radius to the chord length. The law of cosines
+        // gives us a way to get the length of a line on a triangle. We use the center of the earth as the vertex of
+        // the triangle and then the earth's radius as the two known sides of the triangle. Then, the arc length
+        // gives us the theta of the triangle.
+        // Implementation notes: because we converted from meters to degrees, we are now on a unit sphere. That
+        // means the radius is 1 and the degrees arc length is actually in radians, so we do not need to do a conversion.
+        // Further, we return a squared result since we are only interested in the relative distance between two points.
+        return 2 * (1 - Math.cos(degrees));
     }
 }
