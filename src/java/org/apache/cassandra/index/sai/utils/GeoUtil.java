@@ -52,13 +52,6 @@ public class GeoUtil
         // two points that are also using degrees as their units.
         double degrees = distanceInMeters / distanceBetweenDegreeLatitude;
 
-        // Using the law of sines, project the arc length of the search radius to the chord length. The law of cosines
-        // gives us a way to get the length of a line on a triangle. We use the center of the earth as the vertex of
-        // the triangle and then the earth's radius as the two known sides of the triangle. Then, the arc length
-        // gives us the theta of the triangle.
-        // Implementation notes: because we converted from meters to degrees, we are now on a unit sphere. That
-        // means the radius is 1 and the degrees arc length is actually in radians, so we do not need to do a conversion.
-        // Further, we return a squared result since we are only interested in the relative distance between two points.
-        return 2 * (1 - Math.cos(degrees));
+        return Math.pow(degrees, 2);
     }
 }
