@@ -1124,9 +1124,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             this.distanceOperator = operator;
             this.distance = distance;
             searchRadiusMeters = FloatType.instance.compose(distance);
-            // Since searchRadiusMeters is a float, use 0 plus a small epsilon to avoid rounding errors.
-            // We aren't going to get searches for lat/long within a centimeter radius, anyway.
-            if (searchRadiusMeters < 0.001)
+            if (searchRadiusMeters <= 0)
                 throw new InvalidRequestException("GEO_DISTANCE radius must be non-negative, got " + searchRadiusMeters);
             searchRadiusDegreesSquared = (float) GeoUtil.maximumSquareDistanceForCorrectLatLongSimilarity(searchRadiusMeters);
             var pointVector = TypeUtil.decomposeVector(column.type, point.duplicate());
