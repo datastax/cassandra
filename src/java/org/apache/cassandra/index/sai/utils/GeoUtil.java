@@ -41,12 +41,14 @@ public class GeoUtil
     }
 
     /**
-     * Calculate the maximum bound for a squared distance between lat/long points on the earth.
+     * Calculate the maximum bound for a squared distance between lat/long points on the earth. The result is
+     * increased proportionally to the latitude of the search vector because the distance between two lines of
+     * longitude decreases as you move away from the equator.
      * @param vector search vector
      * @param distanceInMeters the search radius
-     * @return
+     * @return the threshold to use for the given geo point and distance
      */
-    public static double maximumAmplifiedSquareDistanceForEuclideanSimilarity(float[] vector, float distanceInMeters)
+    public static float amplifiedEuclideanSimilarityThreshold(float[] vector, float distanceInMeters)
     {
         // Get the conversion ratio for meters to degrees at the given latitude.
         double distanceBetweenDegreeLatitude = metersToDegreesRatioForLatitude(vector);
@@ -55,7 +57,7 @@ public class GeoUtil
         // two points that are also using degrees as their units.
         double degrees = distanceInMeters / distanceBetweenDegreeLatitude;
 
-        return Math.pow(degrees, 2);
+        return (float) (1.0 / (1 + Math.pow((float) degrees, 2)));
     }
 
     /**
@@ -64,8 +66,8 @@ public class GeoUtil
      * @param distanceInMeters
      * @return
      */
-    public static double maximumSquareDistanceForCorrectLatLongSimilarity(float distanceInMeters)
+    public static float maximumSquareDistanceForCorrectLatLongSimilarity(float distanceInMeters)
     {
-        return Math.pow(distanceInMeters / DISTANCE_PER_DEGREE_LATITUDE, 2);
+        return (float) Math.pow(distanceInMeters / DISTANCE_PER_DEGREE_LATITUDE, 2);
     }
 }

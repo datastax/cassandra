@@ -30,10 +30,11 @@ import static org.junit.Assert.assertTrue;
 
 public class GeoSearchAccuracyTest extends VectorTester
 {
-    // Number indicates that 98% of the search results are truly within the searched distance
-    // In testing, it appeared to be around 99.9% for NYC. The accuracy improves as the latitude
-    // approaches the equator.
-    private final static float EXPECTED_ACCURACY = 0.98f;
+    // Number represents the number of results that are within the search radius divided by the number of expected results
+    private final static float MIN_EXPECTED_RECALL = 0.85f;
+
+    // Number represents the percent of actual results that are incorrect (i.e. outside the search radius)
+    private final static float MAX_EXPECTED_FALSE_POSITIVE_RATE = 0.01f;
 
     @Test
     public void testRandomVectorsAgainstHaversineDistance()
@@ -48,7 +49,8 @@ public class GeoSearchAccuracyTest extends VectorTester
         for (var vector : vectors)
             execute("INSERT INTO %s (pk, val) VALUES (?, ?)", vector.left, vector(vector.right));
 
-        double accuracy = 0;
+        double recallRate = 0;
+        double falsePositiveRate = 0;
         int queryCount = 100;
         for (int i = 0; i < queryCount; i++)
         {
@@ -62,18 +64,32 @@ public class GeoSearchAccuracyTest extends VectorTester
 
             var results = execute("SELECT pk FROM %s WHERE GEO_DISTANCE(val, ?) < " + distanceInMeters, vector(searchVector));
 
-            // The current algorithm for searching by latitude and longitude produces a superset of results. We expect
-            // all the results that are within the great circle distance to also be within the search distance.
+            // Get the collection of expected rows. This uses a more expensive and more correct haversine distance
+            // formula, which is why we calculate the false-positive ratio as well.
             var expected = closeVectors.stream().map(v -> v.left).collect(Collectors.toSet());
             var actual = results.stream().map(r -> r.getInt("pk")).collect(Collectors.toSet());
-            assertTrue("Actual should be a superset of expected", actual.containsAll(expected));
+            var incorrectMatches = actual.stream().filter(pk -> !expected.contains(pk)).count();
+            var correctMatches = actual.size() - incorrectMatches;
+
+            if (!expected.isEmpty())
+                recallRate += correctMatches / (double) expected.size();
+            else if (actual.isEmpty())
+                // We expected none (recall was empty) and we got none, so that is 100% recall. If we got some,
+                // recall is 0%, which is a no-op here.
+                recallRate += 1;
+
+            // If actual is empty, then we have no false positives, so this is a no-op.
             if (!actual.isEmpty())
-                accuracy += (double) expected.size() / actual.size();
+                falsePositiveRate += incorrectMatches / (double) actual.size();
         }
-        double observedAccuracy = accuracy / queryCount;
-        logger.info("Observed accuracy: {}", observedAccuracy);
-        assertTrue("Accuracy should be greater than " + EXPECTED_ACCURACY + " but found " + observedAccuracy,
-                   observedAccuracy > EXPECTED_ACCURACY);
+        double observedRecall = recallRate / queryCount;
+        double observedFalsePositiveAccuracy = falsePositiveRate / queryCount;
+        logger.info("Observed recall rate: {}", observedRecall);
+        logger.info("Observed false positive rate: {}", observedFalsePositiveAccuracy);
+        assertTrue("Recall should be greater than " + MIN_EXPECTED_RECALL + " but found " + observedRecall,
+                   observedRecall > MIN_EXPECTED_RECALL);
+        assertTrue("False positive rate should be less than " + MAX_EXPECTED_FALSE_POSITIVE_RATE + " but found " + observedFalsePositiveAccuracy,
+                   observedFalsePositiveAccuracy < MAX_EXPECTED_FALSE_POSITIVE_RATE);
     }
 
     public static boolean isWithinDistance(float[] vector, float[] searchVector, float distanceInMeters)

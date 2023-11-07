@@ -117,9 +117,9 @@ public class Expression
     protected Op operation;
 
     public Bound lower, upper;
-    public double boundedAnnUpperBound = 0;
-    public float searchRadiusMeters = 0;
-    public float searchRadiusDegreesSquared = 0;
+    private float boundedAnnEuclideanDistanceThreshold = 0;
+    private float searchRadiusMeters = 0;
+    private float searchRadiusDegreesSquared = 0;
     public int topK;
     public boolean upperInclusive, lowerInclusive;
 
@@ -214,8 +214,8 @@ public class Expression
                 lower = new Bound(value, validator, true);
                 assert upper != null;
                 searchRadiusMeters = FloatType.instance.compose(upper.value.raw);
-                searchRadiusDegreesSquared = (float) GeoUtil.maximumSquareDistanceForCorrectLatLongSimilarity(searchRadiusMeters);
-                boundedAnnUpperBound = GeoUtil.maximumAmplifiedSquareDistanceForEuclideanSimilarity(lower.value.vector, searchRadiusMeters);
+                searchRadiusDegreesSquared = GeoUtil.maximumSquareDistanceForCorrectLatLongSimilarity(searchRadiusMeters);
+                boundedAnnEuclideanDistanceThreshold = GeoUtil.amplifiedEuclideanSimilarityThreshold(lower.value.vector, searchRadiusMeters);
                 break;
         }
 
@@ -245,6 +245,8 @@ public class Expression
             // This relies on the fact that lat/long distort distance by making close points further apart.
             if (squareDistance <= searchRadiusDegreesSquared)
                 return true;
+            // Otherwise, we need to compute the more expensive haversine distance to determine if we are within the
+            // search radius meters.
             double haversineDistance = SloppyMath.haversinMeters(lower.value.vector[0], lower.value.vector[1], value.vector[0], value.vector[1]);
             return upperInclusive ? haversineDistance <= searchRadiusMeters : haversineDistance < searchRadiusMeters;
         }
@@ -373,6 +375,11 @@ public class Expression
 
         int cmp = validator.compare(value, upper.value.raw);
         return cmp < 0 || cmp == 0 && upper.inclusive;
+    }
+
+    public float getEuclideanSearchRadius()
+    {
+        return boundedAnnEuclideanDistanceThreshold;
     }
 
     public String toString()

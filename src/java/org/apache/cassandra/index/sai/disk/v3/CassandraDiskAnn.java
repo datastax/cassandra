@@ -110,6 +110,22 @@ public class CassandraDiskAnn implements JVectorLuceneOnDiskGraph, AutoCloseable
     @Override
     public VectorPostingList search(float[] queryVector, int topK, int limit, Bits acceptBits, QueryContext context)
     {
+        return search(queryVector, topK, 0, limit, acceptBits, context);
+    }
+
+    /**
+     * @return Row IDs associated with the topK vectors near the query. If a threshold is specified, only vectors with
+     * a similarity score >= threshold will be returned.
+     * @param queryVector the query vector
+     * @param threshold the minimum similarity score to accept
+     * @param limit the maximum number of results to return
+     * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
+     * @param context unused (vestige from HNSW, retained in signature to allow calling both easily)
+     * @return
+     */
+    @Override
+    public VectorPostingList search(float[] queryVector, int topk, float threshold, int limit, Bits acceptBits, QueryContext context)
+    {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
         var view = graph.getView();
@@ -129,7 +145,8 @@ public class CassandraDiskAnn implements JVectorLuceneOnDiskGraph, AutoCloseable
         }
         var result = searcher.search(scoreFunction,
                                      reRanker,
-                                     topK,
+                                     limit,
+                                     threshold,
                                      ordinalsMap.ignoringDeleted(acceptBits));
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         return annRowIdsToPostings(result, limit);

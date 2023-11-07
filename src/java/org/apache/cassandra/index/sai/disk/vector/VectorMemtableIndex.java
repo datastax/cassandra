@@ -159,10 +159,8 @@ public class VectorMemtableIndex implements MemtableIndex
         assert expr.getOp() == Expression.Op.ANN || expr.getOp() == Expression.Op.BOUNDED_ANN : "Only ANN is supported for vector search, received " + expr.getOp();
 
         float[] qv = expr.lower.value.vector;
-        ByteBuffer boundary = expr.upper.value.raw;
-        // TODO remove this hack once we are able to pass in the boundary
-        if (boundary != null)
-            limit = 10000;
+        if (expr.getEuclideanSearchRadius() > 0)
+            limit = 100000;
 
         Bits bits;
         if (RangeUtil.coversFullRing(keyRange))
@@ -200,7 +198,7 @@ public class VectorMemtableIndex implements MemtableIndex
                 bits = new KeyRangeFilteringBits(keyRange, queryContext.bitsetForShadowedPrimaryKeys(graph));
         }
 
-        var keyQueue = graph.search(qv, limit, bits);
+        var keyQueue = graph.search(qv, limit, expr.getEuclideanSearchRadius(), bits);
         if (keyQueue.isEmpty())
             return RangeIterator.empty();
         return new ReorderingRangeIterator(keyQueue);
@@ -232,7 +230,7 @@ public class VectorMemtableIndex implements MemtableIndex
 
         float[] qv = exp.lower.value.vector;
         var bits = new KeyFilteringBits(results);
-        var keyQueue = graph.search(qv, limit, bits);
+        var keyQueue = graph.search(qv, limit, 0.0f, bits);
         if (keyQueue.isEmpty())
             return RangeIterator.empty();
         return new ReorderingRangeIterator(keyQueue);

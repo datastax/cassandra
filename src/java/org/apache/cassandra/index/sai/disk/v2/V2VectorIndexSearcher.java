@@ -19,7 +19,6 @@ package org.apache.cassandra.index.sai.disk.v2;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
-import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
@@ -118,17 +117,15 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (exp.getOp() != Expression.Op.ANN && exp.getOp() != Expression.Op.BOUNDED_ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + exp));
 
-        ByteBuffer boundary = exp.upper.value.raw;
-        // TODO remove this hack once we are able to pass in the boundary
-        if (boundary != null)
-            limit = 10000;
+        if (exp.getEuclideanSearchRadius() > 0)
+            limit = 100000;
         int topK = topKFor(limit);
         BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, topK);
         if (bitsOrPostingList.skipANN())
             return bitsOrPostingList.postingList();
 
         float[] queryVector = exp.lower.value.vector;
-        var vectorPostings = graph.search(queryVector, topK, limit, bitsOrPostingList.getBits(), context);
+        var vectorPostings = graph.search(queryVector, topK, exp.getEuclideanSearchRadius(), limit, bitsOrPostingList.getBits(), context);
         if (bitsOrPostingList.expectedNodesVisited >= 0)
             updateExpectedNodes(vectorPostings.getVisitedCount(), bitsOrPostingList.expectedNodesVisited);
         return vectorPostings;
