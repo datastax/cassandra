@@ -22,6 +22,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.SyntaxException;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -103,5 +104,17 @@ public class GeoDistanceInvalidQueryTest extends VectorTester
         assertThatThrownBy(() -> execute( "SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1]) < 1000"))
         .hasMessage(StatementRestrictions.VECTOR_INDEX_PRESENT_NOT_SUPPORT_GEO_DISTANCE_MESSAGE)
         .isInstanceOf(InvalidRequestException.class);
+    }
+
+    @Test
+    public void geoDistanceUsageInIfClause() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, x int, v vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        waitForIndexQueryable();
+
+        // GEO_DISTANCE is not parsable at this part of the CQL
+        assertThatThrownBy(() -> execute("UPDATE %s SET x = 100 WHERE pk = 1 IF GEO_DISTANCE(v, [1, 1]) < 1000"))
+        .isInstanceOf(SyntaxException.class);
     }
 }
