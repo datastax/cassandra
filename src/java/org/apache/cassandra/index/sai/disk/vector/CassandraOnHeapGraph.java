@@ -323,7 +323,7 @@ public class CassandraOnHeapGraph<T>
             // null if remapping is not possible
             final BiMap <Integer, Integer> ordinalMap = deletedOrdinals.isEmpty() ? buildOrdinalMap() : null;
 
-            boolean canFastFindRows = ordinalMap != null;
+            boolean canFastFindRows = false; // ordinalMap != null;
             IntUnaryOperator ordinalMapper = canFastFindRows
                                                 ? x -> ordinalMap.getOrDefault(x, x)
                                                 : x -> x;
