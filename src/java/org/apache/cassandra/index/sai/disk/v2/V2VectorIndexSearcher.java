@@ -145,6 +145,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         var n = indexContext.getIndexWriterConfig().getOptimizeFor() == OptimizeFor.LATENCY
                 ? 0.979 + 4.021 * pow(limit, -0.761)  // f(1) =  5.0, f(100) = 1.1, f(1000) = 1.0
                 : 0.509 + 9.491 * pow(limit, -0.402); // f(1) = 10.0, f(100) = 2.0, f(1000) = 1.1
+        // The functions become less than 1 at the 997.325... and 1583.4 points, respectively.
+        if (n < 1.0)
+            return limit;
         return (int) (n * limit);
     }
 
@@ -362,14 +365,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         private final int expectedNodesVisited;
         private final PostingList postingList;
 
-        public BitsOrPostingList(@Nullable Bits bits, int expectedNodesVisited)
+        public BitsOrPostingList(Bits bits, int expectedNodesVisited)
         {
             this.bits = bits;
             this.expectedNodesVisited = expectedNodesVisited;
             this.postingList = null;
         }
 
-        public BitsOrPostingList(@Nullable Bits bits)
+        public BitsOrPostingList(Bits bits)
         {
             this.bits = bits;
             this.postingList = null;

@@ -164,7 +164,7 @@ public class VectorMemtableIndex implements MemtableIndex
         if (boundary != null)
             limit = 10000;
 
-        Bits bits = null;
+        Bits bits;
         if (RangeUtil.coversFullRing(keyRange))
         {
             // partition/range deletion won't trigger index update, so we have to filter shadow primary keys in memtable index
