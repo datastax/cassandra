@@ -216,7 +216,6 @@ public class Operation
 
     static RangeIterator buildIterator(QueryController controller)
     {
-        // TODO revisit this logic to make geo distance work for nested predicates.
         var filterOperation = controller.filterOperation();
         var orderings = filterOperation.expressions()
                                        .stream().filter(e -> e.operator() == Operator.ANN).collect(Collectors.toList());
