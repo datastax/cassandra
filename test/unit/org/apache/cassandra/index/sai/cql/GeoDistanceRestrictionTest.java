@@ -77,19 +77,19 @@ public class GeoDistanceRestrictionTest extends VectorTester
         waitForIndexQueryable();
 
         // Distances computed using https://www.nhc.noaa.gov/gccalc.shtml
-        execute("INSERT INTO %s (pk, v) VALUES (0, [1, 2])"); // distance is 555 km from [5,5]
-        execute("INSERT INTO %s (pk, v) VALUES (1, [4, 4])"); // distance is 157 km from [5,5]
-        execute("INSERT INTO %s (pk, v) VALUES (2, [5, 5])"); // distance is 0 km from [5,5]
-        execute("INSERT INTO %s (pk, v) VALUES (3, [6, 6])"); // distance is 157 km from [5,5]
-        execute("INSERT INTO %s (pk, v) VALUES (4, [8, 9])"); // distance is 553 from [5,5]
-        execute("INSERT INTO %s (pk, v) VALUES (5, [10, 10])"); // distance is 782 km from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (0, 0, [1, 2])"); // distance is 555 km from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (1, 1, [4, 4])"); // distance is 157 km from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (2, 2, [5, 5])"); // distance is 0 km from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (3, 3, [6, 6])"); // distance is 157 km from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (4, 4, [8, 9])"); // distance is 553 from [5,5]
+        execute("INSERT INTO %s (pk, num, v) VALUES (5, 5, [10, 10])"); // distance is 782 km from [5,5]
 
         var query = "SELECT pk FROM %s WHERE GEO_DISTANCE(v, ?) < ? AND num < ?";
         prepare(query);
 
         beforeAndAfterFlush(() -> {
-            // TODO this is failing, and also fails with a different error when the distance is 5.0.
-            assertRows(execute(query, vector(5,5), 200000, 2), row(1));
+            assertRows(execute(query, vector(5,5), 200000f, 2), row(1));
+            assertRows(execute(query, vector(5,5), 200000.0f, 2), row(1));
         });
     }
 
