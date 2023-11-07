@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,10 +36,10 @@ public class GeoSearchInvalidQueryTest extends VectorTester
 
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [5]) < 1000"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining("Invalid vector literal for v of type vector<float, 2>; expected 2 elements, but given 1");
+        .hasMessage("Invalid vector literal for v of type vector<float, 2>; expected 2 elements, but given 1");
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1, 1]) < 1000"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining("Invalid vector literal for v of type vector<float, 2>; expected 2 elements, but given 3");
+        .hasMessage("Invalid vector literal for v of type vector<float, 2>; expected 2 elements, but given 3");
     }
 
     @Test
@@ -51,13 +52,13 @@ public class GeoSearchInvalidQueryTest extends VectorTester
         // Even though the search vector size is 2, the index vector size is not 2, so the query is not valid.
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1]) < 1000"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining("GEO_DISTANCE is only supported against vector<float, 2> columns");
+        .hasMessage("GEO_DISTANCE is only supported against vector<float, 2> columns");
 
         // Even though the search vector matches the index vector size, the index vector size is not 2, so the query is
         // not valid.
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1, 1]) < 1000"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining("GEO_DISTANCE is only supported against vector<float, 2> columns");
+        .hasMessage("GEO_DISTANCE is only supported against vector<float, 2> columns");
     }
 
     @Test
@@ -69,18 +70,38 @@ public class GeoSearchInvalidQueryTest extends VectorTester
 
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1]) < 0"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining("GEO_DISTANCE radius must be non-negative, got 0.");
+        .hasMessage("GEO_DISTANCE radius must be non-negative, got 0.0");
 
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1]) <= 0"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining("GEO_DISTANCE radius must be non-negative, got 0.");
+        .hasMessage("GEO_DISTANCE radius must be non-negative, got 0.0");
 
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1]) < -1"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining("GEO_DISTANCE radius must be non-negative, got -1.");
+        .hasMessage("GEO_DISTANCE radius must be non-negative, got -1.0");
 
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1]) <= -1"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining("GEO_DISTANCE radius must be non-negative, got -1.");
+        .hasMessage("GEO_DISTANCE radius must be non-negative, got -1.0");
+    }
+
+    @Test
+    public void geoSearchMissingOrIncorrectlyConfiguredIndex() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, x int, v vector<float, 2>, PRIMARY KEY(pk))");
+
+        // Query without index
+        assertThatThrownBy(() -> execute( "SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1]) < 1000"))
+        .hasMessage(StatementRestrictions.GEO_DISTANCE_REQUIRES_INDEX_MESSAGE)
+        .isInstanceOf(InvalidRequestException.class);
+
+        // Intentionally create index with incorrect similarity function
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // Query with incorrectly configured index
+        assertThatThrownBy(() -> execute( "SELECT pk FROM %s WHERE GEO_DISTANCE(v, [1, 1]) < 1000"))
+        .hasMessage(StatementRestrictions.VECTOR_INDEX_PRESENT_NOT_SUPPORT_GEO_DISTANCE_MESSAGE)
+        .isInstanceOf(InvalidRequestException.class);
     }
 }
