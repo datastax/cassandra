@@ -20,7 +20,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
-public class VectorRadiusRestrictionTest extends VectorTester
+public class GeoSearchRestrictionTest extends VectorTester
 {
     @Test
     public void testBasicGeoDistanceQuery() throws Throwable
