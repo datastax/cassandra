@@ -1126,7 +1126,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             searchRadiusMeters = FloatType.instance.compose(distance);
             if (searchRadiusMeters <= 0)
                 throw new InvalidRequestException("GEO_DISTANCE radius must be non-negative, got " + searchRadiusMeters);
-            searchRadiusDegreesSquared = (float) GeoUtil.maximumSquareDistanceForCorrectLatLongSimilarity(searchRadiusMeters);
+            searchRadiusDegreesSquared = GeoUtil.maximumSquareDistanceForCorrectLatLongSimilarity(searchRadiusMeters);
             var pointVector = TypeUtil.decomposeVector(column.type, point.duplicate());
             // This is validated earlier in the parser because the column requires size 2, so only assert on it
             assert pointVector.length == 2 : "GEO_DISTANCE requires search vector to have 2 dimensions.";
