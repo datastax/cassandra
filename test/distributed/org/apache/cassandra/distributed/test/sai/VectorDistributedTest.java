@@ -69,7 +69,7 @@ public class VectorDistributedTest extends TestBaseImpl
     private static final String INVALID_LIMIT_MESSAGE = "Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than 1000";
 
     private static final double MIN_RECALL = 0.8;
-    private static final double MIN_GEO_SEARCH_RECALL = 0.98;
+    private static final double MIN_GEO_SEARCH_RECALL = 0.97;
 
     private static final int NUM_REPLICAS = 3;
     private static final int RF = 2;
@@ -502,8 +502,7 @@ public class VectorDistributedTest extends TestBaseImpl
         });
         if (expected.isEmpty() && result.isEmpty())
             return 1.0;
-        // The
-        return Math.min(expected.size() * 1.0 / result.size(), result.size() * 1.0 / expected.size());
+        return matches.get() * 1.0 / expected.size();
     }
 
 
