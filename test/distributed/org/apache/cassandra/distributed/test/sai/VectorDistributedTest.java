@@ -43,7 +43,7 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.cql.GeoAccuracyTest;
+import org.apache.cassandra.index.sai.cql.GeoDistanceAccuracyTest;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
@@ -494,7 +494,7 @@ public class VectorDistributedTest extends TestBaseImpl
     {
         assertThat(allVectors).containsAll(result);
         AtomicInteger matches = new AtomicInteger();
-        var expected = allVectors.stream().filter(v -> GeoAccuracyTest.isWithinDistance(v, query, distance))
+        var expected = allVectors.stream().filter(v -> GeoDistanceAccuracyTest.isWithinDistance(v, query, distance))
                                  .collect(Collectors.toSet());
         result.forEach(v -> {
             if (expected.contains(v))
