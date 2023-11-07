@@ -25,10 +25,10 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-public class GeoSearchInvalidQueryTest extends VectorTester
+public class GeoDistancInvalidQueryTest extends VectorTester
 {
     @Test
-    public void geoSearchRequiresSearchVectorSizeTwo() throws Throwable
+    public void geoDistancRequiresSearchVectorSizeTwo() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
@@ -43,7 +43,7 @@ public class GeoSearchInvalidQueryTest extends VectorTester
     }
 
     @Test
-    public void geoSearchRequiresVectorIndexSizeTwo() throws Throwable
+    public void geoDistancRequiresVectorIndexSizeTwo() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
@@ -62,7 +62,7 @@ public class GeoSearchInvalidQueryTest extends VectorTester
     }
 
     @Test
-    public void geoSearchRequiresPositiveSearchRadius() throws Throwable
+    public void geoDistancRequiresPositiveSearchRadius() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
@@ -86,7 +86,7 @@ public class GeoSearchInvalidQueryTest extends VectorTester
     }
 
     @Test
-    public void geoSearchMissingOrIncorrectlyConfiguredIndex() throws Throwable
+    public void geoDistancMissingOrIncorrectlyConfiguredIndex() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, x int, v vector<float, 2>, PRIMARY KEY(pk))");
 

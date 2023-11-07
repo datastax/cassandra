@@ -28,7 +28,7 @@ import org.apache.lucene.geo.GeoUtils;
 
 import static org.junit.Assert.assertTrue;
 
-public class GeoSearchAccuracyTest extends VectorTester
+public class GeoDistanceAccuracyTest extends VectorTester
 {
     // Number represents the number of results that are within the search radius divided by the number of expected results
     private final static float MIN_EXPECTED_RECALL = 0.85f;
