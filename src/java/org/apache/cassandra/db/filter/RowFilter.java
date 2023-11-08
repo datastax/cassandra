@@ -1107,7 +1107,6 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     }
 
 
-    // VSTODO make generic?
     public static class GeoDistanceExpression extends Expression
     {
         private final ByteBuffer distance;
@@ -1115,7 +1114,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         private final float searchRadiusMeters;
         private final float searchRadiusDegreesSquared;
         private final float searchLat;
-        private final float searchLong;
+        private final float searchLon;
 
         public GeoDistanceExpression(ColumnMetadata column, ByteBuffer point, Operator operator, ByteBuffer distance)
         {
@@ -1127,11 +1126,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             if (searchRadiusMeters <= 0)
                 throw new InvalidRequestException("GEO_DISTANCE radius must be non-negative, got " + searchRadiusMeters);
             searchRadiusDegreesSquared = GeoUtil.maximumSquareDistanceForCorrectLatLongSimilarity(searchRadiusMeters);
-            var pointVector = TypeUtil.decomposeVector(column.type, point.duplicate());
+            var pointVector = TypeUtil.decomposeVector(column.type, point);
             // This is validated earlier in the parser because the column requires size 2, so only assert on it
             assert pointVector.length == 2 : "GEO_DISTANCE requires search vector to have 2 dimensions.";
             searchLat = pointVector[0];
-            searchLong = pointVector[1];
+            searchLon = pointVector[1];
         }
 
 
@@ -1162,8 +1161,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             // This relies on the fact that lat/long distort distance by making close points further apart.
             if (squareDistance <= searchRadiusDegreesSquared)
                 return true;
-            var foundVector = TypeUtil.decomposeVector(column.type, foundValue.duplicate());
-            double haversineDistance = SloppyMath.haversinMeters(foundVector[0], foundVector[1], searchLat, searchLong);
+            var foundVector = TypeUtil.decomposeVector(column.type, foundValue);
+            double haversineDistance = SloppyMath.haversinMeters(foundVector[0], foundVector[1], searchLat, searchLon);
             switch (distanceOperator)
             {
                 case LTE:

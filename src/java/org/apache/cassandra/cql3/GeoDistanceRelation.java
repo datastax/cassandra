@@ -36,7 +36,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 /**
- * A relation using the token function.
+ * A relation using a GEO_DISTANCE function to get vectors of kind lat, lon within a given distance.
  * Examples:
  * <ul>
  * <li>SELECT ... WHERE GEO_DISTANCE(geopoint, :querypoint) &lt; :distance</li>

@@ -290,7 +290,7 @@ public enum Operator
         @Override
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
-            return true;
+            throw new UnsupportedOperationException();
         }
     },
     /**

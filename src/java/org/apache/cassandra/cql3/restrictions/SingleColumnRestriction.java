@@ -874,8 +874,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     }
 
     /**
-     * A Bounded ANN Restriction is one that uses a distance as the limiting factor instead of a number of result
-     * vectors.
+     * A Bounded ANN Restriction is one that uses a similarity score as the limiting factor for ANN instead of a number
+     * of results.
      */
     public static final class BoundedAnnRestriction extends SingleColumnRestriction
     {
@@ -906,6 +906,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         MultiColumnRestriction toMultiColumnRestriction()
         {
+            // only used by partition and clustering restrictions
             throw new UnsupportedOperationException();
         }
 
@@ -932,7 +933,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            throw invalidRequest("%s cannot be restricted by more than one relation if it includes an Equal", columnDef.name);
+            throw invalidRequest("%s cannot be restricted by more than one relation if it includes an BOUNDED_ANN", columnDef.name);
         }
 
         @Override

@@ -377,7 +377,7 @@ public class Expression
         return cmp < 0 || cmp == 0 && upper.inclusive;
     }
 
-    public float getEuclideanSearchRadius()
+    public float getEuclideanSearchThreshold()
     {
         return boundedAnnEuclideanDistanceThreshold;
     }
@@ -439,7 +439,7 @@ public class Expression
         {
             this.raw = value;
             this.encoded = TypeUtil.encode(value, type);
-            this.vector = type.isVector() ? TypeUtil.decomposeVector(type, raw.duplicate()) : null;
+            this.vector = type.isVector() ? TypeUtil.decomposeVector(type, raw) : null;
         }
 
         @Override
