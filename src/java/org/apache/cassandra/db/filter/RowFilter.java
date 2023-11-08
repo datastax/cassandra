@@ -609,11 +609,30 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     {
         public static final Serializer serializer = new Serializer();
 
-        // Note: the order of this enum matter, it's used for serialization,
+        // Note: the val of this enum is used for serialization,
         // and this is why we have some UNUSEDX for values we don't use anymore
         // (we could clean those on a major protocol update, but it's not worth
         // the trouble for now)
-        protected enum Kind { SIMPLE, MAP_EQUALITY, UNUSED1, CUSTOM, USER, VECTOR_RADIUS }
+        // VECTOR
+        protected enum Kind {
+            SIMPLE(0), MAP_EQUALITY(1), UNUSED1(2), CUSTOM(3), USER(4), VECTOR_RADIUS(100);
+            private final int val;
+            Kind(int v) { val = v; }
+            public int getVal() { return val; }
+            public static Kind fromVal(int val)
+            {
+                switch (val)
+                {
+                    case 0: return SIMPLE;
+                    case 1: return MAP_EQUALITY;
+                    case 2: return UNUSED1;
+                    case 3: return CUSTOM;
+                    case 4: return USER;
+                    case 100: return VECTOR_RADIUS;
+                    default: throw new IllegalArgumentException("Unknown index expression kind: " + val);
+                }
+            }
+        }
 
         protected abstract Kind kind();
         protected final ColumnMetadata column;
@@ -746,7 +765,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         {
             public void serialize(Expression expression, DataOutputPlus out, int version) throws IOException
             {
-                out.writeByte(expression.kind().ordinal());
+                out.writeByte(expression.kind().getVal());
 
                 // Custom expressions include neither a column or operator, but all
                 // other expressions do.
@@ -777,7 +796,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                         ByteBufferUtil.writeWithShortLength(mexpr.value, out);
                         break;
                     case VECTOR_RADIUS:
-                        GeoDistanceExpression gexpr = (GeoDistanceExpression)expression;
+                        GeoDistanceExpression gexpr = (GeoDistanceExpression) expression;
                         gexpr.distanceOperator.writeTo(out);
                         ByteBufferUtil.writeWithShortLength(gexpr.distance, out);
                         ByteBufferUtil.writeWithShortLength(gexpr.value, out);
@@ -786,7 +805,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
             public Expression deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
             {
-                Kind kind = Kind.values()[in.readByte()];
+                Kind kind = Kind.fromVal(in.readByte());
 
                 // custom expressions (3.0+ only) do not contain a column or operator, only a value
                 if (kind == Kind.CUSTOM)
