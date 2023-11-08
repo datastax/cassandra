@@ -68,7 +68,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void doTestExactMatch(Function<String, ByteComparable> asByteComparable) throws Exception
     {
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext, false))
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
         {
             writer.add(asByteComparable.apply("ab"), 0);
             writer.add(asByteComparable.apply("abb"), 1);
@@ -99,7 +99,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void doTestCeiling(Function<String, ByteComparable> asByteComparable) throws Exception
     {
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext, false))
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
         {
             writer.add(asByteComparable.apply("ab"), 0);
             writer.add(asByteComparable.apply("abb"), 1);
@@ -141,7 +141,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void doTestCeilingWithEmulatedPrimaryKey(Function<String, ByteComparable> asByteComparable) throws Exception
     {
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext, false))
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
         {
             writer.add(primaryKey(asByteComparable, "ab", "cd", "def"), 0);
             writer.add(primaryKey(asByteComparable, "ab", "cde", "def"), 1);
@@ -190,7 +190,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void doTestFloor(Function<String, ByteComparable> asByteComparable) throws Exception
     {
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext, false))
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
         {
             writer.add(asByteComparable.apply("ab"), 0);
             writer.add(asByteComparable.apply("abb"), 1);
@@ -231,7 +231,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void doTestFloorWithEmulatedPrimaryKey(Function<String, ByteComparable> asByteComparable) throws Exception
     {
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext, false))
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
         {
             writer.add(primaryKey(asByteComparable, "ab", "cd", "def"), 0);
             writer.add(primaryKey(asByteComparable, "ab", "cde", "def"), 1);
@@ -283,7 +283,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         final List<ByteComparable> byteComparables = generateSortedByteComparables(asByteComparable);
 
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext, false))
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
         {
             for (int i = 0; i < byteComparables.size(); ++i)
             {
@@ -321,7 +321,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         final List<ByteComparable> byteComparables = generateSortedByteComparables(asByteComparable);
 
         long fp;
-        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext, false))
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
         {
             for (int i = 0; i < byteComparables.size(); ++i)
             {

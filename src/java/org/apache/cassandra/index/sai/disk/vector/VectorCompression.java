@@ -18,13 +18,9 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-public enum OptimizeFor
+public enum VectorCompression
 {
-    LATENCY,
-    RECALL;
-
-    public static OptimizeFor fromString(String value)
-    {
-        return valueOf(value.toUpperCase());
-    }
+    NONE,
+    PRODUCT_QUANTIZATION,
+    BINARY_QUANTIZATION
 }
