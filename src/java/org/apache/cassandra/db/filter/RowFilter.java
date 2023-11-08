@@ -800,6 +800,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                         gexpr.distanceOperator.writeTo(out);
                         ByteBufferUtil.writeWithShortLength(gexpr.distance, out);
                         ByteBufferUtil.writeWithShortLength(gexpr.value, out);
+                        break;
                 }
             }
 
