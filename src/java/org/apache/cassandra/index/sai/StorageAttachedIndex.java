@@ -653,7 +653,8 @@ public class StorageAttachedIndex implements Index
     @Override
     public void validate(ReadCommand command) throws InvalidRequestException
     {
-        if (!getIndexContext().isVector())
+        QueryPlan indexQueryPlan = command.indexQueryPlan();
+        if (indexQueryPlan == null || !indexQueryPlan.isTopK())
             return;
 
         // to avoid overflow HNSW internal data structure and avoid OOM when filtering top-k
