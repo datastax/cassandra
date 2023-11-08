@@ -42,7 +42,7 @@ import io.github.jbellis.jvector.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
-import io.github.jbellis.jvector.graph.NeighborSimilarity;
+import io.github.jbellis.jvector.graph.NodeSimilarity;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.pq.BQVectors;
 import io.github.jbellis.jvector.pq.BinaryQuantization;
@@ -276,7 +276,7 @@ public class CassandraOnHeapGraph<T>
         // VSTODO re-use searcher objects
         GraphIndex<float[]> graph = builder.getGraph();
         var searcher = new GraphSearcher.Builder<>(graph.getView()).withConcurrentUpdates().build();
-        NeighborSimilarity.ExactScoreFunction scoreFunction = node2 -> {
+        NodeSimilarity.ExactScoreFunction scoreFunction = node2 -> {
             return similarityFunction.compare(queryVector, ((RandomAccessVectorValues<float[]>) vectorValues).vectorValue(node2));
         };
         var result = searcher.search(scoreFunction, null, limit, threshold, bits);
