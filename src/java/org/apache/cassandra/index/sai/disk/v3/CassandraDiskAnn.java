@@ -149,7 +149,7 @@ public class CassandraDiskAnn implements JVectorLuceneOnDiskGraph, AutoCloseable
         }
         var result = searcher.search(scoreFunction,
                                      reRanker,
-                                     limit,
+                                     topk,
                                      threshold,
                                      ordinalsMap.ignoringDeleted(acceptBits));
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
