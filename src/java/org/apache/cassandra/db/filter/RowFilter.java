@@ -1170,6 +1170,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             checkBindValueSet(value, "Unsupported unset vector value for column %s", column.name);
         }
 
+        @Override
         public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row)
         {
             ByteBuffer foundValue = getValue(metadata, partitionKey, row);
