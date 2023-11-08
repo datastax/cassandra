@@ -559,4 +559,18 @@ public class LuceneAnalyzerTest extends SAITester
 
         waitForTableIndexesQueryable();
     }
+
+    @Test
+    public void testInvalidQueryOnNumericColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, some_num tinyint)");
+        createIndex("CREATE CUSTOM INDEX ON %s(some_num) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
+
+        execute("INSERT INTO %s (id, some_num) VALUES (1, 1)");
+        flush();
+
+        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE some_num : 1"))
+        .isInstanceOf(InvalidRequestException.class);
+    }
 }

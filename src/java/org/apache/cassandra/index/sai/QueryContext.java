@@ -37,7 +37,7 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
-import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
+import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
@@ -234,7 +234,7 @@ public class QueryContext
     {
         return hnswVectorCacheHits.longValue();
     }
-    
+
     public void checkpoint()
     {
         if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
@@ -277,7 +277,7 @@ public class QueryContext
     public Bits bitsetForShadowedPrimaryKeys(CassandraOnHeapGraph<PrimaryKey> graph)
     {
         if (getShadowedPrimaryKeys().isEmpty())
-            return null;
+            return Bits.ALL;
 
         return new IgnoredKeysBits(graph, getShadowedPrimaryKeys());
     }
@@ -285,7 +285,7 @@ public class QueryContext
     public Bits bitsetForShadowedPrimaryKeys(SegmentMetadata metadata, PrimaryKeyMap primaryKeyMap, JVectorLuceneOnDiskGraph graph) throws IOException
     {
         Set<Integer> ignoredOrdinals = null;
-        try (OnDiskOrdinalsMap.OrdinalsView ordinalsView = graph.getOrdinalsView())
+        try (OrdinalsView ordinalsView = graph.getOrdinalsView())
         {
             for (PrimaryKey primaryKey : getShadowedPrimaryKeys())
             {
@@ -316,7 +316,7 @@ public class QueryContext
         }
 
         if (ignoredOrdinals == null)
-            return null;
+            return Bits.ALL;
 
         return new IgnoringBits(ignoredOrdinals, graph.size());
     }
