@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntUnaryOperator;
 
 import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -31,6 +32,16 @@ import org.apache.cassandra.utils.Pair;
 
 public class VectorPostingsWriter<T>
 {
+
+    private final boolean canFastFindRows;
+
+    private final IntUnaryOperator reverseOrdinalsMapper;
+
+    public VectorPostingsWriter(boolean canFastFindRows, IntUnaryOperator mapper) {
+        this.canFastFindRows = canFastFindRows;
+        this.reverseOrdinalsMapper = mapper;
+    }
+
     public long writePostings(SequentialWriter writer,
                               RamAwareVectorValues vectorValues,
                               Map<float[], VectorPostings<T>> postingsMap,
@@ -45,6 +56,13 @@ public class VectorPostingsWriter<T>
 
     private void writeDeletedOrdinals(SequentialWriter writer, Set<Integer> deletedOrdinals) throws IOException
     {
+        if (canFastFindRows) {
+            assert deletedOrdinals.isEmpty();
+            // -1 indicates that fast mapping of ordinal to rowId can be used
+            writer.writeInt(-1);
+            return;
+        }
+
         writer.writeInt(deletedOrdinals.size());
         for (Integer ordinal : deletedOrdinals) {
             writer.writeInt(ordinal);
@@ -66,16 +84,19 @@ public class VectorPostingsWriter<T>
         for (int i = 0; i < vectorValues.size(); i++) {
             // (ordinal is implied; don't need to write it)
             writer.writeLong(nextOffset);
-            IntArrayList rowIds = postingsMap.get(vectorValues.vectorValue(i)).getRowIds();
+
+            int originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
+
+            IntArrayList rowIds = postingsMap.get(vectorValues.vectorValue(originalOrdinal)).getRowIds();
             nextOffset += 4 + (rowIds.size() * 4L); // 4 bytes for size and 4 bytes for each integer in the list
         }
         assert writer.position() == offsetsStartAt : "writer.position()=" + writer.position() + " offsetsStartAt=" + offsetsStartAt;
 
         // Write postings lists
         for (int i = 0; i < vectorValues.size(); i++) {
-            VectorPostings<T> postings = postingsMap.get(vectorValues.vectorValue(i));
+            int originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
+            IntArrayList rowIds = postingsMap.get(vectorValues.vectorValue(originalOrdinal)).getRowIds();
 
-            IntArrayList rowIds = postings.getRowIds();
             writer.writeInt(rowIds.size());
             for (int r = 0; r < rowIds.size(); r++)
                 writer.writeInt(rowIds.getInt(r));
@@ -91,7 +112,11 @@ public class VectorPostingsWriter<T>
 
         // Collect all (rowId, vectorOrdinal) pairs
         for (int i = 0; i < vectorValues.size(); i++) {
-            IntArrayList rowIds = postingsMap.get(vectorValues.vectorValue(i)).getRowIds();
+            int ord = postingsMap.get(vectorValues.vectorValue(i)).getOrdinal();
+            assert ord == i;
+
+            ord = reverseOrdinalsMapper.applyAsInt(ord);
+            IntArrayList rowIds = postingsMap.get(vectorValues.vectorValue(ord)).getRowIds();
             for (int r = 0; r < rowIds.size(); r++)
                 pairs.add(Pair.create(rowIds.getInt(r), i));
         }
