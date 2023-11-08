@@ -232,7 +232,7 @@ public class QueryContext
     {
         return hnswVectorCacheHits.longValue();
     }
-    
+
     public void checkpoint()
     {
         if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
@@ -275,7 +275,7 @@ public class QueryContext
     public Bits bitsetForShadowedPrimaryKeys(CassandraOnHeapGraph<PrimaryKey> graph)
     {
         if (getShadowedPrimaryKeys().isEmpty())
-            return null;
+            return Bits.ALL;
 
         return new IgnoredKeysBits(graph, getShadowedPrimaryKeys());
     }
@@ -314,7 +314,7 @@ public class QueryContext
         }
 
         if (ignoredOrdinals == null)
-            return null;
+            return Bits.ALL;
 
         return new IgnoringBits(ignoredOrdinals, graph.size());
     }
