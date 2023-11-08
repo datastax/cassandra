@@ -232,14 +232,21 @@ public class VectorDistributedTest extends TestBaseImpl
             cluster.forEach(n -> n.flush(KEYSPACE));
         }
 
-        // query multiple sstable indexes in multiple node
-        int searchRadiusMeters = getRandom().nextIntBetween(500, 20000);
-        float[] queryVector = randomUSVector();
-        Object[][] result = execute("SELECT val FROM %s WHERE GEO_DISTANCE(val, " + Arrays.toString(queryVector) + ") < " + searchRadiusMeters);
+        // Run the query 50 times to get an average of several queries
+        int queryCount = 50;
+        double recallSum = 0;
+        for (int i = 0; i < queryCount; i++)
+        {
+            // query multiple sstable indexes in multiple node
+            int searchRadiusMeters = getRandom().nextIntBetween(500, 20000);
+            float[] queryVector = randomUSVector();
+            Object[][] result = execute("SELECT val FROM %s WHERE GEO_DISTANCE(val, " + Arrays.toString(queryVector) + ") < " + searchRadiusMeters);
 
-        // expect recall to be at least 0.97
-        double recall = getGeoRecall(allVectors, queryVector, searchRadiusMeters, getVectors(result));
-        assertThat(recall).isGreaterThanOrEqualTo(MIN_GEO_SEARCH_RECALL);
+            // expect recall to be at least 0.97
+            var recall = getGeoRecall(allVectors, queryVector, searchRadiusMeters, getVectors(result));
+            recallSum += recall;
+        }
+        assertThat(recallSum / queryCount).isGreaterThanOrEqualTo(MIN_GEO_SEARCH_RECALL);
     }
 
     @Test
@@ -490,19 +497,26 @@ public class VectorDistributedTest extends TestBaseImpl
         return new float[] {lat, lon};
     }
 
-    private double getGeoRecall(List<float[]> allVectors, float[] query, float distance, List<float[]> result)
+    private double getGeoRecall(List<float[]> allVectors, float[] query, float distance, List<float[]> resultVectors)
     {
-        assertThat(allVectors).containsAll(result);
-        AtomicInteger matches = new AtomicInteger();
-        var expected = allVectors.stream().filter(v -> GeoDistanceAccuracyTest.isWithinDistance(v, query, distance))
+        assertThat(allVectors).containsAll(resultVectors);
+        var expectdVectors = allVectors.stream().filter(v -> GeoDistanceAccuracyTest.isWithinDistance(v, query, distance))
                                  .collect(Collectors.toSet());
-        result.forEach(v -> {
-            if (expected.contains(v))
-                matches.getAndIncrement();
-        });
-        if (expected.isEmpty() && result.isEmpty())
+        int matches = 0;
+        for (float[] expectedVector : expectdVectors)
+        {
+            for (float[] resultVector : resultVectors)
+            {
+                if (Arrays.compare(expectedVector, resultVector) == 0)
+                {
+                    matches++;
+                    break;
+                }
+            }
+        }
+        if (expectdVectors.isEmpty() && resultVectors.isEmpty())
             return 1.0;
-        return matches.get() * 1.0 / expected.size();
+        return matches * 1.0 / expectdVectors.size();
     }
 
 
