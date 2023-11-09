@@ -31,8 +31,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_ANALYZED_TERM_SIZE;
-
 /**
  * Utility class for conditionally materializing a list of tokens given an analyzer and the term to be analyzed.
  * If the cumulative size of the analyzed term exceeds the configured maximum, an empty list is returned to prevent
@@ -42,7 +40,6 @@ public class ByteLimitedMaterializer
 {
     private static final Logger logger = LoggerFactory.getLogger(ByteLimitedMaterializer.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
-    public static final int MAX_ANALYZED_TERM_SIZE = SAI_MAX_ANALYZED_TERM_SIZE.getInt();
     public static final String ANALYZED_TERM_OVERSIZE_MESSAGE = "Cannot add term's analyzed tokens of column {} to index" +
                                                                 " for key: {}, analzyed term size {}, but max allowed size {}.";
 
@@ -73,13 +70,13 @@ public class ByteLimitedMaterializer
                 final ByteBuffer token = analyzer.next();
                 tokens.add(token);
                 bytesCount += token.remaining();
-                if (bytesCount >= MAX_ANALYZED_TERM_SIZE)
+                if (bytesCount >= IndexContext.MAX_ANALYZED_SIZE)
                 {
                     noSpamLogger.warn(indexContext.logMessage(ANALYZED_TERM_OVERSIZE_MESSAGE),
                                       indexContext.getColumnName(),
                                       indexContext.keyValidator().getString(primaryKey.partitionKey().getKey()),
                                       FBUtilities.prettyPrintMemory(bytesCount),
-                                      FBUtilities.prettyPrintMemory(MAX_ANALYZED_TERM_SIZE));
+                                      FBUtilities.prettyPrintMemory(IndexContext.MAX_ANALYZED_SIZE));
                     return List.of();
                 }
             }
