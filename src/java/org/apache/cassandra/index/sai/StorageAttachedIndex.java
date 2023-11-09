@@ -187,6 +187,7 @@ public class StorageAttachedIndex implements Index
     private static final Set<String> VALID_OPTIONS = ImmutableSet.of(NonTokenizingOptions.CASE_SENSITIVE,
                                                                      NonTokenizingOptions.NORMALIZE,
                                                                      NonTokenizingOptions.ASCII,
+                                                                     // For now, we leave this for backward compatibility even though it's not used
                                                                      IndexContext.ENABLE_SEGMENT_COMPACTION_OPTION_NAME,
                                                                      IndexTarget.TARGET_OPTION_NAME,
                                                                      IndexTarget.CUSTOM_INDEX_OPTION_NAME,
@@ -195,10 +196,10 @@ public class StorageAttachedIndex implements Index
                                                                      IndexWriterConfig.MAXIMUM_NODE_CONNECTIONS,
                                                                      IndexWriterConfig.CONSTRUCTION_BEAM_WIDTH,
                                                                      IndexWriterConfig.SIMILARITY_FUNCTION,
-                                                                     IndexWriterConfig.OPTIMIZE_FOR,
                                                                      LuceneAnalyzer.INDEX_ANALYZER,
                                                                      LuceneAnalyzer.QUERY_ANALYZER);
 
+    // this does not include vectors because each Vector declaration is a separate type instance
     public static final Set<CQL3Type> SUPPORTED_TYPES = ImmutableSet.of(CQL3Type.Native.ASCII, CQL3Type.Native.BIGINT, CQL3Type.Native.DATE,
                                                                         CQL3Type.Native.DOUBLE, CQL3Type.Native.FLOAT, CQL3Type.Native.INT,
                                                                         CQL3Type.Native.SMALLINT, CQL3Type.Native.TEXT, CQL3Type.Native.TIME,
@@ -306,6 +307,8 @@ public class StorageAttachedIndex implements Index
         }
 
         AbstractType<?> type = TypeUtil.cellValueType(target.left, target.right);
+        AbstractAnalyzer.fromOptions(type, options); // will throw if invalid
+        var config = IndexWriterConfig.fromOptions(null, type, options);
 
         // If we are indexing map entries we need to validate the sub-types
         if (TypeUtil.isComposite(type))
@@ -316,13 +319,15 @@ public class StorageAttachedIndex implements Index
                     throw new InvalidRequestException("Unsupported composite type for SAI: " + subType.asCQL3Type());
             }
         }
-        else if (!type.isVector() && !SUPPORTED_TYPES.contains(type.asCQL3Type()) && !TypeUtil.isFrozen(type))
+        else if (type.isVector())
+        {
+            if (type.valueLengthIfFixed() == 4 && config.getSimilarityFunction() == VectorSimilarityFunction.COSINE)
+                throw new InvalidRequestException("Cosine similarity is not supported for single-dimension vectors");
+        }
+        else if (!SUPPORTED_TYPES.contains(type.asCQL3Type()) && !TypeUtil.isFrozen(type))
         {
             throw new InvalidRequestException("Unsupported type for SAI: " + type.asCQL3Type());
         }
-
-        AbstractAnalyzer.fromOptions(type, options);
-        IndexWriterConfig.fromOptions(null, type, options);
 
         return Collections.emptyMap();
     }
@@ -331,7 +336,13 @@ public class StorageAttachedIndex implements Index
     public void register(IndexRegistry registry)
     {
         // index will be available for writes
-        registry.registerIndex(this, StorageAttachedIndexGroup.class, () -> new StorageAttachedIndexGroup(baseCfs));
+        registry.registerIndex(this, StorageAttachedIndexGroup.GROUP_KEY, () -> new StorageAttachedIndexGroup(baseCfs));
+    }
+
+    @Override
+    public void unregister(IndexRegistry registry)
+    {
+        registry.unregisterIndex(this, StorageAttachedIndexGroup.GROUP_KEY);
     }
 
     @Override
@@ -610,7 +621,8 @@ public class StorageAttachedIndex implements Index
     @Override
     public void validate(ReadCommand command) throws InvalidRequestException
     {
-        if (!getIndexContext().isVector())
+        var indexQueryPlan = command.indexQueryPlan();
+        if (indexQueryPlan == null || !indexQueryPlan.isTopK())
             return;
 
         // to avoid overflow HNSW internal data structure and avoid OOM when filtering top-k

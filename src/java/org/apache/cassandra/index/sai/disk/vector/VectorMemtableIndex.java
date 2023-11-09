@@ -156,12 +156,19 @@ public class VectorMemtableIndex implements MemtableIndex
     @Override
     public RangeIterator search(QueryContext queryContext, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
-        assert expr.getOp() == Expression.Op.ANN : "Only ANN is supported for vector search, received " + expr.getOp();
+        assert expr.getOp() == Expression.Op.ANN || expr.getOp() == Expression.Op.BOUNDED_ANN : "Only ANN is supported for vector search, received " + expr.getOp();
 
         float[] qv = expr.lower.value.vector;
+        if (expr.getEuclideanSearchThreshold() > 0)
+            limit = 100000;
 
-        Bits bits = null;
-        if (!RangeUtil.coversFullRing(keyRange))
+        Bits bits;
+        if (RangeUtil.coversFullRing(keyRange))
+        {
+            // partition/range deletion won't trigger index update, so we have to filter shadow primary keys in memtable index
+            bits = queryContext.bitsetForShadowedPrimaryKeys(graph);
+        }
+        else
         {
             // if left bound is MIN_BOUND or KEY_BOUND, we need to include all token-only PrimaryKeys with same token
             boolean leftInclusive = keyRange.left.kind() != PartitionPosition.Kind.MAX_BOUND;
@@ -190,13 +197,8 @@ public class VectorMemtableIndex implements MemtableIndex
             else
                 bits = new KeyRangeFilteringBits(keyRange, queryContext.bitsetForShadowedPrimaryKeys(graph));
         }
-        else
-        {
-            // partition/range deletion won't trigger index update, so we have to filter shadow primary keys in memtable index
-            bits = queryContext.bitsetForShadowedPrimaryKeys(graph);
-        }
 
-        var keyQueue = graph.search(qv, limit, bits);
+        var keyQueue = graph.search(qv, limit, expr.getEuclideanSearchThreshold(), bits);
         if (keyQueue.isEmpty())
             return RangeIterator.empty();
         return new ReorderingRangeIterator(keyQueue);
@@ -228,7 +230,7 @@ public class VectorMemtableIndex implements MemtableIndex
 
         float[] qv = exp.lower.value.vector;
         var bits = new KeyFilteringBits(results);
-        var keyQueue = graph.search(qv, limit, bits);
+        var keyQueue = graph.search(qv, limit, 0.0f, bits);
         if (keyQueue.isEmpty())
             return RangeIterator.empty();
         return new ReorderingRangeIterator(keyQueue);

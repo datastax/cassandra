@@ -382,9 +382,18 @@ public class SAITester extends CQLTester
         waitForIndexQueryable(KEYSPACE, currentTable());
     }
 
-    public void waitForIndexQueryable(String keyspace, String table)
+    public void waitForIndexQueryable(int seconds)
     {
-        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, table)), 60, TimeUnit.SECONDS);
+        waitForIndexQueryable(KEYSPACE, currentTable(), seconds);
+    }
+
+    public void waitForIndexQueryable(String keyspace, String table) {
+        waitForIndexQueryable(keyspace, table, 60);
+    }
+
+    public void waitForIndexQueryable(String keyspace, String table, int seconds)
+    {
+        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, table)), seconds, TimeUnit.SECONDS);
     }
 
     protected void startCompaction() throws Throwable
@@ -619,7 +628,7 @@ public class SAITester extends CQLTester
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
         StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(cfs);
-        int contextCount = indexGroup.sstableContextManager().size();
+        int contextCount = indexGroup == null ? 0 : indexGroup.sstableContextManager().size();
         assertEquals("Expected " + sstableContextCount +" SSTableContexts, but got " + contextCount, sstableContextCount, contextCount);
 
         StorageAttachedIndex sai = (StorageAttachedIndex) cfs.indexManager.getIndexByName(indexName);
