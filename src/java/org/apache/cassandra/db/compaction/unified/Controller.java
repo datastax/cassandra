@@ -70,6 +70,7 @@ public abstract class Controller
     private static final ConcurrentMap<TableMetadata, Controller.Metrics> allMetrics = new ConcurrentHashMap<>();
 
     static final String PREFIX = "unified_compaction.";
+    static final String DSE_PREFIX = "dse." + PREFIX;
 
     /**
      * The data size in GB, it will be assumed that the node will have on disk roughly this size of data when it
@@ -103,7 +104,7 @@ public abstract class Controller
      * and replayers in CNDB without having to change the schema for each tenant.
      */
     @Deprecated
-    static final Optional<Integer> DEFAULT_NUM_SHARDS = Optional.ofNullable(System.getProperty(PREFIX + NUM_SHARDS_OPTION)).map(Integer::valueOf);
+    static final Optional<Integer> DEFAULT_NUM_SHARDS = Optional.ofNullable(System.getProperty(DSE_PREFIX + NUM_SHARDS_OPTION)).map(Integer::valueOf);
 
     /**
      * The minimum sstable size. Sharded writers split sstables over shard only if they are at least as large as the
