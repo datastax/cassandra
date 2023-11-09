@@ -38,6 +38,7 @@ import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -108,11 +109,10 @@ public class IndexContext
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
     private final boolean isAnalyzed;
+    private final boolean hasEuclideanSimilarityFunc;
     private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
     private final AbstractAnalyzer.AnalyzerFactory queryAnalyzerFactory;
     private final PrimaryKey.Factory primaryKeyFactory;
-
-    private final boolean segmentCompactionEnabled;
 
     public IndexContext(@Nonnull String keyspace,
                         @Nonnull String table,
@@ -149,7 +149,7 @@ public class IndexContext
             this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(config.options)
                                         ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
                                         : this.analyzerFactory;
-            this.segmentCompactionEnabled = Boolean.parseBoolean(config.options.getOrDefault(ENABLE_SEGMENT_COMPACTION_OPTION_NAME, "false"));
+            this.hasEuclideanSimilarityFunc = VectorSimilarityFunction.EUCLIDEAN.name().equalsIgnoreCase(config.options.get(IndexWriterConfig.SIMILARITY_FUNCTION));
         }
         else
         {
@@ -157,7 +157,7 @@ public class IndexContext
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(Collections.EMPTY_MAP);
             this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), Collections.EMPTY_MAP);
             this.queryAnalyzerFactory = this.analyzerFactory;
-            this.segmentCompactionEnabled = true;
+            this.hasEuclideanSimilarityFunc = false;
         }
 
         logger.debug(logMessage("Initialized index context with index writer config: {}"), indexWriterConfig);
@@ -255,14 +255,8 @@ public class IndexContext
 
     public void renewMemtable(Memtable renewed)
     {
-        for (Memtable memtable : liveMemtables.keySet())
-        {
-            // remove every index but the one that corresponds to the post-truncate Memtable
-            if (renewed != memtable)
-            {
-                liveMemtables.remove(memtable);
-            }
-        }
+        // remove every index but the one that corresponds to the post-truncate Memtable
+        liveMemtables.keySet().removeIf(m -> m != renewed);
     }
 
     public void discardMemtable(Memtable discarded)
@@ -441,12 +435,14 @@ public class IndexContext
         if (op.isLike() || op == Operator.LIKE) return false;
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
         // The only supported operator is ANALYZER_MATCHES.
-        if (isAnalyzed) return op == Operator.ANALYZER_MATCHES;
+        if (isAnalyzed || op == Operator.ANALYZER_MATCHES) return isAnalyzed && op == Operator.ANALYZER_MATCHES;
 
-        // ANN is only supported against vectors, and vector indexes only support ANN
+        // ANN is only supported against vectors.
+        // BOUNDED_ANN is only supported against vectors with a Euclidean similarity function.
+        // Vector indexes only support ANN and BOUNDED_ANN
         if (column.type instanceof VectorType)
-            return op == Operator.ANN;
-        if (op == Operator.ANN)
+            return op == Operator.ANN || (op == Operator.BOUNDED_ANN && hasEuclideanSimilarityFunc);
+        if (op == Operator.ANN || op == Operator.BOUNDED_ANN)
             return false;
 
         Expression.Op operator = Expression.Op.valueOf(op);
@@ -681,20 +677,5 @@ public class IndexContext
         IndexFeatureSet.Accumulator accumulator = new IndexFeatureSet.Accumulator();
         getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(set -> accumulator.accumulate(set));
         return accumulator.complete();
-    }
-
-    /**
-     * Returns true if index segments should be compacted into one segment after building the index.
-     *
-     * By default, this option is set to true. A user is able to override this by setting
-     * <code>enable_segment_compaction</code> to false in the index options.
-     * This is an expert-only option.
-     * Disabling compaction improves performance of writes at the expense of significantly reducing performance
-     * of read queries. A user should never turn compaction off on a production system
-     * unless diagnosing a performance issue.
-     */
-    public boolean isSegmentCompactionEnabled()
-    {
-        return this.segmentCompactionEnabled;
     }
 }

@@ -397,7 +397,14 @@ public enum CassandraRelevantProperties
     //This only applies if include all is false
     SYSTEM_VIEWS_INCLUDE_LOCAL_AND_PEERS("cassandra.system_view.include_local_and_peers"),
     //This only applies if include all is false
-    SYSTEM_VIEWS_INCLUDE_INDEXES("cassandra.system_view.include_indexes");
+    SYSTEM_VIEWS_INCLUDE_INDEXES("cassandra.system_view.include_indexes"),
+
+    // if true, allow BQ and writing optimized ordinal maps
+    VSEARCH_11_9_UPGRADES("cassandra.vsearch_11_9_upgrades", "true"),
+
+    // Enables parallel index read.
+    USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
+    PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

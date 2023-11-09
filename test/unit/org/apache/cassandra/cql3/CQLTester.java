@@ -1177,7 +1177,7 @@ public abstract class CQLTester
         {
             logger.info("Error performing schema change", e);
             if (e instanceof InvalidRequestException)
-                throw new InvalidRequestException(String.format("Error setting schema for test (query was: %s)", query), e);
+                throw e;
             throw new RuntimeException(String.format("Error setting schema for test (query was: %s)", query), e);
         }
     }
@@ -2442,6 +2442,11 @@ public abstract class CQLTester
         public int nextIntBetween(int minValue, int maxValue)
         {
             return RandomInts.randomIntBetween(random, minValue, maxValue);
+        }
+
+        public float nextFloatBetween(int minValue, int maxValue)
+        {
+            return random.nextFloat() * (maxValue - minValue) + minValue;
         }
 
         public long nextLong()

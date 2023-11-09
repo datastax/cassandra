@@ -49,12 +49,17 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
 
     public abstract int size();
 
-    public abstract OnDiskOrdinalsMap.OrdinalsView getOrdinalsView() throws IOException;
+    public abstract OrdinalsView getOrdinalsView() throws IOException;
 
     /**
      * See CassandraDiskANN::search
      */
     public abstract VectorPostingList search(float[] queryVector, int topK, int limit, Bits bits, QueryContext context);
+
+    /**
+     * See CassandraDiskANN::search
+     */
+    public abstract VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits bits, QueryContext context);
 
     public abstract void close() throws IOException;
 

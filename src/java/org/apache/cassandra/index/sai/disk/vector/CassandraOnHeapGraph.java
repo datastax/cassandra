@@ -29,8 +29,11 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
 
+import com.google.common.collect.BiMap;
+import com.google.common.collect.HashBiMap;
 import org.cliffc.high_scale_lib.NonBlockingHashMapLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,13 +42,18 @@ import io.github.jbellis.jvector.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
-import io.github.jbellis.jvector.graph.NeighborSimilarity;
+import io.github.jbellis.jvector.graph.NodeSimilarity;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
+import io.github.jbellis.jvector.pq.BQVectors;
+import io.github.jbellis.jvector.pq.BinaryQuantization;
 import io.github.jbellis.jvector.pq.CompressedVectors;
+import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.pq.ProductQuantization;
+import io.github.jbellis.jvector.pq.VectorCompressor;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorEncoding;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -257,7 +265,7 @@ public class CassandraOnHeapGraph<T>
     /**
      * @return keys (PrimaryKey or segment row id) associated with the topK vectors near the query
      */
-    public PriorityQueue<T> search(float[] queryVector, int limit, Bits toAccept)
+    public PriorityQueue<T> search(float[] queryVector, int limit, float threshold, Bits toAccept)
     {
         validateIndexable(queryVector, similarityFunction);
 
@@ -269,10 +277,10 @@ public class CassandraOnHeapGraph<T>
         // VSTODO re-use searcher objects
         GraphIndex<float[]> graph = builder.getGraph();
         var searcher = new GraphSearcher.Builder<>(graph.getView()).withConcurrentUpdates().build();
-        NeighborSimilarity.ExactScoreFunction scoreFunction = node2 -> {
+        NodeSimilarity.ExactScoreFunction scoreFunction = node2 -> {
             return similarityFunction.compare(queryVector, ((RandomAccessVectorValues<float[]>) vectorValues).vectorValue(node2));
         };
-        var result = searcher.search(scoreFunction, null, limit, bits);
+        var result = searcher.search(scoreFunction, null, limit, threshold, bits);
         Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         var a = result.getNodes();
         PriorityQueue<T> keyQueue = new PriorityQueue<>();
@@ -305,11 +313,6 @@ public class CassandraOnHeapGraph<T>
             SAICodecUtils.writeHeader(postingsOutput);
             SAICodecUtils.writeHeader(indexOutput);
 
-            // compute and write PQ
-            long pqOffset = pqOutput.getFilePointer();
-            long pqPosition = writePQ(pqOutput.asSequentialWriter());
-            long pqLength = pqPosition - pqOffset;
-
             var deletedOrdinals = new HashSet<Integer>();
             postingsMap.values().stream().filter(VectorPostings::isEmpty).forEach(vectorPostings -> deletedOrdinals.add(vectorPostings.getOrdinal()));
             // remove ordinals that don't have corresponding row ids due to partition/range deletion
@@ -319,15 +322,38 @@ public class CassandraOnHeapGraph<T>
                 if (vectorPostings.shouldAppendDeletedOrdinal())
                     deletedOrdinals.add(vectorPostings.getOrdinal());
             }
+
+            // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
+            // null if remapping is not possible
+            final BiMap <Integer, Integer> ordinalMap = deletedOrdinals.isEmpty() ? buildOrdinalMap() : null;
+
+            boolean canFastFindRows = ordinalMap != null && CassandraRelevantProperties.VSEARCH_11_9_UPGRADES.getBoolean();
+            IntUnaryOperator ordinalMapper = canFastFindRows
+                                                ? x -> ordinalMap.getOrDefault(x, x)
+                                                : x -> x;
+            IntUnaryOperator reverseOrdinalMapper = canFastFindRows
+                                                        ? x -> ordinalMap.inverse().getOrDefault(x, x)
+                                                        : x -> x;
+
+            // compute and write PQ
+            long pqOffset = pqOutput.getFilePointer();
+            long pqPosition = writePQ(pqOutput.asSequentialWriter(), reverseOrdinalMapper);
+            long pqLength = pqPosition - pqOffset;
+
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
-            long postingsPosition = new VectorPostingsWriter<T>().writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap, deletedOrdinals);
+            long postingsPosition = new VectorPostingsWriter<T>(canFastFindRows, reverseOrdinalMapper)
+                                            .writePostings(postingsOutput.asSequentialWriter(),
+                                                           vectorValues, postingsMap, deletedOrdinals);
             long postingsLength = postingsPosition - postingsOffset;
 
             // complete (internal clean up) and write the graph
-            builder.complete();
+            builder.cleanup();
             long termsOffset = indexOutput.getFilePointer();
-            OnDiskGraphIndex.write(builder.getGraph(), vectorValues, indexOutput.asSequentialWriter());
+
+            OnDiskGraphIndex.write(new RemappingOnDiskGraphIndex<>(builder.getGraph(), ordinalMapper, reverseOrdinalMapper),
+                                   new RemappingRamAwareVectorValues(vectorValues, reverseOrdinalMapper),
+                                   indexOutput.asSequentialWriter());
             long termsLength = indexOutput.getFilePointer() - termsOffset;
 
             // write footers/checksums
@@ -345,35 +371,133 @@ public class CassandraOnHeapGraph<T>
         }
     }
 
-    private long writePQ(SequentialWriter writer) throws IOException
+    private BiMap <Integer, Integer> buildOrdinalMap()
     {
-        // VSTODO ideally we should make this dynamic based on observed performance
-        // currently this is hardcoded so that ada002 1536-dimension vectors get quantized harder
-        int M = vectorValues.dimension() <= 1024 ? max(1, vectorValues.dimension() / 4) : vectorValues.dimension() / 8;
-        // don't bother with PQ if there are fewer than 1K vectors
-        writer.writeBoolean(vectorValues.size() >= 1024);
-        if (vectorValues.size() < 1024)
+        BiMap <Integer, Integer> ordinalMap = HashBiMap.create();
+        int minRow = Integer.MAX_VALUE;
+        int maxRow = Integer.MIN_VALUE;
+        for (VectorPostings<T> vectorPostings : postingsMap.values())
         {
-            logger.debug("Skipping PQ for only {} vectors", vectorValues.size());
+            if (vectorPostings.getRowIds().size() != 1)
+            {
+                return null;
+            }
+            int rowId = vectorPostings.getRowIds().getInt(0);
+            int ordinal = vectorPostings.getOrdinal();
+            minRow = Math.min(minRow, rowId);
+            maxRow = Math.max(maxRow, rowId);
+            if (ordinalMap.containsKey(ordinal))
+            {
+                return null;
+            } else {
+                ordinalMap.put(ordinal, rowId);
+            }
+        }
+
+        if (minRow != 0 || maxRow != postingsMap.values().size() - 1)
+        {
+            return null;
+        }
+        return ordinalMap;
+    }
+
+    private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper) throws IOException
+    {
+        VectorCompression compressionType;
+        if (vectorValues.dimension() >= 1536 && CassandraRelevantProperties.VSEARCH_11_9_UPGRADES.getBoolean())
+            compressionType = VectorCompression.BINARY_QUANTIZATION;
+        else if (vectorValues.size() < 1024)
+            compressionType = VectorCompression.NONE;
+        else
+            compressionType = VectorCompression.PRODUCT_QUANTIZATION;
+        writer.writeByte(compressionType.ordinal());
+        if (compressionType == VectorCompression.NONE)
+        {
+            if (logger.isDebugEnabled()) logger.debug("Skipping compression for only {} vectors", vectorValues.size());
             return writer.position();
         }
 
-        logger.debug("Computing PQ for {} vectors", vectorValues.size());
+        int bytesPerVector = getBytesPerVector(vectorValues.dimension());
+        logger.debug("Computing PQ for {} vectors at {} bytes per vector (originally {}-D)",
+                     vectorValues.size(), bytesPerVector, vectorValues.dimension());
+
+        // train PQ and encode
+        VectorCompressor<?> compressor;
+        Object encoded; // byte[][], or long[][]
         // limit the PQ computation and encoding to one index at a time -- goal during flush is to
         // evict from memory ASAP so better to do the PQ build (in parallel) one at a time
         synchronized (CassandraOnHeapGraph.class)
         {
-            // train PQ and encode
-            var pq = ProductQuantization.compute(vectorValues, M, false);
+            if (vectorValues.dimension() >= 1536)
+                compressor = BinaryQuantization.compute(vectorValues);
+            else
+                compressor = ProductQuantization.compute(vectorValues, bytesPerVector, false);
             assert !vectorValues.isValueShared();
-            var encoded = IntStream.range(0, vectorValues.size()).parallel()
-                          .mapToObj(i -> pq.encode(vectorValues.vectorValue(i)))
-                          .toArray(byte[][]::new);
-            var cv = new CompressedVectors(pq, encoded);
-            // save
-            cv.write(writer);
-            return writer.position();
+            encoded = compressVectors(reverseOrdinalMapper, compressor);
         }
+
+        // save (outside the synchronized block, this is io-bound not CPU)
+        CompressedVectors cv;
+        if (compressor instanceof BinaryQuantization)
+            cv = new BQVectors((BinaryQuantization) compressor, (long[][]) encoded);
+        else
+            cv = new PQVectors((ProductQuantization) compressor, (byte[][]) encoded);
+        cv.write(writer);
+        return writer.position();
+    }
+
+    private Object compressVectors(IntUnaryOperator reverseOrdinalMapper, VectorCompressor<?> compressor)
+    {
+        if (compressor instanceof ProductQuantization)
+            return IntStream.range(0, vectorValues.size()).parallel()
+                       .mapToObj(i -> ((ProductQuantization) compressor).encode(vectorValues.vectorValue(reverseOrdinalMapper.applyAsInt(i))))
+                       .toArray(byte[][]::new);
+        else if (compressor instanceof BinaryQuantization)
+            return IntStream.range(0, vectorValues.size()).parallel()
+                            .mapToObj(i -> ((BinaryQuantization) compressor).encode(vectorValues.vectorValue(reverseOrdinalMapper.applyAsInt(i))))
+                            .toArray(long[][]::new);
+        throw new UnsupportedOperationException("Unrecognized compressor " + compressor.getClass());
+    }
+
+    /**
+     * Compute bytes per vector for PQ using piecewise linear interpolation.
+     *
+     * @param dimension Dimension of the original vector
+     * @return Approximate number of bytes after compression
+     */
+    private int getBytesPerVector(int dimension) {
+        // the idea here is that higher dimensions compress well, but not so well that we should use fewer bits
+        // than a lower-dimension vector, which is what you could get with cutoff points to switch between (e.g.)
+        // D*0.5 and D*0.25.  Thus, the following ensures that bytes per vector is strictly increasing with D.
+        if (dimension <= 32) {
+            // We are compressing from 4-byte floats to single-byte codebook indexes,
+            // so this represents compression of 4x
+            // * GloVe-25 needs 25 BPV to achieve good recall
+            return dimension;
+        }
+        if (dimension <= 64) {
+            // * GloVe-50 performs fine at 25
+            return 32;
+        }
+        if (dimension <= 200) {
+            // * GloVe-100 and -200 perform well at 50 and 100 BPV, respectively
+            return (int) (dimension * 0.5);
+        }
+        if (dimension <= 400) {
+            // * NYTimes-256 actually performs fine at 64 BPV but we'll be conservative
+            //   since we don't want BPV to decrease
+            return 100;
+        }
+        if (dimension <= 768) {
+            // allow BPV to increase linearly up to 192
+            return (int) (dimension * 0.25);
+        }
+        if (dimension <= 1536) {
+            // * ada002 vectors have good recall even at 192 BPV = compression of 32x
+            return 192;
+        }
+        // We have not tested recall with larger vectors than this, let's let it increase linearly
+        return (int) (dimension * 0.125);
     }
 
     public long ramBytesUsed()

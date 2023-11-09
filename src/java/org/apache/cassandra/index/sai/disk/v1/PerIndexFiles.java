@@ -45,7 +45,7 @@ public class PerIndexFiles implements Closeable
     private final IndexDescriptor indexDescriptor;
     private final IndexContext indexContext;
 
-    public PerIndexFiles(IndexDescriptor indexDescriptor, IndexContext indexContext, boolean temporary)
+    public PerIndexFiles(IndexDescriptor indexDescriptor, IndexContext indexContext)
     {
         this.indexDescriptor = indexDescriptor;
         this.indexContext = indexContext;
@@ -70,7 +70,7 @@ public class PerIndexFiles implements Closeable
         {
             try
             {
-                files.put(component, indexDescriptor.createPerIndexFileHandle(component, indexContext, temporary));
+                files.put(component, indexDescriptor.createPerIndexFileHandle(component, indexContext));
                 componentsPresent.add(component);
             }
             catch (UncheckedIOException e)
@@ -78,6 +78,7 @@ public class PerIndexFiles implements Closeable
                 // leave logging until we're done
             }
         }
+
         logger.info("Components present for {} are {}", indexDescriptor, componentsPresent);
     }
 

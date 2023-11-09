@@ -41,6 +41,8 @@ import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
+import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
+import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.lucene.index.VectorEncoding;
@@ -123,10 +125,16 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         }
     }
 
+    @Override
+    public VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits bits, QueryContext context)
+    {
+        throw new UnsupportedOperationException();
+    }
+
     private class RowIdIterator implements PrimitiveIterator.OfInt, AutoCloseable
     {
         private final NeighborQueue queue;
-        private final OnDiskOrdinalsMap.RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
+        private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
 
         private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
 
@@ -182,7 +190,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     }
 
     @Override
-    public OnDiskOrdinalsMap.OrdinalsView getOrdinalsView()
+    public OrdinalsView getOrdinalsView()
     {
         return ordinalsMap.getOrdinalsView();
     }
@@ -214,11 +222,11 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         @Override
         public float[] vectorValue(int i) throws IOException
         {
-            queryContext.hnswVectorsAccessed++;
+            queryContext.addHnswVectorsAccessed(1);
             var cached = vectorCache.get(i);
             if (cached != null)
             {
-                queryContext.hnswVectorCacheHits++;
+                queryContext.addHnswVectorCacheHits(1);
                 return cached;
             }
 

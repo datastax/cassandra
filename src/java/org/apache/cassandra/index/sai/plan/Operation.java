@@ -138,6 +138,14 @@ public class Operation
                         while (analyzer.hasNext());
                     }
                 }
+                else if (e instanceof RowFilter.GeoDistanceExpression)
+                {
+                    var distance = ((RowFilter.GeoDistanceExpression) e);
+                    var expression = new Expression(indexContext)
+                                     .add(distance.getDistanceOperator(), distance.getDistance().duplicate())
+                                     .add(Operator.BOUNDED_ANN, e.getIndexValue().duplicate());
+                    perColumn.add(expression);
+                }
                 else
                 // "range" or not-equals operator, combines both bounds together into the single expression,
                 // if operation of the group is AND, otherwise we are forced to create separate expressions,
@@ -208,13 +216,16 @@ public class Operation
 
     static RangeIterator buildIterator(QueryController controller)
     {
-        var orderings = controller.filterOperation().expressions()
-                                  .stream().filter(e -> e.operator() == Operator.ANN).collect(Collectors.toList());
+        var filterOperation = controller.filterOperation();
+        var orderings = filterOperation.expressions()
+                                       .stream().filter(e -> e.operator() == Operator.ANN).collect(Collectors.toList());
         assert orderings.size() <= 1;
-        if (controller.filterOperation().expressions().size() == 1 && orderings.size() == 1)
+        if (filterOperation.expressions().size() == 1 && filterOperation.children().isEmpty() && orderings.size() == 1)
             // If we only have one expression, we just use the ANN index to order and limit.
             return controller.getTopKRows(orderings.get(0));
-        var iter = Node.buildTree(controller.filterOperation()).analyzeTree(controller).rangeIterator(controller);
+        var nonOrderingExpressions = filterOperation.expressions().stream()
+                                                    .filter(e -> e.operator() != Operator.ANN).collect(Collectors.toList());
+        var iter = Node.buildTree(nonOrderingExpressions, filterOperation.children(), filterOperation.isDisjunction()).analyzeTree(controller).rangeIterator(controller);
         if (orderings.isEmpty())
             return iter;
         return controller.getTopKRows(iter, orderings.get(0));
@@ -255,14 +266,19 @@ public class Operation
 
         abstract RangeIterator rangeIterator(QueryController controller);
 
-        static Node buildTree(RowFilter.FilterElement filterOperation)
+        static Node buildTree(List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
         {
-            OperatorNode node = filterOperation.isDisjunction() ? new OrNode() : new AndNode();
-            for (RowFilter.Expression expression : filterOperation.expressions())
+            OperatorNode node = isDisjunction ? new OrNode() : new AndNode();
+            for (RowFilter.Expression expression : expressions)
                 node.add(buildExpression(expression));
-            for (RowFilter.FilterElement child : filterOperation.children())
+            for (RowFilter.FilterElement child : children)
                 node.add(buildTree(child));
             return node;
+        }
+
+        static Node buildTree(RowFilter.FilterElement filterOperation)
+        {
+            return buildTree(filterOperation.expressions(), filterOperation.children(), filterOperation.isDisjunction());
         }
 
         static Node buildExpression(RowFilter.Expression expression)
