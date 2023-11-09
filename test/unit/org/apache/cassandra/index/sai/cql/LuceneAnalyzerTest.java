@@ -575,7 +575,7 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void testAnalyzerThatProducesTooManyBytesMustNotIndexTokens() throws Throwable
+    public void testAnalyzerThatProducesTooManyBytesIsRejectedAtWriteTime() throws Throwable
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
 
@@ -585,16 +585,8 @@ public class LuceneAnalyzerTest extends SAITester
 
         waitForIndexQueryable();
 
-        execute("INSERT INTO %s (id, val) VALUES (0, 'abcdedfghijklmnopqrstuvwxyz abcdedfghijklmnopqrstuvwxyz')");
-        execute("INSERT INTO %s (id, val) VALUES (1, 'a')");
-
-        // Verify that we get only PK 1 and not PK 0 since it is too large
-        beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT id FROM %s WHERE val : 'a'"), row(1));
-        });
-
-        // Also verify that compaction does not reintroduce the entry into the index.
-        compact();
-        assertRows(execute("SELECT id FROM %s WHERE val : 'a'"), row(1));
+        assertThatThrownBy(() -> execute("INSERT INTO %s (id, val) VALUES (0, 'abcdedfghijklmnopqrstuvwxyz abcdedfghijklmnopqrstuvwxyz')"))
+        .hasMessage("Term's analyzed size for column val exceeds the cumulative limit for index. Max allowed size 5.000KiB.")
+        .isInstanceOf(InvalidRequestException.class);
     }
 }
