@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -95,6 +96,14 @@ public abstract class Controller
      */
     @Deprecated
     static final String NUM_SHARDS_OPTION = "num_shards";
+
+    /**
+     * The default number of shards defined via system property, see {@link #NUM_SHARDS_OPTION}.
+     * The property exists for backward compatibility, and is deprecated. It allows for configuring compactors, writers
+     * and replayers in CNDB without having to change the schema for each tenant.
+     */
+    @Deprecated
+    static final Optional<Integer> DEFAULT_NUM_SHARDS = Optional.ofNullable(System.getProperty(PREFIX + NUM_SHARDS_OPTION)).map(Integer::valueOf);
 
     /**
      * The minimum sstable size. Sharded writers split sstables over shard only if they are at least as large as the
@@ -855,10 +864,12 @@ public abstract class Controller
                                                   ? Reservations.Type.valueOf(options.get(RESERVATIONS_TYPE_OPTION).toUpperCase())
                                                   : DEFAULT_RESERVED_THREADS_TYPE;
 
-        if (options.containsKey(NUM_SHARDS_OPTION))
+        if (options.containsKey(NUM_SHARDS_OPTION) || DEFAULT_NUM_SHARDS.isPresent())
         {
             // Legacy V1 mode.
-            int numShards = Integer.parseInt(options.get(NUM_SHARDS_OPTION));
+            int numShards = options.containsKey(NUM_SHARDS_OPTION) // options take precedence
+                            ? Integer.parseInt(options.get(NUM_SHARDS_OPTION))
+                            : DEFAULT_NUM_SHARDS.get();
             if (!options.containsKey(MIN_SSTABLE_SIZE_OPTION))
                 minSSTableSize = MIN_SSTABLE_SIZE_AUTO;
             baseShardCount = numShards;
