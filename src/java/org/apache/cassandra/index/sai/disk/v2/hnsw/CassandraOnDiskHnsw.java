@@ -115,7 +115,8 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
                                              LuceneCompat.bits(ordinalsMap.ignoringDeleted(acceptBits)),
                                              Integer.MAX_VALUE);
             Tracing.trace("HNSW search visited {} nodes to return {} results", queue.visitedCount(), queue.size());
-            return annRowIdsToPostings(queue, limit);
+            // Use topK to ensure we exhaust the whole queue, which is ordered from least similar to most similar.
+            return annRowIdsToPostings(queue, topK);
         }
         catch (IOException e)
         {
