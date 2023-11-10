@@ -41,6 +41,7 @@ import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
@@ -66,7 +67,9 @@ public final class IndexMetadata
 
     static
     {
-        indexNameAliases.put(StorageAttachedIndex.class.getSimpleName(), StorageAttachedIndex.class.getCanonicalName());
+        indexNameAliases.put(StorageAttachedIndex.NAME, StorageAttachedIndex.class.getCanonicalName());
+        indexNameAliases.put(StorageAttachedIndex.class.getSimpleName().toLowerCase(), StorageAttachedIndex.class.getCanonicalName());
+        indexNameAliases.put(SASIIndex.class.getSimpleName(), SASIIndex.class.getCanonicalName());
     }
 
     public enum Kind
