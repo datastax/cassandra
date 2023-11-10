@@ -115,8 +115,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
                                              LuceneCompat.bits(ordinalsMap.ignoringDeleted(acceptBits)),
                                              Integer.MAX_VALUE);
             Tracing.trace("HNSW search visited {} nodes to return {} results", queue.visitedCount(), queue.size());
-            // Use topK to ensure we exhaust the whole queue, which is ordered from least similar to most similar.
-            return annRowIdsToPostings(queue, topK);
+            return annRowIdsToPostings(queue);
         }
         catch (IOException e)
         {
@@ -166,11 +165,14 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         }
     }
 
-    private VectorPostingList annRowIdsToPostings(NeighborQueue queue, int limit) throws IOException
+    private VectorPostingList annRowIdsToPostings(NeighborQueue queue) throws IOException
     {
         try (var iterator = new RowIdIterator(queue))
         {
-            return new VectorPostingList(iterator, limit, queue.visitedCount());
+            // JVector returns results ordered most- to least-similar, which is why VPL has a `limit` paramter
+            // to avoid sorting results we don't care about.  But Lucene returns them with the least-similar
+            // results at the front of the queue, so we ensure we exhaust the whole queue here.
+            return new VectorPostingList(iterator, queue.size(), queue.visitedCount());
         }
     }
 
