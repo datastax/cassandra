@@ -677,8 +677,8 @@ public class NativeIndexDDLTest extends SAITester
         .hasMessage("Term of column m exceeds the byte limit for index. Term size 32.000KiB. Max allowed size 1.000KiB.")
         .isInstanceOf(InvalidQueryException.class);
 
-        assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, m) VALUES (0, {'" + largeTerm + "': '', '" + largeTerm + "': ''})"))
-        .hasMessage("Term of column frozen_m exceeds the byte limit for index. Term size 32.000KiB. Max allowed size 1.000KiB.")
+        assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, frozen_m) VALUES (0, {'key': '" + largeTerm + "'})"))
+        .hasMessage("Term of column frozen_m exceeds the byte limit for index. Term size 32.015KiB. Max allowed size 5.000KiB.")
         .isInstanceOf(InvalidQueryException.class);
     }
 
