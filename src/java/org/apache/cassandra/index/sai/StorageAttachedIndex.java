@@ -645,7 +645,11 @@ public class StorageAttachedIndex implements Index
 
     @Override
     public void validate(PartitionUpdate update) throws InvalidRequestException
-    {}
+    {
+        DecoratedKey key = update.partitionKey();
+        for (Row row : update)
+            indexContext.validate(key, row);
+    }
 
     /**
      * This method is called by the startup tasks to find SSTables that don't have indexes. The method is

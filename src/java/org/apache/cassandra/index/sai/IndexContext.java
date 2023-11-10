@@ -60,6 +60,7 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
+import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
@@ -101,6 +102,7 @@ public class IndexContext
 
     // Config can be null if the column context is "fake" (i.e. created for a filtering expression).
     private final IndexMetadata config;
+    private final VectorSimilarityFunction vectorSimilarityFunction;
 
     private final ConcurrentMap<Memtable, MemtableIndex> liveMemtables = new ConcurrentHashMap<>();
 
@@ -149,7 +151,10 @@ public class IndexContext
             this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(config.options)
                                         ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
                                         : this.analyzerFactory;
-            this.hasEuclideanSimilarityFunc = VectorSimilarityFunction.EUCLIDEAN.name().equalsIgnoreCase(config.options.get(IndexWriterConfig.SIMILARITY_FUNCTION));
+            String vsf = config.options.get(IndexWriterConfig.SIMILARITY_FUNCTION);
+            // We already validated it's a valid config, so no need to confirm that it is a valid enum value
+            this.vectorSimilarityFunction = vsf != null ? VectorSimilarityFunction.valueOf(vsf.toUpperCase()) : null;
+            this.hasEuclideanSimilarityFunc = vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN;
         }
         else
         {
@@ -157,6 +162,7 @@ public class IndexContext
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(Collections.EMPTY_MAP);
             this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), Collections.EMPTY_MAP);
             this.queryAnalyzerFactory = this.analyzerFactory;
+            this.vectorSimilarityFunction = null;
             this.hasEuclideanSimilarityFunc = false;
         }
 
@@ -538,6 +544,17 @@ public class IndexContext
         //VSTODO probably move this down to TypeUtils eventually
         return getValidator().isVector();
     }
+
+    public void validate(DecoratedKey key, Row row)
+    {
+        if (isVector())
+        {
+            // TODO can we validate without decomposing?
+            float[] value = TypeUtil.decomposeVector(getValidator(), getValueOf(key, row, FBUtilities.nowInSeconds()));
+            CassandraOnHeapGraph.validateIndexable(value, vectorSimilarityFunction);
+        }
+    }
+
 
     public boolean equals(Object obj)
     {
