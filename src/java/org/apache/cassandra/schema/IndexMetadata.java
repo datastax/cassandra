@@ -158,7 +158,7 @@ public final class IndexMetadata
 
     public static String expandAliases(String className)
     {
-        return indexNameAliases.getOrDefault(className, className);
+        return indexNameAliases.getOrDefault(className.toLowerCase(), className);
     }
 
     private void validateCustomIndexOptions(TableMetadata table, Class<? extends Index> indexerClass, Map<String, String> options)
