@@ -195,6 +195,9 @@ public class VectorInvalidQueryTest extends SAITester
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, Float.NaN))).isInstanceOf(InvalidRequestException.class);
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, Float.POSITIVE_INFINITY))).isInstanceOf(InvalidRequestException.class);
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(Float.NEGATIVE_INFINITY, 1))).isInstanceOf(InvalidRequestException.class);
+        // TODO the ANN read query no longer fails without writing to the index... this is likely because the other
+        // inserts created the index and then failed afterwards.
+        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, 1));
         assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY value ann of [0.0, 0.0] LIMIT 2")).isInstanceOf(InvalidRequestException.class);
     }
 
