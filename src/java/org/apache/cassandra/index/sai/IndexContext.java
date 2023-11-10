@@ -347,7 +347,7 @@ public class IndexContext
     private boolean validateCumulativeAnalyzedTermLimit(DecoratedKey key, AbstractAnalyzer analyzer)
     {
         int bytesCount = 0;
-        // TODO anayzer.hasNext copies the byteBuffer, but we don't need that here.
+        // VSTODO anayzer.hasNext copies the byteBuffer, but we don't need that here.
         while (analyzer.hasNext())
         {
             final ByteBuffer token = analyzer.next();
