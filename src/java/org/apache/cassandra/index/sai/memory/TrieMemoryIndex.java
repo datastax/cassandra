@@ -93,7 +93,7 @@ public class TrieMemoryIndex extends MemoryIndex
         try
         {
             value = TypeUtil.asIndexBytes(value, indexContext.getValidator());
-            analyzer.reset(value.duplicate());
+            analyzer.reset(value);
             final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
             final long initialSizeOnHeap = data.sizeOnHeap();
             final long initialSizeOffHeap = data.sizeOffHeap();
@@ -102,7 +102,7 @@ public class TrieMemoryIndex extends MemoryIndex
             while (analyzer.hasNext())
             {
                 final ByteBuffer term = analyzer.next();
-                if (!indexContext.validateMaxTermSize(key, term, false))
+                if (!indexContext.validateMaxTermSize(key, term))
                     continue;
 
                 setMinMaxTerm(term.duplicate());
