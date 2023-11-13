@@ -692,7 +692,7 @@ public class IndexContext
             return;
         // Only iterate over the top level expressions because that is where the ANN expression is located.
         for (RowFilter.Expression expression : rowFilter.root().expressions())
-            if (expression.operator() == Operator.ANN)
+            if (expression.operator() == Operator.ANN && expression.column().equals(column))
             {
                 float[] value = TypeUtil.decomposeVector(getValidator(), expression.getIndexValue());
                 CassandraOnHeapGraph.validateIndexable(value, vectorSimilarityFunction);
