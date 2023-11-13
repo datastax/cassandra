@@ -22,6 +22,7 @@ import java.io.IOException;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DataRange;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
@@ -33,8 +34,6 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.util.FileUtils;
@@ -56,8 +55,8 @@ public class MemtableRangeIterator extends RangeIterator
                                  PrimaryKey.Factory pkFactory,
                                  AbstractBounds<PartitionPosition> keyRange)
     {
-        super(pkFactory.createTokenOnly(keyRange.left.getToken()),
-              pkFactory.createTokenOnly(maxToken(keyRange, memtable.metadata().partitioner)),
+        super(minKey(memtable, pkFactory),
+              maxKey(memtable, pkFactory),
               memtable.getOperations());
 
         TableMetadata metadata = memtable.metadata();
@@ -74,9 +73,16 @@ public class MemtableRangeIterator extends RangeIterator
         this.rowIterator = null;
     }
 
-    private static Token maxToken(AbstractBounds<PartitionPosition> keyRange, IPartitioner partitioner)
+    private static PrimaryKey minKey(Memtable memtable, PrimaryKey.Factory factory)
     {
-        return keyRange.right.getToken().isMinimum() ? partitioner.getMaximumToken() : keyRange.right.getToken();
+        DecoratedKey pk = memtable.minPartitionKey();
+        return pk != null ? factory.createPartitionKeyOnly(pk) : null;
+    }
+
+    private static PrimaryKey maxKey(Memtable memtable, PrimaryKey.Factory factory)
+    {
+        DecoratedKey pk = memtable.maxPartitionKey();
+        return pk != null ? factory.createPartitionKeyOnly(pk) : null;
     }
 
     @Override
