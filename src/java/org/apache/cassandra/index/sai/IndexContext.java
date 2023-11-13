@@ -689,7 +689,7 @@ public class IndexContext
 
     public void validate(RowFilter rowFilter)
     {
-        // Only vector row filters are validated by the index right now.
+        // Only vector indexes have requirements to validate right now.
         if (!isVector())
             return;
         // Only iterate over the top level expressions because that is where the ANN expression is located.
