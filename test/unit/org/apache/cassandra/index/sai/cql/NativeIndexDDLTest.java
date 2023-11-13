@@ -121,7 +121,7 @@ public class NativeIndexDDLTest extends SAITester
     @BeforeClass
     public static void init()
     {
-        CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR.setBoolean(true);
+        CassandraRelevantProperties.SAI_VALIDATE_TERMS_AT_COORDINATOR.setBoolean(true);
     }
 
     @Before
@@ -691,6 +691,29 @@ public class NativeIndexDDLTest extends SAITester
         assertRows(execute("SELECT k,v,m FROM %s"), row(0, largeTerm, map(largeTerm, "")));
         assertEmpty(execute("SELECT k,v,m FROM %s WHERE v = ?", largeTerm));
         assertEmpty(execute("SELECT k,v,m FROM %s WHERE m[?] = ''", largeTerm));
+    }
+
+    @Test
+    public void testMaxTermSizeRejectionsAtWrite() throws Throwable
+    {
+        createTable(KEYSPACE, "CREATE TABLE %s (k int PRIMARY KEY, v text, m map<text, text>, frozen_m frozen<map<text, text>>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(m) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(full(frozen_m)) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
+
+        String largeTerm = UTF8Type.instance.compose(ByteBuffer.allocate(FBUtilities.MAX_UNSIGNED_SHORT / 2 + 1));
+        assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, v) VALUES (0, ?)", largeTerm))
+        .hasMessage("Term of column v exceeds the byte limit for index. Term size 32.000KiB. Max allowed size 1.000KiB.")
+        .isInstanceOf(InvalidQueryException.class);
+
+        assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, m) VALUES (0, {'key': '" + largeTerm + "'})"))
+        .hasMessage("Term of column m exceeds the byte limit for index. Term size 32.000KiB. Max allowed size 1.000KiB.")
+        .isInstanceOf(InvalidQueryException.class);
+
+        assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, frozen_m) VALUES (0, {'key': '" + largeTerm + "'})"))
+        .hasMessage("Term of column frozen_m exceeds the byte limit for index. Term size 32.015KiB. Max allowed size 5.000KiB.")
+        .isInstanceOf(InvalidQueryException.class);
     }
 
     @Test

@@ -34,6 +34,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.analyzer.ByteLimitedMaterializer;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -41,7 +42,6 @@ import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.NoSpamLogger;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
@@ -52,7 +52,6 @@ import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 public class SSTableIndexWriter implements PerIndexWriter
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableIndexWriter.class);
-    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     private final IndexDescriptor indexDescriptor;
     private final IndexContext indexContext;
@@ -199,7 +198,7 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private void addTerm(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type) throws IOException
     {
-        if (!indexContext.validateMaxTermSize(key.partitionKey(), term, false))
+        if (!indexContext.validateMaxTermSize(key.partitionKey(), term))
             return;
 
         if (currentBuilder == null)
@@ -220,19 +219,9 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
         else
         {
-            analyzer.reset(term);
-            try
-            {
-                while (analyzer.hasNext())
-                {
-                    ByteBuffer tokenTerm = analyzer.next();
-                    limiter.increment(currentBuilder.add(tokenTerm, key, sstableRowId));
-                }
-            }
-            finally
-            {
-                analyzer.end();
-            }
+            List<ByteBuffer> tokens = ByteLimitedMaterializer.materializeTokens(analyzer, term, indexContext, key);
+            for (ByteBuffer tokenTerm : tokens)
+                limiter.increment(currentBuilder.add(tokenTerm, key, sstableRowId));
         }
     }
 
