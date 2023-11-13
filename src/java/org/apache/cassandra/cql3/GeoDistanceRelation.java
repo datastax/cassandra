@@ -100,11 +100,16 @@ public class GeoDistanceRelation extends Relation
     }
 
     @Override
-    protected Restriction newContainsRestriction(TableMetadata table, VariableSpecifications boundNames, boolean isKey, boolean isNot)
+    protected Restriction newContainsRestriction(TableMetadata table, VariableSpecifications boundNames, boolean isKey)
     {
         throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
     }
 
+    @Override
+    protected Restriction newNotContainsRestriction(TableMetadata table, VariableSpecifications boundNames, boolean isKey)
+    {
+        throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
+    }
 
     @Override
     protected Restriction newINRestriction(TableMetadata table, VariableSpecifications boundNames)
