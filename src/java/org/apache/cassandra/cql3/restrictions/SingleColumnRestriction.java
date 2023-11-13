@@ -980,7 +980,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public MultiCBuilder appendTo(MultiCBuilder builder, QueryOptions options)
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
         {
             throw new UnsupportedOperationException();
         }
