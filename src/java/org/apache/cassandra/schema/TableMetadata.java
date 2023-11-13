@@ -469,23 +469,58 @@ public class TableMetadata implements SchemaElement
         return !columnName.bytes.hasRemaining();
     }
 
+    /*
+    Method that runs the same checks as validateCompatibility, but does not check the keyspace name and table id.
+    */
+    public void validateTableStructureCompatibility(TableMetadata previous)
+    {
+        if (isIndex())
+            return;
+
+        validateTableName(previous);
+        validateTableType(previous);
+        validateTableColumns(previous);
+    }
+
     void validateCompatibility(TableMetadata previous)
     {
         if (isIndex())
             return;
 
+        validateKeyspaceName(previous);
+        validateTableName(previous);
+        validateTableId(previous);
+        validateTableType(previous);
+        validateTableColumns(previous);
+
+    }
+
+    private void validateKeyspaceName(TableMetadata previous)
+    {
         if (!previous.keyspace.equals(keyspace))
             except("Keyspace mismatch (found %s; expected %s)", keyspace, previous.keyspace);
+    }
 
+    private void validateTableName(TableMetadata previous)
+    {
         if (!previous.name.equals(name))
             except("Table mismatch (found %s; expected %s)", name, previous.name);
+    }
 
+    private void validateTableId(TableMetadata previous)
+    {
         if (!previous.id.equals(id))
             except("Table ID mismatch (found %s; expected %s)", id, previous.id);
+    }
 
+    private void validateTableType(TableMetadata previous)
+    {
         if (!previous.flags.equals(flags) && (!Flag.isCQLTable(flags) || Flag.isCQLTable(previous.flags)))
             except("Table type mismatch (found %s; expected %s)", flags, previous.flags);
+    }
 
+    private void validateTableColumns(TableMetadata previous)
+    {
         if (previous.partitionKeyColumns.size() != partitionKeyColumns.size())
         {
             except("Partition keys of different length (found %s; expected %s)",
