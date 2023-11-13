@@ -35,6 +35,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -196,6 +197,28 @@ public class VectorInvalidQueryTest extends SAITester
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, Float.POSITIVE_INFINITY))).isInstanceOf(InvalidRequestException.class);
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(Float.NEGATIVE_INFINITY, 1))).isInstanceOf(InvalidRequestException.class);
         assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY value ann of [0.0, 0.0] LIMIT 2")).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY value ann of ? LIMIT 2", vector(0, 0))).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY value ann of ? LIMIT 2", vector(1, Float.NaN))).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY value ann of ? LIMIT 2", vector(1, Float.POSITIVE_INFINITY))).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY value ann of ? LIMIT 2", vector(Float.NEGATIVE_INFINITY, 1))).isInstanceOf(InvalidRequestException.class);
+    }
+
+    @Test
+    public void disallowZeroVectorsWithDefaultSimilarity() throws Throwable
+    {
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
+
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, value) VALUES (0, [0.0, 0.0])")).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(0, 0))).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, Float.NaN))).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, Float.POSITIVE_INFINITY))).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(Float.NEGATIVE_INFINITY, 1))).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY value ann of [0.0, 0.0] LIMIT 2")).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY value ann of ? LIMIT 2", vector(0, 0))).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY value ann of ? LIMIT 2", vector(1, Float.NaN))).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY value ann of ? LIMIT 2", vector(1, Float.POSITIVE_INFINITY))).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY value ann of ? LIMIT 2", vector(Float.NEGATIVE_INFINITY, 1))).isInstanceOf(InvalidRequestException.class);
     }
 
     @Test
@@ -282,11 +305,11 @@ public class VectorInvalidQueryTest extends SAITester
         QueryState queryState = new QueryState(state);
 
         CQLStatement statement = QueryProcessor.parseStatement(formatQuery(query), queryState.getClientState());
-        statement.validate(queryState);
+        statement.validate(queryState.getClientState());
 
         QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
         options.updateConsistency(consistencyLevel);
 
-        return ((ResultMessage.Rows)statement.execute(queryState, options, System.nanoTime())).result;
+        return ((ResultMessage.Rows)statement.execute(queryState, options, Dispatcher.RequestTime.forImmediateExecution())).result;
     }
 }
