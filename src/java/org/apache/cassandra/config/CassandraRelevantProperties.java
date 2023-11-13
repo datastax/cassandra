@@ -547,13 +547,17 @@ public enum CassandraRelevantProperties
     /** Latest version to be used for SAI index writing */
     SAI_LATEST_VERSION("cassandra.sai.latest_version", "ba"),
 
-    SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "8"),
-    SAI_MAX_STRING_TERM_SIZE("cassandra.sai.max_string_term_size_kb", "8"),
+    SAI_MAX_ANALYZED_SIZE("cassandra.sai.max_analyzed_size_kb", "5"),
+    SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "5"),
+    SAI_MAX_STRING_TERM_SIZE("cassandra.sai.max_string_term_size_kb", "1"),
+    SAI_MAX_VECTOR_TERM_SIZE("cassandra.sai.max_vector_term_size_kb", "16"),
 
     SAI_NUMERIC_VALUES_BLOCK_SIZE("dse.sai.numeric_values.block_size", "128"),
     SAI_NUMERIC_VALUES_MONOTONIC_BLOCK_SIZE("dse.sai.numeric_values.monotonic_block_size", "16384"),
     SAI_TEST_DISABLE_TIMEOUT("cassandra.sai.test.timeout_disabled", "false"),
     SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT("cassandra.test.sai.segment_build_memory_limit"),
+    /** Whether to validate terms that will be SAI indexed at the coordinator */
+    SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
     /** Controls the maximum top-k limit for vector search */
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
     /**
@@ -753,7 +757,6 @@ public enum CassandraRelevantProperties
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
     USE_RANDOM_ALLOCATION_IF_NOT_SUPPORTED("cassandra.token_allocation.use_random_if_not_supported"),
     /** Gossiper compute expiration timeout. Default value 3 days. */
-    VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("cassandra.sai.validate_max_term_size_at_coordinator"),
     VERY_LONG_TIME_MS("cassandra.very_long_time_ms", "259200000"),
     // if true, allow BQ and writing optimized ordinal maps
     VSEARCH_11_9_UPGRADES("cassandra.vsearch_11_9_upgrades", "true"),
