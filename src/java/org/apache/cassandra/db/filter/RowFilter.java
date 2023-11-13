@@ -1151,6 +1151,10 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             assert pointVector.length == 2 : "GEO_DISTANCE requires search vector to have 2 dimensions.";
             searchLat = pointVector[0];
             searchLon = pointVector[1];
+            if (searchLat < -90 || searchLat > 90)
+                throw new InvalidRequestException("GEO_DISTANCE latitude must be between -90 and 90 degrees, got " + searchLat);
+            if (searchLon < -180 || searchLon > 180)
+                throw new InvalidRequestException("GEO_DISTANCE longitude must be between -180 and 180 degrees, got " + searchLon);
         }
 
 
