@@ -172,9 +172,7 @@ public class IndexContext
             this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(config.options)
                                         ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
                                         : this.analyzerFactory;
-            String vsf = config.options.get(IndexWriterConfig.SIMILARITY_FUNCTION);
-            // We already validated it's a valid config, so no need to confirm that it is a valid enum value
-            this.vectorSimilarityFunction = vsf != null ? VectorSimilarityFunction.valueOf(vsf.toUpperCase()) : null;
+            this.vectorSimilarityFunction = indexWriterConfig.getSimilarityFunction();
             this.hasEuclideanSimilarityFunc = vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN;
         }
         else
