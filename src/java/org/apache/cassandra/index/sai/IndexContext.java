@@ -29,9 +29,9 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
@@ -39,6 +39,7 @@ import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -56,6 +57,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -66,6 +68,7 @@ import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
@@ -73,6 +76,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -82,6 +86,21 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 public class IndexContext
 {
     private static final Logger logger = LoggerFactory.getLogger(IndexContext.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
+
+    public static final int MAX_STRING_TERM_SIZE = Integer.getInteger("cassandra.sai.max_string_term_size_kb", 1) * 1024;
+    public static final int MAX_FROZEN_TERM_SIZE = Integer.getInteger("cassandra.sai.max_frozen_term_size_kb", 5) * 1024;
+    public static final int MAX_VECTOR_TERM_SIZE = Integer.getInteger("cassandra.sai.max_vector_term_size_kb", 16) * 1024;
+    public static final int MAX_ANALYZED_SIZE = Integer.getInteger("cassandra.sai.max_analyzed_size_kb", 5) * 1024;
+    private static final String TERM_OVERSIZE_LOG_MESSAGE =
+    "Can't add term of column {} to index for key: {}, term size {} max allowed size {}.";
+    private static final String TERM_OVERSIZE_ERROR_MESSAGE =
+    "Term of column %s exceeds the byte limit for index. Term size %s. Max allowed size %s.";
+
+    private static final String ANALYZED_TERM_OVERSIZE_LOG_MESSAGE =
+    "Term's analyzed size for column {} exceeds the cumulative limit for index. Max allowed size {}.";
+    private static final String ANALYZED_TERM_OVERSIZE_ERROR_MESSAGE =
+    "Term's analyzed size for column %s exceeds the cumulative limit for index. Max allowed size %s.";
 
     private static final Set<AbstractType<?>> EQ_ONLY_TYPES =
             ImmutableSet.of(UTF8Type.instance, AsciiType.instance, BooleanType.instance, UUIDType.instance);
@@ -108,11 +127,12 @@ public class IndexContext
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
     private final boolean isAnalyzed;
+    private final boolean hasEuclideanSimilarityFunc;
     private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
     private final AbstractAnalyzer.AnalyzerFactory queryAnalyzerFactory;
     private final PrimaryKey.Factory primaryKeyFactory;
 
-    private final boolean segmentCompactionEnabled;
+    private final int maxTermSize;
 
     public IndexContext(@Nonnull String keyspace,
                         @Nonnull String table,
@@ -149,7 +169,7 @@ public class IndexContext
             this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(config.options)
                                         ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
                                         : this.analyzerFactory;
-            this.segmentCompactionEnabled = Boolean.parseBoolean(config.options.getOrDefault(ENABLE_SEGMENT_COMPACTION_OPTION_NAME, "false"));
+            this.hasEuclideanSimilarityFunc = VectorSimilarityFunction.EUCLIDEAN.name().equalsIgnoreCase(config.options.get(IndexWriterConfig.SIMILARITY_FUNCTION));
         }
         else
         {
@@ -157,8 +177,13 @@ public class IndexContext
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(Collections.EMPTY_MAP);
             this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), Collections.EMPTY_MAP);
             this.queryAnalyzerFactory = this.analyzerFactory;
-            this.segmentCompactionEnabled = true;
+            this.hasEuclideanSimilarityFunc = false;
         }
+
+        this.maxTermSize = isVector() ? MAX_VECTOR_TERM_SIZE
+                                      : isAnalyzed ? MAX_ANALYZED_SIZE
+                                                   : isFrozen() ? MAX_FROZEN_TERM_SIZE : MAX_STRING_TERM_SIZE;
+
 
         logger.debug(logMessage("Initialized index context with index writer config: {}"), indexWriterConfig);
     }
@@ -236,6 +261,109 @@ public class IndexContext
         indexMetrics.memtableIndexWriteLatency.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
     }
 
+    /**
+     * Validate maximum term size for given row. Throw an exception when invalid.
+     */
+    public void validateMaxTermSizeForRow(DecoratedKey key, Row row)
+    {
+        AbstractAnalyzer analyzer = getAnalyzerFactory().create();
+        if (isNonFrozenCollection())
+        {
+            Iterator<ByteBuffer> bufferIterator = getValuesOf(row, FBUtilities.nowInSeconds());
+            while (bufferIterator != null && bufferIterator.hasNext())
+                validateMaxTermSizeForCell(analyzer, key, bufferIterator.next());
+        }
+        else
+        {
+            ByteBuffer value = getValueOf(key, row, FBUtilities.nowInSeconds());
+            validateMaxTermSizeForCell(analyzer, key, value);
+        }
+    }
+
+    private void validateMaxTermSizeForCell(AbstractAnalyzer analyzer, DecoratedKey key, @Nullable ByteBuffer cellBuffer)
+    {
+        if (cellBuffer == null || cellBuffer.remaining() == 0)
+            return;
+
+        analyzer.reset(cellBuffer);
+        try
+        {
+            if (analyzer.transformValue())
+            {
+                if (!validateCumulativeAnalyzedTermLimit(key, analyzer))
+                {
+                    var error = String.format(ANALYZED_TERM_OVERSIZE_ERROR_MESSAGE,
+                                              column.name, FBUtilities.prettyPrintMemory(maxTermSize));
+                    throw new InvalidRequestException(error);
+                }
+            }
+            else
+            {
+                while (analyzer.hasNext())
+                {
+                    var size = analyzer.next().remaining();
+                    if (!validateMaxTermSize(key, size))
+                    {
+                        var error = String.format(TERM_OVERSIZE_ERROR_MESSAGE,
+                                                  column.name,
+                                                  FBUtilities.prettyPrintMemory(size),
+                                                  FBUtilities.prettyPrintMemory(maxTermSize));
+                        throw new InvalidRequestException(error);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            analyzer.end();
+        }
+    }
+
+
+    /**
+     * Validate maximum term size for given term
+     * @return true if given term is valid; otherwise false.
+     */
+    public boolean validateMaxTermSize(DecoratedKey key, ByteBuffer term)
+    {
+        return validateMaxTermSize(key, term.remaining());
+    }
+
+    private boolean validateMaxTermSize(DecoratedKey key, int termSize)
+    {
+        if (termSize > maxTermSize)
+        {
+            noSpamLogger.warn(logMessage(TERM_OVERSIZE_LOG_MESSAGE),
+                              getColumnName(),
+                              keyValidator().getString(key.getKey()),
+                              FBUtilities.prettyPrintMemory(termSize),
+                              FBUtilities.prettyPrintMemory(maxTermSize));
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean validateCumulativeAnalyzedTermLimit(DecoratedKey key, AbstractAnalyzer analyzer)
+    {
+        int bytesCount = 0;
+        // VSTODO anayzer.hasNext copies the byteBuffer, but we don't need that here.
+        while (analyzer.hasNext())
+        {
+            final ByteBuffer token = analyzer.next();
+            bytesCount += token.remaining();
+            if (bytesCount >= maxTermSize)
+            {
+                noSpamLogger.warn(logMessage(ANALYZED_TERM_OVERSIZE_LOG_MESSAGE),
+                                  getColumnName(),
+                                  keyValidator().getString(key.getKey()),
+                                  FBUtilities.prettyPrintMemory(maxTermSize));
+                return false;
+            }
+        }
+        return true;
+    }
+
     public void update(DecoratedKey key, Row oldRow, Row newRow, Memtable memtable, OpOrder.Group opGroup)
     {
         if (!isVector())
@@ -255,14 +383,8 @@ public class IndexContext
 
     public void renewMemtable(Memtable renewed)
     {
-        for (Memtable memtable : liveMemtables.keySet())
-        {
-            // remove every index but the one that corresponds to the post-truncate Memtable
-            if (renewed != memtable)
-            {
-                liveMemtables.remove(memtable);
-            }
-        }
+        // remove every index but the one that corresponds to the post-truncate Memtable
+        liveMemtables.keySet().removeIf(m -> m != renewed);
     }
 
     public void discardMemtable(Memtable discarded)
@@ -279,16 +401,44 @@ public class IndexContext
                             .orElse(null);
     }
 
-    public List<Pair<Memtable, RangeIterator<PrimaryKey>>> iteratorsForSearch(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit) {
-        return liveMemtables.entrySet()
-                                   .stream()
-                                   .map(e -> Pair.create(e.getKey(), e.getValue().search(queryContext, expression, keyRange, limit))).collect(Collectors.toList());
+
+    public RangeIterator searchMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
+    {
+        Collection<MemtableIndex> memtables = liveMemtables.values();
+
+        if (memtables.isEmpty())
+        {
+            return RangeIterator.empty();
+        }
+
+        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+
+        for (MemtableIndex index : memtables)
+        {
+            builder.add(index.search(context, e, keyRange, limit));
+        }
+
+        return builder.build();
     }
 
-    public RangeIterator<PrimaryKey> reorderMemtable(Memtable memtable, QueryContext context, RangeIterator<PrimaryKey> iterator, Expression exp, int limit)
+    // Search all memtables for all PrimaryKeys in list.
+    public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> source, Expression e, int limit)
     {
-        var index = liveMemtables.get(memtable);
-        return index.limitToTopResults(context, iterator, exp, limit);
+        Collection<MemtableIndex> memtables = liveMemtables.values();
+
+        if (memtables.isEmpty())
+        {
+            return RangeIterator.empty();
+        }
+
+        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+
+        for (MemtableIndex index : memtables)
+        {
+            builder.add(index.limitToTopResults(context, source, e, limit));
+        }
+
+        return builder.build();
     }
 
     public long liveMemtableWriteCount()
@@ -413,12 +563,14 @@ public class IndexContext
         if (op.isLike() || op == Operator.LIKE) return false;
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
         // The only supported operator is ANALYZER_MATCHES.
-        if (isAnalyzed) return op == Operator.ANALYZER_MATCHES;
+        if (isAnalyzed || op == Operator.ANALYZER_MATCHES) return isAnalyzed && op == Operator.ANALYZER_MATCHES;
 
-        // ANN is only supported against vectors, and vector indexes only support ANN
+        // ANN is only supported against vectors.
+        // BOUNDED_ANN is only supported against vectors with a Euclidean similarity function.
+        // Vector indexes only support ANN and BOUNDED_ANN
         if (column.type instanceof VectorType)
-            return op == Operator.ANN;
-        if (op == Operator.ANN)
+            return op == Operator.ANN || (op == Operator.BOUNDED_ANN && hasEuclideanSimilarityFunc);
+        if (op == Operator.ANN || op == Operator.BOUNDED_ANN)
             return false;
 
         Expression.Op operator = Expression.Op.valueOf(op);
@@ -607,7 +759,7 @@ public class IndexContext
             }
             catch (Throwable e)
             {
-                logger.warn(logMessage("Failed to update per-column components for SSTable {}"), context.descriptor(), e);
+                logger.error(logMessage("Failed to update per-column components for SSTable {}"), context.descriptor(), e);
                 invalid.add(context);
             }
         }
@@ -653,20 +805,5 @@ public class IndexContext
         IndexFeatureSet.Accumulator accumulator = new IndexFeatureSet.Accumulator();
         getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(set -> accumulator.accumulate(set));
         return accumulator.complete();
-    }
-
-    /**
-     * Returns true if index segments should be compacted into one segment after building the index.
-     *
-     * By default, this option is set to true. A user is able to override this by setting
-     * <code>enable_segment_compaction</code> to false in the index options.
-     * This is an expert-only option.
-     * Disabling compaction improves performance of writes at the expense of significantly reducing performance
-     * of read queries. A user should never turn compaction off on a production system
-     * unless diagnosing a performance issue.
-     */
-    public boolean isSegmentCompactionEnabled()
-    {
-        return this.segmentCompactionEnabled;
     }
 }

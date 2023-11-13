@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Stopwatch;
@@ -51,7 +52,7 @@ import org.apache.cassandra.utils.Throwables;
  */
 
 @NotThreadSafe
-public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
+public class PostingListRangeIterator extends RangeIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -62,6 +63,8 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
     private final IndexContext indexContext;
     private final PrimaryKeyMap primaryKeyMap;
     private final IndexSearcherContext searcherContext;
+
+    private final AtomicBoolean isClosed = new AtomicBoolean(false);
 
     private boolean needsSkipping = false;
     private PrimaryKey skipToToken = null;
@@ -124,13 +127,22 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
     @Override
     public void close() throws IOException
     {
-        if (logger.isTraceEnabled())
+        if (isClosed.compareAndSet(false, true))
         {
-            final long exhaustedInMills = timeToExhaust.stop().elapsed(TimeUnit.MILLISECONDS);
-            logger.trace(indexContext.logMessage("PostinListRangeIterator exhausted after {} ms"), exhaustedInMills);
+            if (logger.isTraceEnabled())
+            {
+                // timeToExhaust.stop() throws on already stopped stopwatch
+                final long closedInMills = timeToExhaust.stop().elapsed(TimeUnit.MILLISECONDS);
+                logger.trace(indexContext.logMessage("PostinListRangeIterator exhausted after {} ms"), closedInMills);
+            }
+
+            FileUtils.closeQuietly(postingList, primaryKeyMap);
+        }
+        else {
+            logger.warn("PostingListRangeIterator is already closed",
+                        new IllegalStateException("PostingListRangeIterator is already closed"));
         }
 
-        FileUtils.closeQuietly(postingList, primaryKeyMap);
     }
 
     private boolean exhausted()
@@ -146,7 +158,7 @@ public class PostingListRangeIterator extends RangeIterator<PrimaryKey>
         long segmentRowId;
         if (needsSkipping)
         {
-            long targetRowID = primaryKeyMap.rowIdFromPrimaryKey(skipToToken);
+            long targetRowID = primaryKeyMap.ceiling(skipToToken);
             // skipToToken is larger than max token in token file
             if (targetRowID < 0)
             {

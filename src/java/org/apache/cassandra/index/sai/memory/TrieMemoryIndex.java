@@ -93,7 +93,7 @@ public class TrieMemoryIndex extends MemoryIndex
         try
         {
             value = TypeUtil.encode(value, indexContext.getValidator());
-            analyzer.reset(value.duplicate());
+            analyzer.reset(value);
             final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
             final long initialSizeOnHeap = data.sizeOnHeap();
             final long initialSizeOffHeap = data.sizeOffHeap();
@@ -156,7 +156,7 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public RangeIterator<PrimaryKey> search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         if (logger.isTraceEnabled())
             logger.trace("Searching memtable index on expression '{}'...", expression);
@@ -175,18 +175,18 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-    public RangeIterator<PrimaryKey> exactMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public RangeIterator exactMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : encode(expression.lower.value.encoded);
         final PrimaryKeys primaryKeys = data.get(prefix);
         if (primaryKeys == null)
         {
-            return RangeIterator.emptyKeys();
+            return RangeIterator.empty();
         }
         return new FilteringKeyRangeIterator(primaryKeys.keys(), keyRange);
     }
 
-    private RangeIterator<PrimaryKey> rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    private RangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         ByteComparable lowerBound, upperBound;
         boolean lowerInclusive, upperInclusive;
@@ -218,7 +218,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
         if (cd.mergedKeys.isEmpty())
         {
-            return RangeIterator.emptyKeys();
+            return RangeIterator.empty();
         }
 
         lastQueueSize.set(Math.max(MINIMUM_QUEUE_SIZE, cd.mergedKeys.size()));

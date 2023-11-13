@@ -30,10 +30,12 @@ import javax.annotation.Nullable;
 import io.github.jbellis.jvector.disk.CachingGraphIndex;
 import io.github.jbellis.jvector.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.GraphSearcher;
-import io.github.jbellis.jvector.graph.NeighborSimilarity;
+import io.github.jbellis.jvector.graph.NodeSimilarity;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.graph.SearchResult.NodeScore;
+import io.github.jbellis.jvector.pq.BQVectors;
 import io.github.jbellis.jvector.pq.CompressedVectors;
+import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -45,10 +47,13 @@ import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
+import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
+import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.tracing.Tracing;
 
-public class CassandraDiskAnn implements JVectorLuceneOnDiskGraph, AutoCloseable
+public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 {
     private static final Logger logger = Logger.getLogger(CassandraDiskAnn.class.getName());
 
@@ -61,25 +66,29 @@ public class CassandraDiskAnn implements JVectorLuceneOnDiskGraph, AutoCloseable
 
     public CassandraDiskAnn(SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context) throws IOException
     {
+        super(componentMetadatas, indexFiles);
+
         similarityFunction = context.getIndexWriterConfig().getSimilarityFunction();
 
-        SegmentMetadata.ComponentMetadata termsMetadata = componentMetadatas.get(IndexComponent.TERMS_DATA);
+        SegmentMetadata.ComponentMetadata termsMetadata = getComponentMetadata(IndexComponent.TERMS_DATA);
         graphHandle = indexFiles.termsData();
         graph = new CachingGraphIndex(new OnDiskGraphIndex<>(graphHandle::createReader, termsMetadata.offset));
 
-        long pqSegmentOffset = componentMetadatas.get(IndexComponent.PQ).offset;
+        long pqSegmentOffset = getComponentMetadata(IndexComponent.PQ).offset;
         try (var pqFile = indexFiles.pq();
              var reader = pqFile.createReader())
         {
             reader.seek(pqSegmentOffset);
-            var containsCompressedVectors = reader.readBoolean();
-            if (containsCompressedVectors)
-                compressedVectors = CompressedVectors.load(reader, reader.getFilePointer());
+            VectorCompression compressionType = VectorCompression.values()[reader.readByte()];
+            if (compressionType == VectorCompression.PRODUCT_QUANTIZATION)
+                compressedVectors = PQVectors.load(reader, reader.getFilePointer());
+            else if (compressionType == VectorCompression.BINARY_QUANTIZATION)
+                compressedVectors = BQVectors.load(reader, reader.getFilePointer());
             else
                 compressedVectors = null;
         }
 
-        SegmentMetadata.ComponentMetadata postingListsMetadata = componentMetadatas.get(IndexComponent.POSTING_LISTS);
+        SegmentMetadata.ComponentMetadata postingListsMetadata = getComponentMetadata(IndexComponent.POSTING_LISTS);
         ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
     }
 
@@ -107,15 +116,32 @@ public class CassandraDiskAnn implements JVectorLuceneOnDiskGraph, AutoCloseable
     @Override
     public VectorPostingList search(float[] queryVector, int topK, int limit, Bits acceptBits, QueryContext context)
     {
+        return search(queryVector, topK, 0, limit, acceptBits, context);
+    }
+
+    /**
+     * @return Row IDs associated with the topK vectors near the query. If a threshold is specified, only vectors with
+     * a similarity score >= threshold will be returned.
+     * @param queryVector the query vector
+     * @param topK the number of results to look for in the index (>= limit)
+     * @param threshold the minimum similarity score to accept
+     * @param limit the maximum number of results to return
+     * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
+     * @param context unused (vestige from HNSW, retained in signature to allow calling both easily)
+     * @return
+     */
+    @Override
+    public VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits acceptBits, QueryContext context)
+    {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
         var view = graph.getView();
         var searcher = new GraphSearcher.Builder<>(view).build();
-        NeighborSimilarity.ScoreFunction scoreFunction;
-        NeighborSimilarity.ReRanker<float[]> reRanker;
+        NodeSimilarity.ScoreFunction scoreFunction;
+        NodeSimilarity.ReRanker<float[]> reRanker;
         if (compressedVectors == null)
         {
-            scoreFunction = (NeighborSimilarity.ExactScoreFunction)
+            scoreFunction = (NodeSimilarity.ExactScoreFunction)
                             i -> similarityFunction.compare(queryVector, view.getVector(i));
             reRanker = null;
         }
@@ -127,15 +153,21 @@ public class CassandraDiskAnn implements JVectorLuceneOnDiskGraph, AutoCloseable
         var result = searcher.search(scoreFunction,
                                      reRanker,
                                      topK,
+                                     threshold,
                                      ordinalsMap.ignoringDeleted(acceptBits));
-        Tracing.trace("DiakANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
+        Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         return annRowIdsToPostings(result, limit);
+    }
+
+    public CompressedVectors getCompressedVectors()
+    {
+        return compressedVectors;
     }
 
     private class RowIdIterator implements PrimitiveIterator.OfInt, AutoCloseable
     {
         private final Iterator<NodeScore> it;
-        private final OnDiskOrdinalsMap.RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
+        private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
 
         private OfInt segmentRowIdIterator = IntStream.empty().iterator();
 
@@ -193,7 +225,7 @@ public class CassandraDiskAnn implements JVectorLuceneOnDiskGraph, AutoCloseable
     }
 
     @Override
-    public OnDiskOrdinalsMap.OrdinalsView getOrdinalsView()
+    public OrdinalsView getOrdinalsView()
     {
         return ordinalsMap.getOrdinalsView();
     }

@@ -57,7 +57,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.index.sai.disk.v1.kdtree.BKDQueries.bkdQueryFrom;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Note: The sstables and SAI indexes used in this test were written with DSE 6.8
@@ -153,9 +155,9 @@ public class LegacyOnDiskFormatTest
         List<SegmentMetadata> metadatas = SegmentMetadata.load(source, indexDescriptor.primaryKeyFactory);
 
         BKDReader bkdReader = new BKDReader(indexContext,
-                                            indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext, false),
+                                            indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext),
                                             metadatas.get(0).getIndexRoot(IndexComponent.KD_TREE),
-                                            indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext, false),
+                                            indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext),
                                             metadatas.get(0).getIndexRoot(IndexComponent.KD_TREE_POSTING_LISTS));
 
         Expression expression = new Expression(indexContext).add(Operator.LT, Int32Type.instance.decompose(10));
@@ -179,8 +181,8 @@ public class LegacyOnDiskFormatTest
         long footerPointer = footerPointerString == null ? -1 : Long.parseLong(footerPointerString);
 
         TermsReader termsReader = new TermsReader(indexContext,
-                                                  indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext, false),
-                                                  indexDescriptor.createPerIndexFileHandle(IndexComponent.POSTING_LISTS, indexContext, false),
+                                                  indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext),
+                                                  indexDescriptor.createPerIndexFileHandle(IndexComponent.POSTING_LISTS, indexContext),
                                                   root,
                                                   footerPointer);
         Expression expression = new Expression(indexContext).add(Operator.EQ, UTF8Type.instance.decompose("10"));

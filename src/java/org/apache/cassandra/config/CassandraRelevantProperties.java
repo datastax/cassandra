@@ -332,11 +332,20 @@ public enum CassandraRelevantProperties
     /** Controls the maximum top-k limit for vector search */
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
 
+    /**
+     * Controls the maximum number of PrimaryKeys that will be read into memory at one time when ordering/limiting
+     * the results of an ANN query constrained by non-ANN predicates.
+     */
+    SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE("cassandra.sai.vector_search.order_chunk_size", "100000"),
+
     /** Controls the hnsw vector cache size, in bytes, per index segment. 0 to disable */
     SAI_HNSW_VECTOR_CACHE_BYTES("cassandra.sai.vector_search.vector_cache_bytes", String.valueOf(4 * 1024 * 1024)),
 
     /** Whether to allow the user to specify custom options to the hnsw index */
     SAI_HNSW_ALLOW_CUSTOM_PARAMETERS("cassandra.sai.hnsw.allow_custom_parameters", "false"),
+
+    /** Whether to validate terms that will be SAI indexed at the coordinator */
+    SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
 
     /**
      * Whether to disable auto-compaction
@@ -391,7 +400,14 @@ public enum CassandraRelevantProperties
     //This only applies if include all is false
     SYSTEM_VIEWS_INCLUDE_LOCAL_AND_PEERS("cassandra.system_view.include_local_and_peers"),
     //This only applies if include all is false
-    SYSTEM_VIEWS_INCLUDE_INDEXES("cassandra.system_view.include_indexes");
+    SYSTEM_VIEWS_INCLUDE_INDEXES("cassandra.system_view.include_indexes"),
+
+    // if true, allow BQ and writing optimized ordinal maps
+    VSEARCH_11_9_UPGRADES("cassandra.vsearch_11_9_upgrades", "true"),
+
+    // Enables parallel index read.
+    USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
+    PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

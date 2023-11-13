@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.Test;
 
@@ -140,33 +141,33 @@ public class SortedTermsTest extends SaiRandomizedTest
         writeTerms(descriptor, terms);
 
         // iterate on terms ascending
-        withSortedTermsReader(descriptor, reader ->
+        withSortedTermsCursor(descriptor, reader ->
         {
             for (int x = 0; x < terms.size(); x++)
             {
-                long pointId = reader.getPointId(ByteComparable.fixedLength(terms.get(x)));
+                long pointId = reader.ceiling(ByteComparable.fixedLength(terms.get(x)));
                 assertEquals(x, pointId);
             }
         });
 
         // iterate on terms descending
-        withSortedTermsReader(descriptor, reader ->
+        withSortedTermsCursor(descriptor, reader ->
         {
             for (int x = terms.size() - 1; x >= 0; x--)
             {
-                long pointId = reader.getPointId(ByteComparable.fixedLength(terms.get(x)));
+                long pointId = reader.ceiling(ByteComparable.fixedLength(terms.get(x)));
                 assertEquals(x, pointId);
             }
         });
 
         // iterate randomly
-        withSortedTermsReader(descriptor, reader ->
+        withSortedTermsCursor(descriptor, reader ->
         {
             for (int x = 0; x < terms.size(); x++)
             {
                 int target = nextInt(0, terms.size());
 
-                long pointId = reader.getPointId(ByteComparable.fixedLength(terms.get(target)));
+                long pointId = reader.ceiling(ByteComparable.fixedLength(terms.get(target)));
                 assertEquals(target, pointId);
             }
         });
@@ -182,17 +183,25 @@ public class SortedTermsTest extends SaiRandomizedTest
         int valuesPerPrefix = 10;
         writeTerms(descriptor, termsMinPrefixNoMatch, termsMaxPrefixNoMatch, valuesPerPrefix, false);
 
+        var countEndOfData = new AtomicInteger();
         // iterate on terms ascending
-        withSortedTermsReader(descriptor, reader ->
+        withSortedTermsCursor(descriptor, reader ->
         {
             for (int x = 0; x < termsMaxPrefixNoMatch.size(); x++)
             {
                 int index = x;
-                long pointIdStart = reader.getPointId(v -> termsMinPrefixNoMatch.get(index));
-                long pointIdEnd = reader.getLastPointId(v -> termsMaxPrefixNoMatch.get(index));
-                assertTrue(pointIdStart > pointIdEnd);
+                long pointIdEnd = reader.ceiling(v -> termsMinPrefixNoMatch.get(index));
+                long pointIdStart = reader.floor(v -> termsMaxPrefixNoMatch.get(index));
+                if (pointIdStart >= 0 && pointIdEnd >= 0)
+                    assertTrue(pointIdEnd > pointIdStart);
+                else
+                    countEndOfData.incrementAndGet();
             }
         });
+        // ceiling reaches the end of the data because we call writeTerms with matchesData false, which means that
+        // the last set of terms we are calling ceiling on are greater than anything in the trie, so ceiling returns
+        // a negative value.
+        assertEquals(valuesPerPrefix, countEndOfData.get());
     }
 
     @Test
@@ -206,15 +215,15 @@ public class SortedTermsTest extends SaiRandomizedTest
         writeTerms(descriptor, termsMinPrefix, termsMaxPrefix, valuesPerPrefix, true);
 
         // iterate on terms ascending
-        withSortedTermsReader(descriptor, reader ->
+        withSortedTermsCursor(descriptor, reader ->
         {
             for (int x = 0; x < termsMaxPrefix.size(); x++)
             {
                 int index = x;
-                long pointIdStart = reader.getPointId(v -> termsMinPrefix.get(index));
-                long pointIdEnd = reader.getLastPointId(v -> termsMaxPrefix.get(index));
-                assertEquals(pointIdStart, x / valuesPerPrefix * valuesPerPrefix);
-                assertEquals(pointIdStart + valuesPerPrefix - 1, pointIdEnd);
+                long pointIdEnd = reader.ceiling(v -> termsMinPrefix.get(index));
+                long pointIdStart = reader.floor(v -> termsMaxPrefix.get(index));
+                assertEquals(pointIdEnd, x / valuesPerPrefix * valuesPerPrefix);
+                assertEquals(pointIdEnd + valuesPerPrefix - 1, pointIdStart);
             }
         });
     }
@@ -408,8 +417,8 @@ public class SortedTermsTest extends SaiRandomizedTest
         void accept(T t) throws IOException;
     }
 
-    private void withSortedTermsReader(IndexDescriptor indexDescriptor,
-                                       ThrowingConsumer<SortedTermsReader> testCode) throws IOException
+    private void withSortedTermsCursor(IndexDescriptor indexDescriptor,
+                                       ThrowingConsumer<SortedTermsReader.Cursor> testCode) throws IOException
     {
         MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexDescriptor);
         NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)));
@@ -419,20 +428,11 @@ public class SortedTermsTest extends SaiRandomizedTest
              FileHandle blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS))
         {
             SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta);
-            testCode.accept(reader);
-        }
-    }
-
-    private void withSortedTermsCursor(IndexDescriptor descriptor,
-                                       ThrowingConsumer<SortedTermsReader.Cursor> testCode) throws IOException
-    {
-        withSortedTermsReader(descriptor, reader ->
-        {
             try (SortedTermsReader.Cursor cursor = reader.openCursor())
             {
                 testCode.accept(cursor);
             }
-        });
+        }
     }
 
     private boolean validateComponent(IndexDescriptor indexDescriptor, IndexComponent indexComponent, boolean checksum)

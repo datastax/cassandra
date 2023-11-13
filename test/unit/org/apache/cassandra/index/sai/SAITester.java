@@ -65,16 +65,13 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
-import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.ResourceLeakDetector;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.Component;
@@ -244,6 +241,14 @@ public class SAITester extends CQLTester
                                 MockSchema.newCFS("test_ks"));
     }
 
+    protected static Vector<Float> vector(float... v)
+    {
+        var v2 = new Float[v.length];
+        for (int i = 0; i < v.length; i++)
+            v2[i] = v[i];
+        return new Vector<>(v2);
+    }
+
     protected void simulateNodeRestart()
     {
         simulateNodeRestart(true);
@@ -330,6 +335,8 @@ public class SAITester extends CQLTester
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
             IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
+            if (indexDescriptor.isIndexEmpty(context))
+                continue;
             if (!indexDescriptor.validatePerSSTableComponentsChecksum() || !indexDescriptor.validatePerIndexComponentsChecksum(context))
                 return false;
         }
@@ -375,9 +382,18 @@ public class SAITester extends CQLTester
         waitForIndexQueryable(KEYSPACE, currentTable());
     }
 
-    public void waitForIndexQueryable(String keyspace, String table)
+    public void waitForIndexQueryable(int seconds)
     {
-        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, table)), 60, TimeUnit.SECONDS);
+        waitForIndexQueryable(KEYSPACE, currentTable(), seconds);
+    }
+
+    public void waitForIndexQueryable(String keyspace, String table) {
+        waitForIndexQueryable(keyspace, table, 60);
+    }
+
+    public void waitForIndexQueryable(String keyspace, String table, int seconds)
+    {
+        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, table)), seconds, TimeUnit.SECONDS);
     }
 
     protected void startCompaction() throws Throwable
@@ -612,7 +628,7 @@ public class SAITester extends CQLTester
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
         StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(cfs);
-        int contextCount = indexGroup.sstableContextManager().size();
+        int contextCount = indexGroup == null ? 0 : indexGroup.sstableContextManager().size();
         assertEquals("Expected " + sstableContextCount +" SSTableContexts, but got " + contextCount, sstableContextCount, contextCount);
 
         StorageAttachedIndex sai = (StorageAttachedIndex) cfs.indexManager.getIndexByName(indexName);

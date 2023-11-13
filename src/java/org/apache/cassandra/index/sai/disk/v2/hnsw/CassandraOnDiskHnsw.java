@@ -41,6 +41,8 @@ import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
+import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
+import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.lucene.index.VectorEncoding;
@@ -48,7 +50,7 @@ import org.apache.lucene.util.hnsw.HnswGraphSearcher;
 import org.apache.lucene.util.hnsw.NeighborQueue;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
-public class CassandraOnDiskHnsw implements JVectorLuceneOnDiskGraph, AutoCloseable
+public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraOnDiskHnsw.class);
 
@@ -63,16 +65,18 @@ public class CassandraOnDiskHnsw implements JVectorLuceneOnDiskGraph, AutoClosea
 
     public CassandraOnDiskHnsw(SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context) throws IOException
     {
+        super(componentMetadatas, indexFiles);
+
         similarityFunction = context.getIndexWriterConfig().getSimilarityFunction();
 
         vectorsFile = indexFiles.vectors();
-        long vectorsSegmentOffset = componentMetadatas.get(IndexComponent.VECTOR).offset;
+        long vectorsSegmentOffset = getComponentMetadata(IndexComponent.VECTOR).offset;
         vectorsSupplier = (qc) -> new VectorsWithCache(new OnDiskVectors(vectorsFile, vectorsSegmentOffset), qc);
 
-        SegmentMetadata.ComponentMetadata postingListsMetadata = componentMetadatas.get(IndexComponent.POSTING_LISTS);
+        SegmentMetadata.ComponentMetadata postingListsMetadata = getComponentMetadata(IndexComponent.POSTING_LISTS);
         ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
 
-        SegmentMetadata.ComponentMetadata termsMetadata = componentMetadatas.get(IndexComponent.TERMS_DATA);
+        SegmentMetadata.ComponentMetadata termsMetadata = getComponentMetadata(IndexComponent.TERMS_DATA);
         hnsw = new OnDiskHnswGraph(indexFiles.termsData(), termsMetadata.offset, termsMetadata.length, OFFSET_CACHE_MIN_BYTES);
         var mockContext = new QueryContext();
         try (var vectors = new OnDiskVectors(vectorsFile, vectorsSegmentOffset))
@@ -113,7 +117,7 @@ public class CassandraOnDiskHnsw implements JVectorLuceneOnDiskGraph, AutoClosea
                                              LuceneCompat.bits(ordinalsMap.ignoringDeleted(acceptBits)),
                                              Integer.MAX_VALUE);
             Tracing.trace("HNSW search visited {} nodes to return {} results", queue.visitedCount(), queue.size());
-            return annRowIdsToPostings(queue, limit);
+            return annRowIdsToPostings(queue);
         }
         catch (IOException e)
         {
@@ -121,10 +125,16 @@ public class CassandraOnDiskHnsw implements JVectorLuceneOnDiskGraph, AutoClosea
         }
     }
 
+    @Override
+    public VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits bits, QueryContext context)
+    {
+        throw new UnsupportedOperationException();
+    }
+
     private class RowIdIterator implements PrimitiveIterator.OfInt, AutoCloseable
     {
         private final NeighborQueue queue;
-        private final OnDiskOrdinalsMap.RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
+        private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
 
         private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
 
@@ -163,11 +173,14 @@ public class CassandraOnDiskHnsw implements JVectorLuceneOnDiskGraph, AutoClosea
         }
     }
 
-    private VectorPostingList annRowIdsToPostings(NeighborQueue queue, int limit) throws IOException
+    private VectorPostingList annRowIdsToPostings(NeighborQueue queue) throws IOException
     {
         try (var iterator = new RowIdIterator(queue))
         {
-            return new VectorPostingList(iterator, limit, queue.visitedCount());
+            // JVector returns results ordered most- to least-similar, which is why VPL has a `limit` paramter
+            // to avoid sorting results we don't care about.  But Lucene returns them with the least-similar
+            // results at the front of the queue, so we ensure we exhaust the whole queue here.
+            return new VectorPostingList(iterator, queue.size(), queue.visitedCount());
         }
     }
 
@@ -180,7 +193,7 @@ public class CassandraOnDiskHnsw implements JVectorLuceneOnDiskGraph, AutoClosea
     }
 
     @Override
-    public OnDiskOrdinalsMap.OrdinalsView getOrdinalsView()
+    public OrdinalsView getOrdinalsView()
     {
         return ordinalsMap.getOrdinalsView();
     }
@@ -212,11 +225,11 @@ public class CassandraOnDiskHnsw implements JVectorLuceneOnDiskGraph, AutoClosea
         @Override
         public float[] vectorValue(int i) throws IOException
         {
-            queryContext.hnswVectorsAccessed++;
+            queryContext.addHnswVectorsAccessed(1);
             var cached = vectorCache.get(i);
             if (cached != null)
             {
-                queryContext.hnswVectorCacheHits++;
+                queryContext.addHnswVectorCacheHits(1);
                 return cached;
             }
 

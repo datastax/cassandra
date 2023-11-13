@@ -56,6 +56,30 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
+    public void testStandardQueryAnalyzer()
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': 'standard'};");
+
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES (1, 'some row')");
+        execute("INSERT INTO %s (id, val) VALUES (2, 'a different row')");
+        execute("INSERT INTO %s (id, val) VALUES (3, 'a row with some and different but not together')");
+        execute("INSERT INTO %s (id, val) VALUES (4, 'a row with some different together')");
+        execute("INSERT INTO %s (id, val) VALUES (5, 'a row with some Different together but not same casing')");
+
+        flush();
+
+        // The query is parsed by the standard analyzer, so the query is tokenized by whitespace and lowercased
+        // and then we do an intersection on the results and get docs that have 'some' and 'different'
+        assertRows(execute("SELECT id FROM %s WHERE val : 'Some different'"), row(5), row(4), row(3));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'some different'"), row(5), row(4), row(3));
+    }
+
+    @Test
     public void testQueryAnalyzerBuiltIn() throws Throwable
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
@@ -115,7 +139,7 @@ public class LuceneAnalyzerTest extends SAITester
         assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(c1) USING 'StorageAttachedIndex' WITH OPTIONS = " +
                     "{'query_analyzer': 'whitespace'}"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasRootCauseMessage("Cannot specify query_analyzer without an index_analyzer option or any combination of " +
+        .hasMessageContaining("Cannot specify query_analyzer without an index_analyzer option or any combination of " +
                              "case_sensitive, normalize, or ascii options. options={query_analyzer=whitespace, target=c1}");;
     }
 
@@ -194,7 +218,7 @@ public class LuceneAnalyzerTest extends SAITester
                                              "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                                              "WITH OPTIONS = { 'index_analyzer': '{}'}"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasRootCauseMessage("Analzyer config requires at least a tokenizer, a filter, or a charFilter, but none found. config={}");
+        .hasMessageContaining("Analzyer config requires at least a tokenizer, a filter, or a charFilter, but none found. config={}");
     }
 
 // FIXME re-enable exception detection once incompatible options have been purged from prod DBs
@@ -636,5 +660,35 @@ public class LuceneAnalyzerTest extends SAITester
                     "{'index_analyzer':'" + builtInAnalyzerName + "'}");
 
         waitForIndexQueryable();
+    }
+
+    @Test
+    public void testInvalidQueryOnNumericColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, some_num tinyint)");
+        createIndex("CREATE CUSTOM INDEX ON %s(some_num) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, some_num) VALUES (1, 1)");
+        flush();
+
+        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE some_num : 1"))
+        .isInstanceOf(InvalidRequestException.class);
+    }
+
+    @Test
+    public void testAnalyzerThatProducesTooManyBytesIsRejectedAtWriteTime() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'{" +
+                    "\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"1\", \"maxGramSize\":\"26\"}},\n" +
+                    "\"filters\":[{\"name\":\"lowercase\"}]}'}");
+
+        waitForIndexQueryable();
+
+        assertThatThrownBy(() -> execute("INSERT INTO %s (id, val) VALUES (0, 'abcdedfghijklmnopqrstuvwxyz abcdedfghijklmnopqrstuvwxyz')"))
+        .hasMessage("Term's analyzed size for column val exceeds the cumulative limit for index. Max allowed size 5.000KiB.")
+        .isInstanceOf(InvalidRequestException.class);
     }
 }

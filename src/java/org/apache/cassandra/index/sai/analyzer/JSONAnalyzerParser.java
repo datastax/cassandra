@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.analyzer;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,6 +29,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.filter.BuiltInAnalyzers;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.custom.CustomAnalyzer;
+import org.apache.lucene.analysis.ngram.NGramTokenizerFactory;
 
 public class JSONAnalyzerParser
 {
@@ -56,7 +58,9 @@ public class JSONAnalyzerParser
         }
         else
         {
-            builder.withTokenizer(analyzerModel.getTokenizer().getName(), analyzerModel.getTokenizer().getArgs());
+            String name = analyzerModel.getTokenizer().getName();
+            Map<String, String> args = analyzerModel.getTokenizer().getArgs();
+            builder.withTokenizer(name, applyTokenizerDefaults(name, args));
         }
         for (LuceneClassNameAndArgs filter : analyzerModel.getFilters())
         {
@@ -95,5 +99,16 @@ public class JSONAnalyzerParser
             }
         }
         return null;
+    }
+
+    private static Map<String, String> applyTokenizerDefaults(String filterName, Map<String, String> args)
+    {
+        if (NGramTokenizerFactory.NAME.equalsIgnoreCase(filterName))
+        {
+            // Lucene's defaults are 1 and 2 respectively, which has a large memory overhead.
+            args.putIfAbsent("minGramSize", "3");
+            args.putIfAbsent("maxGramSize", "7");
+        }
+        return args;
     }
 }
