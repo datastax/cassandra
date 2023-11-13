@@ -45,7 +45,6 @@ import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
@@ -108,6 +107,7 @@ import org.apache.cassandra.utils.concurrent.FutureCombiner;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VALIDATE_TERMS_AT_COORDINATOR;
 import static org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig.MAX_TOP_K;
 
 public class StorageAttachedIndex implements Index
@@ -116,12 +116,7 @@ public class StorageAttachedIndex implements Index
 
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
 
-    /**
-     * By default, disable max-term-size validation at coordinator to avoid perf regression, thus no client warning will be sent to driver.
-     * Unindexable term will still be ignored by memtable index at writer side.
-     */
-    private static final boolean VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR =
-        CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR.getBoolean(false);
+    private static final boolean VALIDATE_TERMS_AT_COORDINATOR = SAI_VALIDATE_TERMS_AT_COORDINATOR.getBoolean();
 
     private static class StorageAttachedIndexBuildingSupport implements IndexBuildingSupport
     {
@@ -678,14 +673,13 @@ public class StorageAttachedIndex implements Index
     @Override
     public void validate(PartitionUpdate update, ClientState state) throws InvalidRequestException
     {
-        if (!VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR)
+        if (!VALIDATE_TERMS_AT_COORDINATOR)
             return;
 
         DecoratedKey key = update.partitionKey();
         for (Row row : update)
-            indexContext.validateMaxTermSizeForRow(key, row, true);
+            indexContext.validateMaxTermSizeForRow(key, row);
     }
-
     /**
      * This method is called by the startup tasks to find SSTables that don't have indexes. The method is
      * synchronized so that the view is unchanged between validation and the selection of non-indexed SSTables.
