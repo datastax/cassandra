@@ -629,6 +629,8 @@ public class StorageAttachedIndex implements Index
         if (command.limits().isUnlimited() || command.limits().count() > MAX_TOP_K)
             throw new InvalidRequestException(String.format("Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than %s. LIMIT was %s",
                                                             MAX_TOP_K, command.limits().isUnlimited() ? "NO LIMIT" : command.limits().count()));
+
+        indexContext.validate(command.rowFilter());
     }
 
     @Override

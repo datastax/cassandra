@@ -44,6 +44,7 @@ import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
@@ -549,10 +550,25 @@ public class IndexContext
     {
         if (isVector())
         {
-            // TODO can we validate without decomposing?
             float[] value = TypeUtil.decomposeVector(getValidator(), getValueOf(key, row, FBUtilities.nowInSeconds()));
             CassandraOnHeapGraph.validateIndexable(value, vectorSimilarityFunction);
         }
+    }
+
+    public void validate(RowFilter rowFilter)
+    {
+        // Only vector row filters are validated by the index right now.
+        if (!isVector())
+            return;
+        // Only iterate over the top level expressions because that is where the ANN expression is located.
+        for (RowFilter.Expression expression : rowFilter.root().expressions())
+            if (expression.operator() == Operator.ANN)
+            {
+                float[] value = TypeUtil.decomposeVector(getValidator(), expression.getIndexValue());
+                CassandraOnHeapGraph.validateIndexable(value, vectorSimilarityFunction);
+                // There is only one ANN expression per query.
+                return;
+            }
     }
 
 
