@@ -229,6 +229,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         MemtableShard shard = shards[boundaries.getShardForKey(key)];
         long colUpdateTimeDelta = shard.put(key, update, indexer, opGroup);
 
+        updateMinMaxPartitionKey(key);
+
         if (shard.data.reachedAllocatedSizeThreshold() && !switchRequested.getAndSet(true))
         {
             logger.info("Scheduling flush due to trie size limit reached.");

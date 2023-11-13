@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -43,6 +44,10 @@ public abstract class AbstractMemtable implements Memtable
     protected final StatsCollector statsCollector = new StatsCollector();
     // The smallest timestamp for all partitions stored in this memtable
     protected AtomicLong minTimestamp = new AtomicLong(Long.MAX_VALUE);
+
+    protected AtomicReference<DecoratedKey> minPartitionKey = new AtomicReference<>();
+    protected AtomicReference<DecoratedKey> maxPartitionKey = new AtomicReference<>();
+
     private final AtomicReference<LifecycleTransaction> flushTransaction = new AtomicReference<>(null);
     protected TableMetadataRef metadata;
 
@@ -92,6 +97,48 @@ public abstract class AbstractMemtable implements Memtable
             if (minTracker.compareAndSet(memtableMinTimestamp, newValue))
                 break;
         }
+    }
+
+    private final void updateMinPartitionKey(DecoratedKey key)
+    {
+        while (true)
+        {
+            DecoratedKey currentMinKey = minPartitionKey.get();
+            if (currentMinKey != null && key.compareTo(currentMinKey) >= 0)
+                break;
+            if (minPartitionKey.compareAndSet(currentMinKey, key))
+                break;
+        }
+    }
+
+    private void updateMaxPartitionKey(DecoratedKey key)
+    {
+        while (true)
+        {
+            DecoratedKey currentMaxKey = maxPartitionKey.get();
+            if (currentMaxKey != null && key.compareTo(currentMaxKey) <= 0)
+                break;
+            if (maxPartitionKey.compareAndSet(currentMaxKey, key))
+                break;
+        }
+    }
+
+    protected final void updateMinMaxPartitionKey(DecoratedKey key)
+    {
+        updateMinPartitionKey(key);
+        updateMaxPartitionKey(key);
+    }
+
+    @Override
+    public final DecoratedKey minPartitionKey()
+    {
+        return minPartitionKey.get();
+    }
+
+    @Override
+    public final DecoratedKey maxPartitionKey()
+    {
+        return maxPartitionKey.get();
     }
 
     RegularAndStaticColumns columns()

@@ -159,6 +159,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
 
         BTreePartitionUpdater updater = previous.addAll(update, cloner, opGroup, indexer);
         updateMin(minTimestamp, previous.stats().minTimestamp);
+        updateMinMaxPartitionKey(update.partitionKey());
         liveDataSize.addAndGet(initialSize + updater.dataSize);
         columnsCollector.update(update.columns());
         statsCollector.update(update.stats());
