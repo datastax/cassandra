@@ -681,7 +681,8 @@ public class IndexContext
         if (isVector())
         {
             float[] value = TypeUtil.decomposeVector(getValidator(), getValueOf(key, row, FBUtilities.nowInSeconds()));
-            CassandraOnHeapGraph.validateIndexable(value, vectorSimilarityFunction);
+            if (value != null)
+                CassandraOnHeapGraph.validateIndexable(value, vectorSimilarityFunction);
         }
     }
 
