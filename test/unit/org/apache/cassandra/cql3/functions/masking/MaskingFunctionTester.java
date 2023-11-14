@@ -108,7 +108,7 @@ public abstract class MaskingFunctionTester extends CQLTester
                 case DATE:
                     testMaskingOnAllColumns(type,
                                             SimpleDateSerializer.timeInMillisToDay(2),
-                                            SimpleDateSerializer.timeInMillisToDay(Long.MAX_VALUE));
+                                            SimpleDateSerializer.timeInMillisToDay(Integer.MAX_VALUE));
                     break;
                 case DURATION:
                     testMaskingOnNotKeyColumns(type, Duration.newInstance(1, 2, 3), Duration.newInstance(3, 2, 1));
