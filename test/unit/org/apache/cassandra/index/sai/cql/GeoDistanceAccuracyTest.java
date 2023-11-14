@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -28,12 +27,14 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.utils.Pair;
 import org.apache.lucene.geo.GeoUtils;
 import org.apache.lucene.util.SloppyMath;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.junit.Assert.assertTrue;
 
 public class GeoDistanceAccuracyTest extends VectorTester
 {
-    private static final Logger logger = Logger.getLogger(GeoDistanceAccuracyTest.class.getName());
+    private static final Logger logger = LoggerFactory.getLogger(GeoDistanceAccuracyTest.class.getName());
 
     // Number represents the number of results that are within the search radius divided by the number of expected results
     // Note that this recall number is just for random vectors in a box around NYC. These vectors might not
