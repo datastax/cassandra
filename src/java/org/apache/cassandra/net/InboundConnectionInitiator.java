@@ -323,7 +323,8 @@ public class InboundConnectionInitiator
             else
             {
                 int version = initiate.requestMessagingVersion;
-                assert version < VERSION_40 && version >= settings.acceptMessaging.min;
+                assert (version < VERSION_40 && version >= settings.acceptMessaging.min) ||
+                       (version == settings.acceptMessaging.min && settings.acceptMessaging.acceptsDse());
                 logger.trace("Connection version {} from {}", version, ctx.channel().remoteAddress());
 
                 if (initiate.type.isStreaming())
@@ -340,7 +341,17 @@ public class InboundConnectionInitiator
                 {
                     // if this version is < the MS version the other node is trying
                     // to connect with, the other node will disconnect
-                    ByteBuf response = HandshakeProtocol.Accept.respondPre40(version, ctx.alloc());
+                    ByteBuf response;
+                    if (version == settings.acceptMessaging.min && settings.acceptMessaging.acceptsDse())
+                    {
+                        // Min protocol is used for DSE CNDB compatibility
+                        response = HandshakeProtocol.Accept.respondPre40(version, ctx.alloc());
+                    }
+                    else
+                    {
+                        response = HandshakeProtocol.Accept.respondPre40(settings.acceptMessaging.max, ctx.alloc());
+                    }
+
                     AsyncChannelPromise.writeAndFlush(ctx, response,
                           (ChannelFutureListener) future -> {
                                if (!future.isSuccess())

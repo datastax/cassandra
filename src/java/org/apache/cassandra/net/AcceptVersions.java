@@ -36,6 +36,11 @@ class AcceptVersions
         this.dse = dse;
     }
 
+    public boolean acceptsDse()
+    {
+        return dse > 0;
+    }
+
     @Override
     public boolean equals(Object that)
     {
