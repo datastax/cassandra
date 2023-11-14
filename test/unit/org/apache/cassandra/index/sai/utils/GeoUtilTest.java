@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import java.util.logging.Logger;
+
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.SAITester;
@@ -26,50 +28,41 @@ import org.apache.cassandra.utils.memory.SlabPool;
 import org.apache.lucene.util.SloppyMath;
 import org.apache.lucene.util.VectorUtil;
 
+import static org.junit.Assert.assertTrue;
+
 public class GeoUtilTest
 {
+    private static final Logger logger = Logger.getLogger(GeoUtilTest.class.getName());
     @Test
-    public void verifyDistanceFormulaAssumptions()
+    public void haversineBenchmark()
     {
         // Run 1 million iterations
         int iterations = 1000000;
-        double sqDistDuration = 0;
-        double haversineDuration = 0;
+        double strictHaversineDuration = 0;
+        double sloppyHaversineDuration = 0;
         for (int i = 0; i < iterations; i++)
         {
-            // VSTODO make this work for the whole globe?
             float searchLat = SAITester.getRandom().nextFloatBetween(-90, 90);
-            float searchLon = SAITester.getRandom().nextFloatBetween(0, 180);
+            float searchLon = SAITester.getRandom().nextFloatBetween(-180, 180);
             float pointLat = SAITester.getRandom().nextFloatBetween(-90, 90);
-            float pointLon = SAITester.getRandom().nextFloatBetween(0, 180);
+            float pointLon = SAITester.getRandom().nextFloatBetween(-180, 180);
 
             // Get the haversine distance using a strict algorithm
-            double strictDistance = GeoDistanceAccuracyTest.strictHaversineDistance(searchLat, searchLon, pointLat, pointLon);
-            // This represents the maximum square distance that we can use to get the correct results when using
-            // the square distance. Therefore, this value should always be less than or equal to the
-            // square distance between the two points. Otherwise, there will be false postives.
-            double maxSquareDistance = GeoUtil.maximumSquareDistanceForCorrectLatLongSimilarity((float) strictDistance);
+            var nowStrict = System.nanoTime();
+            GeoDistanceAccuracyTest.strictHaversineDistance(searchLat, searchLon, pointLat, pointLon);
+            strictHaversineDuration += System.nanoTime() - nowStrict;
 
-            // Calculate the square distance.
-            var nowSq = System.nanoTime();
-            double squareDistance = VectorUtil.squareDistance(new float[]{ searchLat, searchLon }, new float[]{ pointLat, pointLon });
-            sqDistDuration += System.nanoTime() - nowSq;
-
-            // Calculate the sloppy distance (the one used in the code). This should always be greater than or equal
-            // to the maxSquareDistance to ensure correctness.
-            var nowH = System.nanoTime();
-            double sloppyDistance = SloppyMath.haversinMeters(searchLat, searchLon, pointLat, pointLon);
-            haversineDuration += System.nanoTime() - nowH;
-
-            assertLessThanOrEqual(maxSquareDistance, squareDistance);
-            assertLessThanOrEqual(maxSquareDistance, sloppyDistance);
+            // Calculate the sloppy distance (the one used in the code)
+            var nowSloppy = System.nanoTime();
+            SloppyMath.haversinMeters(searchLat, searchLon, pointLat, pointLon);
+            sloppyHaversineDuration += System.nanoTime() - nowSloppy;
         }
-        System.out.println("Square distance average duration: " + sqDistDuration / iterations);
-        System.out.println("Haversine average duration: " + haversineDuration / iterations);
-    }
 
-    private void assertLessThanOrEqual(double a, double b)
-    {
-        assert a <= b : String.format("%f is not less than or equal to %f", a, b);
+        double strictHaversineAverage = strictHaversineDuration / iterations;
+        double sloppyHaversineAverage = sloppyHaversineDuration / iterations;
+        logger.info("Average duration for strict haversine: " + strictHaversineAverage);
+        logger.info("Average duration for sloppy haversine: " + sloppyHaversineAverage);
+        assertTrue("Sloppy haversine distance should be at least as fast as strict haversine distance.",
+                   sloppyHaversineAverage <= strictHaversineAverage);
     }
 }

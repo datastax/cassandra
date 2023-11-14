@@ -24,11 +24,6 @@ public class GeoUtil
     // and therefore include more results.
     private static final double DISTANCE_PER_DEGREE_LONGITUDE_AT_EQUATOR = 110_000;
 
-    // An estimate of the distance in meters between two lines of latitude. The number is typically 111,111 meters.
-    // However, we round up slightly since this number is only used to determine when we can skip calculating the
-    // haversine distance between two points.
-    private static final float DISTANCE_PER_DEGREE_LATITUDE = 111_198;
-
     /**
      * Determines the worst ratio for meters to degrees for a given latitude. The worst ratio will be the distance in
      * meters of 1 degree longitude.
@@ -60,16 +55,5 @@ public class GeoUtil
         double degrees = distanceInMeters / distanceBetweenDegreeLatitude;
 
         return (float) (1.0 / (1 + Math.pow((float) degrees, 2)));
-    }
-
-    /**
-     * Caclulate the maximum bound such that if the square distance between two points is less than the bound, then
-     * the points are within the search radius.
-     * @param distanceInMeters
-     * @return
-     */
-    public static float maximumSquareDistanceForCorrectLatLongSimilarity(float distanceInMeters)
-    {
-        return (float) Math.pow(distanceInMeters / DISTANCE_PER_DEGREE_LATITUDE, 2);
     }
 }
