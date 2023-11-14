@@ -127,7 +127,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
 
         waitForIndexCompaction(keyspace, TABLE, INDEX);
 
-        waitForIndexQueryable(keyspace, TABLE);
+        waitForTableIndexesQueryable(keyspace, TABLE);
         ResultSet rows = executeNet(String.format("SELECT id1 FROM %s.%s WHERE v1 >= 0", keyspace, TABLE));
         assertEquals(rowCount, rows.all().size());
 

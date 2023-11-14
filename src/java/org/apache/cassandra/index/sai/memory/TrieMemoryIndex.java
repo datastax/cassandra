@@ -99,7 +99,7 @@ public class TrieMemoryIndex extends MemoryIndex
         synchronized (writeLock)
         {
             AbstractAnalyzer analyzer = columnContext.getAnalyzer();
-            value = TypeUtil.encode(value, validator);
+            value = TypeUtil.asIndexBytes(value, validator);
             analyzer.reset(value.duplicate());
             final PrimaryKey primaryKey = PrimaryKey.of(key, clustering);
             final long initialSizeOnHeap = data.sizeOnHeap();
