@@ -1175,12 +1175,6 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 throw new InvalidRequestException("GEO_DISTANCE latitude must be between -90 and 90 degrees, got " + searchLat);
             if (searchLon < -180 || searchLon > 180)
                 throw new InvalidRequestException("GEO_DISTANCE longitude must be between -180 and 180 degrees, got " + searchLon);
-
-            // We don't currently return complete results when a search crosses the antimeridian.
-            double searchDegreesLongitude = GeoUtil.amplifiedDegreesLongitude(searchLat, searchRadiusMeters);
-            if (searchLon - searchDegreesLongitude < -180 || searchLon + searchDegreesLongitude > 180)
-                throw new InvalidRequestException("GEO_DISTANCE radius crosses the antimeridian, possibly resulting in incomplete results. " +
-                                                  "Decrease search radius or change search location.");
         }
 
         @Override
