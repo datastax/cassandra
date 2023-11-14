@@ -18,18 +18,23 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.junit.Test;
 
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.utils.Pair;
 import org.apache.lucene.geo.GeoUtils;
+import org.apache.lucene.util.SloppyMath;
 
 import static org.junit.Assert.assertTrue;
 
 public class GeoDistanceAccuracyTest extends VectorTester
 {
+    private static final Logger logger = Logger.getLogger(GeoDistanceAccuracyTest.class.getName());
+
     // Number represents the number of results that are within the search radius divided by the number of expected results
     // Note that this recall number is just for random vectors in a box around NYC. These vectors might not
     // be representative of real data, so this test mostly serves to verify the status quo.
@@ -94,6 +99,39 @@ public class GeoDistanceAccuracyTest extends VectorTester
                    observedFalsePositiveAccuracy < MAX_EXPECTED_FALSE_POSITIVE_RATE);
     }
 
+    @Test
+    public void haversineBenchmark()
+    {
+        // Run 1 million iterations
+        int iterations = 1000000;
+        double strictHaversineDuration = 0;
+        double sloppyHaversineDuration = 0;
+        for (int i = 0; i < iterations; i++)
+        {
+            float searchLat = SAITester.getRandom().nextFloatBetween(-90, 90);
+            float searchLon = SAITester.getRandom().nextFloatBetween(-180, 180);
+            float pointLat = SAITester.getRandom().nextFloatBetween(-90, 90);
+            float pointLon = SAITester.getRandom().nextFloatBetween(-180, 180);
+
+            // Get the haversine distance using a strict algorithm
+            var nowStrict = System.nanoTime();
+            GeoDistanceAccuracyTest.strictHaversineDistance(searchLat, searchLon, pointLat, pointLon);
+            strictHaversineDuration += System.nanoTime() - nowStrict;
+
+            // Calculate the sloppy distance (the one used in the code)
+            var nowSloppy = System.nanoTime();
+            SloppyMath.haversinMeters(searchLat, searchLon, pointLat, pointLon);
+            sloppyHaversineDuration += System.nanoTime() - nowSloppy;
+        }
+
+        double strictHaversineAverage = strictHaversineDuration / iterations;
+        double sloppyHaversineAverage = sloppyHaversineDuration / iterations;
+        logger.info("Average duration for strict haversine: " + strictHaversineAverage);
+        logger.info("Average duration for sloppy haversine: " + sloppyHaversineAverage);
+        assertTrue("Sloppy haversine distance should be at least as fast as strict haversine distance.",
+                   sloppyHaversineAverage <= strictHaversineAverage);
+    }
+
     public static boolean isWithinDistance(float[] vector, float[] searchVector, float distanceInMeters)
     {
         return strictHaversineDistance(vector[0], vector[1], searchVector[0], searchVector[1]) < distanceInMeters;
@@ -109,7 +147,7 @@ public class GeoDistanceAccuracyTest extends VectorTester
 
     // In the production code, we use a haversine distance formula from lucene, which prioritizes speed over some
     // accuracy. This is the strict formula.
-    public static double strictHaversineDistance(float lat1, float lon1, float lat2, float lon2)
+    private static double strictHaversineDistance(float lat1, float lon1, float lat2, float lon2)
     {
         // This implementation is based on information from https://www.movable-type.co.uk/scripts/latlong.html
         double phi1 = lat1 * Math.PI/180; // phi, lambda in radians
