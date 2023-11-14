@@ -388,8 +388,7 @@ public class InboundConnectionInitiator
 
         private void exceptionCaught(Channel channel, Throwable cause)
         {
-            logger.error("Failed to properly handshake with peer {}. Closing the channel.", channel.remoteAddress());
-            logger.error(cause.getMessage(), cause);
+            logger.error("Failed to properly handshake with peer {}. Closing the channel.", channel.remoteAddress(), cause);
             try
             {
                 failHandshake(channel);
