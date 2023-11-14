@@ -944,7 +944,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
             if (!otherRestriction.isAnn())
-                throw invalidRequest("%s cannot be restricted by both %s and %s", columnDef.name, this.toString(), otherRestriction.toString());
+                throw invalidRequest("%s cannot be restricted by both BOUNDED_ANN and %s", columnDef.name, otherRestriction.toString());
 
             if (annRestriction == null)
                 return new BoundedAnnRestriction(columnDef, value, distance, isInclusive, (AnnRestriction) otherRestriction);
