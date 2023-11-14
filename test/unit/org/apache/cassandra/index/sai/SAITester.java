@@ -73,7 +73,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.service.snapshot.SnapshotManifest;
+import org.apache.cassandra.service.snapshot.TableSnapshot;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.codecs.CodecUtil;
@@ -419,6 +419,11 @@ public class SAITester extends CQLTester
         return StorageAttachedIndexGroup.getIndexGroup(cfs).diskUsage();
     }
 
+    protected void verifyNoIndexFiles()
+    {
+        assertTrue(indexFiles().isEmpty());
+    }
+
     protected void verifyIndexFiles(int numericFiles, int stringFiles)
     {
         verifyIndexFiles(Math.max(numericFiles, stringFiles), numericFiles, stringFiles, numericFiles + stringFiles);
@@ -587,9 +592,9 @@ public class SAITester extends CQLTester
 
     protected int snapshot(String snapshotName) throws IOException
     {
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        SnapshotManifest manifest = SnapshotManifest.deserializeFromJsonFile(cfs.getDirectories().getSnapshotManifestFile(snapshotName));
-        return manifest.getFiles().size();
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        TableSnapshot snapshot = cfs.snapshot(snapshotName);
+        return snapshot.getDirectories().size();
     }
 
     protected List<String> restoreSnapshot(String snapshot)

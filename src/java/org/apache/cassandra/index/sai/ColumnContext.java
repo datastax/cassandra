@@ -120,7 +120,7 @@ public class ColumnContext
         this.config = metadata;
         this.viewManager = new IndexViewManager(this);
         this.indexMetrics = new IndexMetrics(this, tableMeta);
-        this.validator = TypeUtil.cellValueType(target);
+        this.validator = TypeUtil.cellValueType(target.left, target.right);
 
         String fullIndexName = String.format("%s.%s.%s", this.keyspace, this.table, this.config.name);
         this.indexWriterConfig = IndexWriterConfig.fromOptions(fullIndexName, validator, config.options);
@@ -160,7 +160,7 @@ public class ColumnContext
         this.partitionKeyType = table.partitionKeyType;
         this.clusteringComparator = table.comparator;
         this.target = TargetParser.parse(table, column.name.toString());
-        this.validator = target == null ? null : TypeUtil.cellValueType(target);
+        this.validator = target == null ? null : TypeUtil.cellValueType(target.left, target.right);
         this.config = null;
         this.viewManager = null;
         this.indexMetrics = null;
@@ -440,7 +440,7 @@ public class ColumnContext
                 if (!row.isStatic())
                     return null;
             case REGULAR:
-                return TypeUtil.collectionIterator(validator, (ComplexColumnData)row.getComplexColumnData(target.left), target, nowInSecs);
+                return TypeUtil.collectionIterator(validator, (ComplexColumnData)row.getComplexColumnData(target.left), target.left, target.right, nowInSecs);
 
             default:
                 return null;

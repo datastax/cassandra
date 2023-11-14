@@ -36,7 +36,7 @@ public class SnapshotTest extends SAITester
     }
 
     @After
-    public void resetCounters() throws Throwable
+    public void resetCounters()
     {
         resetValidationCount();
     }
@@ -45,7 +45,7 @@ public class SnapshotTest extends SAITester
     public void shouldTakeAndRestoreSnapshots() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
-        verifyIndexFiles(0, 0);
+        verifyNoIndexFiles();
 
         // Insert some initial data and create the index over it
         execute("INSERT INTO %s (id1, v1) VALUES ('0', 0);");
@@ -63,8 +63,7 @@ public class SnapshotTest extends SAITester
 
         // Take a snapshot recording the index files last modified date
         String snapshot = "s";
-        int numSnapshottedSSTables = snapshot(snapshot);
-        assertEquals(2, numSnapshottedSSTables);
+        assertEquals(1, snapshot(snapshot));
         long snapshotLastModified = indexFilesLastModified();
 
         // File.lastModified result can be truncated one second resolution, which can be lesser than the index build
@@ -81,7 +80,7 @@ public class SnapshotTest extends SAITester
 
         // Truncate the table
         truncate(false);
-        waitForAssert(() -> verifyIndexFiles(0, 0));
+        waitForAssert(() -> verifyNoIndexFiles());
         assertNumRows(0, "SELECT * FROM %%s WHERE v1 >= 0");
         assertValidationCount(0, 0);
 
@@ -110,7 +109,7 @@ public class SnapshotTest extends SAITester
     public void shouldSnapshotAfterIndexBuild() throws Throwable
     {
         createTable(CREATE_TABLE_TEMPLATE);
-        verifyIndexFiles(0, 0);
+        verifyNoIndexFiles();
 
         // Insert some initial data
         execute("INSERT INTO %s (id1, v1) VALUES ('0', 0);");
@@ -133,8 +132,7 @@ public class SnapshotTest extends SAITester
 
         // Take a snapshot recording the index files last modified date
         String snapshot = "s";
-        int numSnapshottedSSTables = snapshot(snapshot);
-        assertEquals(2, numSnapshottedSSTables);
+        assertEquals(1, snapshot(snapshot));
         long snapshotLastModified = indexFilesLastModified();
 
         // File.lastModified result can be truncated one second resolution, which can be lesser than the index build
@@ -144,7 +142,7 @@ public class SnapshotTest extends SAITester
 
         // Truncate the table
         truncate(false);
-        waitForAssert(() -> verifyIndexFiles(0, 0));
+        waitForAssert(() -> verifyNoIndexFiles());
         assertNumRows(0, "SELECT * FROM %%s WHERE v1 >= 0");
         assertValidationCount(0, 0);
 

@@ -686,8 +686,8 @@ public abstract class DataSet<T> extends CQLTester
                 values[index] = value;
             }
             Arrays.sort(values, (o1, o2) -> {
-                return TypeUtil.compare(TypeUtil.encode(ByteBuffer.wrap(o1.getAddress()), InetAddressType.instance),
-                                        TypeUtil.encode(ByteBuffer.wrap(o2.getAddress()), InetAddressType.instance),
+                return TypeUtil.compare(TypeUtil.asIndexBytes(ByteBuffer.wrap(o1.getAddress()), InetAddressType.instance),
+                                        TypeUtil.asIndexBytes(ByteBuffer.wrap(o2.getAddress()), InetAddressType.instance),
                                         InetAddressType.instance);
             });
         }
