@@ -42,7 +42,6 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.utils.NdiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 public class TypeUtilTest extends NdiRandomizedTest
@@ -58,8 +57,8 @@ public class TypeUtilTest extends NdiRandomizedTest
             boolean isLiteral = cql3Type == CQL3Type.Native.ASCII || cql3Type == CQL3Type.Native.TEXT || cql3Type == CQL3Type.Native.VARCHAR;
             assertEquals(isLiteral, TypeUtil.isLiteral(type));
             assertEquals(TypeUtil.isLiteral(type), TypeUtil.isLiteral(reversedType));
-            assertEquals(isLiteral, TypeUtil.isUTF8OrAscii(type));
-            assertEquals(TypeUtil.isUTF8OrAscii(type), TypeUtil.isUTF8OrAscii(reversedType));
+            assertEquals(isLiteral, TypeUtil.isString(type));
+            assertEquals(TypeUtil.isString(type), TypeUtil.isString(reversedType));
             assertEquals(TypeUtil.isIn(type, AbstractAnalyzer.ANALYZABLE_TYPES),
                          TypeUtil.isIn(reversedType, AbstractAnalyzer.ANALYZABLE_TYPES));
         }
@@ -103,12 +102,12 @@ public class TypeUtilTest extends NdiRandomizedTest
             AbstractType<?> frozenCollection = init.apply(elementType.getType(), false);
             AbstractType<?> reversedFrozenCollection = ReversedType.getInstance(frozenCollection);
 
-            AbstractType<?> type = TypeUtil.cellValueType(target(frozenCollection, IndexTarget.Type.FULL));
+            AbstractType<?> type = TypeUtil.cellValueType(column(frozenCollection), IndexTarget.Type.FULL);
             assertTrue(TypeUtil.isFrozenCollection(type));
             assertTrue(TypeUtil.isLiteral(type));
             assertFalse(type.isReversed());
 
-            type = TypeUtil.cellValueType(target(reversedFrozenCollection, IndexTarget.Type.FULL));
+            type = TypeUtil.cellValueType(column(reversedFrozenCollection), IndexTarget.Type.FULL);
             assertTrue(TypeUtil.isFrozenCollection(type));
             assertTrue(TypeUtil.isLiteral(type));
             assertTrue(type.isReversed());
@@ -121,12 +120,7 @@ public class TypeUtilTest extends NdiRandomizedTest
 
     private static AbstractType<?> cellValueType(AbstractType<?> type, IndexTarget.Type indexType)
     {
-        return TypeUtil.cellValueType(target(type, indexType));
-    }
-
-    private static Pair<ColumnMetadata, IndexTarget.Type> target(AbstractType<?> type, IndexTarget.Type indexType)
-    {
-        return Pair.create(column(type), indexType);
+        return TypeUtil.cellValueType(column(type), indexType);
     }
 
     private static ColumnMetadata column(AbstractType<?> type)
@@ -178,8 +172,8 @@ public class TypeUtilTest extends NdiRandomizedTest
             BigInteger i1 = data[i];
             assertTrue("#" + i, i0.compareTo(i1) <= 0);
 
-            ByteBuffer b0 = TypeUtil.encode(ByteBuffer.wrap(i0.toByteArray()), IntegerType.instance);
-            ByteBuffer b1 = TypeUtil.encode(ByteBuffer.wrap(i1.toByteArray()), IntegerType.instance);
+            ByteBuffer b0 = TypeUtil.asIndexBytes(ByteBuffer.wrap(i0.toByteArray()), IntegerType.instance);
+            ByteBuffer b1 = TypeUtil.asIndexBytes(ByteBuffer.wrap(i1.toByteArray()), IntegerType.instance);
             assertTrue("#" + i, TypeUtil.compare(b0, b1, IntegerType.instance) <= 0);
         }
     }
