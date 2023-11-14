@@ -106,7 +106,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
                 while (valueIterator.hasNext())
                 {
                     ByteBuffer value = valueIterator.next();
-                    addTerm(TypeUtil.encode(value.duplicate(), columnContext.getValidator()), rowKey, sstableRowId, columnContext.getValidator());
+                    addTerm(TypeUtil.asIndexBytes(value.duplicate(), columnContext.getValidator()), rowKey, sstableRowId, columnContext.getValidator());
                 }
             }
         }
@@ -114,7 +114,7 @@ public class SSTableIndexWriter implements ColumnIndexWriter
         {
             ByteBuffer value = columnContext.getValueOf(rowKey, row, nowInSec);
             if (value != null)
-                addTerm(TypeUtil.encode(value.duplicate(), columnContext.getValidator()), rowKey, sstableRowId, columnContext.getValidator());
+                addTerm(TypeUtil.asIndexBytes(value.duplicate(), columnContext.getValidator()), rowKey, sstableRowId, columnContext.getValidator());
         }
         maxSSTableRowId = sstableRowId;
     }

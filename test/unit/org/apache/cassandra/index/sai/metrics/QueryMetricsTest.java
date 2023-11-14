@@ -93,7 +93,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace, table));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index, keyspace, table, "v1"));
-        waitForIndexQueryable(keyspace, table);
+        waitForTableIndexesQueryable(keyspace, table);
 
         execute("INSERT INTO " + keyspace + "." + table + " (id1, v1, v2) VALUES ('0', 0, '0')");
 
@@ -132,7 +132,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
         compact(keyspace, table);
         waitForIndexCompaction(keyspace, table, index);
 
-        waitForIndexQueryable(keyspace, table);
+        waitForTableIndexesQueryable(keyspace, table);
 
         ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 >= 0");
 
@@ -197,7 +197,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
         compact(keyspace, table);
         waitForIndexCompaction(keyspace, table, v1Index);
 
-        waitForIndexQueryable(keyspace, table);
+        waitForTableIndexesQueryable(keyspace, table);
 
         ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 >= 0");
 
@@ -238,7 +238,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
         compact(keyspace, table);
         waitForIndexCompaction(keyspace, table, index);
 
-        waitForIndexQueryable(keyspace, table);
+        waitForTableIndexesQueryable(keyspace, table);
 
         ResultSet rows = executeNet("SELECT id1 FROM " + keyspace + "." + table + " WHERE v2 = '0'");
 
@@ -289,7 +289,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
                                   "WITH compaction = {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }", keyspace,  table));
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index, keyspace, table, "v1"));
-        waitForIndexQueryable(keyspace, table);
+        waitForTableIndexesQueryable(keyspace, table);
 
         execute("INSERT INTO " + keyspace + "." + table + "(pk, ck, v1) VALUES (0, 0, 0)");
         execute("INSERT INTO " + keyspace + "." + table + "(pk, ck, v1) VALUES (1, 1, 1)");
@@ -320,7 +320,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
                                   "WITH compaction = {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }", keyspace, table));
 
         createIndex(String.format(CREATE_INDEX_TEMPLATE, index, keyspace, table, "v1"));
-        waitForIndexQueryable(keyspace, table);
+        waitForTableIndexesQueryable(keyspace, table);
 
         execute("INSERT INTO " + keyspace + "." + table + "(pk, ck, v1) VALUES (0, 0, 0)");
         execute("INSERT INTO " + keyspace + "." + table + "(pk, ck, v1) VALUES (1, 1, 1)");
@@ -350,7 +350,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
         return (long) getMetricValue(objectNameNoIndex(metricsName, keyspace, table, PER_QUERY_METRIC_TYPE));
     }
 
-    private long getTableQueryMetrics(String keyspace, String table, String metricsName) throws Exception
+    private long getTableQueryMetrics(String keyspace, String table, String metricsName)
     {
         return (long) getMetricValue(objectNameNoIndex(metricsName, keyspace, table, TableQueryMetrics.TABLE_QUERY_METRIC_TYPE));
     }
