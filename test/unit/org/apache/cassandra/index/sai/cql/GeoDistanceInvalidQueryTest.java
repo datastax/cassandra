@@ -111,6 +111,40 @@ public class GeoDistanceInvalidQueryTest extends VectorTester
     }
 
     @Test
+    public void geoDistanceCrossesAntimeridian() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        waitForIndexQueryable();
+
+        // At the equator, a degree of longitude is about 111km, so this query should cross the antimeridian.
+        assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [0, -179]) < 111000"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessage("GEO_DISTANCE radius crosses the antimeridian, possibly resulting in incomplete results. Decrease search radius or change search location.");
+
+        // At the equator, a degree of longitude is about 111km, so this query should cross the antimeridian.
+        assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [0, 179]) < 111000"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessage("GEO_DISTANCE radius crosses the antimeridian, possibly resulting in incomplete results. Decrease search radius or change search location.");
+
+        // At the 80 degrees latitude, a degree of longitude is about 19,296 meters, so this query should cross the antimeridian.
+        assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [80, -179]) < 20000"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessage("GEO_DISTANCE radius crosses the antimeridian, possibly resulting in incomplete results. Decrease search radius or change search location.");
+
+        // At the 80 degrees latitude, a degree of longitude is about 19,296 meters, so this query should cross the antimeridian.
+        assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [80, 179]) < 20000"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessage("GEO_DISTANCE radius crosses the antimeridian, possibly resulting in incomplete results. Decrease search radius or change search location.");
+
+        // Now run all of the above for queries that are very close, but still valid
+        assertRows(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [0, -179]) < 110000"));
+        assertRows(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [0, 179]) < 110000"));
+        assertRows(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [80, -179]) < 19000"));
+        assertRows(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [80, 179]) < 19000"));
+    }
+
+    @Test
     public void geoDistanceMissingOrIncorrectlyConfiguredIndex() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, x int, v vector<float, 2>, PRIMARY KEY(pk))");

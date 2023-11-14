@@ -30,14 +30,31 @@ public class GeoUtil
     /**
      * Determines the worst ratio for meters to degrees for a given latitude. The worst ratio will be the distance in
      * meters of 1 degree longitude.
-     * @param vector the search vector
+     * @param latitidue the search vector's latitude
      * @return
      */
-    private static double metersToDegreesRatioForLatitude(float[] vector)
+    private static double metersToDegreesRatioForLatitude(float latitidue)
     {
         // Got this formula from https://sciencing.com/what-parallels-maps-4689046.html. It seems
         // to produce accurate results, but it'd be good to find additional support for its correctness.
-        return Math.cos(Math.toRadians(vector[0])) * DISTANCE_PER_DEGREE_LONGITUDE_AT_EQUATOR;
+        return Math.cos(Math.toRadians(latitidue)) * DISTANCE_PER_DEGREE_LONGITUDE_AT_EQUATOR;
+    }
+
+    /**
+     * Calculate the number of degrees longitude that the search radius represents. This is an amplified estimate
+     * because the distance between two lines of longitude decreases as you move away from the equator.
+     * @param latitude the search's latitude
+     * @param distanceInMeters the search's radius
+     * @return the number of degrees longitude that the search radius represents
+     */
+    public static double amplifiedDegreesLongitude(float latitude, float distanceInMeters)
+    {
+        // Get the conversion ratio for meters to degrees at the given latitude.
+        double distanceBetweenDegreeLatitude = metersToDegreesRatioForLatitude(latitude);
+
+        // Calculate the number of degrees that the search radius represents because we're finding the distance between
+        // two points that are also using degrees as their units.
+        return distanceInMeters / distanceBetweenDegreeLatitude;
     }
 
     /**
@@ -50,13 +67,7 @@ public class GeoUtil
      */
     public static float amplifiedEuclideanSimilarityThreshold(float[] vector, float distanceInMeters)
     {
-        // Get the conversion ratio for meters to degrees at the given latitude.
-        double distanceBetweenDegreeLatitude = metersToDegreesRatioForLatitude(vector);
-
-        // Calculate the number of degrees that the search radius represents because we're finding the distance between
-        // two points that are also using degrees as their units.
-        double degrees = distanceInMeters / distanceBetweenDegreeLatitude;
-
+        double degrees = amplifiedDegreesLongitude(vector[0], distanceInMeters);
         return (float) (1.0 / (1 + Math.pow((float) degrees, 2)));
     }
 
