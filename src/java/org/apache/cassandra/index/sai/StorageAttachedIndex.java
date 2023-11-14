@@ -197,12 +197,12 @@ public class StorageAttachedIndex implements Index
     // Used to build indexes on newly added SSTables:
     private static final StorageAttachedIndexBuildingSupport INDEX_BUILDER_SUPPORT = new StorageAttachedIndexBuildingSupport();
 
-    private static final Set<String> VALID_OPTIONS = ImmutableSet.of(NonTokenizingOptions.CASE_SENSITIVE,
-                                                                     NonTokenizingOptions.NORMALIZE,
-                                                                     NonTokenizingOptions.ASCII,
-                                                                     IndexTarget.TARGET_OPTION_NAME,
+    private static final Set<String> VALID_OPTIONS = ImmutableSet.of(IndexTarget.TARGET_OPTION_NAME,
                                                                      IndexTarget.CUSTOM_INDEX_OPTION_NAME,
-                                                                     IndexWriterConfig.POSTING_LIST_LVL_MIN_LEAVES,
+                                                                     NonTokenizingOptions.CASE_SENSITIVE,
+                                                                     NonTokenizingOptions.NORMALIZE,
+                                                                     NonTokenizingOptions.ASCII,                                                                     
+                                                                     IndexWriterConfig.POSTING_LIST_LVL_MIN_LEAVES, 
                                                                      IndexWriterConfig.POSTING_LIST_LVL_SKIP_OPTION);
 
     public static final Set<CQL3Type> SUPPORTED_TYPES = ImmutableSet.of(CQL3Type.Native.ASCII, CQL3Type.Native.BIGINT, CQL3Type.Native.DATE,
@@ -210,7 +210,7 @@ public class StorageAttachedIndex implements Index
                                                                         CQL3Type.Native.SMALLINT, CQL3Type.Native.TEXT, CQL3Type.Native.TIME,
                                                                         CQL3Type.Native.TIMESTAMP, CQL3Type.Native.TIMEUUID, CQL3Type.Native.TINYINT,
                                                                         CQL3Type.Native.UUID, CQL3Type.Native.VARCHAR, CQL3Type.Native.INET,
-                                                                        CQL3Type.Native.VARINT, CQL3Type.Native.DECIMAL);
+                                                                        CQL3Type.Native.VARINT, CQL3Type.Native.DECIMAL, CQL3Type.Native.BOOLEAN);
 
     private static final Set<Class<? extends IPartitioner>> ILLEGAL_PARTITIONERS =
             ImmutableSet.of(OrderPreservingPartitioner.class, LocalPartitioner.class, ByteOrderedPartitioner.class, RandomPartitioner.class);
@@ -289,18 +289,18 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("Cannot create more than one storage-attached index on the same column: " + target.left);
         }
 
-        AbstractType<?> type = TypeUtil.cellValueType(target);
+        AbstractType<?> type = TypeUtil.cellValueType(target.left, target.right);
 
         // If we are indexing map entries we need to validate the sub-types
         if (TypeUtil.isComposite(type))
         {
             for (AbstractType<?> subType : type.subTypes())
             {
-                if (!SUPPORTED_TYPES.contains(subType.asCQL3Type()) && !TypeUtil.isFrozenCollection(subType))
+                if (!SUPPORTED_TYPES.contains(subType.asCQL3Type()) && !TypeUtil.isFrozen(subType))
                     throw new InvalidRequestException("Unsupported type: " + subType.asCQL3Type());
             }
         }
-        else if (!SUPPORTED_TYPES.contains(type.asCQL3Type()) && !TypeUtil.isFrozenCollection(type))
+        else if (!SUPPORTED_TYPES.contains(type.asCQL3Type()) && !TypeUtil.isFrozen(type))
         {
             throw new InvalidRequestException("Unsupported type: " + type.asCQL3Type());
         }
