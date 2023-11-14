@@ -36,7 +36,7 @@ public class GeoDistanceAccuracyTest extends VectorTester
     private final static float MIN_EXPECTED_RECALL = 0.85f;
 
     // Number represents the percent of actual results that are incorrect (i.e. outside the search radius)
-    private final static float MAX_EXPECTED_FALSE_POSITIVE_RATE = 0.01f;
+    private final static float MAX_EXPECTED_FALSE_POSITIVE_RATE = 0.0001f;
 
     @Test
     public void testRandomVectorsAgainstHaversineDistance()
@@ -109,7 +109,7 @@ public class GeoDistanceAccuracyTest extends VectorTester
 
     // In the production code, we use a haversine distance formula from lucene, which prioritizes speed over some
     // accuracy. This is the strict formula.
-    private static double strictHaversineDistance(float lat1, float lon1, float lat2, float lon2)
+    public static double strictHaversineDistance(float lat1, float lon1, float lat2, float lon2)
     {
         // This implementation is based on information from https://www.movable-type.co.uk/scripts/latlong.html
         double phi1 = lat1 * Math.PI/180; // phi, lambda in radians
