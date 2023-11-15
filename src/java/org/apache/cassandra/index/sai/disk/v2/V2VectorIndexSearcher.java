@@ -19,8 +19,12 @@ package org.apache.cassandra.index.sai.disk.v2;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.PrimitiveIterator;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
@@ -28,10 +32,13 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.graph.NodeSimilarity;
+import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.pq.BinaryQuantization;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseFixedBitSet;
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -45,7 +52,6 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
-import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
@@ -124,11 +130,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (exp.getEuclideanSearchThreshold() > 0)
             limit = 100000;
         int topK = topKFor(limit);
-        BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, topK);
+        float[] queryVector = exp.lower.value.vector;
+
+        BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, queryVector, topK);
         if (bitsOrPostingList.skipANN())
             return bitsOrPostingList.postingList();
 
-        float[] queryVector = exp.lower.value.vector;
         VectorPostingList vectorPostings = graph.search(queryVector, topK, exp.getEuclideanSearchThreshold(), limit, bitsOrPostingList.getBits(), context);
         if (bitsOrPostingList.expectedNodesVisited >= 0)
             updateExpectedNodes(vectorPostings.getVisitedCount(), bitsOrPostingList.expectedNodesVisited);
@@ -142,10 +149,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
      */
     private int topKFor(int limit)
     {
+        CompressedVectors cv = graph.getCompressedVectors();
         // uncompressed indexes don't need to over-search
-        if (graph instanceof CassandraOnDiskHnsw)
-            return limit;
-        CompressedVectors cv = ((CassandraDiskAnn) graph).getCompressedVectors();
         if (cv == null)
             return limit;
 
@@ -168,7 +173,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     /**
      * Return bit set if needs to search HNSW; otherwise return posting list to bypass HNSW
      */
-    private BitsOrPostingList bitsOrPostingListForKeyRange(QueryContext context, AbstractBounds<PartitionPosition> keyRange, int limit) throws IOException
+    private BitsOrPostingList bitsOrPostingListForKeyRange(QueryContext context,
+                                                           AbstractBounds<PartitionPosition> keyRange,
+                                                           float[] queryVector,
+                                                           int limit) throws IOException
     {
         try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
         {
@@ -200,19 +208,32 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             // so we will live with the inaccuracy.)
             int nRows = Math.toIntExact(maxSSTableRowId - minSSTableRowId + 1);
             int maxBruteForceRows = min(globalBruteForceRows, maxBruteForceRows(limit, nRows, graph.size()));
-            logger.trace("Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
+            if (logger.isTraceEnabled())
+                logger.trace("Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
                          nRows, maxBruteForceRows, graph.size(), limit);
-            Tracing.trace("Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
+            if (Tracing.isTracing())
+                Tracing.trace("Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
                           nRows, maxBruteForceRows, graph.size(), limit);
+
             if (nRows <= maxBruteForceRows)
             {
-                IntArrayList postings = new IntArrayList(Math.toIntExact(nRows), -1);
-                for (long sstableRowId = minSSTableRowId; sstableRowId <= maxSSTableRowId; sstableRowId++)
+                IntStream segmentRowIdsStream = LongStream.range(minSSTableRowId, maxSSTableRowId + 1)
+                                                          .filter(sstableRowId -> context.shouldInclude(sstableRowId, primaryKeyMap))
+                                                          .mapToInt(metadata::toSegmentRowId);
+                final int[] postings;
+                if (graph.getCompressedVectors() == null || nRows <= limit)
                 {
-                    if (context.shouldInclude(sstableRowId, primaryKeyMap))
-                        postings.addInt(metadata.toSegmentRowId(sstableRowId));
+                    postings = segmentRowIdsStream.toArray();
                 }
-                return new BitsOrPostingList(new ArrayPostingList(postings.toIntArray()));
+                else
+                {
+                    CompressedVectors cv = graph.getCompressedVectors();
+                    VectorSimilarityFunction similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
+                    NodeSimilarity.ApproximateScoreFunction scoreFunction = cv.approximateScoreFunctionFor(queryVector, similarityFunction);
+
+                    postings = findTopApproximatePostings(limit, nRows, segmentRowIdsStream, scoreFunction);
+                }
+                return new BitsOrPostingList(new ArrayPostingList(postings));
             }
 
             // create a bitset of ordinals corresponding to the rows in the given key range
@@ -244,6 +265,34 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
             return new BitsOrPostingList(bits, VectorMemtableIndex.expectedNodesVisited(limit, nRows, graph.size()));
         }
+    }
+
+    private int[] findTopApproximatePostings(int limit, int nRows, IntStream segmentRowIdsStream, NodeSimilarity.ApproximateScoreFunction scoreFunction) throws IOException
+    {
+        ArrayList<SearchResult.NodeScore> pairs = new ArrayList<>(nRows);
+        try (OrdinalsView ordinalsView = graph.getOrdinalsView())
+        {
+            // just because getOrdinalForRowId throw IOException, to avoid wrapping it into RuntimException
+            PrimitiveIterator.OfInt segmentRowIdIterator = segmentRowIdsStream.iterator();
+            while(segmentRowIdIterator.hasNext())
+            {
+                int segmentRowId = segmentRowIdIterator.nextInt();
+                int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
+                if (ordinal < 0)
+                    continue;
+
+                float score = scoreFunction.similarityTo(ordinal);
+                pairs.add(new SearchResult.NodeScore(segmentRowId, score));
+            }
+        }
+        // sort descending
+        pairs.sort((a, b) -> Float.compare(b.score, a.score));
+        int end = Math.min(pairs.size(), limit) - 1;
+        int[] postings = new int[end + 1];
+        // top K ascending
+        for (int i = end; i >= 0; i--)
+            postings[end - i] = pairs.get(i).node;
+        return postings;
     }
 
     private long getMaxSSTableRowId(PrimaryKeyMap primaryKeyMap, PartitionPosition right)
