@@ -533,6 +533,32 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
+    public void rangeRestrictedTestWithDuplicateVectorsAndADelete() throws Throwable
+    {
+        setMaxBruteForceRows(0);
+        createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", 2));
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])");
+        execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 2.0])");
+        execute("INSERT INTO %s (pk, val) VALUES (2, [1.0, 2.0])");
+
+        flush();
+
+        // Show the result set is as expected
+        assertRows(execute("SELECT pk FROM %s WHERE token(pk) <= -3248873570005575792 AND " +
+                           "token(pk) >= -3485513579396041028 ORDER BY val ann of [1,2] LIMIT 1000"), row(0), row(2));
+        // Delete one of the rows and get the other
+        // a delete always gets sent, right??
+        execute("DELETE FROM %s WHERE pk = 0");
+
+        flush();
+        assertRows(execute("SELECT pk FROM %s WHERE token(pk) <= -3248873570005575792 AND " +
+                           "token(pk) >= -3485513579396041028 ORDER BY val ann of [1,2] LIMIT 1000"), row(2));
+    }
+
+    @Test
     public void testVectorRowWhereUpdateMakesRowMatchNonOrderingPredicates()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
