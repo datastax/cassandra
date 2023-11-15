@@ -45,6 +45,7 @@ import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -407,7 +408,7 @@ public class IndexContext
     }
 
 
-    public RangeIterator searchMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public RangeIterator searchMemtable(QueryContext context, ShadowedPrimaryKeysTracker shadowedTracker, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
@@ -420,7 +421,7 @@ public class IndexContext
 
         for (MemtableIndex index : memtables)
         {
-            builder.add(index.search(context, e, keyRange, limit));
+            builder.add(index.search(context, shadowedTracker, e, keyRange, limit));
         }
 
         return builder.build();

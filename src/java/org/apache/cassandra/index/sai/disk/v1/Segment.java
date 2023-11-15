@@ -32,8 +32,9 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
+import org.apache.cassandra.index.sai.ShadowedPrimaryKeysTracker;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -156,9 +157,10 @@ public class Segment implements Closeable, SegmentOrdering
      * @param limit      the num of rows to returned, used by ANN index
      * @return range iterator of {@link PrimaryKey} that matches given expression
      */
-    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
+    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange,
+                                QueryContext context, ShadowedPrimaryKeysTracker shadowedTracker, boolean defer, int limit) throws IOException
     {
-        return index.search(expression, keyRange, context, defer, limit);
+        return index.search(expression, keyRange, context, shadowedTracker, defer, limit);
     }
 
     @Override

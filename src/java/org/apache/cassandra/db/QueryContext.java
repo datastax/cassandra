@@ -16,34 +16,73 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai;
+package org.apache.cassandra.db;
 
-import java.io.IOException;
-import java.util.HashSet;
-import java.util.NavigableSet;
-import java.util.Set;
-import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
-import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import io.github.jbellis.jvector.util.Bits;
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
-import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 
 /**
  * Tracks state relevant to the execution of a single query, including metrics and timeout monitoring.
  */
-@NotThreadSafe
 public class QueryContext
 {
+    static class SearchResultMetric
+    {
+        private final LongAdder searchesCount = new LongAdder();
+        private final Histogram visitsHistogram = createHistogram();
+        private final Histogram resultsHistogram = createHistogram();
+
+        public void addSearches(long visits, long results)
+        {
+            searchesCount.add(1);
+            visitsHistogram.update(visits);
+            resultsHistogram.update(results);
+        }
+
+        public long getSearchesCount()
+        {
+            return searchesCount.longValue();
+        }
+
+        public Snapshot getVisitsHistogram()
+        {
+            return visitsHistogram.getSnapshot();
+        }
+
+        public Snapshot getResultsHistogram()
+        {
+            return resultsHistogram.getSnapshot();
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("executed %d times, visits: %s, results: %s",
+                                 searchesCount.longValue(),
+                                 printHisto(getVisitsHistogram()),
+                                 printHisto(getResultsHistogram()));
+        }
+    }
+
+    private static Histogram createHistogram()
+    {
+        return new Histogram(new DecayingEstimatedHistogramReservoir(true));
+    }
+
+    public static String printHisto(Snapshot val)
+    {
+        return String.format("(p50=%.2f, p99=%.2f, max=%d, stdev=%.2f)",
+                             val.getMedian(), val.get99thPercentile(), val.getMax(), val.getStdDev());
+    }
+
     private static final boolean DISABLE_TIMEOUT = Boolean.getBoolean("cassandra.sai.test.disable.timeout");
 
     protected final long queryStartTimeNanos;
@@ -75,7 +114,19 @@ public class QueryContext
     private final LongAdder hnswVectorCacheHits = new LongAdder();
 
     private final LongAdder shadowedKeysLoopCount = new LongAdder();
-    private final NavigableSet<PrimaryKey> shadowedPrimaryKeys = new ConcurrentSkipListSet<>();
+    private final LongAdder shadowedPrimaryKeysCount = new LongAdder();
+
+
+    private final SearchResultMetric diskannSearches = new SearchResultMetric();
+    private final Histogram diskAnnLatenciesMicros = createHistogram();
+    private final SearchResultMetric diskhnswSearches = new SearchResultMetric();
+    private final Histogram diskHnswLatenciesMicros = createHistogram();
+    private final SearchResultMetric heapannSearches = new SearchResultMetric();
+    private final Histogram heapAnnLatenciesMicros = createHistogram();
+
+    private final Histogram searchLatenciesMicros = createHistogram();
+
+    private final Histogram sstablesPerIndexQueried = createHistogram();
 
     @VisibleForTesting
     public QueryContext()
@@ -95,6 +146,47 @@ public class QueryContext
     }
 
     // setters
+
+    public void markDiskHnswLatencies(long latencyNanos)
+    {
+        diskHnswLatenciesMicros.update(TimeUnit.NANOSECONDS.toMicros(latencyNanos));
+    }
+
+    public void markDiskAnnLatencies(long latencyNanos)
+    {
+        diskAnnLatenciesMicros.update(TimeUnit.NANOSECONDS.toMicros(latencyNanos));
+    }
+
+    public void markHeapAnnLatencies(long latencyNanos)
+    {
+        heapAnnLatenciesMicros.update(TimeUnit.NANOSECONDS.toMicros(latencyNanos));
+    }
+
+    public void addIndexesQueried(long sstablesPerIndex)
+    {
+        sstablesPerIndexQueried.update(sstablesPerIndex);
+    }
+
+    public void addDiskannSearches(long nodes, long results)
+    {
+        diskannSearches.addSearches(nodes, results);
+    }
+
+    public void addDiskhnswSearches(long nodes, long results)
+    {
+        diskhnswSearches.addSearches(nodes, results);
+    }
+
+    public void addHeapannSearches(long nodes, long results)
+    {
+        heapannSearches.addSearches(nodes, results);
+    }
+
+    public void addShadowedPrimaryKeysCount(long val)
+    {
+        shadowedPrimaryKeysCount.add(val);
+    }
+
     public void addSstablesHit(long val)
     {
         sstablesHit.add(val);
@@ -166,6 +258,11 @@ public class QueryContext
 
     // getters
 
+    public long shadowedPrimaryKeysCount()
+    {
+        return shadowedPrimaryKeysCount.longValue();
+    }
+
     public long sstablesHit()
     {
         return sstablesHit.longValue();
@@ -230,8 +327,24 @@ public class QueryContext
         return hnswVectorCacheHits.longValue();
     }
 
+    public SearchResultMetric diskannSearches()
+    {
+        return diskannSearches;
+    }
+
+    public SearchResultMetric heapannSearches()
+    {
+        return heapannSearches;
+    }
+
+    public SearchResultMetric diskhnswSearches()
+    {
+        return diskhnswSearches;
+    }
+
     public void checkpoint()
     {
+        searchLatenciesMicros.update(TimeUnit.NANOSECONDS.toMicros(totalQueryTimeNs()));
         if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
         {
             addQueryTimeouts(1);
@@ -239,130 +352,44 @@ public class QueryContext
         }
     }
 
+    public long numSearches()
+    {
+        return searchLatenciesMicros.getCount();
+    }
+
+    public Snapshot searchLatenciesMicros()
+    {
+        return searchLatenciesMicros.getSnapshot();
+    }
+
+    public Snapshot diskhnswLatenciesMicros()
+    {
+        return diskHnswLatenciesMicros.getSnapshot();
+    }
+
+    public Snapshot diskAnnLatenciesMicros()
+    {
+        return diskAnnLatenciesMicros.getSnapshot();
+    }
+
+    public Snapshot heapAnnLatenciesMicros()
+    {
+        return heapAnnLatenciesMicros.getSnapshot();
+    }
+
+    public long numIndexesQueried()
+    {
+        return sstablesPerIndexQueried.getCount();
+    }
+
+    public Snapshot sstablesPerIndexQueried()
+    {
+        return sstablesPerIndexQueried.getSnapshot();
+    }
+
     public long shadowedKeysLoopCount()
     {
         return shadowedKeysLoopCount.longValue();
     }
 
-    public void recordShadowedPrimaryKey(PrimaryKey primaryKey)
-    {
-        boolean isNewKey = shadowedPrimaryKeys.add(primaryKey);
-        // FIXME VectorUpdateDeleteTest.shadowedPrimaryKeyWithSharedVectorAndOtherPredicates fails this assertion
-        // assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query.";
-    }
-
-    // Returns true if the row ID will be included or false if the row ID will be shadowed
-    public boolean shouldInclude(long sstableRowId, PrimaryKeyMap primaryKeyMap)
-    {
-        return !shadowedPrimaryKeys.contains(primaryKeyMap.primaryKeyFromRowId(sstableRowId));
-    }
-
-    public boolean shouldInclude(PrimaryKey pk)
-    {
-        return !shadowedPrimaryKeys.contains(pk);
-    }
-
-    /**
-     * @return shadowed primary keys, in ascending order
-     */
-    public NavigableSet<PrimaryKey> getShadowedPrimaryKeys()
-    {
-        return shadowedPrimaryKeys;
-    }
-
-    public Bits bitsetForShadowedPrimaryKeys(CassandraOnHeapGraph<PrimaryKey> graph)
-    {
-        if (getShadowedPrimaryKeys().isEmpty())
-            return Bits.ALL;
-
-        return new IgnoredKeysBits(graph, getShadowedPrimaryKeys());
-    }
-
-    public Bits bitsetForShadowedPrimaryKeys(SegmentMetadata metadata, PrimaryKeyMap primaryKeyMap, JVectorLuceneOnDiskGraph graph) throws IOException
-    {
-        Set<Integer> ignoredOrdinals = null;
-        try (var ordinalsView = graph.getOrdinalsView())
-        {
-            for (PrimaryKey primaryKey : getShadowedPrimaryKeys())
-            {
-                // not in current segment
-                if (primaryKey.compareTo(metadata.minKey) < 0 || primaryKey.compareTo(metadata.maxKey) > 0)
-                    continue;
-
-                long sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
-                if (sstableRowId < 0) // not found
-                    continue;
-
-                int segmentRowId = metadata.toSegmentRowId(sstableRowId);
-                // not in segment yet
-                if (segmentRowId < 0)
-                    continue;
-                // end of segment
-                if (segmentRowId > metadata.maxSSTableRowId)
-                    break;
-
-                int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                if (ordinal >= 0)
-                {
-                    if (ignoredOrdinals == null)
-                        ignoredOrdinals = new HashSet<>();
-                    ignoredOrdinals.add(ordinal);
-                }
-            }
-        }
-
-        if (ignoredOrdinals == null)
-            return Bits.ALL;
-
-        return new IgnoringBits(ignoredOrdinals, graph.size());
-    }
-
-    private static class IgnoringBits implements Bits
-    {
-        private final Set<Integer> ignoredOrdinals;
-        private final int maxOrdinal;
-
-        public IgnoringBits(Set<Integer> ignoredOrdinals, int maxOrdinal)
-        {
-            this.ignoredOrdinals = ignoredOrdinals;
-            this.maxOrdinal = maxOrdinal;
-        }
-
-        @Override
-        public boolean get(int index)
-        {
-            return !ignoredOrdinals.contains(index);
-        }
-
-        @Override
-        public int length()
-        {
-            return maxOrdinal;
-        }
-    }
-
-    private static class IgnoredKeysBits implements Bits
-    {
-        private final CassandraOnHeapGraph<PrimaryKey> graph;
-        private final NavigableSet<PrimaryKey> ignored;
-
-        public IgnoredKeysBits(CassandraOnHeapGraph<PrimaryKey> graph, NavigableSet<PrimaryKey> ignored)
-        {
-            this.graph = graph;
-            this.ignored = ignored;
-        }
-
-        @Override
-        public boolean get(int ordinal)
-        {
-            var keys = graph.keysFromOrdinal(ordinal);
-            return keys.stream().anyMatch(k -> !ignored.contains(k));
-        }
-
-        @Override
-        public int length()
-        {
-            return graph.size();
-        }
-    }
 }

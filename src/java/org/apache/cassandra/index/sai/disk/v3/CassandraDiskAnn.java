@@ -39,7 +39,7 @@ import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -150,12 +150,14 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, similarityFunction);
             reRanker = (i, map) -> similarityFunction.compare(queryVector, map.get(i));
         }
+        final long start = System.nanoTime();
         var result = searcher.search(scoreFunction,
                                      reRanker,
                                      topK,
                                      threshold,
                                      ordinalsMap.ignoringDeleted(acceptBits));
-        Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
+        context.addDiskannSearches(result.getVisitedCount(), result.getNodes().length);
+        context.markDiskAnnLatencies(System.nanoTime() - start);
         return annRowIdsToPostings(result, limit);
     }
 

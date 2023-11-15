@@ -29,7 +29,8 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
+import org.apache.cassandra.index.sai.ShadowedPrimaryKeysTracker;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
@@ -83,7 +84,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     }
 
     @SuppressWarnings("resource")
-    public RangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
+    public RangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, ShadowedPrimaryKeysTracker shadowedTracker, boolean defer, int limit) throws IOException
     {
         PostingList postingList = searchPosting(exp, context);
         return toPrimaryKeyIterator(postingList, context);

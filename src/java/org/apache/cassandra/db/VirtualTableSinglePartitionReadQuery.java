@@ -171,14 +171,22 @@ public class VirtualTableSinglePartitionReadQuery extends VirtualTableReadQuery 
             return new Group(queries, limits);
         }
 
+        private final QueryContext queryContext;
         public Group(List<VirtualTableSinglePartitionReadQuery> queries, DataLimits limits)
         {
             super(queries, limits);
+            queryContext = queries.get(0).queryContext();
         }
 
         public static Group one(VirtualTableSinglePartitionReadQuery query)
         {
             return new Group(Collections.singletonList(query), query.limits());
+        }
+
+        @Override
+        public QueryContext queryContext()
+        {
+            return queryContext;
         }
 
         public PartitionIterator execute(ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestExecutionException

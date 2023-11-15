@@ -21,7 +21,7 @@ package org.apache.cassandra.index.sai.disk.v2.hnsw;
 import java.io.IOException;
 import java.util.Arrays;
 
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.lucene.util.hnsw.HnswGraph;

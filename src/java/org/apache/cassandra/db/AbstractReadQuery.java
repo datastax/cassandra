@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.concurrent.TimeUnit;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -37,6 +40,8 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
     private final RowFilter rowFilter;
     private final DataLimits limits;
 
+    private final QueryContext queryContext;
+
     protected AbstractReadQuery(TableMetadata metadata, int nowInSec, ColumnFilter columnFilter, RowFilter rowFilter, DataLimits limits)
     {
         this.metadata = metadata;
@@ -44,6 +49,15 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
         this.columnFilter = columnFilter;
         this.rowFilter = rowFilter;
         this.limits = limits;
+
+        long executionQuotaMs = DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS);
+        this.queryContext = new QueryContext(executionQuotaMs);
+    }
+
+    @Override
+    public QueryContext queryContext()
+    {
+        return queryContext;
     }
 
     @Override

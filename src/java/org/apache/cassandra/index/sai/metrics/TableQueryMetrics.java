@@ -25,8 +25,7 @@ import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.RatioGauge;
 import com.codahale.metrics.Timer;
-import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -203,14 +202,6 @@ public class TableQueryMetrics extends AbstractMetrics
             this.rowsFiltered.update(rowsFiltered);
             totalRowsFiltered.inc(rowsFiltered);
 
-            if (Tracing.isTracing())
-            {
-                Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, and took {} microseconds.",
-                              pluralize(ssTablesHit, "SSTable index", "es"), pluralize(segmentsHit, "segment", "s"),
-                              pluralize(rowsFiltered, "row", "s"), pluralize(partitionsRead, "partition", "s"),
-                              queryLatencyMicros);
-            }
-
             if (queryContext.trieSegmentsHit() > 0)
                 recordStringIndexCacheMetrics(queryContext);
             if (queryContext.bkdSegmentsHit() > 0)
@@ -219,14 +210,9 @@ public class TableQueryMetrics extends AbstractMetrics
                 recordHnswIndexMetrics(queryContext);
 
             shadowedKeysLoopsHistogram.update(queryContext.shadowedKeysLoopCount());
-            shadowedKeysScannedHistogram.update(queryContext.getShadowedPrimaryKeys().size());
+            shadowedKeysScannedHistogram.update(queryContext.shadowedPrimaryKeysCount());
 
             totalQueriesCompleted.inc();
         }
-    }
-
-    private String pluralize(long count, String root, String plural)
-    {
-        return count == 1 ? String.format("1 %s", root) : String.format("%d %s%s", count, root, plural);
     }
 }

@@ -52,8 +52,9 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.IncludingExcludingBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.ShadowedPrimaryKeysTracker;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -196,7 +197,10 @@ public class TrieMemtableIndexTest extends SAITester
 
             Set<Integer> foundKeys = new HashSet<>();
 
-            try (RangeIterator iterator = memtableIndex.search(new QueryContext(), expression, keyRange, 0))
+            QueryContext queryContext = new QueryContext();
+            ShadowedPrimaryKeysTracker shadowedTracker = new ShadowedPrimaryKeysTracker(queryContext);
+
+            try (RangeIterator iterator = memtableIndex.search(queryContext, shadowedTracker, expression, keyRange, 0))
             {
                 while (iterator.hasNext())
                 {

@@ -20,7 +20,7 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.List;
 
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.index.sai.plan.Expression;
 
 /***

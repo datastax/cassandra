@@ -27,7 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Set;
-import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
@@ -56,8 +55,9 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
+import org.apache.cassandra.index.sai.ShadowedPrimaryKeysTracker;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
@@ -91,6 +91,7 @@ public class QueryController
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
     private final QueryContext queryContext;
+    private final ShadowedPrimaryKeysTracker shadowedTracker;
     private final TableQueryMetrics tableQueryMetrics;
     private final RowFilter.FilterElement filterOperation;
     private final IndexFeatureSet indexFeatureSet;
@@ -106,11 +107,13 @@ public class QueryController
                            RowFilter.FilterElement filterOperation,
                            IndexFeatureSet indexFeatureSet,
                            QueryContext queryContext,
-                           TableQueryMetrics tableQueryMetrics)
+                           TableQueryMetrics tableQueryMetrics,
+                           ShadowedPrimaryKeysTracker shadowedTracker)
     {
         this.cfs = cfs;
         this.command = command;
         this.queryContext = queryContext;
+        this.shadowedTracker = shadowedTracker;
         this.tableQueryMetrics = tableQueryMetrics;
         this.filterOperation = filterOperation;
         this.indexFeatureSet = indexFeatureSet;
@@ -250,7 +253,7 @@ public class QueryController
             for (Map.Entry<Expression, NavigableSet<SSTableIndex>> e : view)
             {
                 @SuppressWarnings("resource") // RangeIterators are closed by releaseIndexes
-                RangeIterator index = TermIterator.build(e.getKey(), e.getValue(), mergeRange, queryContext, defer, currentSoftLimitEstimate());
+                RangeIterator index = TermIterator.build(e.getKey(), e.getValue(), mergeRange, queryContext, shadowedTracker, defer, currentSoftLimitEstimate());
 
                 builder.add(index);
             }
@@ -273,9 +276,9 @@ public class QueryController
                              .add(Operator.ANN, expression.getIndexValue().duplicate());
         int limit = currentSoftLimitEstimate();
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        RangeIterator memtableResults = getContext(expression).searchMemtable(queryContext, planExpression, mergeRange, limit);
+        RangeIterator memtableResults = getContext(expression).searchMemtable(queryContext, shadowedTracker, planExpression, mergeRange, limit);
 
-        var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
+        var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange, queryContext).build();
 
         try
         {
@@ -306,14 +309,14 @@ public class QueryController
         // Filter out PKs now. Each PK is passed to every segment of the ANN index, so filtering shadowed keys
         // eagerly can save some work when going from PK to row id for on disk segments.
         // Since the result is shared with multiple streams, we use an unmodifiable list.
-        var sourceKeys = rawSourceKeys.stream().filter(queryContext::shouldInclude).collect(Collectors.toList());
+        var sourceKeys = rawSourceKeys.stream().filter(shadowedTracker::shouldInclude).collect(Collectors.toList());
         var planExpression = new Expression(this.getContext(expression));
         planExpression.add(Operator.ANN, expression.getIndexValue().duplicate());
 
         int limit = currentSoftLimitEstimate();
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
         RangeIterator memtableResults = this.getContext(expression).limitToTopResults(queryContext, sourceKeys, planExpression, limit);
-        var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
+        var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange, queryContext).build();
 
         try
         {
@@ -361,7 +364,7 @@ public class QueryController
                                     {
                                         try
                                         {
-                                            return ie.index.search(ie.expression, mergeRange, queryContext, defer, limit);
+                                            return ie.index.search(ie.expression, mergeRange, queryContext, shadowedTracker, defer, limit);
                                         }
                                         catch (Throwable ex)
                                         {
@@ -389,7 +392,7 @@ public class QueryController
         if (!allowSpeculativeLimits)
             return K;
 
-        int M = queryContext.getShadowedPrimaryKeys().size();
+        int M = shadowedTracker.getShadowedPrimaryKeys().size();
         if (M == 0)
             return K;
 
@@ -474,45 +477,56 @@ public class QueryController
      */
     private Map<Expression, NavigableSet<SSTableIndex>> referenceAndGetView(Operation.OperationType op, Collection<Expression> expressions)
     {
-        SortedSet<String> indexNames = new TreeSet<>();
-        try
+        List<SSTableIndex> referencedIndexes = new ArrayList<>();
+        while (true)
         {
-            while (true)
+            referencedIndexes.clear();
+            boolean failed = false;
+
+            Map<Expression, NavigableSet<SSTableIndex>> view = getView(op, expressions);
+
+            for (SSTableIndex index : view.values().stream().flatMap(Collection::stream).collect(Collectors.toList()))
             {
-                List<SSTableIndex> referencedIndexes = new ArrayList<>();
-                boolean failed = false;
-
-                Map<Expression, NavigableSet<SSTableIndex>> view = getView(op, expressions);
-
-                for (SSTableIndex index : view.values().stream().flatMap(Collection::stream).collect(Collectors.toList()))
+                if (index.reference())
                 {
-                    indexNames.add(index.getIndexContext().getIndexName());
-
-                    if (index.reference())
-                    {
-                        referencedIndexes.add(index);
-                    }
-                    else
-                    {
-                        failed = true;
-                        break;
-                    }
-                }
-
-                if (failed)
-                {
-                    // TODO: This might be a good candidate for a table/index group metric in the future...
-                    referencedIndexes.forEach(QueryController::releaseQuietly);
+                    referencedIndexes.add(index);
                 }
                 else
                 {
-                    return view;
+                    failed = true;
+                    break;
                 }
             }
+
+            if (failed)
+            {
+                // TODO: This might be a good candidate for a table/index group metric in the future...
+                referencedIndexes.forEach(QueryController::releaseQuietly);
+            }
+            else
+            {
+                updateMetricsAndTraceGroupedIndexes(referencedIndexes, queryContext);
+                return view;
+            }
         }
-        finally
+    }
+
+    static void updateMetricsAndTraceGroupedIndexes(Collection<SSTableIndex> referencedIndexes, QueryContext queryContext)
+    {
+        if (referencedIndexes.isEmpty())
+            return;
+
+        var groupedIndexes = referencedIndexes
+                             .stream()
+                             .collect(Collectors.groupingBy(i -> i.getIndexContext().getIndexName(), Collectors.counting()));
+        groupedIndexes.values().forEach(queryContext::addIndexesQueried);
+
+        if (Tracing.isTracing())
         {
-            Tracing.trace("Querying storage-attached indexes {}", indexNames);
+            var summary = groupedIndexes.entrySet().stream()
+                                        .map(e -> String.format("%s (%s sstables)", e.getKey(), e.getValue()))
+                                        .collect(Collectors.joining(", "));;
+            Tracing.trace("Querying storage-attached indexes {}", summary);
         }
     }
 

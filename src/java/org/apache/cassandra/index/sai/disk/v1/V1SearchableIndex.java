@@ -30,8 +30,9 @@ import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
+import org.apache.cassandra.index.sai.ShadowedPrimaryKeysTracker;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -162,6 +163,7 @@ public class V1SearchableIndex implements SearchableIndex
     public RangeIterator search(Expression expression,
                                 AbstractBounds<PartitionPosition> keyRange,
                                 QueryContext context,
+                                ShadowedPrimaryKeysTracker shadowedTracker,
                                 boolean defer,
                                 int limit) throws IOException
     {
@@ -171,7 +173,7 @@ public class V1SearchableIndex implements SearchableIndex
         {
             if (segment.intersects(keyRange))
             {
-                rangeConcatIteratorBuilder.add(segment.search(expression, keyRange, context, defer, limit));
+                rangeConcatIteratorBuilder.add(segment.search(expression, keyRange, context, shadowedTracker, defer, limit));
             }
         }
 

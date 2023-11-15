@@ -51,8 +51,9 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.RequestTimeoutException;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
+import org.apache.cassandra.index.sai.ShadowedPrimaryKeysTracker;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
@@ -70,18 +71,21 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private final QueryController controller;
     private final QueryContext queryContext;
     private final ColumnFamilyStore cfs;
+    private final ShadowedPrimaryKeysTracker shadowedTracker;
 
     public StorageAttachedIndexSearcher(ColumnFamilyStore cfs,
                                         TableQueryMetrics tableQueryMetrics,
                                         ReadCommand command,
                                         RowFilter.FilterElement filterOperation,
-                                        IndexFeatureSet indexFeatureSet,
-                                        long executionQuotaMs)
+                                        IndexFeatureSet indexFeatureSet)
     {
         this.command = command;
         this.cfs = cfs;
-        this.queryContext = new QueryContext(executionQuotaMs);
-        this.controller = new QueryController(cfs, command, filterOperation, indexFeatureSet, queryContext, tableQueryMetrics);
+        this.queryContext = command.queryContext();
+        this.shadowedTracker = new ShadowedPrimaryKeysTracker(queryContext);
+        this.controller = new QueryController(cfs, command, filterOperation, indexFeatureSet,
+                                              queryContext, tableQueryMetrics,
+                                              shadowedTracker);
     }
 
     @Override
@@ -115,24 +119,26 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
         // VSTODO see about switching to use an order op instead of ann
-        Supplier<ResultRetriever> queryIndexes = () -> new ResultRetriever(analyze(), analyzeFilter(), controller, executionController, queryContext, command.isTopK());
+        Supplier<ResultRetriever> queryIndexes = () -> new ResultRetriever(analyze(), analyzeFilter(), controller,
+                                                                           executionController, queryContext,
+                                                                           shadowedTracker, command.isTopK());
         if (!command.isTopK())
             return queryIndexes.get();
 
         // If there are shadowed primary keys, we have to at least query twice.
         // First time to find out there are shadowed keys, second time to find out there are no more shadow keys.
         int loopsCount = 1;
-        final long startShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
+        final long startShadowedKeysCount = shadowedTracker.getShadowedPrimaryKeys().size();
         final var exactLimit = controller.getExactLimit();
         while (true)
         {
             queryContext.addShadowedKeysLoopCount(1L);
-            long lastShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
+            long lastShadowedKeysCount = shadowedTracker.getShadowedPrimaryKeys().size();
             final var softLimit = controller.currentSoftLimitEstimate();
             ResultRetriever result = queryIndexes.get();
             UnfilteredPartitionIterator topK = (UnfilteredPartitionIterator)new VectorTopKProcessor(command).filter(result);
 
-            long currentShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
+            long currentShadowedKeysCount = shadowedTracker.getShadowedPrimaryKeys().size();
             long newShadowedKeysCount = currentShadowedKeysCount - lastShadowedKeysCount;
             // Stop if no new shadowed keys found
             // or if we already tried to search beyond the limit for more than the limit + count of new shadowed keys
@@ -144,7 +150,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 return topK;
             }
             loopsCount++;
-            Tracing.trace("Found {} new shadowed keys, rerunning query (loop {})", newShadowedKeysCount, loopsCount);
+            if (Tracing.isTracing())
+                Tracing.trace("Found {} new shadowed keys, rerunning query (loop {}) with new topk = {}",
+                          newShadowedKeysCount, loopsCount, controller.currentSoftLimitEstimate());
         }
     }
 
@@ -185,6 +193,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final QueryController controller;
         private final ReadExecutionController executionController;
         private final QueryContext queryContext;
+        private final ShadowedPrimaryKeysTracker shadowedTracker;
         private final PrimaryKey.Factory keyFactory;
         private final boolean topK;
 
@@ -194,7 +203,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                 FilterTree filterTree,
                                 QueryController controller,
                                 ReadExecutionController executionController,
-                                QueryContext queryContext, boolean topK)
+                                QueryContext queryContext,
+                                ShadowedPrimaryKeysTracker shadowedTracker,
+                                boolean topK)
         {
             this.keyRanges = controller.dataRanges().iterator();
             this.currentKeyRange = keyRanges.next().keyRange();
@@ -204,6 +215,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.controller = controller;
             this.executionController = executionController;
             this.queryContext = queryContext;
+            this.shadowedTracker = shadowedTracker;
             this.keyFactory = controller.primaryKeyFactory();
             this.topK = topK;
 
@@ -315,7 +327,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             {
                 queryContext.addPartitionsRead(1);
 
-                return applyIndexFilter(key, partition, filterTree, queryContext);
+                return applyIndexFilter(key, partition, filterTree, queryContext, shadowedTracker);
             }
         }
 
@@ -500,11 +512,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             {
                 queryContext.addPartitionsRead(1);
 
-                return applyIndexFilter(key, partition, filterTree, queryContext);
+                return applyIndexFilter(key, partition, filterTree, queryContext, shadowedTracker);
             }
         }
 
-        private UnfilteredRowIterator applyIndexFilter(PrimaryKey key, UnfilteredRowIterator partition, FilterTree tree, QueryContext queryContext)
+        private UnfilteredRowIterator applyIndexFilter(PrimaryKey key, UnfilteredRowIterator partition, FilterTree tree,
+                                                       QueryContext queryContext, ShadowedPrimaryKeysTracker shadowedTracker)
         {
             Row staticRow = partition.staticRow();
             List<Unfiltered> clusters = new ArrayList<>();
@@ -540,7 +553,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             {
                 // shadowed by expired TTL or row tombstone or range tombstone
                 if (topK)
-                    queryContext.recordShadowedPrimaryKey(key);
+                    shadowedTracker.recordShadowedPrimaryKey(key);
                 return null;
             }
 

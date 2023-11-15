@@ -25,6 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.codahale.metrics.Histogram;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
@@ -52,6 +53,8 @@ public class ReadExecutionController implements AutoCloseable
     private final RepairedDataInfo repairedDataInfo;
     private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
 
+    private final QueryContext queryContext;
+
     public final Histogram sstablesScannedPerRowRead;
 
     ReadExecutionController(ReadCommand command,
@@ -71,6 +74,7 @@ public class ReadExecutionController implements AutoCloseable
         this.writeContext = writeContext;
         this.command = command;
         this.createdAtNanos = createdAtNanos;
+        this.queryContext = command == null ? ReadQuery.empty(null).queryContext() : command.queryContext();
 
         this.sstablesScannedPerRowRead = new Histogram(new DecayingEstimatedHistogramReservoir(true));
 
@@ -89,6 +93,11 @@ public class ReadExecutionController implements AutoCloseable
 
         if (Tracing.isTracing())
             Tracing.instance.setRangeQuery(isRangeCommand());
+    }
+
+    public QueryContext queryContext()
+    {
+        return queryContext;
     }
 
     public boolean isRangeCommand()
@@ -197,28 +206,38 @@ public class ReadExecutionController implements AutoCloseable
 
     public void close()
     {
-        try
-        {
-            if (baseOp != null)
-                baseOp.close();
-        }
-        finally
-        {
-            if (indexController != null)
-            {
-                try
-                {
-                    indexController.close();
-                }
-                finally
-                {
-                    writeContext.close();
-                }
-            }
-        }
+        FileUtils.closeQuietly(baseOp);
+        FileUtils.closeQuietly(indexController);
+        FileUtils.closeQuietly(writeContext);
 
         if (createdAtNanos != NO_SAMPLING)
             addSample();
+
+        if (Tracing.isTracing())
+        {
+            if (queryContext.diskannSearches().getSearchesCount() > 0)
+                Tracing.trace("DiskANN search {} with search latencies {} micros",
+                              queryContext.diskannSearches(), QueryContext.printHisto(queryContext.diskAnnLatenciesMicros()));
+
+            if (queryContext.diskhnswSearches().getSearchesCount() > 0)
+                Tracing.trace("DiskHNSW search {} with search latencies {} micros",
+                              queryContext.diskhnswSearches(), QueryContext.printHisto(queryContext.diskhnswLatenciesMicros()));
+
+            if (queryContext.heapannSearches().getSearchesCount() > 0)
+                Tracing.trace("HeapANN search {} with search latencies {} micros",
+                              queryContext.heapannSearches(), QueryContext.printHisto(queryContext.heapAnnLatenciesMicros()));
+
+            Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, and took {} microseconds.",
+                          pluralize(queryContext.sstablesHit(), "SSTable index", "es"), pluralize(queryContext.segmentsHit(), "segment", "s"),
+                          pluralize(queryContext.rowsFiltered(), "row", "s"), pluralize(queryContext.partitionsRead(), "partition", "s"),
+                          TimeUnit.NANOSECONDS.toMicros(queryContext.totalQueryTimeNs()));
+            Tracing.trace("Queried {} storage-attached indexes with {} sstables per index.",
+                          queryContext.numIndexesQueried(),
+                          QueryContext.printHisto(queryContext.sstablesPerIndexQueried()));
+            Tracing.trace("Index query performed {} timeout checks in {} micros intervals",
+                          queryContext.numSearches(),
+                          QueryContext.printHisto(queryContext.searchLatenciesMicros()));
+        }
 
         if (Tracing.traceSinglePartitions())
         {
@@ -229,7 +248,12 @@ public class ReadExecutionController implements AutoCloseable
                           sstablesHistogram.getStdDev(),
                           sstablesHistogram.getMax());
         }
-}
+    }
+
+    private static String pluralize(long count, String root, String plural)
+    {
+        return count == 1 ? String.format("1 %s", root) : String.format("%d %s%s", count, root, plural);
+    }
 
     public boolean isTrackingRepairedStatus()
     {

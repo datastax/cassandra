@@ -34,7 +34,7 @@ import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -109,6 +109,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         NeighborQueue queue;
         try (var vectors = vectorsSupplier.apply(context); var view = hnsw.getView(context))
         {
+            final long start = System.nanoTime();
             queue = HnswGraphSearcher.search(queryVector,
                                              topK,
                                              vectors,
@@ -117,7 +118,8 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
                                              view,
                                              LuceneCompat.bits(ordinalsMap.ignoringDeleted(acceptBits)),
                                              Integer.MAX_VALUE);
-            Tracing.trace("HNSW search visited {} nodes to return {} results", queue.visitedCount(), queue.size());
+            context.addDiskhnswSearches(queue.visitedCount(), queue.size());
+            context.markDiskHnswLatencies(System.nanoTime() - start);
             return annRowIdsToPostings(queue);
         }
         catch (IOException e)

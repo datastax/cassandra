@@ -43,7 +43,8 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
+import org.apache.cassandra.index.sai.ShadowedPrimaryKeysTracker;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
@@ -154,7 +155,7 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public RangeIterator search(QueryContext queryContext, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public RangeIterator search(QueryContext context, ShadowedPrimaryKeysTracker shadowedTracker, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         assert expr.getOp() == Expression.Op.ANN || expr.getOp() == Expression.Op.BOUNDED_ANN : "Only ANN is supported for vector search, received " + expr.getOp();
 
@@ -166,7 +167,7 @@ public class VectorMemtableIndex implements MemtableIndex
         if (RangeUtil.coversFullRing(keyRange))
         {
             // partition/range deletion won't trigger index update, so we have to filter shadow primary keys in memtable index
-            bits = queryContext.bitsetForShadowedPrimaryKeys(graph);
+            bits = shadowedTracker.bitsetForShadowedPrimaryKeys(graph);
         }
         else
         {
@@ -181,8 +182,8 @@ public class VectorMemtableIndex implements MemtableIndex
             PrimaryKey right = isMaxToken ? null : indexContext.keyFactory().createTokenOnly(keyRange.right.getToken()); // upper bound
 
             Set<PrimaryKey> resultKeys = isMaxToken ? primaryKeys.tailSet(left, leftInclusive) : primaryKeys.subSet(left, leftInclusive, right, rightInclusive);
-            if (!queryContext.getShadowedPrimaryKeys().isEmpty())
-                resultKeys = resultKeys.stream().filter(queryContext::shouldInclude).collect(Collectors.toSet());
+            if (!shadowedTracker.getShadowedPrimaryKeys().isEmpty())
+                resultKeys = resultKeys.stream().filter(shadowedTracker::shouldInclude).collect(Collectors.toSet());
 
             if (resultKeys.isEmpty())
                 return RangeIterator.empty();
@@ -195,10 +196,10 @@ public class VectorMemtableIndex implements MemtableIndex
             if (resultKeys.size() <= bruteForceRows)
                 return new ReorderingRangeIterator(new PriorityQueue<>(resultKeys));
             else
-                bits = new KeyRangeFilteringBits(keyRange, queryContext.bitsetForShadowedPrimaryKeys(graph));
+                bits = new KeyRangeFilteringBits(keyRange, shadowedTracker.bitsetForShadowedPrimaryKeys(graph));
         }
 
-        var keyQueue = graph.search(qv, limit, expr.getEuclideanSearchThreshold(), bits);
+        var keyQueue = graph.search(qv, limit, expr.getEuclideanSearchThreshold(), bits, context);
         if (keyQueue.isEmpty())
             return RangeIterator.empty();
         return new ReorderingRangeIterator(keyQueue);
@@ -230,7 +231,7 @@ public class VectorMemtableIndex implements MemtableIndex
 
         float[] qv = exp.lower.value.vector;
         var bits = new KeyFilteringBits(results);
-        var keyQueue = graph.search(qv, limit, 0.0f, bits);
+        var keyQueue = graph.search(qv, limit, 0.0f, bits, context);
         if (keyQueue.isEmpty())
             return RangeIterator.empty();
         return new ReorderingRangeIterator(keyQueue);

@@ -20,7 +20,7 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 public class IndexSearcherContext

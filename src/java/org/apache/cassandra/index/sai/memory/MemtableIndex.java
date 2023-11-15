@@ -25,10 +25,11 @@ import javax.annotation.Nullable;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.ShadowedPrimaryKeysTracker;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -73,7 +74,7 @@ public interface MemtableIndex extends MemtableOrdering
         throw new UnsupportedOperationException();
     }
 
-    RangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit);
+    RangeIterator search(QueryContext context, ShadowedPrimaryKeysTracker shadowedTracker, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit);
 
     Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator(DecoratedKey min, DecoratedKey max);
 

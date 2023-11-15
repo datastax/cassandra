@@ -20,23 +20,21 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.tracing.Tracing;
 
 /**
  * Build a query specific view of the on-disk indexes for a query. This will return a
@@ -51,11 +49,13 @@ public class QueryViewBuilder
 {
     private final Collection<Expression> expressions;
     private final AbstractBounds<PartitionPosition> range;
+    private final QueryContext queryContext;
 
-    QueryViewBuilder(Collection<Expression> expressions, AbstractBounds<PartitionPosition> range)
+    QueryViewBuilder(Collection<Expression> expressions, AbstractBounds<PartitionPosition> range, QueryContext queryContext)
     {
         this.expressions = expressions;
         this.range = range;
+        this.queryContext = queryContext;
     }
 
     public static class QueryView
@@ -79,43 +79,31 @@ public class QueryViewBuilder
     {
         Set<SSTableIndex> referencedIndexes = new HashSet<>();
         AtomicBoolean failed = new AtomicBoolean();
-        try
+        while (true)
         {
-            while (true)
+            referencedIndexes.clear();
+            failed.set(false);
+
+            Map<SSTableReader, List<IndexExpression>> view = getQueryView(expressions);
+            view.values()
+            .stream()
+            .flatMap(expressions -> expressions.stream().map(e -> e.index))
+            .forEach(index ->
             {
-                referencedIndexes.clear();
-                failed.set(false);
-
-                Map<SSTableReader, List<IndexExpression>> view = getQueryView(expressions);
-                view.values()
-                .stream()
-                .flatMap(expressions -> expressions.stream().map(e -> e.index))
-                .forEach(index ->
-                {
-                    if (referencedIndexes.contains(index))
-                        return;
-                    if (index.reference())
-                        referencedIndexes.add(index);
-                    else
-                        failed.set(true);
-                });
-
-                if (failed.get())
-                    referencedIndexes.forEach(SSTableIndex::release);
+                if (referencedIndexes.contains(index))
+                    return;
+                if (index.reference())
+                    referencedIndexes.add(index);
                 else
-                    return new QueryView(view, referencedIndexes);
-            }
-        }
-        finally
-        {
-            if (Tracing.isTracing())
+                    failed.set(true);
+            });
+
+            if (failed.get())
+                referencedIndexes.forEach(SSTableIndex::release);
+            else
             {
-                var groupedIndexes = referencedIndexes.stream().collect(
-                    Collectors.groupingBy(i -> i.getIndexContext().getIndexName(), Collectors.counting()));
-                var summary = groupedIndexes.entrySet().stream()
-                                            .map(e -> String.format("%s (%s sstables)", e.getKey(), e.getValue()))
-                                            .collect(Collectors.joining(", "));
-                Tracing.trace("Querying storage-attached indexes {}", summary);
+                QueryController.updateMetricsAndTraceGroupedIndexes(referencedIndexes, queryContext);
+                return new QueryView(view, referencedIndexes);
             }
         }
     }

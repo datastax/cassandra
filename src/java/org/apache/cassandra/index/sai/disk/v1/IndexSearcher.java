@@ -23,7 +23,8 @@ import java.io.IOException;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
+import org.apache.cassandra.index.sai.ShadowedPrimaryKeysTracker;
 import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PostingListRangeIterator;
@@ -75,7 +76,9 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
      * @param limit        the num of rows to returned, used by ANN index
      * @return {@link RangeIterator} that matches given expression
      */
-    public abstract RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit) throws IOException;
+    public abstract RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange,
+                                         QueryContext queryContext, ShadowedPrimaryKeysTracker shadowedTracker,
+                                         boolean defer, int limit) throws IOException;
 
     protected RangeIterator toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext) throws IOException
     {

@@ -19,7 +19,7 @@ package org.apache.cassandra.index.sai.metrics;
 
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
 
 public final class MulticastQueryEventListeners
 {

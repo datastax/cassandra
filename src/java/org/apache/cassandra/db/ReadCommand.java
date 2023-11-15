@@ -36,7 +36,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.guardrails.DefaultGuardrail;
-import org.apache.cassandra.guardrails.Guardrail;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.guardrails.Threshold;
 import org.apache.cassandra.net.MessageFlag;
@@ -583,11 +582,14 @@ public abstract class ReadCommand extends AbstractReadQuery
             @Override
             public void onClose()
             {
-                recordReadLatency(metric, System.nanoTime() - startTimeNanos);
+                var readNanos = System.nanoTime() - startTimeNanos;
+                recordReadLatency(metric, readNanos);
                 metric.incLiveRows(liveRows);
                 metric.incTombstones(tombstones.get(), tombstones.checkAndTriggerWarning());
 
-                Tracing.trace("Read {} live rows and {} tombstone ones", liveRows, tombstones.get());
+                if (Tracing.isTracing())
+                    Tracing.trace("Read {} live rows and {} tombstone ones in {} micros",
+                              liveRows, tombstones.get(), TimeUnit.NANOSECONDS.toMicros(readNanos));
             }
         }
 

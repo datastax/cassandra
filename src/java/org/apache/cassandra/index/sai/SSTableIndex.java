@@ -30,6 +30,7 @@ import com.google.common.base.Objects;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
@@ -141,10 +142,11 @@ public class SSTableIndex implements SegmentOrdering
     public RangeIterator search(Expression expression,
                                 AbstractBounds<PartitionPosition> keyRange,
                                 QueryContext context,
+                                ShadowedPrimaryKeysTracker shadowedTracker,
                                 boolean defer,
                                 int limit) throws IOException
     {
-        return searchableIndex.search(expression, keyRange, context, defer, limit);
+        return searchableIndex.search(expression, keyRange, context, shadowedTracker, defer, limit);
     }
 
     public void populateSegmentView(SimpleDataSet dataSet)

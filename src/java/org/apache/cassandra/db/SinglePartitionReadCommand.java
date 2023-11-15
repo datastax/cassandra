@@ -1158,6 +1158,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
      */
     public static class Group extends SinglePartitionReadQuery.Group<SinglePartitionReadCommand>
     {
+        private final QueryContext queryContext;
         public static Group create(TableMetadata metadata,
                                    int nowInSec,
                                    ColumnFilter columnFilter,
@@ -1184,11 +1185,18 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         public Group(List<SinglePartitionReadCommand> commands, DataLimits limits)
         {
             super(commands, limits);
+            queryContext = commands.get(0).queryContext();
         }
 
         public static Group one(SinglePartitionReadCommand command)
         {
             return new Group(Collections.singletonList(command), command.limits());
+        }
+
+        @Override
+        public QueryContext queryContext()
+        {
+            return queryContext;
         }
 
         public PartitionIterator execute(ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestExecutionException

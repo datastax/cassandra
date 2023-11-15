@@ -36,7 +36,7 @@ import org.slf4j.LoggerFactory;
 
 import org.agrona.collections.LongArrayList;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.v1.postings.FilteringPostingList;

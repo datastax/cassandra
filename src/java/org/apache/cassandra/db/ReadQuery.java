@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.concurrent.TimeUnit;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -38,6 +41,13 @@ public interface ReadQuery
     {
         return new ReadQuery()
         {
+            @Override
+            public QueryContext queryContext()
+            {
+                long executionQuotaMs = DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS);
+                return new QueryContext(executionQuotaMs);
+            }
+
             public TableMetadata metadata()
             {
                 return metadata;
@@ -117,6 +127,8 @@ public interface ReadQuery
             }
         };
     }
+
+    QueryContext queryContext();
 
     /**
      * The metadata for the table this is a query on.

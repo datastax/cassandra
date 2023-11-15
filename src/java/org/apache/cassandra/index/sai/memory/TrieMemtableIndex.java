@@ -34,13 +34,14 @@ import com.google.common.base.Preconditions;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.QueryContext;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.ShadowedPrimaryKeysTracker;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
@@ -159,7 +160,7 @@ public class TrieMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public RangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public RangeIterator search(QueryContext context, ShadowedPrimaryKeysTracker shadowedTracker, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
