@@ -54,10 +54,11 @@ public class TypeUtilTest extends NdiRandomizedTest
             AbstractType<?> type = cql3Type.getType();
             AbstractType<?> reversedType = ReversedType.getInstance(type);
 
-            boolean isLiteral = cql3Type == CQL3Type.Native.ASCII || cql3Type == CQL3Type.Native.TEXT || cql3Type == CQL3Type.Native.VARCHAR;
+            boolean isUTF8OrAscii = cql3Type == CQL3Type.Native.ASCII || cql3Type == CQL3Type.Native.TEXT || cql3Type == CQL3Type.Native.VARCHAR;
+            boolean isLiteral = cql3Type == CQL3Type.Native.ASCII || cql3Type == CQL3Type.Native.TEXT || cql3Type == CQL3Type.Native.VARCHAR || cql3Type == CQL3Type.Native.BOOLEAN;
             assertEquals(isLiteral, TypeUtil.isLiteral(type));
             assertEquals(TypeUtil.isLiteral(type), TypeUtil.isLiteral(reversedType));
-            assertEquals(isLiteral, TypeUtil.isString(type));
+            assertEquals(isUTF8OrAscii, TypeUtil.isString(type));
             assertEquals(TypeUtil.isString(type), TypeUtil.isString(reversedType));
             assertEquals(TypeUtil.isIn(type, AbstractAnalyzer.ANALYZABLE_TYPES),
                          TypeUtil.isIn(reversedType, AbstractAnalyzer.ANALYZABLE_TYPES));
