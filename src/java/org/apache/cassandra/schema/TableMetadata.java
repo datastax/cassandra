@@ -468,10 +468,7 @@ public class TableMetadata implements SchemaElement
     {
         return !columnName.bytes.hasRemaining();
     }
-
-    /*
-    Method that runs the same checks as validateCompatibility, but does not check the keyspace name and table id.
-    */
+    
     public void validateTableStructureCompatibility(TableMetadata previous)
     {
         if (isIndex())
@@ -479,7 +476,9 @@ public class TableMetadata implements SchemaElement
 
         validateTableName(previous);
         validateTableType(previous);
-        validateTableColumns(previous);
+        validatePartitionKeyColumnTypes(previous);
+        validateClusteringColumns(previous);
+        validateRegularAndStaticColumns(previous);
     }
 
     void validateCompatibility(TableMetadata previous)
@@ -491,7 +490,9 @@ public class TableMetadata implements SchemaElement
         validateTableName(previous);
         validateTableId(previous);
         validateTableType(previous);
-        validateTableColumns(previous);
+        validatePartitionKeyColumns(previous);
+        validateClusteringColumns(previous);
+        validateRegularAndStaticColumns(previous);
 
     }
 
@@ -519,13 +520,21 @@ public class TableMetadata implements SchemaElement
             except("Table type mismatch (found %s; expected %s)", flags, previous.flags);
     }
 
-    private void validateTableColumns(TableMetadata previous)
-    {
+    private void validatePartitionKeyColumnTypes(TableMetadata previous) {
+        if (!partitionKeyType.isCompatibleWith(previous.partitionKeyType))
+        {
+            except("Partition keys of different types (found %s; expected %s)",
+                    partitionKeyType,
+                    previous.partitionKeyType);
+        }
+    }
+
+    private void validatePartitionKeyColumns(TableMetadata previous) {
         if (previous.partitionKeyColumns.size() != partitionKeyColumns.size())
         {
             except("Partition keys of different length (found %s; expected %s)",
-                   partitionKeyColumns.size(),
-                   previous.partitionKeyColumns.size());
+                    partitionKeyColumns.size(),
+                    previous.partitionKeyColumns.size());
         }
 
         for (int i = 0; i < partitionKeyColumns.size(); i++)
@@ -533,11 +542,14 @@ public class TableMetadata implements SchemaElement
             if (!partitionKeyColumns.get(i).type.isCompatibleWith(previous.partitionKeyColumns.get(i).type))
             {
                 except("Partition key column mismatch (found %s; expected %s)",
-                       partitionKeyColumns.get(i).type,
-                       previous.partitionKeyColumns.get(i).type);
+                        partitionKeyColumns.get(i).type,
+                        previous.partitionKeyColumns.get(i).type);
             }
         }
+    }
 
+    private void validateClusteringColumns(TableMetadata previous)
+    {
         if (previous.clusteringColumns.size() != clusteringColumns.size())
         {
             except("Clustering columns of different length (found %s; expected %s)",
@@ -554,7 +566,10 @@ public class TableMetadata implements SchemaElement
                        previous.clusteringColumns.get(i).type);
             }
         }
+    }
 
+    private void validateRegularAndStaticColumns(TableMetadata previous)
+    {
         for (ColumnMetadata previousColumn : previous.regularAndStaticColumns)
         {
             ColumnMetadata column = getColumn(previousColumn.name);
