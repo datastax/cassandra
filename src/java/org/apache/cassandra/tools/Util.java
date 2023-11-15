@@ -308,8 +308,22 @@ public final class Util
      * @param desc SSTable's descriptor
      * @return Restored CFMetaData
      * @throws IOException when Stats.db cannot be read
+     *
+     * Hardcodes the keyspace and table name to default values to preserve the existing behavior.
      */
     public static TableMetadata metadataFromSSTable(Descriptor desc) throws IOException
+    {
+        return metadataFromSSTable(desc, "keyspace", "table");
+    }
+
+    /**
+     * Construct table schema from info stored in SSTable's Stats.db, using the specified keyspace and table names.
+     *
+     * @param desc SSTable's descriptor
+     * @return Restored CFMetaData
+     * @throws IOException when Stats.db cannot be read
+     */
+    public static TableMetadata metadataFromSSTable(Descriptor desc, String keyspaceName, String tableName) throws IOException
     {
         if (desc.getFormat().getType() == SSTableFormat.Type.BIG)
         {
@@ -323,7 +337,7 @@ public final class Util
 
         IPartitioner partitioner = FBUtilities.newPartitioner(desc);
 
-        TableMetadata.Builder builder = TableMetadata.builder("keyspace", "table").partitioner(partitioner);
+        TableMetadata.Builder builder = TableMetadata.builder(keyspaceName, tableName).partitioner(partitioner);
         header.getStaticColumns().entrySet().stream()
                 .forEach(entry -> {
                     ColumnIdentifier ident = ColumnIdentifier.getInterned(UTF8Type.instance.getString(entry.getKey()), true);
