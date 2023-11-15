@@ -33,6 +33,7 @@ import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.distributed.test.DistributedRepairUtils.RepairParallelism;
 import org.apache.cassandra.distributed.test.DistributedRepairUtils.RepairType;
+import org.apache.cassandra.io.util.FileUtils;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.NODETOOL_JMX_NOTIFICATION_POLL_INTERVAL_SECONDS;
 
@@ -88,8 +89,7 @@ public class RepairCoordinatorBase extends TestBaseImpl
     @AfterClass
     public static void teardownCluster()
     {
-        if (CLUSTER != null)
-            CLUSTER.close();
+        FileUtils.closeQuietly(CLUSTER);
     }
 
     protected String tableName(String prefix) {
