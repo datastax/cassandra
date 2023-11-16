@@ -480,7 +480,6 @@ public class VectorUpdateDeleteTest extends VectorTester
     @Test
     public void shadowedPrimaryKeyWithSharedVector()
     {
-        // FIXME this fails due to shadowed key logic not accounting for multiple rows with the same vector
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();

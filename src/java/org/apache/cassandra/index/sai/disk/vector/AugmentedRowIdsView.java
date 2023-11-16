@@ -22,6 +22,11 @@ import java.io.IOException;
 
 import com.carrotsearch.hppc.IntObjectHashMap;
 
+/**
+ * An augmented view of RowIdsView that takes an in memory mapping of vectorOrdinal -> rowIds and uses that
+ * as the primary source of rowIds. If a vectorOrdinal is not found in the mapping, it falls back to the
+ * delegate RowIdsView.
+ */
 public class AugmentedRowIdsView implements RowIdsView
 {
     private final IntObjectHashMap<int[]> augmentedMapping;

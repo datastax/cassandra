@@ -21,8 +21,9 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.IOException;
 import java.util.HashMap;
 
-import org.agrona.collections.IntArrayList;
-
+/**
+ * An in-memory implementation of RowIdsView.
+ */
 public class InMemoryRowIdsView implements RowIdsView
 {
     private final HashMap<Integer, int[]> rowIdMapping;
