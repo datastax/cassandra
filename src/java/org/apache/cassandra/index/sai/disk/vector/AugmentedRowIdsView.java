@@ -38,12 +38,6 @@ public class AugmentedRowIdsView implements RowIdsView
         this.delegate = delegate;
     }
 
-    public void put(int vectorOrdinal, int[] rowIds)
-    {
-        var previous = augmentedMapping.put(vectorOrdinal, rowIds);
-        assert previous == null : "Ordinals cannot be added multiple times";
-    }
-
     @Override
     public int[] getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
     {
