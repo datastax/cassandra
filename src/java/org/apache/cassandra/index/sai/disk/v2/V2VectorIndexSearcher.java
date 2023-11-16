@@ -44,7 +44,9 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
 import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
+import org.apache.cassandra.index.sai.disk.vector.InMemoryRowIdsView;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
+import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
@@ -55,6 +57,7 @@ import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.Pair;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
@@ -126,7 +129,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             return bitsOrPostingList.postingList();
 
         float[] queryVector = exp.lower.value.vector;
-        var vectorPostings = graph.search(queryVector, topK, exp.getEuclideanSearchThreshold(), limit, bitsOrPostingList.getBits(), context);
+        var vectorPostings = graph.search(queryVector, topK, exp.getEuclideanSearchThreshold(), limit,
+                                          bitsOrPostingList.getBits(), bitsOrPostingList.getRowIdsView(), context);
         if (bitsOrPostingList.expectedNodesVisited >= 0)
             updateExpectedNodes(vectorPostings.getVisitedCount(), bitsOrPostingList.expectedNodesVisited);
         return vectorPostings;
@@ -214,7 +218,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
             // create a bitset of ordinals corresponding to the rows in the given key range
             SparseFixedBitSet bits = bitSetForSearch();
-            boolean hasMatches = false;
+            InMemoryRowIdsView inMemoryRowIdsView = null;
             try (var ordinalsView = graph.getOrdinalsView())
             {
                 for (long sstableRowId = minSSTableRowId; sstableRowId <= maxSSTableRowId; sstableRowId++)
@@ -223,11 +227,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     {
                         int segmentRowId = metadata.toSegmentRowId(sstableRowId);
                         int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                        if (ordinal >= 0)
-                        {
-                            bits.set(ordinal);
-                            hasMatches = true;
-                        }
+                        if (ordinal < 0)
+                            continue;
+
+                        bits.set(ordinal);
+                        if (inMemoryRowIdsView == null)
+                            inMemoryRowIdsView = new InMemoryRowIdsView();
+                        inMemoryRowIdsView.put(ordinal, segmentRowId);
                     }
                 }
             }
@@ -236,10 +242,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 throw new RuntimeException(e);
             }
 
-            if (!hasMatches)
+            if (inMemoryRowIdsView == null)
                 return new BitsOrPostingList(PostingList.EMPTY);
 
-            return new BitsOrPostingList(bits, VectorMemtableIndex.expectedNodesVisited(limit, nRows, graph.size()));
+            return new BitsOrPostingList(bits, inMemoryRowIdsView, VectorMemtableIndex.expectedNodesVisited(limit, nRows, graph.size()));
         }
     }
 
@@ -310,6 +316,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             var maxSegmentRowId = metadata.toSegmentRowId(metadata.maxSSTableRowId);
             SparseFixedBitSet bits = bitSetForSearch();
             var rowIds = new IntArrayList();
+            var rowIdsView = new InMemoryRowIdsView();
             try (var ordinalsView = graph.getOrdinalsView())
             {
                 for (PrimaryKey primaryKey : keysInRange)
@@ -330,7 +337,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     // force check eagerly to potentially skip the PK to sstable row id to ordinal lookup?
                     int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
                     if (ordinal >= 0)
+                    {
                         bits.set(ordinal);
+                        rowIdsView.put(ordinal, segmentRowId);
+                    }
                 }
             }
 
@@ -339,7 +349,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
             // else ask the index to perform a search limited to the bits we created
             float[] queryVector = exp.lower.value.vector;
-            var results = graph.search(queryVector, topK, limit, bits, context);
+            var results = graph.search(queryVector, topK, limit, bits, rowIdsView, context);
             updateExpectedNodes(results.getVisitedCount(), expectedNodesVisited(topK, maxSegmentRowId, graph.size()));
             return toPrimaryKeyIterator(results, context);
         }
@@ -373,19 +383,22 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private static class BitsOrPostingList
     {
         private final Bits bits;
+        private final RowIdsView rowIdsView;
         private final int expectedNodesVisited;
         private final PostingList postingList;
 
-        public BitsOrPostingList(Bits bits, int expectedNodesVisited)
+        public BitsOrPostingList(Bits bits, RowIdsView rowIdsView, int expectedNodesVisited)
         {
             this.bits = bits;
+            this.rowIdsView = rowIdsView;
             this.expectedNodesVisited = expectedNodesVisited;
             this.postingList = null;
         }
 
-        public BitsOrPostingList(Bits bits)
+        public BitsOrPostingList(Pair<Bits, RowIdsView> bitsAndView)
         {
-            this.bits = bits;
+            this.bits = bitsAndView.left;
+            this.rowIdsView = bitsAndView.right;
             this.postingList = null;
             this.expectedNodesVisited = -1;
         }
@@ -393,6 +406,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         public BitsOrPostingList(PostingList postingList)
         {
             this.bits = null;
+            this.rowIdsView = null;
             this.postingList = Preconditions.checkNotNull(postingList);
             this.expectedNodesVisited = -1;
         }
@@ -402,6 +416,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             Preconditions.checkState(!skipANN());
             return bits;
+        }
+
+        @Nullable
+        public RowIdsView getRowIdsView()
+        {
+            Preconditions.checkState(!skipANN());
+            return rowIdsView;
         }
 
         public PostingList postingList()

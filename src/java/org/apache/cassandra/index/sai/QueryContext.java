@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.NavigableSet;
 import java.util.Set;
@@ -29,14 +30,19 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import com.carrotsearch.hppc.IntArrayList;
+import com.carrotsearch.hppc.IntObjectHashMap;
 import io.github.jbellis.jvector.util.Bits;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
+import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
+import org.apache.cassandra.index.sai.disk.vector.AugmentedRowIdsView;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * Tracks state relevant to the execution of a single query, including metrics and timeout monitoring.
@@ -247,8 +253,7 @@ public class QueryContext
     public void recordShadowedPrimaryKey(PrimaryKey primaryKey)
     {
         boolean isNewKey = shadowedPrimaryKeys.add(primaryKey);
-        // FIXME VectorUpdateDeleteTest.shadowedPrimaryKeyWithSharedVectorAndOtherPredicates fails this assertion
-        // assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query.";
+         assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query.";
     }
 
     // Returns true if the row ID will be included or false if the row ID will be shadowed
@@ -278,9 +283,11 @@ public class QueryContext
         return new IgnoredKeysBits(graph, getShadowedPrimaryKeys());
     }
 
-    public Bits bitsetForShadowedPrimaryKeys(SegmentMetadata metadata, PrimaryKeyMap primaryKeyMap, JVectorLuceneOnDiskGraph graph) throws IOException
+    public Pair<Bits, RowIdsView> bitsetForShadowedPrimaryKeys(SegmentMetadata metadata, PrimaryKeyMap primaryKeyMap, JVectorLuceneOnDiskGraph graph) throws IOException
     {
         Set<Integer> ignoredOrdinals = null;
+        HashMap<Integer, IntArrayList> ordinalsToRowIds = null;
+        IntObjectHashMap<int[]> partiallyShadowedOrinals = null;
         try (var ordinalsView = graph.getOrdinalsView())
         {
             for (PrimaryKey primaryKey : getShadowedPrimaryKeys())
@@ -302,19 +309,72 @@ public class QueryContext
                     break;
 
                 int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                if (ordinal >= 0)
+                // row id does not have an ordinal in this segment.
+                if (ordinal < 0)
+                    continue;
+
+                if (ordinalsToRowIds == null)
+                    ordinalsToRowIds = new HashMap<>();
+                ordinalsToRowIds.compute(ordinal, (k, rowIds) -> {
+                    if (rowIds == null)
+                        rowIds = new IntArrayList(1);
+                    rowIds.add(segmentRowId);
+                    return rowIds;
+                });
+            }
+
+            if (ordinalsToRowIds == null)
+                return Pair.create(Bits.ALL, null);
+
+            try (var rowIdsView = graph.getRowIdsView())
+            {
+                for (var entry : ordinalsToRowIds.entrySet())
                 {
-                    if (ignoredOrdinals == null)
-                        ignoredOrdinals = new HashSet<>();
-                    ignoredOrdinals.add(ordinal);
+                    int ordinal = entry.getKey();
+                    int[] shadowedRowIds = entry.getValue().toArray();
+                    int[] allRowIds = rowIdsView.getSegmentRowIdsMatching(ordinal);
+                    int[] nonShadowedRowIds = subtractOrderedArrays(allRowIds, shadowedRowIds);
+                    if (nonShadowedRowIds != null)
+                    {
+                        if (partiallyShadowedOrinals == null)
+                            partiallyShadowedOrinals = new IntObjectHashMap<>();
+                        partiallyShadowedOrinals.put(ordinal, nonShadowedRowIds);
+                    }
+                    else
+                    {
+                        if (ignoredOrdinals == null)
+                            ignoredOrdinals = new HashSet<>();
+                        ignoredOrdinals.add(ordinal);
+                    }
                 }
             }
         }
 
-        if (ignoredOrdinals == null)
-            return Bits.ALL;
+        assert partiallyShadowedOrinals != null || ignoredOrdinals != null : "No shadowed ordinals found";
 
-        return new IgnoringBits(ignoredOrdinals, graph.size());
+        RowIdsView view = partiallyShadowedOrinals != null ? new AugmentedRowIdsView(partiallyShadowedOrinals, graph.getRowIdsView())
+                                                           : null;
+        Bits bits = ignoredOrdinals != null ? new IgnoringBits(ignoredOrdinals, graph.size()) : Bits.ALL;
+        return Pair.create(bits, view);
+    }
+
+    private int[] subtractOrderedArrays(int[] allRowIds, int[] shadowedRowIds)
+    {
+        if (allRowIds.length - shadowedRowIds.length == 0)
+            return null;
+        int[] result = new int[allRowIds.length - shadowedRowIds.length];
+        int resultIndex = 0;
+        int shadowedRowIdsIndex = 0;
+        for (int rowId : allRowIds)
+        {
+            if (resultIndex == result.length)
+                break;
+            if (shadowedRowIdsIndex < shadowedRowIds.length && rowId == shadowedRowIds[shadowedRowIdsIndex])
+                shadowedRowIdsIndex++;
+            else
+                result[resultIndex++] = rowId;
+        }
+        return result;
     }
 
     private static class IgnoringBits implements Bits

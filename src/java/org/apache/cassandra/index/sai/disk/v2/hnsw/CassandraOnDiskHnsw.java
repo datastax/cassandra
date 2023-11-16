@@ -102,7 +102,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
      * @return Row IDs associated with the topK vectors near the query
      */
     @Override
-    public VectorPostingList search(float[] queryVector, int topK, int limit, Bits acceptBits, QueryContext context)
+    public VectorPostingList search(float[] queryVector, int topK, int limit, Bits acceptBits, RowIdsView rowIdsView, QueryContext context)
     {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
@@ -118,7 +118,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
                                              LuceneCompat.bits(ordinalsMap.ignoringDeleted(acceptBits)),
                                              Integer.MAX_VALUE);
             Tracing.trace("HNSW search visited {} nodes to return {} results", queue.visitedCount(), queue.size());
-            return annRowIdsToPostings(queue);
+            return annRowIdsToPostings(queue, rowIdsView);
         }
         catch (IOException e)
         {
@@ -127,24 +127,25 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     }
 
     @Override
-    public VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits bits, QueryContext context)
+    public VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits bits, RowIdsView rowIdsView, QueryContext context)
     {
         if (threshold > 0)
             throw new InvalidRequestException("Geo queries are not supported for legacy SAI indexes -- drop the index and recreate it to enable these");
 
-        return search(queryVector, topK, limit, bits, context);
+        return search(queryVector, topK, limit, bits, rowIdsView, context);
     }
 
     private class RowIdIterator implements PrimitiveIterator.OfInt, AutoCloseable
     {
         private final NeighborQueue queue;
-        private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
+        private final RowIdsView rowIdsView;
 
         private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
 
-        public RowIdIterator(NeighborQueue queue)
+        public RowIdIterator(NeighborQueue queue, RowIdsView rowIdsView)
         {
             this.queue = queue;
+            this.rowIdsView = rowIdsView == null ? ordinalsMap.getRowIdsView() : rowIdsView;
         }
 
         @Override
@@ -177,9 +178,9 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         }
     }
 
-    private VectorPostingList annRowIdsToPostings(NeighborQueue queue) throws IOException
+    private VectorPostingList annRowIdsToPostings(NeighborQueue queue, RowIdsView rowIdsView) throws IOException
     {
-        try (var iterator = new RowIdIterator(queue))
+        try (var iterator = new RowIdIterator(queue, rowIdsView))
         {
             // JVector returns results ordered most- to least-similar, which is why VPL has a `limit` paramter
             // to avoid sorting results we don't care about.  But Lucene returns them with the least-similar
@@ -200,6 +201,12 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     public OrdinalsView getOrdinalsView()
     {
         return ordinalsMap.getOrdinalsView();
+    }
+
+    @Override
+    public RowIdsView getRowIdsView()
+    {
+        return ordinalsMap.getRowIdsView();
     }
 
     @NotThreadSafe

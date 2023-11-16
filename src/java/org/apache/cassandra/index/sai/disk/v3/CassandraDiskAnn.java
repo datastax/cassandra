@@ -111,12 +111,13 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
      * @param topK the number of results to look for in the index (>= limit)
      * @param limit the maximum number of results to return
      * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
+     * @param rowIdsView a RowIdsView to use for the returned postings, or null to use the default
      * @param context unused (vestige from HNSW, retained in signature to allow calling both easily)
      */
     @Override
-    public VectorPostingList search(float[] queryVector, int topK, int limit, Bits acceptBits, QueryContext context)
+    public VectorPostingList search(float[] queryVector, int topK, int limit, Bits acceptBits, RowIdsView rowIdsView, QueryContext context)
     {
-        return search(queryVector, topK, 0, limit, acceptBits, context);
+        return search(queryVector, topK, 0, limit, acceptBits, rowIdsView, context);
     }
 
     /**
@@ -127,11 +128,12 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
      * @param threshold the minimum similarity score to accept
      * @param limit the maximum number of results to return
      * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
+     * @param rowIdsView a RowIdsView to use for the returned postings, or null to use the default
      * @param context unused (vestige from HNSW, retained in signature to allow calling both easily)
      * @return
      */
     @Override
-    public VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits acceptBits, QueryContext context)
+    public VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits acceptBits, RowIdsView rowIdsView, QueryContext context)
     {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
@@ -156,7 +158,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
                                      threshold,
                                      ordinalsMap.ignoringDeleted(acceptBits));
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-        return annRowIdsToPostings(result, limit);
+        return annRowIdsToPostings(result, rowIdsView, limit);
     }
 
     public CompressedVectors getCompressedVectors()
@@ -167,13 +169,14 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private class RowIdIterator implements PrimitiveIterator.OfInt, AutoCloseable
     {
         private final Iterator<NodeScore> it;
-        private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
+        private final RowIdsView rowIdsView;
 
         private OfInt segmentRowIdIterator = IntStream.empty().iterator();
 
-        public RowIdIterator(NodeScore[] results)
+        public RowIdIterator(NodeScore[] results, RowIdsView rowIdsView)
         {
             this.it = Arrays.stream(results).iterator();
+            this.rowIdsView = rowIdsView == null ? ordinalsMap.getRowIdsView() : rowIdsView;
         }
 
         @Override
@@ -208,9 +211,9 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         }
     }
 
-    private VectorPostingList annRowIdsToPostings(SearchResult results, int limit)
+    private VectorPostingList annRowIdsToPostings(SearchResult results, RowIdsView rowIdsView, int limit)
     {
-        try (var iterator = new RowIdIterator(results.getNodes()))
+        try (var iterator = new RowIdIterator(results.getNodes(), rowIdsView))
         {
             return new VectorPostingList(iterator, limit, results.getVisitedCount());
         }
@@ -228,5 +231,11 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     public OrdinalsView getOrdinalsView()
     {
         return ordinalsMap.getOrdinalsView();
+    }
+
+    @Override
+    public RowIdsView getRowIdsView()
+    {
+        return ordinalsMap.getRowIdsView();
     }
 }
