@@ -239,4 +239,10 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     {
         return ordinalsMap.getRowIdsView();
     }
+
+    @Override
+    public boolean isOrdinalsToRowIdsIdentityMapping()
+    {
+        return ordinalsMap.isIdentityMapping();
+    }
 }

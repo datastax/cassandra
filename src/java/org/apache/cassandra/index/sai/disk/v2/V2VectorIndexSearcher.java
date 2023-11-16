@@ -237,6 +237,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
             // create a bitset of ordinals corresponding to the rows in the given key range
             SparseFixedBitSet bits = bitSetForSearch();
+            boolean hasMatches = false;
             InMemoryRowIdsView inMemoryRowIdsView = null;
             try (var ordinalsView = graph.getOrdinalsView())
             {
@@ -250,6 +251,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                             continue;
 
                         bits.set(ordinal);
+                        hasMatches = true;
+                        // We do not need to track the in memory row ids if the ordinals are the same as the row ids
+                        if (graph.isOrdinalsToRowIdsIdentityMapping())
+                            continue;
+
                         if (inMemoryRowIdsView == null)
                             inMemoryRowIdsView = new InMemoryRowIdsView();
                         inMemoryRowIdsView.put(ordinal, segmentRowId);
@@ -261,7 +267,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 throw new RuntimeException(e);
             }
 
-            if (inMemoryRowIdsView == null)
+            if (!hasMatches)
                 return new BitsOrPostingList(PostingList.EMPTY);
 
             return new BitsOrPostingList(bits, inMemoryRowIdsView, VectorMemtableIndex.expectedNodesVisited(limit, nRows, graph.size()));

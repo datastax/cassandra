@@ -313,19 +313,38 @@ public class QueryContext
                 if (ordinal < 0)
                     continue;
 
-                if (ordinalsToRowIds == null)
-                    ordinalsToRowIds = new HashMap<>();
-                ordinalsToRowIds.compute(ordinal, (k, rowIds) -> {
-                    if (rowIds == null)
-                        rowIds = new IntArrayList(1);
-                    rowIds.add(segmentRowId);
-                    return rowIds;
-                });
+                if (graph.isOrdinalsToRowIdsIdentityMapping())
+                {
+                    if (ignoredOrdinals == null)
+                        ignoredOrdinals = new HashSet<>();
+                    ignoredOrdinals.add(ordinal);
+                }
+                else
+                {
+                    if (ordinalsToRowIds == null)
+                        ordinalsToRowIds = new HashMap<>();
+                    ordinalsToRowIds.compute(ordinal, (k, rowIds) -> {
+                        if (rowIds == null)
+                            rowIds = new IntArrayList(1);
+                        rowIds.add(segmentRowId);
+                        return rowIds;
+                    });
+                }
             }
+
+            // If we know we have an identity mapping, we do not have any partially shadowed ordinals.
+            if (graph.isOrdinalsToRowIdsIdentityMapping())
+                if (ignoredOrdinals != null)
+                    return Pair.create(new IgnoringBits(ignoredOrdinals, graph.size()), null);
+                else
+                    return Pair.create(Bits.ALL, null);
 
             if (ordinalsToRowIds == null)
                 return Pair.create(Bits.ALL, null);
 
+            // Since we have a one to many mapping from ordinal to row id, we need to ensure we only ignore fully
+            // shadowed ordinals, and we also want to store the non-shadowed row ids to prevent having to read them
+            // from disk later.
             try (var rowIdsView = graph.getRowIdsView())
             {
                 for (var entry : ordinalsToRowIds.entrySet())
@@ -347,15 +366,12 @@ public class QueryContext
                         ignoredOrdinals.add(ordinal);
                     }
                 }
+                RowIdsView view = partiallyShadowedOrinals != null ? new AugmentedRowIdsView(partiallyShadowedOrinals, graph.getRowIdsView())
+                                                                   : null;
+                Bits bits = ignoredOrdinals != null ? new IgnoringBits(ignoredOrdinals, graph.size()) : Bits.ALL;
+                return Pair.create(bits, view);
             }
         }
-
-        assert partiallyShadowedOrinals != null || ignoredOrdinals != null : "No shadowed ordinals found";
-
-        RowIdsView view = partiallyShadowedOrinals != null ? new AugmentedRowIdsView(partiallyShadowedOrinals, graph.getRowIdsView())
-                                                           : null;
-        Bits bits = ignoredOrdinals != null ? new IgnoringBits(ignoredOrdinals, graph.size()) : Bits.ALL;
-        return Pair.create(bits, view);
     }
 
     private int[] subtractOrderedArrays(int[] allRowIds, int[] shadowedRowIds)

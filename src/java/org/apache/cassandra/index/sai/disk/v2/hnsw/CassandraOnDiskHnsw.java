@@ -211,6 +211,12 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     }
 
     @Override
+    public boolean isOrdinalsToRowIdsIdentityMapping()
+    {
+        return ordinalsMap.isIdentityMapping();
+    }
+
+    @Override
     public CompressedVectors getCompressedVectors()
     {
         return null;

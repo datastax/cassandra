@@ -29,8 +29,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.DiskBinarySearch;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
-import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
 import io.github.jbellis.jvector.util.Bits;
 
 public class OnDiskOrdinalsMap
@@ -78,6 +76,15 @@ public class OnDiskOrdinalsMap
         {
             throw new RuntimeException("Error initializing OnDiskOrdinalsMap at segment " + segmentOffset, e);
         }
+    }
+
+    /**
+     * Indicates wether the RowIdsView and the OrdinalsView are the identity mapping. When true, there are several
+     * optimizations that can be made.
+     */
+    public boolean isIdentityMapping()
+    {
+        return rowIdsMatchOrdinals;
     }
 
     public RowIdsView getRowIdsView()
