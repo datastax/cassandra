@@ -47,9 +47,9 @@ public class AugmentedRowIdsView implements RowIdsView
     @Override
     public int[] getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
     {
-        int[] notShadowedRowIds = augmentedMapping.get(vectorOrdinal);
-        if (notShadowedRowIds != null)
-            return notShadowedRowIds;
+        int[] rowIds = augmentedMapping.get(vectorOrdinal);
+        if (rowIds != null)
+            return rowIds;
         return delegate.getSegmentRowIdsMatching(vectorOrdinal);
     }
 
