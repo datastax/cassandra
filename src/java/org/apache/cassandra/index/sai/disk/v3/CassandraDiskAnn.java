@@ -161,6 +161,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         return annRowIdsToPostings(result, rowIdsView, limit);
     }
 
+    @Override
     public CompressedVectors getCompressedVectors()
     {
         return compressedVectors;

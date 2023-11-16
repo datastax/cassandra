@@ -29,6 +29,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -207,6 +208,12 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     public RowIdsView getRowIdsView()
     {
         return ordinalsMap.getRowIdsView();
+    }
+
+    @Override
+    public CompressedVectors getCompressedVectors()
+    {
+        return null;
     }
 
     @NotThreadSafe
