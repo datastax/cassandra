@@ -752,9 +752,9 @@ public class BufferPool
             clearForEach(Chunk::release);
         }
 
-        private void unsafeRecycle()
+        private void unsafeRecycle(boolean forceEvicted)
         {
-            clearForEach(Chunk::unsafeRecycle);
+            clearForEach(chunk -> Chunk.unsafeRecycle(chunk, forceEvicted));
         }
     }
 
@@ -1047,9 +1047,9 @@ public class BufferPool
         }
 
         @VisibleForTesting
-        void unsafeRecycle()
+        void unsafeRecycle(boolean forceEvicted)
         {
-            chunks.unsafeRecycle();
+            chunks.unsafeRecycle(forceEvicted);
         }
 
         @VisibleForTesting
@@ -1566,12 +1566,14 @@ public class BufferPool
                 FileUtils.cleanWithAttachment(slab);
         }
 
-        static void unsafeRecycle(Chunk chunk)
+        static void unsafeRecycle(Chunk chunk, boolean forceRecycle)
         {
             if (chunk != null)
             {
                 chunk.owner = null;
                 chunk.freeSlots = 0L;
+                if (forceRecycle && !chunk.recycler.canRecyclePartially())
+                    chunk.setEvicted();
                 chunk.recycleFully();
             }
         }
@@ -1628,10 +1630,15 @@ public class BufferPool
     @VisibleForTesting
     public void unsafeReset()
     {
+        unsafeReset(false);
+    }
+    @VisibleForTesting
+    public void unsafeReset(boolean forceEvicted)
+    {
         overflowMemoryUsage.reset();
         memoryInUse.reset();
         memoryAllocated.set(0);
-        localPool.get().unsafeRecycle();
+        localPool.get().unsafeRecycle(forceEvicted);
         globalPool.unsafeFree();
     }
 
