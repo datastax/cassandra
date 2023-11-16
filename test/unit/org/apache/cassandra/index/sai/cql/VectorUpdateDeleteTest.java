@@ -548,8 +548,8 @@ public class VectorUpdateDeleteTest extends VectorTester
         // Show the result set is as expected
         assertRows(execute("SELECT pk FROM %s WHERE token(pk) <= -3248873570005575792 AND " +
                            "token(pk) >= -3485513579396041028 ORDER BY val ann of [1,2] LIMIT 1000"), row(0), row(2));
-        // Delete one of the rows and get the other
-        // a delete always gets sent, right??
+
+        // Delete one of the rows
         execute("DELETE FROM %s WHERE pk = 0");
 
         flush();
