@@ -169,10 +169,10 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                     }
 
                     DecoratedKey key = keys.next();
-
-                    indexWriter.startPartition(key, -1, -1);
-
                     long position = sstable.getPosition(key, SSTableReader.Operator.EQ);
+
+                    indexWriter.startPartition(key, position, position);
+
                     dataFile.seek(position);
                     ByteBufferUtil.readWithShortLength(dataFile); // key
 
