@@ -267,7 +267,7 @@ public class SSTableIndex implements SegmentOrdering
 
     protected final RangeIterator allSSTableKeys(AbstractBounds<PartitionPosition> keyRange) throws IOException
     {
-        return PrimaryKeyMapIterator.create(sstableContext, keyRange);
+        return PrimaryKeyMapIterator.create(sstableContext, indexContext.getDefinition(), keyRange);
     }
 
 }

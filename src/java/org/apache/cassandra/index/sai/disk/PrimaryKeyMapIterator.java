@@ -26,6 +26,8 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * Iterates keys in the {@link PrimaryKeyMap} of a SSTable.
@@ -37,18 +39,45 @@ import org.apache.cassandra.index.sai.utils.RangeIterator;
  */
 public final class PrimaryKeyMapIterator extends RangeIterator
 {
+    // KeyFilter controls which keys we want to return from the iterator.
+    // This is a hack to make this iterator work correctly on schemas with static columns.
+    // If the table has static columns, the primary key map component may contain both keys with clustering
+    // and with no clustering. The keys of regular rows will likely have clustering and the keys associated with
+    // updates of the static columns will have no clustering. Hence, depending on the type of the queried column,
+    // we must return only all keys with clustering or only all keys with no clustering, but not mixed, or we may run
+    // into duplicate row issues. We also shouldn't return keys without clustering for regular rows that expect
+    // clustering information - as that would negate the row-awareness advantage.
+    private enum KeyFilter
+    {
+        ALL,   // return all keys, fast, but safe only if we know there are no mixed keys with and without clustering
+        KEYS_WITH_NO_CLUSTERING, // return keys with no clustering
+        KEYS_WITH_CLUSTERING     // return keys with clustering
+    }
+
     private final PrimaryKeyMap keys;
+    private final KeyFilter filter;
     private long currentRowId;
 
-    private PrimaryKeyMapIterator(PrimaryKeyMap keys, PrimaryKey min, PrimaryKey max, long startRowId)
+
+    private PrimaryKeyMapIterator(PrimaryKeyMap keys, PrimaryKey min, PrimaryKey max, long startRowId, KeyFilter filter)
     {
         super(min, max, keys.count());
         this.keys = keys;
+        this.filter = filter;
         this.currentRowId = startRowId;
     }
 
-    public static RangeIterator create(SSTableContext ctx, AbstractBounds<PartitionPosition> keyRange) throws IOException
+    public static RangeIterator create(SSTableContext ctx, ColumnMetadata column, AbstractBounds<PartitionPosition> keyRange) throws IOException
     {
+        KeyFilter filter;
+        TableMetadata metadata = ctx.sstable().metadata();
+        if (column.isStatic() && !metadata.clusteringColumns().isEmpty())
+            filter = KeyFilter.KEYS_WITH_NO_CLUSTERING;
+        else if (!column.isStatic() && metadata.hasStaticColumns())
+            filter = KeyFilter.KEYS_WITH_CLUSTERING;
+        else // the table doesn't consist anything we want to filter out, so let's use the cheap option
+            filter = KeyFilter.ALL;
+
         PrimaryKeyMap keys = ctx.primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
         long count = keys.count();
         if (keys.count() == 0)
@@ -59,20 +88,14 @@ public final class PrimaryKeyMapIterator extends RangeIterator
 
         PrimaryKey.Factory pkFactory = ctx.indexDescriptor.primaryKeyFactory;
         Token minToken = keyRange.left.getToken();
-        Token maxToken = keyRange.right.getToken();
         PrimaryKey minKeyBound = pkFactory.createTokenOnly(minToken);
-        PrimaryKey maxKeyBound = pkFactory.createTokenOnly(maxToken);
         PrimaryKey sstableMinKey = keys.primaryKeyFromRowId(0);
         PrimaryKey sstableMaxKey = keys.primaryKeyFromRowId(count - 1);
         PrimaryKey minKey = (minKeyBound.compareTo(sstableMinKey) > 0)
                             ? minKeyBound
                             : sstableMinKey;
-        PrimaryKey maxKey = (!maxToken.isMinimum() && maxKeyBound.compareTo(sstableMaxKey) < 0)
-                            ? maxKeyBound
-                            : sstableMaxKey;
-
         long startRowId = minToken.isMinimum() ? 0 : keys.ceiling(minKey);
-        return new PrimaryKeyMapIterator(keys, minKey, maxKey, startRowId);
+        return new PrimaryKeyMapIterator(keys, sstableMinKey, sstableMaxKey, startRowId, filter);
     }
 
     @Override
@@ -84,10 +107,16 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     @Override
     protected PrimaryKey computeNext()
     {
-        // currentRowId may be less than 0 if there are no keys within the keyRange passed at construction
-        return currentRowId >= 0 && currentRowId < keys.count()
-               ? keys.primaryKeyFromRowId(currentRowId++)
-               : endOfData();
+        while (currentRowId >= 0 && currentRowId < keys.count())
+        {
+            PrimaryKey key = keys.primaryKeyFromRowId(currentRowId++);
+            if (filter == KeyFilter.KEYS_WITH_NO_CLUSTERING && !key.hasEmptyClustering())
+                continue;
+            if (filter == KeyFilter.KEYS_WITH_CLUSTERING && key.hasEmptyClustering())
+                continue;
+            return key;
+        }
+        return endOfData();
     }
 
     @Override

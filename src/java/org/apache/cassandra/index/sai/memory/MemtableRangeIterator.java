@@ -37,6 +37,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -52,6 +53,7 @@ public class MemtableRangeIterator extends RangeIterator
     private UnfilteredRowIterator rowIterator;
 
     public MemtableRangeIterator(Memtable memtable,
+                                 ColumnMetadata column,
                                  PrimaryKey.Factory pkFactory,
                                  AbstractBounds<PartitionPosition> keyRange)
     {
@@ -66,6 +68,7 @@ public class MemtableRangeIterator extends RangeIterator
         this.columns = ColumnFilter.selectionBuilder()
                                            .addAll(metadata.partitionKeyColumns())
                                            .addAll(metadata.clusteringColumns())
+                                           .add(column)
                                            .build();
 
         DataRange dataRange = new DataRange(keyRange, new ClusteringIndexSliceFilter(Slices.ALL, false));
@@ -88,10 +91,10 @@ public class MemtableRangeIterator extends RangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        AbstractBounds<PartitionPosition> partitionBounds = AbstractBounds.bounds(nextKey.partitionKey(),
-                                                                                  true,
-                                                                                  this.keyRange.right,
-                                                                                  this.keyRange.inclusiveRight());
+        PartitionPosition start = nextKey.partitionKey() != null
+                                  ? nextKey.partitionKey()
+                                  : nextKey.token().minKeyBound();
+        AbstractBounds<PartitionPosition> partitionBounds = AbstractBounds.bounds(start, true, keyRange.right, true);
         DataRange dataRange = new DataRange(partitionBounds, new ClusteringIndexSliceFilter(Slices.ALL, false));
         FileUtils.closeQuietly(partitionIterator);
         partitionIterator = memtable.makePartitionIterator(columns, dataRange);

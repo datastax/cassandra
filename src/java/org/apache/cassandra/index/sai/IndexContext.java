@@ -447,7 +447,7 @@ public class IndexContext
 
         for (Memtable memtable : memtables)
         {
-            RangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
+            RangeIterator memtableIterator = new MemtableRangeIterator(memtable, column, primaryKeyFactory, keyRange);
             builder.add(memtableIterator);
         }
         return builder.build();
