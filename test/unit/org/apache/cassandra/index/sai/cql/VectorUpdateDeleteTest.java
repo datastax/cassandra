@@ -541,9 +541,10 @@ public class VectorUpdateDeleteTest extends VectorTester
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
 
-        execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])");
-        execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 2.0])");
-        execute("INSERT INTO %s (pk, val) VALUES (2, [1.0, 2.0])");
+        execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])"); // -3485513579396041028
+        execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 2.0])"); // -4069959284402364209
+        execute("INSERT INTO %s (pk, val) VALUES (2, [1.0, 2.0])"); // -3248873570005575792
+        execute("INSERT INTO %s (pk, val) VALUES (3, [1.0, 2.0])"); // 9010454139840013625
 
         flush();
 
