@@ -488,6 +488,8 @@ public class VectorUpdateDeleteTest extends VectorTester
         // flush a sstable with one vector that is shared by two rows
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (2, 'B', [1.0, 2.0, 3.0])");
+        // Add another row to ensure we get the correct ordinal from disk
+        execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'A', [2.0, 3.0, 4.0])");
         flush();
 
         // flush another sstable to shadow the vector row
@@ -499,8 +501,8 @@ public class VectorUpdateDeleteTest extends VectorTester
         flush();
 
         // the shadow vector has the highest score
-        var result = execute("SELECT * FROM %s ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 2");
-        assertThat(result).hasSize(2);
+        var result = execute("SELECT * FROM %s ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 3");
+        assertThat(result).hasSize(3);
     }
 
     @Test
