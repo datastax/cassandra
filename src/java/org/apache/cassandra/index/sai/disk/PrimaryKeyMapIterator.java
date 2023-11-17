@@ -78,6 +78,9 @@ public final class PrimaryKeyMapIterator extends RangeIterator
         else // the table doesn't consist anything we want to filter out, so let's use the cheap option
             filter = KeyFilter.ALL;
 
+        if (ctx.indexDescriptor().isSSTableEmpty())
+            return RangeIterator.empty();
+
         PrimaryKeyMap keys = ctx.primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
         long count = keys.count();
         if (keys.count() == 0)
