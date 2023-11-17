@@ -2102,11 +2102,10 @@ class ImportConversion(object):
                                  for v in [split(split_format_str % vv, sep=sep) for vv in split(val)]))
 
         def convert_vector(val, ct=cql_type):
-            string_coordinates = val.strip("[]").split(',')
+            string_coordinates = split(val)
             if len(string_coordinates) != ct.vector_size:
                 raise ParseError("The length of given vector value '%d' is not equal to the vector size from the type definition '%d'" % (len(string_coordinates), ct.vector_size))
-            float_vector = [float(v) for v in string_coordinates]
-            return float_vector
+            return [convert_mandatory(ct.subtype, v) for v in string_coordinates]
 
         def convert_user_type(val, ct=cql_type):
             """
