@@ -866,28 +866,33 @@ public abstract class Controller
 
         if (options.containsKey(NUM_SHARDS_OPTION) || DEFAULT_NUM_SHARDS.isPresent())
         {
-            // Legacy V1 mode.
-            int numShards = options.containsKey(NUM_SHARDS_OPTION) // options take precedence
+            // Legacy V1 mode is enabled when the number of shards is defined and has a positive value.
+            // Table property takes precendence over system property.
+            int numShards = options.containsKey(NUM_SHARDS_OPTION)
                             ? Integer.parseInt(options.get(NUM_SHARDS_OPTION))
                             : DEFAULT_NUM_SHARDS.get();
-            if (!options.containsKey(MIN_SSTABLE_SIZE_OPTION))
-                minSSTableSize = MIN_SSTABLE_SIZE_AUTO;
-            baseShardCount = numShards;
-            sstableGrowthModifier = 1.0;
-            targetSStableSize = Long.MAX_VALUE; // this no longer plays a part, the result of getNumShards before
-                                                // accounting for minimum size is always baseShardCount
 
-            double maxSpaceOverheadLowerBound = 1.0d / numShards;
-            if (maxSpaceOverhead < maxSpaceOverheadLowerBound)
+            if (numShards > 0)
             {
-                logger.warn("{} shards are not enough to maintain the required maximum space overhead of {}!\n" +
-                            "Falling back to {}={} instead. If this limit needs to be satisfied, please increase the number" +
-                            " of shards.",
-                            numShards,
-                            maxSpaceOverhead,
-                            MAX_SPACE_OVERHEAD_OPTION,
-                            String.format("%.3f", maxSpaceOverheadLowerBound));
-                maxSpaceOverhead = maxSpaceOverheadLowerBound;
+                if (!options.containsKey(MIN_SSTABLE_SIZE_OPTION))
+                    minSSTableSize = MIN_SSTABLE_SIZE_AUTO;
+                baseShardCount = numShards;
+                sstableGrowthModifier = 1.0;
+                targetSStableSize = Long.MAX_VALUE; // this no longer plays a part, the result of getNumShards before
+                // accounting for minimum size is always baseShardCount
+
+                double maxSpaceOverheadLowerBound = 1.0d / numShards;
+                if (maxSpaceOverhead < maxSpaceOverheadLowerBound)
+                {
+                    logger.warn("{} shards are not enough to maintain the required maximum space overhead of {}!\n" +
+                                "Falling back to {}={} instead. If this limit needs to be satisfied, please increase the number" +
+                                " of shards.",
+                                numShards,
+                                maxSpaceOverhead,
+                                MAX_SPACE_OVERHEAD_OPTION,
+                                String.format("%.3f", maxSpaceOverheadLowerBound));
+                    maxSpaceOverhead = maxSpaceOverheadLowerBound;
+                }
             }
         }
 
@@ -955,7 +960,25 @@ public abstract class Controller
         long minSSTableSize = -1;
         long targetSSTableSize = DEFAULT_TARGET_SSTABLE_SIZE;
 
-        validateNoneWith(options, NUM_SHARDS_OPTION, TARGET_SSTABLE_SIZE_OPTION, SSTABLE_GROWTH_OPTION, BASE_SHARD_COUNT_OPTION);
+        s = options.remove(NUM_SHARDS_OPTION);
+        if (s != null)
+        {
+            try
+            {
+                int numShards = Integer.parseInt(s);
+                if (numShards <= 0 && numShards != -1)
+                    throw new ConfigurationException(String.format("Invalid configuration, %s should be positive: %d or -1 " +
+                                                                   "if static sharding is explicitly disabled for this table.",
+                                                                   NUM_SHARDS_OPTION,
+                                                                   numShards));
+                if (numShards != -1)
+                    validateNoneWith(options, NUM_SHARDS_OPTION, TARGET_SSTABLE_SIZE_OPTION, SSTABLE_GROWTH_OPTION, BASE_SHARD_COUNT_OPTION);
+            }
+            catch (NumberFormatException e)
+            {
+                throw new ConfigurationException(String.format(intParseErr, s, NUM_SHARDS_OPTION), e);
+            }
+        }
 
         s = options.remove(ADAPTIVE_OPTION);
         if (s != null)
@@ -971,22 +994,6 @@ public abstract class Controller
         validateSizeWithAlt(options, FLUSH_SIZE_OVERRIDE_OPTION, FLUSH_SIZE_OVERRIDE_OPTION_MB, 20);
         validateSizeWithAlt(options, DATASET_SIZE_OPTION, DATASET_SIZE_OPTION_GB, 30);
 
-        s = options.remove(NUM_SHARDS_OPTION);
-        if (s != null)
-        {
-            try
-            {
-                int numShards = Integer.parseInt(s);
-                if (numShards <= 0)
-                    throw new ConfigurationException(String.format(nonPositiveErr,
-                                                                   NUM_SHARDS_OPTION,
-                                                                   numShards));
-            }
-            catch (NumberFormatException e)
-            {
-                throw new ConfigurationException(String.format(intParseErr, s, NUM_SHARDS_OPTION), e);
-            }
-        }
         s = options.remove(MAX_SSTABLES_TO_COMPACT_OPTION);
         if (s != null)
         {
@@ -1240,7 +1247,7 @@ public abstract class Controller
 
     private static void validateNoneWith(Map<String, String> options, String option, String... incompatibleOptions)
     {
-        if (!options.containsKey(option) || Arrays.stream(incompatibleOptions).noneMatch(options::containsKey))
+        if (Arrays.stream(incompatibleOptions).noneMatch(options::containsKey))
             return;
         throw new ConfigurationException(String.format("Option %s cannot be used in combination with %s",
                                                        option,
