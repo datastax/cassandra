@@ -972,7 +972,15 @@ public abstract class Controller
                                                                    NUM_SHARDS_OPTION,
                                                                    numShards));
                 if (numShards != -1)
-                    validateNoneWith(options, NUM_SHARDS_OPTION, TARGET_SSTABLE_SIZE_OPTION, SSTABLE_GROWTH_OPTION, BASE_SHARD_COUNT_OPTION);
+                {
+                    List<String> incompatibleOptions = List.of(TARGET_SSTABLE_SIZE_OPTION, SSTABLE_GROWTH_OPTION, BASE_SHARD_COUNT_OPTION);
+                    if (incompatibleOptions.stream().anyMatch(options::containsKey))
+                    {
+                        throw new ConfigurationException(String.format("Option %s cannot be used in combination with %s",
+                                                                       NUM_SHARDS_OPTION,
+                                                                       incompatibleOptions.stream().filter(options::containsKey).collect(Collectors.joining(", "))));
+                    }
+                }
             }
             catch (NumberFormatException e)
             {
@@ -1243,15 +1251,6 @@ public abstract class Controller
                                                            opt,
                                                            s));
         return sizeInBytes;
-    }
-
-    private static void validateNoneWith(Map<String, String> options, String option, String... incompatibleOptions)
-    {
-        if (Arrays.stream(incompatibleOptions).noneMatch(options::containsKey))
-            return;
-        throw new ConfigurationException(String.format("Option %s cannot be used in combination with %s",
-                                                       option,
-                                                       Arrays.stream(incompatibleOptions).filter(options::containsKey).collect(Collectors.joining(", "))));
     }
 
     private static void validateOneOf(Map<String, String> options, String option1, String option2)
