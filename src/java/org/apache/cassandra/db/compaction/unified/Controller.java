@@ -111,7 +111,7 @@ public abstract class Controller
      * <p>
      * This is mainly present to support UCS V1 mode, which relies heavily on minimal SSTable
      * size, and defaults to 0 which provides minimal parallelism on all levels of the hierarchy.
-     * In UCS V1 mode (engaged by using "num_shards" above) the default is 100MiB.
+     * In UCS V1 mode (engaged by using "num_shards" above) the default 'auto'.
      */
     static final String MIN_SSTABLE_SIZE_OPTION = "min_sstable_size";
     @Deprecated
