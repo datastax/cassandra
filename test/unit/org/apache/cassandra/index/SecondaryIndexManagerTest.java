@@ -65,6 +65,9 @@ public class SecondaryIndexManagerTest extends CQLTester
     @BeforeClass
     public static void beforeClass()
     {
+        // Needed for testIndexStatusPropagationThread because IndexStatusManager will only submit
+        // to StatusPropagationExecutor of gossip is started.
+        requireNetwork();
         backups = DatabaseDescriptor.isIncrementalBackupsEnabled();
         DatabaseDescriptor.setIncrementalBackupsEnabled(false);
     }
@@ -100,6 +103,20 @@ public class SecondaryIndexManagerTest extends CQLTester
         String indexName = createIndex("CREATE INDEX ON %s(c)");
 
         assertMarkedAsBuilt(indexName);
+    }
+
+    @Test
+    public void testIndexStatusPropagationThread()
+    {
+        // create index to submit index status propagation task
+        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        String indexName = createIndex("CREATE INDEX ON %s(c)");
+        waitForIndexBuilds(KEYSPACE, indexName);
+        Thread statusPropagationThread  = Thread.getAllStackTraces().keySet()
+                                                .stream()
+                                                .filter(t -> t.getName().contains("StatusPropagationExecutor"))
+                                                .findFirst().get();
+        assertTrue(statusPropagationThread.isDaemon());
     }
 
     @Test
