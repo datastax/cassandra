@@ -141,8 +141,6 @@ networking_cache_size: "org.apache.cassandra.config.DataStorageSpec.IntMebibytes
 fields_per_udt_fail_threshold: "java.lang.Integer"
 key_cache_size: "org.apache.cassandra.config.DataStorageSpec.LongMebibytesBound"
 max_hint_window: "org.apache.cassandra.config.DurationSpec.IntMillisecondsBound"
-sai_options:
-  segment_write_buffer_size: "org.apache.cassandra.config.DataStorageSpec.IntMebibytesBound"
 vector_dimensions_fail_threshold: "java.lang.Integer"
 max_hints_size_per_host: "org.apache.cassandra.config.DataStorageSpec.LongBytesBound"
 partition_size_fail_threshold: "org.apache.cassandra.config.DataStorageSpec.LongBytesBound"
