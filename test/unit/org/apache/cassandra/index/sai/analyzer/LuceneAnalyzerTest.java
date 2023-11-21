@@ -91,7 +91,7 @@ public class LuceneAnalyzerTest
         String testString = "DoGs";
         // Default minGramSize is 3
         String[] expected = new String[]{ "dog", "dogs", "ogs" };
-        List<String> list = tokenize(testString, json);
+        List<String> list = tokenize(testString, json, null);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
@@ -222,6 +222,20 @@ public class LuceneAnalyzerTest
         String testString = "{\"_id\": \"id2\", \"data\" : \"dogs withering in the windy\"}";
 
         String[] expected = new String[]{ "dog", "wither", "in", "the", "windi" };
+        List<String> list = tokenize(testString, json, dataParserFields);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    @Test
+    public void testNgramWithJsonData() throws Exception
+    {
+        String json = "{\n" +
+                      "\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}},\n" +
+                      "\"filters\":[{\"name\":\"lowercase\"}]\n" +
+                      "}";
+        String testString = "{\"_id\": \"id2\", \"data\" : \"DoG\"}";
+        String dataParserFields = "data";
+        String[] expected = new String[]{ "do", "dog", "og" };
         List<String> list = tokenize(testString, json, dataParserFields);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
