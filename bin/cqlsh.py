@@ -286,8 +286,12 @@ CQL_ERRORS = (
     cassandra.connection.ConnectionBusy, cassandra.connection.ProtocolError, cassandra.connection.ConnectionException,
     cassandra.protocol.ErrorMessage, cassandra.protocol.InternalError, cassandra.query.TraceUnavailable
 )
+CQL_TRACED_ERRORS = (
+    cassandra.ReadFailure, cassandra.Timeout, cassandra.OperationTimedOut, cassandra.protocol.InternalError
+)
 
 debug_completion = bool(os.environ.get('CQLSH_DEBUG_COMPLETION', '') == 'YES')
+trace_all_errors = bool(os.environ.get('CQLSH_TRACE_ALL_ERRORS', '') == 'YES')
 
 
 class NoKeyspaceError(Exception):
@@ -1114,9 +1118,11 @@ class Shell(cmd.Cmd):
 
         future = self.session.execute_async(statement, trace=self.tracing_enabled)
         result = None
+        err = None
         try:
             result = future.result()
-        except CQL_ERRORS as err:
+        except CQL_ERRORS as e:
+            err = e  # god, python scoping sucks
             err_msg = ensure_text(err.message if hasattr(err, 'message') else str(err))
             self.printerr(str(err.__class__.__name__) + ": " + err_msg)
         except Exception:
@@ -1133,7 +1139,10 @@ class Shell(cmd.Cmd):
                 self.conn.refresh_schema_metadata(-1)
 
         if result is None:
-            return False, future # caller will need future to examine tracing session
+            if err.__class__ in CQL_TRACED_ERRORS or trace_all_errors:
+                return False, future
+            else:
+                return False, None
 
         if statement.query_string[:6].lower() == 'select':
             self.print_result(result, self.parse_for_select_meta(statement.query_string))
