@@ -43,7 +43,7 @@ public interface LongArray extends Closeable
      * @param targetToken Token to lookup and it must not be smaller than previous value
      * @return The row ID of the given token or negative value if target token is greater than all tokens
      */
-    long findTokenRowID(long targetToken);
+    long ceilingRowId(long targetToken);
 
     @Override
     default void close() throws IOException { }
@@ -75,10 +75,10 @@ public interface LongArray extends Closeable
         }
 
         @Override
-        public long findTokenRowID(long targetToken)
+        public long ceilingRowId(long targetToken)
         {
             open();
-            return longArray.findTokenRowID(targetToken);
+            return longArray.ceilingRowId(targetToken);
         }
 
         @Override
