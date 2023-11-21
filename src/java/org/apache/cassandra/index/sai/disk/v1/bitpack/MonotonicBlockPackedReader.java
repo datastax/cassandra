@@ -111,9 +111,15 @@ public class MonotonicBlockPackedReader implements LongArray.Factory
             }
 
             @Override
-            public long findTokenRowID(long targetValue)
+            public long ceilingRowId(long targetValue)
             {
                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public long exactRowId(long targetToken)
+            {
+                throw new UnsupportedOperationException();
             }
         };
     }
