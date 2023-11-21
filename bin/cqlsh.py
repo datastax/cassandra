@@ -1108,6 +1108,7 @@ class Shell(cmd.Cmd):
         return self.get_table_meta(ks, cf)
 
     def perform_simple_statement(self, statement):
+        """returns tuple of success (boolean) and a future of the result"""
         if not statement:
             return False, None
 
@@ -1132,7 +1133,7 @@ class Shell(cmd.Cmd):
                 self.conn.refresh_schema_metadata(-1)
 
         if result is None:
-            return False, None
+            return False, future # caller will need future to examine tracing session
 
         if statement.query_string[:6].lower() == 'select':
             self.print_result(result, self.parse_for_select_meta(statement.query_string))
