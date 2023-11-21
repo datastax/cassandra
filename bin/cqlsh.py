@@ -287,7 +287,10 @@ CQL_ERRORS = (
     cassandra.protocol.ErrorMessage, cassandra.protocol.InternalError, cassandra.query.TraceUnavailable
 )
 CQL_TRACED_ERRORS = (
-    cassandra.ReadFailure, cassandra.Timeout, cassandra.OperationTimedOut, cassandra.protocol.InternalError
+    cassandra.CoordinationFailure,  # superclass of ReadFailure
+    cassandra.Timeout,              # superclass of ReadTimeout
+    cassandra.OperationTimedOut,
+    cassandra.protocol.InternalError
 )
 
 debug_completion = bool(os.environ.get('CQLSH_DEBUG_COMPLETION', '') == 'YES')
@@ -1139,7 +1142,7 @@ class Shell(cmd.Cmd):
                 self.conn.refresh_schema_metadata(-1)
 
         if result is None:
-            if err.__class__ in CQL_TRACED_ERRORS or trace_all_errors:
+            if any(isinstance(err, cls) for cls in CQL_TRACED_ERRORS) or trace_all_errors:
                 return False, future
             else:
                 return False, None
