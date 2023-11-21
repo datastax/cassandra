@@ -350,7 +350,7 @@ public class QueryContext
                 for (var entry : ordinalsToRowIds.entrySet())
                 {
                     int ordinal = entry.getKey();
-                    int[] shadowedRowIds = entry.getValue().toArray();
+                    IntArrayList shadowedRowIds = entry.getValue();
                     int[] allRowIds = rowIdsView.getSegmentRowIdsMatching(ordinal);
                     int[] nonShadowedRowIds = subtractOrderedArrays(allRowIds, shadowedRowIds);
                     if (nonShadowedRowIds != null)
@@ -374,18 +374,18 @@ public class QueryContext
         }
     }
 
-    private int[] subtractOrderedArrays(int[] allRowIds, int[] shadowedRowIds)
+    private int[] subtractOrderedArrays(int[] allRowIds, IntArrayList shadowedRowIds)
     {
-        if (allRowIds.length - shadowedRowIds.length == 0)
+        if (allRowIds.length - shadowedRowIds.size() == 0)
             return null;
-        int[] result = new int[allRowIds.length - shadowedRowIds.length];
+        int[] result = new int[allRowIds.length - shadowedRowIds.size()];
         int resultIndex = 0;
         int shadowedRowIdsIndex = 0;
         for (int rowId : allRowIds)
         {
             if (resultIndex == result.length)
                 break;
-            if (shadowedRowIdsIndex < shadowedRowIds.length && rowId == shadowedRowIds[shadowedRowIdsIndex])
+            if (shadowedRowIdsIndex < shadowedRowIds.size() && rowId == shadowedRowIds.get(shadowedRowIdsIndex))
                 shadowedRowIdsIndex++;
             else
                 result[resultIndex++] = rowId;
