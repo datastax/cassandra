@@ -341,5 +341,12 @@ public class CommitLogDescriptorTest
         File invalidCdcLink = new File(fileNameSuffix + ".invalidlog");
         inferredIndexFile = CommitLogDescriptor.inferCdcIndexFile(invalidCdcLink);
         Assert.assertNull(inferredIndexFile);
+    }   
+    
+    @Test
+    public void testDSE68MessagingVersion()
+    {
+        CommitLogDescriptor descriptor = new CommitLogDescriptor(680, 1, null, null);
+        Assert.assertEquals(MessagingService.VERSION_DSE_68, descriptor.getMessagingVersion());
     }
 }
