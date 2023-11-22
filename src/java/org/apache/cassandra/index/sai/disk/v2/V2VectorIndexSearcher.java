@@ -359,9 +359,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         // path to take until we have an accurate key count.
         SparseFixedBitSet bits = bitSetForSearch();
         IntArrayList rowIds = new IntArrayList();
-        int maxSegmentRowId = metadata.toSegmentRowId(metadata.maxSSTableRowId);
-        try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
-             OrdinalsView ordinalsView = graph.getOrdinalsView())
+        try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
+             var ordinalsView = graph.getOrdinalsView())
         {
             for (PrimaryKey primaryKey : keysInRange)
             {
@@ -400,14 +399,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         }
         // else ask the index to perform a search limited to the bits we created
         float[] queryVector = exp.lower.value.vector;
-        VectorPostingList results = graph.search(queryVector, topK, limit, bits, context);
-        updateExpectedNodes(results.getVisitedCount(), getRawExpectedNodes(topK, maxSegmentRowId));
+        var results = graph.search(queryVector, topK, limit, bits, context);
+        updateExpectedNodes(results.getVisitedCount(), getRawExpectedNodes(topK, numRows));
         return toPrimaryKeyIterator(results, context);
     }
 
-    private int getRawExpectedNodes(int topK, int maxSegmentRowId)
+    private int getRawExpectedNodes(int topK, int nPermittedOrdinals)
     {
-        return VectorMemtableIndex.expectedNodesVisited(topK, maxSegmentRowId, graph.size());
+        return VectorMemtableIndex.expectedNodesVisited(topK, nPermittedOrdinals, graph.size());
     }
 
     private void logAndTrace(String message, Object... args)
