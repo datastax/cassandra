@@ -53,7 +53,10 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
     public RangeIterator(PrimaryKey min, PrimaryKey max, long count)
     {
         if (min == null || max == null || count == 0)
+        {
             assert min == null && max == null && (count == 0 || count == -1) : min + " - " + max + " " + count;
+            endOfData();
+        }
 
         this.min = min;
         this.current = min;
@@ -95,7 +98,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
      */
     public final PrimaryKey skipTo(PrimaryKey nextToken)
     {
-        if (min == null || max == null)
+        if (state == State.DONE)
             return endOfData();
 
         // In the case of deferred iterators the current value may not accurately
