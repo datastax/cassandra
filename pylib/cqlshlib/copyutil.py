@@ -47,7 +47,7 @@ from queue import Queue
 from cassandra import OperationTimedOut
 from cassandra.cluster import DefaultConnection
 from cassandra.connection import SniEndPoint
-from cassandra.cqltypes import ReversedType, UserType, VarcharType, VectorType
+from cassandra.cqltypes import ReversedType, UserType, BytesType, VarcharType, VectorType
 from cassandra.metadata import protect_name, protect_names, protect_value
 from cassandra.policies import RetryPolicy, DCAwareRoundRobinPolicy, FallthroughRetryPolicy
 from cassandra.query import BatchStatement, BatchType, SimpleStatement, tuple_factory
