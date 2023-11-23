@@ -23,6 +23,7 @@ import java.io.IOException;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
@@ -94,6 +95,13 @@ public class MemtableRangeIterator extends RangeIterator
         PartitionPosition start = nextKey.partitionKey() != null
                                   ? nextKey.partitionKey()
                                   : nextKey.token().minKeyBound();
+        if (!keyRange.right.isMinimum() && start.compareTo(keyRange.right) > 0)
+        {
+            partitionIterator = EmptyIterators.unfilteredPartition(memtable.metadata());
+            rowIterator = null;
+            return;
+        }
+
         AbstractBounds<PartitionPosition> partitionBounds = AbstractBounds.bounds(start, true, keyRange.right, true);
         DataRange dataRange = new DataRange(partitionBounds, new ClusteringIndexSliceFilter(Slices.ALL, false));
         FileUtils.closeQuietly(partitionIterator);
