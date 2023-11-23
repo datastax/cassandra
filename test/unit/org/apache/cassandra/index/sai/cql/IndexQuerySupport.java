@@ -39,6 +39,7 @@ import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.apache.cassandra.utils.Pair;
 import org.hamcrest.Matchers;
 
+import static org.apache.cassandra.distributed.test.TestBaseImpl.list;
 import static org.apache.cassandra.index.sai.cql.DataModel.INET_COLUMN;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
@@ -310,8 +311,8 @@ public class IndexQuerySupport
             query(tester, model, DataModel.BIGINT_COLUMN, Operator.LT, 400000000L);
             query(tester, model, DataModel.BIGINT_COLUMN, Operator.GT, 10000000000L);
 
-            query(tester, model, DataModel.BIGINT_COLUMN, Operator.IN, Lists.newArrayList(22L, 3000000000L, 5000000000L));
-            query(tester, model, DataModel.BIGINT_COLUMN, Operator.NOT_IN, Lists.newArrayList(22L, 3000000000L, 5000000000L));
+            query(tester, model, DataModel.BIGINT_COLUMN, Operator.IN, list(22L, 3000000000L, 5000000000L));
+            query(tester, model, DataModel.BIGINT_COLUMN, Operator.NOT_IN, list(22L, 3000000000L, 5000000000L));
 
             rangeQuery(tester, model, DataModel.BIGINT_COLUMN, 3000000000L, 7000000000L);
 
@@ -327,12 +328,12 @@ public class IndexQuerySupport
             query(tester, model, DataModel.DATE_COLUMN, Operator.LT, SimpleDateType.instance.fromString("2000-01-01"));
             query(tester, model, DataModel.DATE_COLUMN, Operator.GT, SimpleDateType.instance.fromString("2020-01-01"));
 
-            query(tester, model, DataModel.DATE_COLUMN, Operator.IN, Lists.newArrayList(
+            query(tester, model, DataModel.DATE_COLUMN, Operator.IN, list(
                 SimpleDateType.instance.fromString("2020-01-01"),
                 SimpleDateType.instance.fromString("2013-06-17"),
                 SimpleDateType.instance.fromString("2018-06-19")
             ));
-            query(tester, model, DataModel.DATE_COLUMN, Operator.NOT_IN, Lists.newArrayList(
+            query(tester, model, DataModel.DATE_COLUMN, Operator.NOT_IN, list(
                 SimpleDateType.instance.fromString("2020-01-01"),
                 SimpleDateType.instance.fromString("2013-06-17"),
                 SimpleDateType.instance.fromString("2018-06-19")
@@ -351,8 +352,8 @@ public class IndexQuerySupport
             query(tester, model, DataModel.DOUBLE_COLUMN, Operator.EQ, 82169.60);
             query(tester, model, DataModel.DOUBLE_COLUMN, Operator.LT, 1948.54);
             query(tester, model, DataModel.DOUBLE_COLUMN, Operator.GT, 570640.95);
-            query(tester, model, DataModel.DOUBLE_COLUMN, Operator.IN, Lists.newArrayList(43203.90, 7800.06, 82169.62));
-            query(tester, model, DataModel.DOUBLE_COLUMN, Operator.NOT_IN, Lists.newArrayList(43203.90, 7800.06, 82169.62));
+            query(tester, model, DataModel.DOUBLE_COLUMN, Operator.IN, list(43203.90, 7800.06, 82169.62));
+            query(tester, model, DataModel.DOUBLE_COLUMN, Operator.NOT_IN, list(43203.90, 7800.06, 82169.62));
 
             rangeQuery(tester, model, DataModel.DOUBLE_COLUMN, 56538.90, 113594.08);
 
@@ -367,8 +368,8 @@ public class IndexQuerySupport
             query(tester, model, DataModel.FLOAT_COLUMN, Operator.EQ, 5.9f);
             query(tester, model, DataModel.FLOAT_COLUMN, Operator.LT, 1.8f);
             query(tester, model, DataModel.FLOAT_COLUMN, Operator.GT, 10.2f);
-            query(tester, model, DataModel.FLOAT_COLUMN, Operator.IN, Lists.newArrayList(7.7f, 1.8f, 3.5f));
-            query(tester, model, DataModel.FLOAT_COLUMN, Operator.NOT_IN, Lists.newArrayList(7.7f, 1.8f, 3.5f));
+            query(tester, model, DataModel.FLOAT_COLUMN, Operator.IN, list(7.7f, 1.8f, 3.5f));
+            query(tester, model, DataModel.FLOAT_COLUMN, Operator.NOT_IN, list(7.7f, 1.8f, 3.5f));
 
             rangeQuery(tester, model, DataModel.FLOAT_COLUMN, 4.6f, 6.7f);
 
@@ -390,8 +391,8 @@ public class IndexQuerySupport
             query(tester, model, DataModel.SMALLINT_COLUMN, Operator.NEQ, (short) 2);
             query(tester, model, DataModel.SMALLINT_COLUMN, Operator.LT, (short) 30);
             query(tester, model, DataModel.SMALLINT_COLUMN, Operator.GT, (short) 1861);
-            query(tester, model, DataModel.SMALLINT_COLUMN, Operator.IN, Lists.newArrayList((short) 1861, (short) 164, (short) 30));
-            query(tester, model, DataModel.SMALLINT_COLUMN, Operator.NOT_IN, Lists.newArrayList((short) 1861, (short) 164, (short) 30));
+            query(tester, model, DataModel.SMALLINT_COLUMN, Operator.IN, list((short) 1861, (short) 164, (short) 30));
+            query(tester, model, DataModel.SMALLINT_COLUMN, Operator.NOT_IN, list((short) 1861, (short) 164, (short) 30));
 
             rangeQuery(tester, model, DataModel.SMALLINT_COLUMN, (short) 126, (short) 383);
 
@@ -405,8 +406,8 @@ public class IndexQuerySupport
             query(tester, model, DataModel.TINYINT_COLUMN, Operator.NEQ, (byte) 1);
             query(tester, model, DataModel.TINYINT_COLUMN, Operator.LT, (byte) 2);
             query(tester, model, DataModel.TINYINT_COLUMN, Operator.GT, (byte) 117);
-            query(tester, model, DataModel.TINYINT_COLUMN, Operator.IN, Lists.newArrayList((byte) 16, (byte) 1));
-            query(tester, model, DataModel.TINYINT_COLUMN, Operator.NOT_IN, Lists.newArrayList((byte) 16, (byte) 1));
+            query(tester, model, DataModel.TINYINT_COLUMN, Operator.IN, list((byte) 16, (byte) 1));
+            query(tester, model, DataModel.TINYINT_COLUMN, Operator.NOT_IN, list((byte) 16, (byte) 1));
 
             rangeQuery(tester, model, DataModel.TINYINT_COLUMN, (byte) 12, (byte) 47);
 
@@ -428,8 +429,8 @@ public class IndexQuerySupport
             query(tester, model, DataModel.TIME_COLUMN, Operator.NEQ, TimeType.instance.fromString("00:15:57"));
             query(tester, model, DataModel.TIME_COLUMN, Operator.LT, TimeType.instance.fromString("00:15:50"));
             query(tester, model, DataModel.TIME_COLUMN, Operator.GT, TimeType.instance.fromString("01:30:45"));
-            query(tester, model, DataModel.TIME_COLUMN, Operator.IN, Lists.newArrayList(TimeType.instance.fromString("00:43:07"), TimeType.instance.fromString("00:15:57")));
-            query(tester, model, DataModel.TIME_COLUMN, Operator.NOT_IN, Lists.newArrayList(TimeType.instance.fromString("00:43:07"), TimeType.instance.fromString("00:15:57")));
+            query(tester, model, DataModel.TIME_COLUMN, Operator.IN, list(TimeType.instance.fromString("00:43:07"), TimeType.instance.fromString("00:15:57")));
+            query(tester, model, DataModel.TIME_COLUMN, Operator.NOT_IN, list(TimeType.instance.fromString("00:43:07"), TimeType.instance.fromString("00:15:57")));
 
             rangeQuery(tester, model, DataModel.TIME_COLUMN, TimeType.instance.fromString("00:38:13"), TimeType.instance.fromString("00:56:07"));
 
@@ -444,10 +445,10 @@ public class IndexQuerySupport
             query(tester, model, DataModel.TIMESTAMP_COLUMN, Operator.LT, TimestampType.instance.fromString("2000-01-01T00:00:00"));
             query(tester, model, DataModel.TIMESTAMP_COLUMN, Operator.GT, TimestampType.instance.fromString("2020-01-01T00:00:00"));
 
-            query(tester, model, DataModel.TIMESTAMP_COLUMN, Operator.IN, Lists.newArrayList(
+            query(tester, model, DataModel.TIMESTAMP_COLUMN, Operator.IN, list(
                         TimestampType.instance.fromString("2013-06-17T00:00:00"),
                         TimestampType.instance.fromString("2017-01-01T00:00:00")));
-            query(tester, model, DataModel.TIMESTAMP_COLUMN, Operator.NOT_IN, Lists.newArrayList(
+            query(tester, model, DataModel.TIMESTAMP_COLUMN, Operator.NOT_IN, list(
                         TimestampType.instance.fromString("2013-06-17T00:00:00"),
                         TimestampType.instance.fromString("2017-01-01T00:00:00")));
 
@@ -470,10 +471,10 @@ public class IndexQuerySupport
             query(tester, model, DataModel.TIMEUUID_COLUMN, Operator.EQ, UUIDType.instance.fromString("2a421a68-d182-11e8-a8d5-f2801f1b9fd1"));
             query(tester, model, DataModel.TIMEUUID_COLUMN, Operator.NEQ, UUIDType.instance.fromString("2a421a68-d182-11e8-a8d5-f2801f1b9fd1"));
 
-            query(tester, model, DataModel.TIMEUUID_COLUMN, Operator.IN, Lists.newArrayList(
+            query(tester, model, DataModel.TIMEUUID_COLUMN, Operator.IN, list(
                     UUIDType.instance.fromString("ee6136d2-d17c-11e8-a8d5-f2801f1b9fd1"),
                     UUIDType.instance.fromString("2a421a68-d182-11e8-a8d5-f2801f1b9fd1")));
-            query(tester, model, DataModel.TIMEUUID_COLUMN, Operator.NOT_IN, Lists.newArrayList(
+            query(tester, model, DataModel.TIMEUUID_COLUMN, Operator.NOT_IN, list(
                     UUIDType.instance.fromString("ee6136d2-d17c-11e8-a8d5-f2801f1b9fd1"),
                     UUIDType.instance.fromString("2a421a68-d182-11e8-a8d5-f2801f1b9fd1")));
 
