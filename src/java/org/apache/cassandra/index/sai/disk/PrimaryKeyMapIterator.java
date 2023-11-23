@@ -26,7 +26,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -50,7 +49,6 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     private enum KeyFilter
     {
         ALL,   // return all keys, fast, but safe only if we know there are no mixed keys with and without clustering
-        KEYS_WITH_NO_CLUSTERING, // return keys with no clustering
         KEYS_WITH_CLUSTERING     // return keys with clustering
     }
 
@@ -67,13 +65,11 @@ public final class PrimaryKeyMapIterator extends RangeIterator
         this.currentRowId = startRowId;
     }
 
-    public static RangeIterator create(SSTableContext ctx, ColumnMetadata column, AbstractBounds<PartitionPosition> keyRange) throws IOException
+    public static RangeIterator create(SSTableContext ctx, AbstractBounds<PartitionPosition> keyRange) throws IOException
     {
         KeyFilter filter;
         TableMetadata metadata = ctx.sstable().metadata();
-        if (column.isStatic() && !metadata.clusteringColumns().isEmpty())
-            filter = KeyFilter.KEYS_WITH_NO_CLUSTERING;
-        else if (!column.isStatic() && metadata.hasStaticColumns())
+        if (metadata.hasStaticColumns())
             filter = KeyFilter.KEYS_WITH_CLUSTERING;
         else // the table doesn't consist anything we want to filter out, so let's use the cheap option
             filter = KeyFilter.ALL;
@@ -113,8 +109,6 @@ public final class PrimaryKeyMapIterator extends RangeIterator
         while (currentRowId >= 0 && currentRowId < keys.count())
         {
             PrimaryKey key = keys.primaryKeyFromRowId(currentRowId++);
-            if (filter == KeyFilter.KEYS_WITH_NO_CLUSTERING && !key.hasEmptyClustering())
-                continue;
             if (filter == KeyFilter.KEYS_WITH_CLUSTERING && key.hasEmptyClustering())
                 continue;
             return key;
