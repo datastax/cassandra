@@ -82,11 +82,9 @@ public class RangeUnionIterator extends RangeIterator
 
     protected void performSkipTo(PrimaryKey nextKey)
     {
+        // (calling hasNext is a pessimisation, since it calls computeNext under the hood.  don't do it.)
         for (RangeIterator range : ranges)
-        {
-            if (range.hasNext())
-                range.skipTo(nextKey);
-        }
+            range.skipTo(nextKey);
     }
 
     public void close() throws IOException

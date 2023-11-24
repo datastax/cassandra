@@ -107,9 +107,9 @@ public class RangeIntersectionIterator extends RangeIterator
 
     protected void performSkipTo(PrimaryKey nextToken)
     {
+        // (calling hasNext is a pessimisation, since it calls computeNext under the hood.  don't do it.)
         for (var range : ranges)
-            if (range.hasNext())
-                range.skipTo(nextToken);
+            range.skipTo(nextToken);
     }
 
     /**
