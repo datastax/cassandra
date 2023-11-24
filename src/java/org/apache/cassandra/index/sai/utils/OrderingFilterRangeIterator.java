@@ -21,7 +21,6 @@ package org.apache.cassandra.index.sai.utils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
-
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.io.util.FileUtils;

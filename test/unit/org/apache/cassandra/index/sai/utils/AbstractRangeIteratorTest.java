@@ -24,8 +24,6 @@ import java.util.stream.Collectors;
 
 import org.junit.Assert;
 
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 public class AbstractRangeIteratorTest extends SaiRandomizedTest
 {
     protected long[] arr(long... longArray)

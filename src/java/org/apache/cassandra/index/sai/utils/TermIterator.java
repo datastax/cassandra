@@ -33,6 +33,10 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
 
+/**
+ * TermIterator wraps RangeUnionIterator with code that tracks and releases the referenced indexes,
+ * and adds timeout checkpoints around expensive operations.
+ */
 public class TermIterator extends RangeIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(TermIterator.class);
@@ -68,7 +72,7 @@ public class TermIterator extends RangeIterator
     @SuppressWarnings("resource")
     public static TermIterator build(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
     {
-        final List<RangeIterator> tokens = new ArrayList<>(1 + perSSTableIndexes.size());;
+        final List<RangeIterator> tokens = new ArrayList<>(1 + perSSTableIndexes.size());
 
         RangeIterator memtableIterator = e.context.searchMemtable(queryContext, e, keyRange, limit);
         if (memtableIterator != null)

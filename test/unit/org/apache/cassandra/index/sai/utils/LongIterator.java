@@ -19,7 +19,6 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 import java.util.function.LongFunction;
 
 import org.apache.cassandra.dht.Murmur3Partitioner;

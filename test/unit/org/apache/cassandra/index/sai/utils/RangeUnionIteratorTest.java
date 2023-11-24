@@ -28,9 +28,6 @@ import org.junit.Test;
 import org.apache.cassandra.io.util.FileUtils;
 
 import static org.apache.cassandra.index.sai.utils.LongIterator.convert;
-import static org.apache.cassandra.index.sai.utils.RangeIterator.Builder.IteratorType.CONCAT;
-import static org.apache.cassandra.index.sai.utils.RangeIterator.Builder.IteratorType.INTERSECTION;
-import static org.apache.cassandra.index.sai.utils.RangeIterator.Builder.IteratorType.UNION;
 
 public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
 {
@@ -110,11 +107,10 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
     {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
-        long[][] values = new long[random.nextInt(1, 20)][];
         int numTests = random.nextInt(10, 20);
-
         for (int tests = 0; tests < numTests; tests++)
         {
+            long[][] values = new long[random.nextInt(1, 20)][];
             RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
             int totalCount = 0;
 

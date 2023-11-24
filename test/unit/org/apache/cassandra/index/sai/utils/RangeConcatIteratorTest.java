@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai.utils;
 
+import java.util.ArrayList;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
@@ -394,6 +395,31 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
         rangeA = build(1L, 2L, 3L, 3L);
         rangeB = build(3L, 3L, 4L, 5L);
         assertEquals(convert(1L, 2L, 3L, 3L, 3L, 3L, 4L, 5L), convert(buildConcat(rangeA, rangeB)));
+    }
+
+    @Test
+    public void testRandom()
+    {
+        for (int testIteration = 0; testIteration < 16; testIteration++)
+        {
+            var ranges = new ArrayList<RangeIterator>();
+            var current = new ArrayList<Long>();
+            int nElements = randomIntBetween(100, 1000);
+            long[] totalOrdered = new long[nElements];
+            for (int i = 0; i < nElements; i++)
+            {
+                totalOrdered[i] = i;
+                current.add((long) i);
+                if (randomDouble() < 0.05 || i == nElements - 1)
+                {
+                    ranges.add(build(current.stream().mapToLong(Long::longValue).toArray()));
+                    current.clear();
+                }
+            }
+
+            RangeIterator concat = buildConcat(ranges.toArray(RangeIterator[]::new));
+            validateWithSkipping(concat, totalOrdered);
+        }
     }
 
     private RangeIterator.Builder getConcatBuilder()

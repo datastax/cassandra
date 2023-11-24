@@ -18,9 +18,7 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.IntStream;
@@ -31,11 +29,8 @@ import org.junit.Test;
 import com.carrotsearch.hppc.LongHashSet;
 import com.carrotsearch.hppc.LongSet;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.hadoop.util.hash.Hash;
 
 import static org.apache.cassandra.index.sai.utils.LongIterator.convert;
-import static org.apache.cassandra.index.sai.utils.RangeIterator.Builder.IteratorType.INTERSECTION;
-import static org.apache.cassandra.index.sai.utils.RangeIterator.Builder.IteratorType.UNION;
 
 public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
 {
