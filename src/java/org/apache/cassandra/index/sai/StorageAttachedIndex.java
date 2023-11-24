@@ -47,6 +47,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
@@ -81,10 +82,10 @@ import org.apache.cassandra.index.TargetParser;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.NonTokenizingOptions;
-import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.index.transactions.IndexTransaction;
@@ -101,6 +102,13 @@ import org.apache.cassandra.utils.Pair;
 public class StorageAttachedIndex implements Index
 {
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
+
+    /**
+     * By default, disable max-term-size validation at coordinator to avoid perf regression, thus no client warning will be sent to driver.
+     * Unindexable term will still be ignored by memtable index at writer side.
+     */
+    private static final boolean VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR =
+        CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR.getBoolean(false);
 
     private static class StorageAttachedIndexBuildingSupport implements IndexBuildingSupport
     {
@@ -571,7 +579,14 @@ public class StorageAttachedIndex implements Index
 
     @Override
     public void validate(PartitionUpdate update) throws InvalidRequestException
-    {}
+    {
+        if (!VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR)
+            return;
+
+        DecoratedKey key = update.partitionKey();
+        for (Row row : update)
+            indexContext.validateMaxTermSizeForRow(key, row, true);
+    }
 
     /**
      * This method is called by the startup tasks to find SSTables that don't have indexes. The method is
