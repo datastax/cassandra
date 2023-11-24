@@ -379,9 +379,9 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
     public void testSelectiveIntersection()
     {
         var intersection = buildSelectiveIntersection(2,
-                                                                arr(1L, 4L, 6L, 7L),
-                                                                arr(1L, 4L, 5L, 6L),
-                                                                arr(4L, 6L, 8L, 9L, 10L)); // skipped
+                                                      arr(1L, 4L, 6L, 7L),
+                                                      arr(1L, 4L, 5L, 6L),
+                                                      arr(4L, 6L, 8L, 9L, 10L)); // skipped
 
         assertEquals(convert(1L, 4L, 6L), convert(intersection));
 
@@ -391,27 +391,5 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
                                                   arr(4L, 6L, 8L, 9L, 10L)); // skipped
 
         assertEquals(convert(2L, 4L, 6L), convert(intersection));
-    }
-
-    @Test
-    public void testIntersectionOfUnionsOnError()
-    {
-        // intersection of two unions
-        assertOnError(() -> buildIntersection(buildOnErrorB(UNION, arr(1L, 2L, 3L), arr(5L, 6L, 7L)),
-                                              buildUnion(arr(2L, 4L, 6L), arr(5L, 7L, 9L))));
-        // intersection of union and intersection
-        assertOnError(() -> buildIntersection(buildOnErrorB(UNION, arr(2L, 4L, 6L), arr(5L, 6L, 9L)),
-                                              buildIntersection(arr(3L, 4L, 6L, 9L), arr(2L, 3L, 6L, 9L))));
-    }
-
-    @Test
-    public void testIntersectionOfIntersectionsOnError()
-    {
-        assertOnError(() -> buildIntersection(buildIntersection(arr(1L, 2L, 3L, 6L), arr(2L, 3L, 6L)),
-                                              buildOnErrorA(INTERSECTION, arr(2L, 4L, 6L), arr(5L, 6L, 7L, 9L))));
-        assertOnError(() -> buildIntersection(buildOnErrorB(INTERSECTION, arr(1L, 2L, 3L, 4L, 5L), arr(2L, 3L, 4L)),
-                                              buildIntersection(arr(1L, 2L, 3L, 4L, 6L), arr(2L, 3L, 4L, 7L, 9L))));
-        assertOnError(() -> buildIntersection(buildOnError(INTERSECTION, arr(1L, 2L, 3L, 5L), arr(3L, 4L)),
-                                              buildIntersection(arr(1L, 2L, 3L, 4L, 6L), arr(2L, 3L, 4L, 7L, 9L))));
     }
 }

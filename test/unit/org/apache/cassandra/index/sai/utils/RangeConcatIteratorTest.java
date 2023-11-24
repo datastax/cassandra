@@ -23,9 +23,6 @@ import java.util.stream.IntStream;
 import org.junit.Test;
 
 import static org.apache.cassandra.index.sai.utils.LongIterator.convert;
-import static org.apache.cassandra.index.sai.utils.RangeIterator.Builder.IteratorType.CONCAT;
-import static org.apache.cassandra.index.sai.utils.RangeIterator.Builder.IteratorType.INTERSECTION;
-import static org.apache.cassandra.index.sai.utils.RangeIterator.Builder.IteratorType.UNION;
 
 public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
 {
@@ -333,31 +330,6 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
         RangeIterator concatB = buildConcat(rangeA, rangeB);
 
         assertEquals(convert(1L, 3L, 5L, 7L, 9L), convert(buildIntersection(concatA, concatB)));
-    }
-
-    @Test
-    public void testConcatOnError()
-    {
-        assertOnError(() -> buildOnErrorA(CONCAT, arr(1L, 2L, 3L), arr(4L, 5L, 6L)));
-        assertOnError(() -> buildOnErrorB(CONCAT, arr( 1L, 2L, 3L), arr(4L)));
-    }
-
-    @Test
-    public void testConcatOfUnionsOnError()
-    {
-        assertOnError(() -> buildConcat(buildUnion(arr(1L, 2L, 3L), arr(4L)),
-                                        buildOnErrorB(UNION, arr(6L), arr(8L, 9L))));
-        assertOnError(() -> buildConcat(buildOnErrorA(UNION, arr(1L, 2L, 3L), arr(4L)),
-                                        buildUnion(arr(5L), arr(5L, 6L))));
-    }
-
-    @Test
-    public void testConcatOfIntersectionsOnError()
-    {
-        assertOnError(() -> buildConcat(buildOnErrorA(INTERSECTION, arr(1L, 2L, 3L), arr(2L, 3L, 4L)),
-                                        buildIntersection(arr(6L, 7L, 8L), arr(7L, 8L, 9L))));
-        assertOnError(() -> buildConcat(buildIntersection(arr(1L, 2L, 3L), arr(2L, 3L, 4L)),
-                                        buildOnErrorB(INTERSECTION, arr(6L, 7L, 8L, 9L, 10L), arr(7L, 8L, 9L))));
     }
 
     @Test

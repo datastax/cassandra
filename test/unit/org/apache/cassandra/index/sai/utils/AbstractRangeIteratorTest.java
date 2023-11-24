@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.utils;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import org.junit.Assert;
@@ -37,11 +36,6 @@ public class AbstractRangeIteratorTest extends SaiRandomizedTest
     protected long[] arr(int... intArray)
     {
         return Arrays.stream(intArray).mapToLong(i -> i).toArray();
-    }
-
-    void assertOnError(Supplier<RangeIterator> f)
-    {
-        assertThatThrownBy(() -> LongIterator.convert(f.get())).isInstanceOf(RuntimeException.class);
     }
 
     final RangeIterator buildIntersection(RangeIterator... ranges)
@@ -91,43 +85,13 @@ public class AbstractRangeIteratorTest extends SaiRandomizedTest
 
     protected LongIterator build(long... tokens)
     {
-        return build(tokens, false);
-    }
-
-    protected LongIterator build(long[] tokensA, boolean onErrorA)
-    {
-        LongIterator rangeA = new LongIterator(tokensA);
-
-        if (onErrorA)
-            rangeA.throwsException();
-
-        return rangeA;
-    }
-
-    protected RangeIterator buildOnError(RangeIterator.Builder.IteratorType type, long[] tokensA, long[] tokensB)
-    {
-        return build(type, tokensA, true, tokensB, true);
-    }
-
-    protected RangeIterator buildOnErrorA(RangeIterator.Builder.IteratorType type, long[] tokensA, long[] tokensB)
-    {
-        return build(type, tokensA, true, tokensB, false);
-    }
-
-    protected RangeIterator buildOnErrorB(RangeIterator.Builder.IteratorType type, long[] tokensA, long[] tokensB)
-    {
-        return build(type, tokensA, false, tokensB, true);
+        return new LongIterator(tokens);
     }
 
     protected RangeIterator build(RangeIterator.Builder.IteratorType type, long[] tokensA, long[] tokensB)
     {
-        return build(type, tokensA, false, tokensB, false);
-    }
-
-    protected RangeIterator build(RangeIterator.Builder.IteratorType type, long[] tokensA, boolean onErrorA, long[] tokensB, boolean onErrorB)
-    {
-        RangeIterator rangeA = build(tokensA, onErrorA);
-        RangeIterator rangeB = build(tokensB, onErrorB);
+        RangeIterator rangeA = new LongIterator(tokensA);
+        RangeIterator rangeB = new LongIterator(tokensB);
 
         switch (type)
         {

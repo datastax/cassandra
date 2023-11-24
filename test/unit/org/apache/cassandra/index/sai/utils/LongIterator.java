@@ -30,12 +30,6 @@ public class LongIterator extends RangeIterator
     private final List<PrimaryKey> keys;
     private int currentIdx = 0;
 
-    /**
-     * whether LongIterator should throw exception during iteration.
-     */
-    private boolean shouldThrow = false;
-    private final Random random = new Random();
-
     public LongIterator(long[] tokens)
     {
         this(tokens, t -> t);
@@ -50,19 +44,9 @@ public class LongIterator extends RangeIterator
             this.keys.add(fromTokenAndRowId(token, toOffset.apply(token)));
     }
 
-    public LongIterator throwsException()
-    {
-        this.shouldThrow = true;
-        return this;
-    }
-
     @Override
     protected PrimaryKey computeNext()
     {
-        // throws exception if it's last element or chosen 1 out of n
-        if (shouldThrow && (currentIdx >= keys.size() - 1 || random.nextInt(keys.size()) == 0))
-            throw new RuntimeException("injected exception");
-
         if (currentIdx >= keys.size())
             return endOfData();
 
