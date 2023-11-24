@@ -21,10 +21,8 @@ package org.apache.cassandra.test.microbench.index.sai.v1;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -77,7 +75,7 @@ public class MergePostingListBench
     @Setup(Level.Invocation)
     public void mergePostings()
     {
-        final PriorityQueue<PostingList.PeekablePostingList> lists = new PriorityQueue<>(Comparator.comparingLong(PostingList.PeekablePostingList::peek));
+        var lists = new ArrayList<PostingList.PeekablePostingList>();
         for (int[] postings : splitPostingLists)
         {
             lists.add(new ArrayPostingList(postings).peekable());
