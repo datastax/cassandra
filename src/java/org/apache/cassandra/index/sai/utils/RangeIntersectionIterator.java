@@ -172,7 +172,7 @@ public class RangeIntersectionIterator extends RangeIterator
             if (range == null)
                 return this;
 
-            if (range.getCount() > 0)
+            if (range.getMaxKeys() > 0)
                 rangeIterators.add(range);
             else
                 FileUtils.closeQuietly(range);
@@ -197,7 +197,7 @@ public class RangeIntersectionIterator extends RangeIterator
 
         protected RangeIterator buildIterator()
         {
-            rangeIterators.sort(Comparator.comparingLong(RangeIterator::getCount));
+            rangeIterators.sort(Comparator.comparingLong(RangeIterator::getMaxKeys));
             int initialSize = rangeIterators.size();
             // all ranges will be included
             if (limit >= rangeIterators.size() || limit <= 0)
@@ -215,7 +215,7 @@ public class RangeIntersectionIterator extends RangeIterator
                 Tracing.trace("Selecting {} {} of {} out of {} indexes",
                               rangeIterators.size(),
                               rangeIterators.size() > 1 ? "indexes with cardinalities" : "index with cardinality",
-                              rangeIterators.stream().map(RangeIterator::getCount).map(Object::toString).collect(Collectors.joining(", ")),
+                              rangeIterators.stream().map(RangeIterator::getMaxKeys).map(Object::toString).collect(Collectors.joining(", ")),
                               initialSize);
 
             return buildIterator(selectiveStatistics, rangeIterators);

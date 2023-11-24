@@ -123,7 +123,7 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
         assertNotNull(tokens);
         assertEquals(1L, tokens.getMinimum().token().getLongValue());
         assertEquals(9L, tokens.getMaximum().token().getLongValue());
-        assertEquals(9L, tokens.getCount());
+        assertEquals(9L, tokens.getMaxKeys());
 
         for (long i = 1; i < 10; i++)
         {
@@ -213,7 +213,7 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
         assertEquals(10L, range.getMinimum().token().getLongValue());
         assertEquals(19L, range.getMaximum().token().getLongValue());
         assertTrue(range.hasNext());
-        assertEquals(10, range.getCount());
+        assertEquals(10, range.getMaxKeys());
     }
 
     @Test
@@ -228,7 +228,7 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
         assertEquals(10L, range.getMinimum().token().getLongValue());
         assertEquals(10L, range.getMaximum().token().getLongValue());
         assertTrue(range.hasNext());
-        assertEquals(1, range.getCount());
+        assertEquals(1, range.getMaxKeys());
     }
 
     @Test
@@ -243,7 +243,7 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
         assertEquals(10L, range.getMinimum().token().getLongValue());
         assertEquals(19L, range.getMaximum().token().getLongValue());
         assertTrue(range.hasNext());
-        assertEquals(10, range.getCount());
+        assertEquals(10, range.getMaxKeys());
     }
 
     @Test
@@ -258,7 +258,7 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
         assertEquals(10L, range.getMinimum().token().getLongValue());
         assertEquals(10L, range.getMaximum().token().getLongValue());
         assertTrue(range.hasNext());
-        assertEquals(1, range.getCount());
+        assertEquals(1, range.getMaxKeys());
     }
 
     @Test
@@ -274,7 +274,7 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
         assertEquals(10L, range.getMinimum().token().getLongValue());
         assertEquals(19L, range.getMaximum().token().getLongValue());
         assertTrue(range.hasNext());
-        assertEquals(10, range.getCount());
+        assertEquals(10, range.getMaxKeys());
     }
 
     @Test
@@ -290,7 +290,7 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
         assertEquals(10L, range.getMinimum().token().getLongValue());
         assertEquals(19L, range.getMaximum().token().getLongValue());
         assertTrue(range.hasNext());
-        assertEquals(10, range.getCount());
+        assertEquals(10, range.getMaxKeys());
     }
 
     @Test
@@ -431,7 +431,7 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
 
         long[] totalOrdered = allValues.stream().mapToLong(Long::longValue).toArray();
         RangeIterator it = buildConcat(ranges.toArray(RangeIterator[]::new));
-        assertEquals(totalOrdered.length, it.getCount());
+        assertEquals(totalOrdered.length, it.getMaxKeys());
         return Pair.create(it, totalOrdered);
     }
 
