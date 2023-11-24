@@ -279,19 +279,19 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
 
         tokens = new LongIterator(new long[] { 0L, 1L, 3L, 5L });
 
-        Assert.assertEquals(3L, tokens.skipTo(LongIterator.fromToken(2L)).token().getLongValue());
+        tokens.skipTo(LongIterator.fromToken(2L));
         Assert.assertTrue(tokens.hasNext());
         Assert.assertEquals(3L, tokens.peek().token().getLongValue());
         Assert.assertEquals(3L, tokens.next().token().getLongValue());
 
-        Assert.assertEquals(5L, tokens.skipTo(LongIterator.fromToken(5L)).token().getLongValue());
+        tokens.skipTo(LongIterator.fromToken(5L));
         Assert.assertTrue(tokens.hasNext());
         Assert.assertEquals(5L, tokens.peek().token().getLongValue());
         Assert.assertEquals(5L, tokens.next().token().getLongValue());
 
         LongIterator empty = new LongIterator(new long[0]);
 
-        Assert.assertNull(empty.skipTo(LongIterator.fromToken(3L)));
+        empty.skipTo(LongIterator.fromToken(3L));
         Assert.assertFalse(empty.hasNext());
     }
 

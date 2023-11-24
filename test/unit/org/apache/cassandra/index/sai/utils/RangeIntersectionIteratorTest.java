@@ -113,15 +113,15 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
         Assert.assertNotNull(range);
 
         // first let's skipTo something before range
-        Assert.assertEquals(4L, range.skipTo(LongIterator.fromToken(3L)).token().getLongValue());
+        range.skipTo(LongIterator.fromToken(3L));
         Assert.assertEquals(4L, range.peek().token().getLongValue());
 
         // now let's skip right to the send value
-        Assert.assertEquals(6L, range.skipTo(LongIterator.fromToken(5L)).token().getLongValue());
+        range.skipTo(LongIterator.fromToken(5L));
         Assert.assertEquals(6L, range.peek().token().getLongValue());
 
         // now right to the element
-        Assert.assertEquals(7L, range.skipTo(LongIterator.fromToken(7L)).token().getLongValue());
+        range.skipTo(LongIterator.fromToken(7L));
         Assert.assertEquals(7L, range.peek().token().getLongValue());
         Assert.assertEquals(7L, range.next().token().getLongValue());
 
@@ -129,7 +129,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
         Assert.assertEquals(10L, range.peek().token().getLongValue());
 
         // now right after the last element
-        Assert.assertNull(range.skipTo(LongIterator.fromToken(11L)));
+        range.skipTo(LongIterator.fromToken(11L));
         Assert.assertFalse(range.hasNext());
     }
 

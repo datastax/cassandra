@@ -80,38 +80,36 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
     }
 
     /**
-     * When called, this iterators current position should
+     * When called, this iterators current position will
      * be skipped forwards until finding either:
      *   1) an element equal to or bigger than next
      *   2) the end of the iterator
      *
      * @param nextToken value to skip the iterator forward until matching
-     *
-     * @return The next current key after the skip was performed.
-     * This key will also be the next key returned by next(), i.e.,
-     * we are "peeking" at the next key as part of the skip.
      */
-    public final PrimaryKey skipTo(PrimaryKey nextToken)
+    public final void skipTo(PrimaryKey nextToken)
     {
         if (state == State.DONE)
-            return endOfData();
+            return;
 
         if (state == State.READY && next.compareTo(nextToken) >= 0)
-            return next;
+            return;
 
         if (max.compareTo(nextToken) < 0)
-            return endOfData();
+        {
+            endOfData();
+            return;
+        }
 
         performSkipTo(nextToken);
         state = State.NOT_READY;
-        return hasNext() ? peek() : endOfData();
     }
 
     /**
-     * Skip up to nextKey, but leave your internal state in a position where
+     * Skip up to nextKey, but leave the internal state in a position where
      * calling computeNext() will return nextKey or the first one after it.
      */
-    protected abstract void performSkipTo(PrimaryKey nextToken);
+    protected abstract void performSkipTo(PrimaryKey nextKey);
 
     public static RangeIterator empty()
     {
