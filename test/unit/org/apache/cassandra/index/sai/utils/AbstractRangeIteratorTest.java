@@ -18,6 +18,12 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.util.Arrays;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
+import org.junit.Assert;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -33,9 +39,9 @@ public class AbstractRangeIteratorTest extends SaiRandomizedTest
         return Arrays.stream(intArray).mapToLong(i -> i).toArray();
     }
 
-    void assertOnError(RangeIterator range)
+    void assertOnError(Supplier<RangeIterator> f)
     {
-        assertThatThrownBy(() -> LongIterator.convert(range)).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> LongIterator.convert(f.get())).isInstanceOf(RuntimeException.class);
     }
 
     final RangeIterator buildIntersection(RangeIterator... ranges)
@@ -134,5 +140,34 @@ public class AbstractRangeIteratorTest extends SaiRandomizedTest
             default:
                 throw new IllegalArgumentException("unknown type: " + type);
         }
+    }
+
+    static void validateWithSkipping(RangeIterator tokens, long[] totalOrdering)
+    {
+        var R = ThreadLocalRandom.current();
+
+        int count = 0;
+        while (tokens.hasNext())
+        {
+            if (R.nextDouble() < 0.1)
+            {
+                int n = R.nextInt(1, 3);
+                // ensure we skip to a different value, otherwise skipTo is a no-op
+                while (count + n < totalOrdering.length && totalOrdering[count] == totalOrdering[count + n])
+                    n++;
+                if (count + n < totalOrdering.length)
+                {
+                    count += n;
+                    tokens.skipTo(LongIterator.fromToken(totalOrdering[count]));
+                }
+            }
+            Assert.assertEquals(totalOrdering[count++], tokens.next().token().getLongValue());
+        }
+        Assert.assertEquals(totalOrdering.length, count);
+    }
+
+    static Set<Long> toSet(long[] tokens)
+    {
+        return Arrays.stream(tokens).boxed().collect(Collectors.toSet());
     }
 }

@@ -20,7 +20,10 @@ package org.apache.cassandra.index.sai.utils;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.IntStream;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -28,6 +31,7 @@ import org.junit.Test;
 import com.carrotsearch.hppc.LongHashSet;
 import com.carrotsearch.hppc.LongSet;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.hadoop.util.hash.Hash;
 
 import static org.apache.cassandra.index.sai.utils.LongIterator.convert;
 import static org.apache.cassandra.index.sai.utils.RangeIterator.Builder.IteratorType.INTERSECTION;
@@ -357,29 +361,16 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
                 Arrays.sort(ranges[i]);
             }
 
-            List<Long> expected = new ArrayList<>();
             // determine unique tokens which intersect every range
-            for (long token : ranges[0])
-            {
-                boolean intersectsAll = true;
-                for (int i = 1; i < ranges.length; i++)
-                {
-                    if (Arrays.binarySearch(ranges[i], token) < 0)
-                    {
-                        intersectsAll = false;
-                        break;
-                    }
-                }
-
-                if (intersectsAll)
-                    expected.add(token);
-            }
+            Set<Long> expectedSet = toSet(ranges[0]);
+            IntStream.range(1, ranges.length).forEach(i -> expectedSet.retainAll(toSet(ranges[i])));
+            long[] expected = expectedSet.stream().mapToLong(Long::longValue).sorted().toArray();
 
             var builder = RangeIntersectionIterator.<PrimaryKey>builder();
             for (long[] range : ranges)
                 builder.add(new LongIterator(range));
 
-            Assert.assertEquals(expected, convert(builder.build()));
+            validateWithSkipping(builder.build(), expected);
         }
     }
 
@@ -406,29 +397,21 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
     public void testIntersectionOfUnionsOnError()
     {
         // intersection of two unions
-        RangeIterator unionA = buildOnErrorB(UNION, arr(1L, 2L, 3L), arr(5L, 6L, 7L));
-        RangeIterator unionB = buildUnion(arr(2L, 4L, 6L), arr(5L, 7L, 9L));
-        assertOnError(buildIntersection(unionA, unionB));
-
+        assertOnError(() -> buildIntersection(buildOnErrorB(UNION, arr(1L, 2L, 3L), arr(5L, 6L, 7L)),
+                                              buildUnion(arr(2L, 4L, 6L), arr(5L, 7L, 9L))));
         // intersection of union and intersection
-        RangeIterator unionC = buildOnErrorB(UNION, arr(2L, 4L, 6L), arr(5L, 6L, 9L));
-        RangeIterator intersectionA = buildIntersection(arr(3L, 4L, 6L, 9L), arr(2L, 3L, 6L, 9L));
-        assertOnError(buildIntersection(unionC, intersectionA));
+        assertOnError(() -> buildIntersection(buildOnErrorB(UNION, arr(2L, 4L, 6L), arr(5L, 6L, 9L)),
+                                              buildIntersection(arr(3L, 4L, 6L, 9L), arr(2L, 3L, 6L, 9L))));
     }
 
     @Test
     public void testIntersectionOfIntersectionsOnError()
     {
-        RangeIterator intersectionA = buildIntersection(arr(1L, 2L, 3L, 6L), arr(2L, 3L, 6L));
-        RangeIterator intersectionB = buildOnErrorA(INTERSECTION, arr(2L, 4L, 6L), arr(5L, 6L, 7L, 9L));
-        assertOnError(buildIntersection(intersectionA, intersectionB));
-
-        intersectionA = buildOnErrorB(INTERSECTION, arr(1L, 2L, 3L, 4L, 5L), arr(2L, 3L, 4L));
-        intersectionB = buildIntersection(arr(1L, 2L, 3L, 4L, 6L), arr(2L, 3L, 4L, 7L, 9L));
-        assertOnError(buildIntersection(intersectionA, intersectionB));
-
-        intersectionA = buildOnError(INTERSECTION, arr(1L, 2L, 3L, 5L), arr( 3L, 4L));
-        intersectionB = buildIntersection(arr(1L, 2L, 3L, 4L, 6L), arr(2L, 3L, 4L, 7L, 9L));
-        assertOnError(buildIntersection(intersectionA, intersectionB));
+        assertOnError(() -> buildIntersection(buildIntersection(arr(1L, 2L, 3L, 6L), arr(2L, 3L, 6L)),
+                                              buildOnErrorA(INTERSECTION, arr(2L, 4L, 6L), arr(5L, 6L, 7L, 9L))));
+        assertOnError(() -> buildIntersection(buildOnErrorB(INTERSECTION, arr(1L, 2L, 3L, 4L, 5L), arr(2L, 3L, 4L)),
+                                              buildIntersection(arr(1L, 2L, 3L, 4L, 6L), arr(2L, 3L, 4L, 7L, 9L))));
+        assertOnError(() -> buildIntersection(buildOnError(INTERSECTION, arr(1L, 2L, 3L, 5L), arr(3L, 4L)),
+                                              buildIntersection(arr(1L, 2L, 3L, 4L, 6L), arr(2L, 3L, 4L, 7L, 9L))));
     }
 }

@@ -118,6 +118,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
             RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
             int totalCount = 0;
 
+            // add a random number of random values
             for (int i = 0; i < values.length; i++)
             {
                 long[] part = new long[random.nextInt(1, 500)];
@@ -132,25 +133,18 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
                 totalCount += part.length;
             }
 
+            // manually compute the total ordering
             long[] totalOrdering = new long[totalCount];
             int index = 0;
-
             for (long[] part : values)
-            {
                 for (long value : part)
                     totalOrdering[index++] = value;
-            }
-
             Arrays.sort(totalOrdering);
 
-            int count = 0;
+            // check that we get the same values out of the union, as from totalOrdering
             RangeIterator tokens = builder.build();
-
             Assert.assertNotNull(tokens);
-            while (tokens.hasNext())
-                Assert.assertEquals(totalOrdering[count++], tokens.next().token().getLongValue());
-
-            Assert.assertEquals(totalCount, count);
+            validateWithSkipping(tokens, totalOrdering);
         }
     }
 
@@ -408,44 +402,35 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
     @Test
     public void testUnionOnError()
     {
-        assertOnError(buildOnError(UNION, arr(1L, 3L, 4L ), arr(7L, 8L)));
-        assertOnError(buildOnErrorA(UNION, arr(1L, 3L, 4L ), arr(4L, 5L)));
-        assertOnError(buildOnErrorB(UNION, arr(1L), arr(2)));
+        assertOnError(() -> buildOnError(UNION, arr(1L, 3L, 4L ), arr(7L, 8L)));
+        assertOnError(() -> buildOnErrorA(UNION, arr(1L, 3L, 4L ), arr(4L, 5L)));
+        assertOnError(() -> buildOnErrorB(UNION, arr(1L), arr(2)));
     }
 
     @Test
     public void testUnionOfIntersectionsOnError()
     {
-        RangeIterator intersectionA = buildIntersection(arr(1L, 2L, 3L, 6L), arr(2L, 3L, 6L));
-        RangeIterator intersectionB = buildOnErrorA(INTERSECTION, arr(2L, 4L, 6L), arr(5L, 6L, 7L, 9L));
-        assertOnError(buildUnion(intersectionA, intersectionB));
-
-        intersectionA = buildOnErrorB(INTERSECTION, arr(1L, 2L, 3L, 4L, 5L), arr(2L, 3L, 5L));
-        intersectionB = buildIntersection(arr(2L, 4L, 5L), arr(5L, 6L, 7L));
-        assertOnError(buildUnion(intersectionA, intersectionB));
+        assertOnError(() -> buildUnion(buildIntersection(arr(1L, 2L, 3L, 6L), arr(2L, 3L, 6L)),
+                                       buildOnErrorA(INTERSECTION, arr(2L, 4L, 6L), arr(5L, 6L, 7L, 9L))));
+        assertOnError(() -> buildUnion(buildOnErrorB(INTERSECTION, arr(1L, 2L, 3L, 4L, 5L), arr(2L, 3L, 5L)),
+                                       buildIntersection(arr(2L, 4L, 5L), arr(5L, 6L, 7L))));
     }
 
     @Test
     public void testUnionOfUnionsOnError()
     {
-        RangeIterator unionA = buildUnion(arr(1L, 2L, 3L, 6L), arr(6L, 7L, 8L));
-        RangeIterator unionB = buildOnErrorA(UNION, arr(2L, 4L, 6L), arr (6L, 7L, 9L));
-        assertOnError(buildUnion(unionA, unionB));
-
-        unionA = buildOnErrorB(UNION, arr(1L, 2L, 3L), arr(3L, 7L, 8L));
-        unionB = buildUnion(arr(2L, 4L, 5L), arr (5L, 7L, 9L));
-        assertOnError(buildUnion(unionA, unionB));
+        assertOnError(() -> buildUnion(buildUnion(arr(1L, 2L, 3L, 6L), arr(6L, 7L, 8L)),
+                                       buildOnErrorA(UNION, arr(2L, 4L, 6L), arr (6L, 7L, 9L))));
+        assertOnError(() -> buildUnion(buildOnErrorB(UNION, arr(1L, 2L, 3L), arr(3L, 7L, 8L)),
+                                       buildUnion(arr(2L, 4L, 5L), arr (5L, 7L, 9L))));
     }
 
     @Test
     public void testUnionOfMergingOnError()
     {
-        RangeIterator mergingA = buildConcat(arr(1L, 2L, 3L, 6L), arr(6L, 7L, 8L));
-        RangeIterator mergingB = buildOnErrorA(CONCAT, arr(2L, 4L, 6L), arr (6L, 7L, 9L));
-        assertOnError(buildUnion(mergingA, mergingB));
-
-        mergingA = buildOnErrorB(CONCAT, arr(1L, 2L, 3L), arr(3L, 7L, 8L));
-        mergingB = buildConcat(arr(2L, 4L, 5L), arr (5L, 7L, 9L));
-        assertOnError(buildUnion(mergingA, mergingB));
+        assertOnError(() -> buildUnion(buildConcat(arr(1L, 2L, 3L, 6L), arr(6L, 7L, 8L)),
+                                       buildOnErrorA(CONCAT, arr(2L, 4L, 6L), arr (6L, 7L, 9L))));
+        assertOnError(() -> buildUnion(buildOnErrorB(CONCAT, arr(1L, 2L, 3L), arr(3L, 7L, 8L)),
+                                       buildConcat(arr(2L, 4L, 5L), arr (5L, 7L, 9L))));
     }
 }

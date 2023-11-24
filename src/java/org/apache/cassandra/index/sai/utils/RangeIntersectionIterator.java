@@ -64,13 +64,11 @@ public class RangeIntersectionIterator extends RangeIterator
 
     protected PrimaryKey computeNext()
     {
-        // Range iterator that has been advanced in the previous cycle of the outer loop.
-        // Initially there hasn't been the previous cycle, so set to null.
-        int alreadyAvanced = -1;
-
         // The highest primary key seen on any range iterator so far.
         // It can become null when we reach the end of the iterator.
-        PrimaryKey highestKey = getCurrent();
+        PrimaryKey highestKey = ranges.get(0).hasNext() ? ranges.get(0).next() : null;
+        // Index of the range iterator that has advanced beyond the others
+        int alreadyAvanced = 0;
 
         outer:
         while (highestKey != null && highestKey.compareTo(getMaximum()) <= 0)

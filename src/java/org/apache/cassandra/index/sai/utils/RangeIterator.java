@@ -28,9 +28,8 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
- * Modified from {@link org.apache.cassandra.index.sasi.utils.RangeIterator} to support:
- * 1. no generic type to reduce allocation
- * 2. CONCAT iterator type
+ * Range iterators contain primary keys, in sorted order, with no duplicates.  They also
+ * know their minimum and maximum keys, and an upper bound on the number of keys they contain.
  */
 public abstract class RangeIterator extends AbstractIterator<PrimaryKey> implements Closeable
 {
@@ -38,7 +37,6 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
 
     private final PrimaryKey min, max;
     private final long count;
-    private PrimaryKey current;
 
     protected RangeIterator(Builder.Statistics statistics)
     {
@@ -59,7 +57,6 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         }
 
         this.min = min;
-        this.current = min;
         this.max = max;
         this.count = count;
     }
@@ -71,7 +68,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
 
     public final PrimaryKey getCurrent()
     {
-        return current;
+        return peek();
     }
 
     public final PrimaryKey getMaximum()
@@ -79,6 +76,9 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         return max;
     }
 
+    /**
+     * @return the maximum number of keys that can be returned by this iterator.
+     */
     public final long getCount()
     {
         return count;
@@ -101,22 +101,15 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         if (state == State.DONE)
             return endOfData();
 
-        // In the case of deferred iterators the current value may not accurately
-        // reflect the next value so we need to check that as well
-        if (current.compareTo(nextToken) >= 0)
-        {
-            next = next == null ? recomputeNext() : next;
-            if (next == null)
-                return endOfData();
-            else if (next.compareTo(nextToken) >= 0)
-                return next;
-        }
+        if (state == State.READY && next.compareTo(nextToken) >= 0)
+            return next;
 
         if (max.compareTo(nextToken) < 0)
             return endOfData();
 
         performSkipTo(nextToken);
-        return recomputeNext();
+        state = State.NOT_READY;
+        return hasNext() ? peek() : endOfData();
     }
 
     /**
@@ -124,19 +117,6 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
      * calling computeNext() will return nextKey or the first one after it.
      */
     protected abstract void performSkipTo(PrimaryKey nextToken);
-
-    // protected because inherited from Guava. We don't want to expose this method.
-    protected PrimaryKey recomputeNext()
-    {
-        return tryToComputeNext() ? peek() : endOfData();
-    }
-
-    protected boolean tryToComputeNext()
-    {
-        boolean hasNext = super.tryToComputeNext();
-        current = hasNext ? next : getMaximum();
-        return hasNext;
-    }
 
     public static RangeIterator empty()
     {
@@ -149,7 +129,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         {
             CONCAT,
             UNION,
-            INTERSECTION;
+            INTERSECTION
         }
 
         @VisibleForTesting
@@ -363,7 +343,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
     protected static boolean isOverlapping(PrimaryKey min, PrimaryKey max, RangeIterator b)
     {
         return (min != null && max != null) &&
-               b.getCount() != 0 &&
+               b.hasNext() &&
                (min.compareTo(b.getMaximum()) <= 0 && b.getCurrent().compareTo(max) <= 0);
     }
 

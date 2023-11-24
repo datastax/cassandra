@@ -80,7 +80,8 @@ public class OrderingFilterRangeIterator extends RangeIterator
     protected void performSkipTo(PrimaryKey nextToken)
     {
         input.skipTo(nextToken);
-        nextIterator.skipTo(nextToken);
+        if (nextIterator != null)
+            nextIterator.skipTo(nextToken);
     }
 
     public void close() {

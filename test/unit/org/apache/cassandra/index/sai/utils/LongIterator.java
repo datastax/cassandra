@@ -72,14 +72,11 @@ public class LongIterator extends RangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextToken)
     {
-        for (int i = currentIdx == 0 ? 0 : currentIdx - 1; i < keys.size(); i++)
+        for ( ; currentIdx < keys.size(); currentIdx++)
         {
-            PrimaryKey token = keys.get(i);
+            PrimaryKey token = keys.get(currentIdx);
             if (token.compareTo(nextToken) >= 0)
-            {
-                currentIdx = i;
                 break;
-            }
         }
     }
 

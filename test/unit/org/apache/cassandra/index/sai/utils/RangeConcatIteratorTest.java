@@ -338,32 +338,26 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
     @Test
     public void testConcatOnError()
     {
-        assertOnError(buildOnErrorA(CONCAT, arr(1L, 2L, 3L), arr(4L, 5L, 6L)));
-        assertOnError(buildOnErrorB(CONCAT, arr( 1L, 2L, 3L), arr(4L)));
+        assertOnError(() -> buildOnErrorA(CONCAT, arr(1L, 2L, 3L), arr(4L, 5L, 6L)));
+        assertOnError(() -> buildOnErrorB(CONCAT, arr( 1L, 2L, 3L), arr(4L)));
     }
 
     @Test
     public void testConcatOfUnionsOnError()
     {
-        RangeIterator unionA = buildUnion(arr( 1L, 2L, 3L), arr( 4L));
-        RangeIterator unionB = buildOnErrorB(UNION, arr( 6L), arr( 8L, 9L));
-        assertOnError(buildConcat(unionA, unionB));
-
-        unionA = buildOnErrorA(UNION, arr( 1L, 2L, 3L), arr( 4L));
-        unionB = buildUnion(arr( 5L), arr( 5L, 6L));
-        assertOnError(buildConcat(unionA, unionB));
+        assertOnError(() -> buildConcat(buildUnion(arr(1L, 2L, 3L), arr(4L)),
+                                        buildOnErrorB(UNION, arr(6L), arr(8L, 9L))));
+        assertOnError(() -> buildConcat(buildOnErrorA(UNION, arr(1L, 2L, 3L), arr(4L)),
+                                        buildUnion(arr(5L), arr(5L, 6L))));
     }
 
     @Test
     public void testConcatOfIntersectionsOnError()
     {
-        RangeIterator intersectionA = buildOnErrorA(INTERSECTION, arr( 1L, 2L, 3L), arr( 2L, 3L, 4L));
-        RangeIterator intersectionB = buildIntersection(arr( 6L, 7L, 8L), arr( 7L, 8L, 9L));
-        assertOnError(buildConcat(intersectionA, intersectionB));
-
-        intersectionA = buildIntersection(arr( 1L, 2L, 3L), arr( 2L, 3L, 4L));
-        intersectionB = buildOnErrorB(INTERSECTION, arr( 6L, 7L, 8L, 9L, 10L), arr(  7L, 8L, 9L));
-        assertOnError(buildConcat(intersectionA, intersectionB));
+        assertOnError(() -> buildConcat(buildOnErrorA(INTERSECTION, arr(1L, 2L, 3L), arr(2L, 3L, 4L)),
+                                        buildIntersection(arr(6L, 7L, 8L), arr(7L, 8L, 9L))));
+        assertOnError(() -> buildConcat(buildIntersection(arr(1L, 2L, 3L), arr(2L, 3L, 4L)),
+                                        buildOnErrorB(INTERSECTION, arr(6L, 7L, 8L, 9L, 10L), arr(7L, 8L, 9L))));
     }
 
     @Test
