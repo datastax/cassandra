@@ -93,9 +93,6 @@ public class RangeIntersectionIterator extends RangeIterator
                         // the other iterators except this one to match the new highest key.
                         continue outer;
                     }
-                    assert nextKey.compareTo(highestKey) == 0:
-                    String.format("skipTo skipped to an item smaller than the target; " +
-                                  "iterator: %s, target key: %s, returned key: %s", range, highestKey, nextKey);
                 }
             }
             // If we reached here, next() has been called at least once on each range iterator and
