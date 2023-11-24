@@ -23,6 +23,8 @@ import java.util.stream.IntStream;
 
 import org.junit.Test;
 
+import org.apache.cassandra.utils.Pair;
+
 import static org.apache.cassandra.index.sai.utils.LongIterator.convert;
 
 public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
@@ -402,24 +404,35 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
     {
         for (int testIteration = 0; testIteration < 16; testIteration++)
         {
-            var ranges = new ArrayList<RangeIterator>();
-            var current = new ArrayList<Long>();
-            int nElements = randomIntBetween(100, 1000);
-            long[] totalOrdered = new long[nElements];
-            for (int i = 0; i < nElements; i++)
-            {
-                totalOrdered[i] = i;
-                current.add((long) i);
-                if (randomDouble() < 0.05 || i == nElements - 1)
-                {
-                    ranges.add(build(current.stream().mapToLong(Long::longValue).toArray()));
-                    current.clear();
-                }
-            }
-
-            RangeIterator concat = buildConcat(ranges.toArray(RangeIterator[]::new));
-            validateWithSkipping(concat, totalOrdered);
+            var p = createRandom();
+            validateWithSkipping(p.left, p.right);
         }
+    }
+
+    static Pair<RangeIterator, long[]> createRandom()
+    {
+        var ranges = new ArrayList<RangeIterator>();
+        var current = new ArrayList<Long>();
+        var allValues = new ArrayList<Long>();
+        int maxValue = 1024;
+        for (int i = 0; i < maxValue; i++)
+        {
+            allValues.add((long) i);
+            current.add((long) i);
+            if (randomDouble() < 0.05)
+            {
+                ranges.add(build(current.stream().mapToLong(Long::longValue).toArray()));
+                current.clear();
+            }
+            if (randomDouble() < 0.1)
+                i += nextInt(5);
+        }
+        ranges.add(build(current.stream().mapToLong(Long::longValue).toArray()));
+
+        long[] totalOrdered = allValues.stream().mapToLong(Long::longValue).toArray();
+        RangeIterator it = buildConcat(ranges.toArray(RangeIterator[]::new));
+        assertEquals(totalOrdered.length, it.getCount());
+        return Pair.create(it, totalOrdered);
     }
 
     private RangeIterator.Builder getConcatBuilder()

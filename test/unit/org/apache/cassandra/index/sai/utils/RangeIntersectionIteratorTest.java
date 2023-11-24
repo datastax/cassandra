@@ -29,6 +29,7 @@ import org.junit.Test;
 import com.carrotsearch.hppc.LongHashSet;
 import com.carrotsearch.hppc.LongSet;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.index.sai.utils.LongIterator.convert;
 
@@ -340,33 +341,36 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
     {
         for (int attempt = 0; attempt < 16; attempt++)
         {
-            final int maxRanges = nextInt(2, 16);
-
-            // generate randomize ranges
-            long[][] ranges = new long[maxRanges][];
-            for (int i = 0; i < ranges.length; i++)
-            {
-                int rangeSize = nextInt(16, 512);
-                LongSet range = new LongHashSet(rangeSize);
-
-                for (int j = 0; j < rangeSize; j++)
-                    range.add(nextLong(0, 100));
-
-                ranges[i] = range.toArray();
-                Arrays.sort(ranges[i]);
-            }
-
-            // determine unique tokens which intersect every range
-            Set<Long> expectedSet = toSet(ranges[0]);
-            IntStream.range(1, ranges.length).forEach(i -> expectedSet.retainAll(toSet(ranges[i])));
-            long[] expected = expectedSet.stream().mapToLong(Long::longValue).sorted().toArray();
-
-            var builder = RangeIntersectionIterator.<PrimaryKey>builder();
-            for (long[] range : ranges)
-                builder.add(new LongIterator(range));
-
-            validateWithSkipping(builder.build(), expected);
+            var p = createRandom(nextInt(2, 16));
+            validateWithSkipping(p.left, p.right);
         }
+    }
+
+    /**
+     * @return a long[][] of random elements, and a long[] of the intersection of those elements
+     */
+    static Pair<RangeIterator, long[]> createRandom(int nRanges)
+    {
+        // generate randomize ranges
+        long[][] ranges = new long[nRanges][];
+        for (int i = 0; i < ranges.length; i++)
+        {
+            int rangeSize = nextInt(16, 512);
+            LongSet range = new LongHashSet(rangeSize);
+
+            for (int j = 0; j < rangeSize; j++)
+                range.add(nextInt(1024));
+
+            ranges[i] = range.toArray();
+            Arrays.sort(ranges[i]);
+        }
+        var builder = RangeIntersectionIterator.builder();
+        for (long[] range : ranges)
+            builder.add(new LongIterator(range));
+
+        Set<Long> expectedSet = toSet(ranges[0]);
+        IntStream.range(1, ranges.length).forEach(i -> expectedSet.retainAll(toSet(ranges[i])));
+        return Pair.create(builder.build(), expectedSet.stream().mapToLong(Long::longValue).sorted().toArray());
     }
 
     // SAI specific tests

@@ -19,13 +19,15 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.index.sai.utils.LongIterator.convert;
 
@@ -105,43 +107,38 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
     @Test
     public void testRandomSequences()
     {
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-
-        int numTests = random.nextInt(10, 20);
-        for (int tests = 0; tests < numTests; tests++)
+        for (int testIteration = 0; testIteration < 16; testIteration++)
         {
-            long[][] values = new long[random.nextInt(1, 20)][];
-            RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
-            int totalCount = 0;
+            var p = createRandom(nextInt(1, 20));
+            validateWithSkipping(p.left, p.right);
+        }
+    }
 
-            // add a random number of random values
-            for (int i = 0; i < values.length; i++)
+    static Pair<RangeIterator, long[]> createRandom(int nRanges)
+    {
+        long[][] values = new long[nRanges][];
+        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+
+        var allValues = new HashSet<Long>();
+        // add a random number of random values
+        for (int i = 0; i < values.length; i++)
+        {
+            int partLength = nextInt(1, 500);
+            var part = new HashSet<Long>(partLength);
+            for (int j = 0; j < partLength; j++)
             {
-                long[] part = new long[random.nextInt(1, 500)];
-                for (int j = 0; j < part.length; j++)
-                    part[j] = random.nextLong();
-
-                // all of the parts have to be sorted to mimic SSTable
-                Arrays.sort(part);
-
-                values[i] = part;
-                builder.add(new LongIterator(part));
-                totalCount += part.length;
+                long m = nextLong(0, 1024);
+                part.add(m);
+                allValues.add(m);
             }
 
-            // manually compute the total ordering
-            long[] totalOrdering = new long[totalCount];
-            int index = 0;
-            for (long[] part : values)
-                for (long value : part)
-                    totalOrdering[index++] = value;
-            Arrays.sort(totalOrdering);
-
-            // check that we get the same values out of the union, as from totalOrdering
-            RangeIterator tokens = builder.build();
-            Assert.assertNotNull(tokens);
-            validateWithSkipping(tokens, totalOrdering);
+            // all of the parts have to be sorted to mimic SSTable
+            builder.add(new LongIterator(part.stream().mapToLong(Long::longValue).sorted().toArray()));
         }
+
+        long[] totalOrdering = allValues.stream().mapToLong(Long::longValue).sorted().toArray();
+        RangeIterator tokens = builder.build();
+        return Pair.create(tokens, totalOrdering);
     }
 
     @Test
@@ -393,5 +390,23 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
 
         union = buildUnion(intersectionA, intersectionB);
         assertEquals(convert(2L, 3L), convert(union));
+    }
+
+    @Test
+    public void testUnionOfRandom()
+    {
+        for (int testIteration = 0; testIteration < 16; testIteration++)
+        {
+            var allValues = new HashSet<Long>();
+            var builder = RangeUnionIterator.builder();
+            for (int i = 0; i < nextInt(2, 3); i++)
+            {
+                var p = createRandomIterator();
+                builder.add(p.left);
+                allValues.addAll(Arrays.stream(p.right).boxed().collect(Collectors.toList()));
+            }
+            long[] totalOrdered = allValues.stream().mapToLong(Long::longValue).sorted().toArray();
+            validateWithSkipping(builder.build(), totalOrdered);
+        }
     }
 }
