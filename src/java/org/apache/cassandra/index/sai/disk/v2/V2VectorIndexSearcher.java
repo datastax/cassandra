@@ -20,8 +20,8 @@ package org.apache.cassandra.index.sai.disk.v2;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
@@ -88,7 +88,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                     SegmentMetadata segmentMetadata,
                                     IndexDescriptor indexDescriptor,
                                     IndexContext indexContext,
-                                    JVectorLuceneOnDiskGraph graph) throws IOException
+                                    JVectorLuceneOnDiskGraph graph)
     {
         super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
         this.graph = graph;
@@ -336,114 +336,99 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     @Override
     public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
-        // VSTODO would it be better to do a binary search to find the boundaries?
-        List<PrimaryKey> keysInRange = keys.stream()
-                                           .dropWhile(k -> k.compareTo(metadata.minKey) < 0)
-                                           .takeWhile(k -> k.compareTo(metadata.maxKey) <= 0)
-                                           .collect(Collectors.toList());
+        // create a sublist of the keys within this segment's bounds
+        int minIndex = Collections.binarySearch(keys, metadata.minKey);
+        minIndex = minIndex < 0 ? -minIndex - 1 : minIndex;
+        int maxIndex = Collections.binarySearch(keys, metadata.maxKey);
+        maxIndex = maxIndex < 0 ? -maxIndex - 1 : maxIndex + 1;
+        List<PrimaryKey> keysInRange = keys.subList(minIndex, maxIndex);
         if (keysInRange.isEmpty())
             return RangeIterator.empty();
-        int numRows = keysInRange.size();
-        logAndTrace("SAI predicates produced {} rows out of limit {}", numRows, limit);
-        if (numRows <= limit)
+
+        logAndTrace("SAI predicates produced {} rows out of limit {}", keysInRange.size(), limit);
+        if (keysInRange.size() <= limit)
             return new ListRangeIterator(metadata.minKey, metadata.maxKey, keysInRange);
 
         int topK = topKFor(limit);
-        var maxBruteForceRows = min(globalBruteForceRows, maxBruteForceRows(topK, numRows));
-        try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
+        // if we are brute forcing, we want to build a list of segment row ids, but if not,
+        // we want to build a bitset of ordinals corresponding to the rows.  We won't know which
+        // path to take until we have an accurate key count.
+        SparseFixedBitSet bits = bitSetForSearch();
+        IntArrayList rowIds = new IntArrayList();
+        try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
+             var ordinalsView = graph.getOrdinalsView())
         {
-            var maxSegmentRowId = metadata.toSegmentRowId(metadata.maxSSTableRowId);
+            // pk and rowid of the next row in the current sstable.  set when we encounter a row in the
+            // source list that doesn't exist locally, so we can skip up to that point
+            PrimaryKey nextPresentPrimaryKey = null;
+            long nextPresentRowId = -1;
 
-            // if we are brute forcing, we want to build a list of segment row ids, but if not,
-            // we want to build a bitset of ordinals corresponding to the rows
-            SparseFixedBitSet bits = null;
-            IntArrayList rowIds = null;
-            if (numRows <= maxBruteForceRows)
-                rowIds = new IntArrayList();
-            else
-                bits = bitSetForSearch();
-
-            try (var ordinalsView = graph.getOrdinalsView())
+            for (PrimaryKey primaryKey : keysInRange)
             {
-                // pk and rowid of the next row in the current sstable.  set when we encounter a row in the
-                // source list that doesn't exist locally, so we can skip up to that point
-                PrimaryKey nextPresentPrimaryKey = null;
-                long nextPresentRowId = -1;
-
-                for (PrimaryKey primaryKey : keysInRange)
+                // skip up to the next present row, if set by the previous iteration
+                long sstableRowId = -1;
+                if (nextPresentPrimaryKey != null)
                 {
-                    // skip up to the next present row, if set by the previous iteration
-                    long sstableRowId = -1;
-                    if (nextPresentPrimaryKey != null)
-                    {
-                        int result = primaryKey.compareTo(nextPresentPrimaryKey);
-                        if (result < 0)
-                            continue;
-                        if (result == 0)
-                            sstableRowId = nextPresentRowId;
-                        // reset so we don't do unnecessary compareTo ops
-                        nextPresentPrimaryKey = null;
-                        nextPresentRowId = -1;
-                    }
-
-                    // look up the row id from the primary key.  this is the expensive part
-                    if (sstableRowId == -1)
-                        sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
-
-                    // if the row is not present, find the next one that *is* present so we can skip up to it
-                    if (sstableRowId < 0)
-                    {
-                        nextPresentRowId = primaryKeyMap.ceiling(primaryKey);
-                        // The current primary key is greater than all the primary keys in this sstable
-                        if (nextPresentRowId < 0 || nextPresentRowId > metadata.maxSSTableRowId)
-                            break;
-                        nextPresentPrimaryKey = primaryKeyMap.primaryKeyFromRowId(nextPresentRowId);
-                        // The current primary key is not in this sstable. Use ceiling to search for the row id
-                        // of the next closest primary key in this sstable.
+                    int result = primaryKey.compareTo(nextPresentPrimaryKey);
+                    if (result < 0)
                         continue;
-                    }
-
-                    // our computation of keysInRange should ensure this is valid
-                    assert sstableRowId >= metadata.minSSTableRowId;
-                    // if sstable row id has exceeded current ANN segment, stop
-                    if (sstableRowId > metadata.maxSSTableRowId)
-                        break;
-
-                    int segmentRowId = metadata.toSegmentRowId(sstableRowId);
-                    if (numRows <= maxBruteForceRows)
-                    {
-                        rowIds.add(segmentRowId);
-                    }
-                    else
-                    {
-                        int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                        if (ordinal >= 0)
-                            bits.set(ordinal);
-                    }
+                    if (result == 0)
+                        sstableRowId = nextPresentRowId;
+                    // reset so we don't do unnecessary compareTo ops
+                    nextPresentPrimaryKey = null;
+                    nextPresentRowId = -1;
                 }
-            }
 
-            numRows = rowIds == null ? bits.cardinality() : rowIds.size();
-            logAndTrace("{} rows relevant to current sstable; max brute force rows is {} for index with {} nodes, LIMIT {}",
-                        numRows, maxBruteForceRows, graph.size(), limit);
-            if (rowIds != null)
-            {
-                var queryVector = exp.lower.value.vector;
-                var postings = findTopApproximatePostings(queryVector, rowIds, topK);
-                return toPrimaryKeyIterator(new ArrayPostingList(postings), context);
-            }
+                // look up the row id from the primary key.  this is the expensive part
+                if (sstableRowId == -1)
+                    sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
 
-            // else ask the index to perform a search limited to the bits we created
-            float[] queryVector = exp.lower.value.vector;
-            var results = graph.search(queryVector, topK, limit, bits, context);
-            updateExpectedNodes(results.getVisitedCount(), getRawExpectedNodes(topK, maxSegmentRowId));
-            return toPrimaryKeyIterator(results, context);
+                // if the row is not present, find the next one that *is* present so we can skip up to it
+                if (sstableRowId < 0)
+                {
+                    nextPresentRowId = primaryKeyMap.ceiling(primaryKey);
+                    // The current primary key is greater than all the primary keys in this sstable
+                    if (nextPresentRowId < 0 || nextPresentRowId > metadata.maxSSTableRowId)
+                        break;
+                    nextPresentPrimaryKey = primaryKeyMap.primaryKeyFromRowId(nextPresentRowId);
+                    // The current primary key is not in this sstable. Use ceiling to search for the row id
+                    // of the next closest primary key in this sstable.
+                    continue;
+                }
+
+                int segmentRowId = metadata.toSegmentRowId(sstableRowId);
+                rowIds.add(segmentRowId);
+                int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
+                if (ordinal >= 0)
+                    bits.set(ordinal);
+            }
         }
+
+        var numRows = rowIds.size();
+        var maxBruteForceRows = min(globalBruteForceRows, maxBruteForceRows(topK, numRows));
+        logAndTrace("{} rows relevant to current sstable; max brute force rows is {} for index with {} nodes, LIMIT {}",
+                    numRows, maxBruteForceRows, graph.size(), limit);
+        if (numRows == 0) {
+            return RangeIterator.empty();
+        }
+
+        if (numRows <= maxBruteForceRows)
+        {
+            // brute force using the in-memory compressed vectors to cut down the number of results returned
+            var queryVector = exp.lower.value.vector;
+            var postings = findTopApproximatePostings(queryVector, rowIds, topK);
+            return toPrimaryKeyIterator(new ArrayPostingList(postings), context);
+        }
+        // else ask the index to perform a search limited to the bits we created
+        float[] queryVector = exp.lower.value.vector;
+        var results = graph.search(queryVector, topK, limit, bits, context);
+        updateExpectedNodes(results.getVisitedCount(), getRawExpectedNodes(topK, numRows));
+        return toPrimaryKeyIterator(results, context);
     }
 
-    private int getRawExpectedNodes(int topK, int maxSegmentRowId)
+    private int getRawExpectedNodes(int topK, int nPermittedOrdinals)
     {
-        return VectorMemtableIndex.expectedNodesVisited(topK, maxSegmentRowId, graph.size());
+        return VectorMemtableIndex.expectedNodesVisited(topK, nPermittedOrdinals, graph.size());
     }
 
     private void logAndTrace(String message, Object... args)
