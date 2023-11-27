@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v2;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
@@ -365,41 +366,34 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
             try (var ordinalsView = graph.getOrdinalsView())
             {
-                PrimaryKey ceilingPrimaryKey = null;
-                long ceilingRowId = -1;
-                for (PrimaryKey primaryKey : keysInRange)
+                for (int i = 0; i < keysInRange.size(); i++)
                 {
-                    long sstableRowId;
-                    if (ceilingPrimaryKey != null)
+                    PrimaryKey primaryKey = keysInRange.get(i);
+                    long sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
+
+                    // The current primary key is not in this sstable. Use ceiling to search for the row id
+                    // of the next closest primary key in this sstable and skip to that primary key.
+                    if (sstableRowId < 0)
                     {
-                        int result = primaryKey.compareTo(ceilingPrimaryKey);
-                        if (result < 0)
-                            continue;
-                        if (result == 0)
-                            sstableRowId = ceilingRowId;
-                        else
-                            sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
+                        long ceilingRowId = primaryKeyMap.ceiling(primaryKey);
+                        // The current primary key is greater than all the primary keys in this sstable
+                        if (ceilingRowId < 0 || metadata.maxSSTableRowId < ceilingRowId)
+                            break;
+                        PrimaryKey ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
+                        // Use a sublist to only search the remaining primary keys in range.
+                        int subListInsertionIndex = Collections.binarySearch(keysInRange.subList(i, keysInRange.size()), ceilingPrimaryKey);
+                        if (subListInsertionIndex < 0)
+                            // We got: -(insertion point) - 1. Invert it so we get the insertion point.
+                            subListInsertionIndex = -subListInsertionIndex - 1;
+                        // Subtract 1 since the loop will increment next. Add to i since we searched the sublist.
+                        i += subListInsertionIndex - 1;
+                        continue;
                     }
-                    else
-                    {
-                        sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
-                    }
+
                     // skip rows that are not in our segment (or more preciesely, have no vectors that were indexed)
                     // or are not in this segment (exactRowIdForPrimaryKey returns a negative value for not found)
                     if (sstableRowId < metadata.minSSTableRowId)
-                    {
-                        // The current primary key is not in this sstable. Use ceiling to search for the row id
-                        // of the next closest primary key in this sstable.
-                        if (sstableRowId < 0)
-                        {
-                            ceilingRowId = primaryKeyMap.ceiling(primaryKey);
-                            // The current primary key is greater than all the primary keys in this sstable
-                            if (ceilingRowId < 0 || metadata.maxSSTableRowId < ceilingRowId)
-                                break;
-                            ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
-                        }
                         continue;
-                    }
 
                     // if sstable row id has exceeded current ANN segment, stop
                     if (sstableRowId > metadata.maxSSTableRowId)
