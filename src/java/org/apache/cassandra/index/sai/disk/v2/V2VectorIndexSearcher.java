@@ -358,43 +358,34 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var ordinalsView = graph.getOrdinalsView())
         {
-            // pk and rowid of the next row in the current sstable.  set when we encounter a row in the
-            // source list that doesn't exist locally, so we can skip up to that point
-            PrimaryKey nextPresentPrimaryKey = null;
-            long nextPresentRowId = -1;
-
-            for (PrimaryKey primaryKey : keysInRange)
+            for (int i = 0; i < keysInRange.size(); i++)
             {
-                // skip up to the next present row, if set by the previous iteration
-                long sstableRowId = -1;
-                if (nextPresentPrimaryKey != null)
-                {
-                    int result = primaryKey.compareTo(nextPresentPrimaryKey);
-                    if (result < 0)
-                        continue;
-                    if (result == 0)
-                        sstableRowId = nextPresentRowId;
-                    // reset so we don't do unnecessary compareTo ops
-                    nextPresentPrimaryKey = null;
-                    nextPresentRowId = -1;
-                }
+                PrimaryKey primaryKey = keysInRange.get(i);
+                long sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
 
-                // look up the row id from the primary key.  this is the expensive part
-                if (sstableRowId == -1)
-                    sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
-
-                // if the row is not present, find the next one that *is* present so we can skip up to it
+                // The current primary key is not in this sstable. Use ceiling to search for the row id
+                // of the next closest primary key in this sstable and skip to that primary key.
                 if (sstableRowId < 0)
                 {
-                    nextPresentRowId = primaryKeyMap.ceiling(primaryKey);
+                    long ceilingRowId = primaryKeyMap.ceiling(primaryKey);
                     // The current primary key is greater than all the primary keys in this sstable
-                    if (nextPresentRowId < 0 || nextPresentRowId > metadata.maxSSTableRowId)
+                    if (ceilingRowId < 0 || ceilingRowId > metadata.maxSSTableRowId)
                         break;
-                    nextPresentPrimaryKey = primaryKeyMap.primaryKeyFromRowId(nextPresentRowId);
-                    // The current primary key is not in this sstable. Use ceiling to search for the row id
-                    // of the next closest primary key in this sstable.
+                    PrimaryKey ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
+                    // Use a sublist to only search the remaining primary keys in range.
+                    // VSTODO if there are very few sstables, this could be less efficient than a simple linear search
+                    int nextIndexForCeiling = Collections.binarySearch(keysInRange.subList(i, keysInRange.size()), ceilingPrimaryKey);
+                    if (nextIndexForCeiling < 0)
+                        // We got: -(insertion point) - 1. Invert it so we get the insertion point.
+                        nextIndexForCeiling = -nextIndexForCeiling - 1;
+                    // Subtract 1 since the loop will increment next. Add to i since we searched the sublist.
+                    i += nextIndexForCeiling - 1;
                     continue;
                 }
+
+                // these should still be true based on our computation of keysInRange
+                assert sstableRowId >= metadata.minSSTableRowId : String.format("sstableRowId %d < minSSTableRowId %d", sstableRowId, metadata.minSSTableRowId);
+                assert sstableRowId <= metadata.maxSSTableRowId : String.format("sstableRowId %d > maxSSTableRowId %d", sstableRowId, metadata.maxSSTableRowId);
 
                 int segmentRowId = metadata.toSegmentRowId(sstableRowId);
                 rowIds.add(segmentRowId);
