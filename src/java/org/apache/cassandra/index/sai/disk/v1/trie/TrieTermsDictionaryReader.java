@@ -95,6 +95,23 @@ public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
         return getCurrentPayload();
     }
 
+    public long exactMatchOrCeiling(ByteComparable key)
+    {
+        int b = followWithGreater(key);
+        // We use initialResult to save a call to getCurrentPayload(). This happens when the current node
+        // is equal to the key we're looking for.
+        long initialResult;
+        if (b != ByteSource.END_OF_STREAM || (initialResult = getCurrentPayload()) == NOT_FOUND)
+        {
+
+            if (greaterBranch == -1)
+                return Long.MIN_VALUE;
+            goMin(greaterBranch);
+            return -getCurrentPayload() - 1;
+        }
+        return initialResult;
+    }
+
     /**
      * Returns the position associated with the least term greater than or equal to the given key, or
      * a negative value if there is no such term.

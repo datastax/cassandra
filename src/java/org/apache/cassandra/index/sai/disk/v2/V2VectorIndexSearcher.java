@@ -361,15 +361,15 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             for (int i = 0; i < keysInRange.size(); i++)
             {
                 PrimaryKey primaryKey = keysInRange.get(i);
-                long sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
+                long sstableRowId = primaryKeyMap.exactRowIdOrCeiling(primaryKey);
 
                 // The current primary key is not in this sstable. Use ceiling to search for the row id
                 // of the next closest primary key in this sstable and skip to that primary key.
                 if (sstableRowId < 0)
                 {
-                    long ceilingRowId = primaryKeyMap.ceiling(primaryKey);
-                    // The current primary key is greater than all the primary keys in this sstable
-                    if (ceilingRowId < 0 || ceilingRowId > metadata.maxSSTableRowId)
+                    long ceilingRowId = - sstableRowId - 1;
+                    // The next greatest primary key is greater than all the primary keys in this sstable
+                    if (ceilingRowId > metadata.maxSSTableRowId)
                         break;
                     PrimaryKey ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
                     // Use a sublist to only search the remaining primary keys in range.

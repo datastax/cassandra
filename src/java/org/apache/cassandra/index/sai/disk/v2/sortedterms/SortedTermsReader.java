@@ -200,6 +200,12 @@ public class SortedTermsReader
             return result < 0 ? NOT_FOUND : result;
         }
 
+        public long getExactPointIdOrCeiling(@Nonnull ByteComparable term)
+        {
+            Preconditions.checkNotNull(term, "term null");
+            return reader.exactMatchOrCeiling(term);
+        }
+
         /**
          * Returns the number of terms
          */
