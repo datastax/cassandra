@@ -388,11 +388,16 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     // or are not in this segment (exactRowIdForPrimaryKey returns a negative value for not found)
                     if (sstableRowId < metadata.minSSTableRowId)
                     {
-                        long nextRowId = primaryKeyMap.ceiling(primaryKey);
-                        // The current primary key is greater than all the primary keys in this sstable
-                        if (nextRowId < 0 || metadata.maxSSTableRowId < nextRowId)
-                            break;
-                        ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(nextRowId);
+                        // The current primary key is not in this sstable. Use ceiling to search for the row id
+                        // of the next closest primary key in this sstable.
+                        if (sstableRowId < 0)
+                        {
+                            ceilingRowId = primaryKeyMap.ceiling(primaryKey);
+                            // The current primary key is greater than all the primary keys in this sstable
+                            if (ceilingRowId < 0 || metadata.maxSSTableRowId < ceilingRowId)
+                                break;
+                            ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
+                        }
                         continue;
                     }
 
