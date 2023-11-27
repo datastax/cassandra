@@ -365,42 +365,46 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
             try (var ordinalsView = graph.getOrdinalsView())
             {
-                PrimaryKey ceilingPrimaryKey = null;
-                long ceilingRowId = -1;
+                // pk and rowid of the next row in the current sstable.  set when we encounter a row in the
+                // source list that doesn't exist locally, so we can skip up to that point
+                PrimaryKey nextPresentPrimaryKey = null;
+                long nextPresentRowId = -1;
+
                 for (PrimaryKey primaryKey : keysInRange)
                 {
-                    long sstableRowId;
-                    if (ceilingPrimaryKey != null)
+                    // skip up to the next present row, if set by the previous iteration
+                    long sstableRowId = -1;
+                    if (nextPresentPrimaryKey != null)
                     {
-                        int result = primaryKey.compareTo(ceilingPrimaryKey);
+                        int result = primaryKey.compareTo(nextPresentPrimaryKey);
                         if (result < 0)
                             continue;
                         if (result == 0)
-                            sstableRowId = ceilingRowId;
-                        else
-                            sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
+                            sstableRowId = nextPresentRowId;
+                        // reset so we don't do unnecessary compareTo ops
+                        nextPresentPrimaryKey = null;
+                        nextPresentRowId = -1;
                     }
-                    else
-                    {
+
+                    // look up the row id from the primary key.  this is the expensive part
+                    if (sstableRowId == -1)
                         sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
-                    }
-                    // skip rows that are not in our segment (or more preciesely, have no vectors that were indexed)
-                    // or are not in this segment (exactRowIdForPrimaryKey returns a negative value for not found)
-                    if (sstableRowId < metadata.minSSTableRowId)
+
+                    // if the row is not present, find the next one that *is* present so we can skip up to it
+                    if (sstableRowId < 0)
                     {
+                        nextPresentRowId = primaryKeyMap.ceiling(primaryKey);
+                        // The current primary key is greater than all the primary keys in this sstable
+                        if (nextPresentRowId < 0 || nextPresentRowId > metadata.maxSSTableRowId)
+                            break;
+                        nextPresentPrimaryKey = primaryKeyMap.primaryKeyFromRowId(nextPresentRowId);
                         // The current primary key is not in this sstable. Use ceiling to search for the row id
                         // of the next closest primary key in this sstable.
-                        if (sstableRowId < 0)
-                        {
-                            ceilingRowId = primaryKeyMap.ceiling(primaryKey);
-                            // The current primary key is greater than all the primary keys in this sstable
-                            if (ceilingRowId < 0 || metadata.maxSSTableRowId < ceilingRowId)
-                                break;
-                            ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
-                        }
                         continue;
                     }
 
+                    // our computation of keysInRange should ensure this is valid
+                    assert sstableRowId >= metadata.minSSTableRowId;
                     // if sstable row id has exceeded current ANN segment, stop
                     if (sstableRowId > metadata.maxSSTableRowId)
                         break;
