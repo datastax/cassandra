@@ -383,7 +383,8 @@ public enum CassandraRelevantProperties
     //This only applies if include all is false
     SYSTEM_VIEWS_INCLUDE_INDEXES("cassandra.system_view.include_indexes"),
     // dse prefix for backward compatibility
-    VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("dse.sai.validate_max_term_size_at_coordinator");
+    VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("dse.sai.validate_max_term_size_at_coordinator"),
+    CUSTOM_READ_OBSERVER_FACTORY("cassandra.custom_read_observer_factory_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
