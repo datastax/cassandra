@@ -365,13 +365,36 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
             try (var ordinalsView = graph.getOrdinalsView())
             {
+                PrimaryKey ceilingPrimaryKey = null;
+                long ceilingRowId = -1;
                 for (PrimaryKey primaryKey : keysInRange)
                 {
-                    long sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
+                    long sstableRowId;
+                    if (ceilingPrimaryKey != null)
+                    {
+                        int result = primaryKey.compareTo(ceilingPrimaryKey);
+                        if (result < 0)
+                            continue;
+                        if (result == 0)
+                            sstableRowId = ceilingRowId;
+                        else
+                            sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
+                    }
+                    else
+                    {
+                        sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
+                    }
                     // skip rows that are not in our segment (or more preciesely, have no vectors that were indexed)
                     // or are not in this segment (exactRowIdForPrimaryKey returns a negative value for not found)
                     if (sstableRowId < metadata.minSSTableRowId)
+                    {
+                        long nextRowId = primaryKeyMap.ceiling(primaryKey);
+                        // The current primary key is greater than all the primary keys in this sstable
+                        if (nextRowId < 0 || metadata.maxSSTableRowId < nextRowId)
+                            break;
+                        ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(nextRowId);
                         continue;
+                    }
 
                     // if sstable row id has exceeded current ANN segment, stop
                     if (sstableRowId > metadata.maxSSTableRowId)
