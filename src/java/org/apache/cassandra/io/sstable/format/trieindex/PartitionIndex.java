@@ -379,12 +379,12 @@ public class PartitionIndex implements Closeable
          */
         public IndexPosIterator(PartitionIndex index)
         {
-            super(index.instantiateRebufferer(), index.root, index.filterFirst, index.filterLast, true);
+            super(index.instantiateRebufferer(), index.root, index.filterFirst, index.filterLast, LeftBoundTreatment.ADMIT_PREFIXES);
         }
 
         IndexPosIterator(PartitionIndex index, PartitionPosition start, PartitionPosition end)
         {
-            super(index.instantiateRebufferer(), index.root, start, end, true);
+            super(index.instantiateRebufferer(), index.root, start, end, LeftBoundTreatment.ADMIT_PREFIXES);
         }
 
         /**
@@ -419,7 +419,7 @@ public class PartitionIndex implements Closeable
         }
         catch (Throwable t)
         {
-            logger.warn("Failed to dump trie to {} due to exception {}", fileName, t);
+            logger.warn("Failed to dump trie to {} due to exception", fileName, t);
         }
     }
 
