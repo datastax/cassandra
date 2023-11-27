@@ -82,7 +82,9 @@ public class RangeUnionIterator extends RangeIterator
 
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        // (calling hasNext is a pessimisation, since it calls computeNext under the hood.  don't do it.)
+        // Resist the temptation to call range.hasNext before skipTo: this is a pessimisation, hasNext will invoke
+        // computeNext under the hood, which is an expensive operation to produce a value that we plan to throw away.
+        // Instead, it is the responsibility of the child iterators to make skipTo fast when the iterator is exhausted.
         for (RangeIterator range : ranges)
             range.skipTo(nextKey);
     }
