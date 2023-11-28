@@ -21,6 +21,9 @@ package org.apache.cassandra.sensors;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.concurrent.ExecutorLocal;
 
+/**
+ * {@link ExecutorLocal} implementation to track and propagate {@link RequestSensors} associated to a given request/response.
+ */
 public class RequestTracker implements ExecutorLocal<RequestSensors>
 {
     public static final RequestTracker instance = new RequestTracker();

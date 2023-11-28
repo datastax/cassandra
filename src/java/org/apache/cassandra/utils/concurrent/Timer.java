@@ -30,7 +30,6 @@ import io.netty.util.HashedWheelTimer;
 import io.netty.util.Timeout;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.TraceState;
 

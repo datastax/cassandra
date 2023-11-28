@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -40,6 +41,21 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Timer;
 
+/**
+ * This class tracks {@link Sensor}s at a "global" level, allowing to:
+ * <ul>
+ *     <li>Getting or creating (if not existing) sensors of a given {@link Context} and {@link Type}.</li>
+ *     <li>Accessing sensors by keyspace, table id or type.</li>
+ * </ul>
+ * The returned sensors are global, meaning that their value spans across requests/responses, but cannot be modified either
+ * directly or indirectly via this class (whose update methods are package protected). In order to modify a sensor value,
+ * it must be registered to a request/response via {@link RequestSensors#registerSensor(Type)} and incremented via
+ * {@link RequestSensors#incrementSensor(Type, double)}, then synced via {@link RequestSensors#syncAllSensors()}, which
+ * will update the related global sensors.
+ * <br/><br/>
+ * Given sensors are tied to a context, that is to a given keyspace and table, their global instance will be deleted
+ * if the related keyspace/table is dropped.
+ */
 public class SensorsRegistry implements SchemaChangeListener
 {
     public static final SensorsRegistry instance = new SensorsRegistry();
@@ -63,7 +79,7 @@ public class SensorsRegistry implements SchemaChangeListener
 
     public Optional<Sensor> getOrCreateSensor(Context context, Type type)
     {
-        if (keyspaces.contains(context.getKeyspace()) && tableIds.contains(context.getTableId()) && updateLock.readLock().tryLock())
+        if (updateLock.readLock().tryLock() && keyspaces.contains(context.getKeyspace()) && tableIds.contains(context.getTableId()))
         {
             try
             {
@@ -90,14 +106,14 @@ public class SensorsRegistry implements SchemaChangeListener
         return Optional.empty();
     }
 
-    public void updateSensor(Context context, Type type, double value)
+    protected void updateSensor(Context context, Type type, double value)
     {
         getOrCreateSensor(context, type).ifPresent(s -> s.increment(value));
     }
 
-    public void updateSensorAsync(Context context, Type type, double value, long delay, TimeUnit unit)
+    protected Future<Void> updateSensorAsync(Context context, Type type, double value, long delay, TimeUnit unit)
     {
-        asyncUpdater.onTimeout(() ->
+        return asyncUpdater.onTimeout(() ->
                                getOrCreateSensor(context, type).ifPresent(s -> s.increment(value)),
                                delay, unit);
     }

@@ -23,6 +23,19 @@ import java.util.Objects;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.AtomicDouble;
 
+/**
+ * Tracks the {@link #value} for a given measurement of a given {@link Type} and {@link Context}, during any
+ * request/response cycle.
+ * <br/><br/>
+ * Sensors can be read (via {@link #getValue()}) but cannot be directly created or incremented, because their lifecycle
+ * and values are managed by the {@link RequestSensors} and {@link SensorsRegistry} classes, more specifically:
+ * <ul>
+ *     <li>In order to track a given measurement for a given request/response, register a sensor of the related type via
+ *     {@link RequestSensors#registerSensor(Type)}.</li>
+ *     <li>Once registered, the sensor lifecycle spans across multiple request/response cycles, and its "global"
+ *     value can be accessed via {@link SensorsRegistry}.</li>
+ * </ul>
+ */
 public class Sensor
 {
     private final Context context;

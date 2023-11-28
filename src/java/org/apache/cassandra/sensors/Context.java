@@ -20,6 +20,14 @@ package org.apache.cassandra.sensors;
 
 import java.util.Objects;
 
+/**
+ * Represents the context for a (group of) {@link Sensor}(s), made up of:
+ * <ul>
+ *     <li>The keyspace the sensor refers to.</li>
+ *     <li>The table the sensor refers to.</li>
+ *     <li>The related table id.</li>
+ * </ul>
+ */
 public class Context
 {
     private final String keyspace;

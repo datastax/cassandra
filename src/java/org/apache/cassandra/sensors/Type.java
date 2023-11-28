@@ -18,6 +18,9 @@
 
 package org.apache.cassandra.sensors;
 
+/**
+ * The type of the measurement a {@link Sensor} refers to.
+ */
 public enum Type
 {
     CLIENT_BYTES,

@@ -23,8 +23,13 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.Type;
 
+/**
+ * Increment {@link Type#READ_BYTES} {@link Sensor}s by the data size of each iterated row and sync the sensor values
+ * when the iterator is closed.
+ */
 public class TrackingRowIterator extends Transformation<UnfilteredRowIterator>
 {
     private final RequestTracker requestTracker;
