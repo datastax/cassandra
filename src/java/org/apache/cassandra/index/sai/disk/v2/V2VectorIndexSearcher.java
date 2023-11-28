@@ -57,6 +57,7 @@ import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.tracing.Tracing;
 
+import static java.lang.Math.ceil;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.Math.pow;
@@ -358,6 +359,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var ordinalsView = graph.getOrdinalsView())
         {
+            int comparisonsSavedByBsearch = 0;
+            int keysEvaluated = 0;
+            boolean preferSeqScanToBsearch = false;
             for (int i = 0; i < keysInRange.size(); i++)
             {
                 PrimaryKey primaryKey = keysInRange.get(i);
@@ -368,18 +372,40 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 if (sstableRowId < 0)
                 {
                     long ceilingRowId = - sstableRowId - 1;
-                    // The next greatest primary key is greater than all the primary keys in this sstable
                     if (ceilingRowId > metadata.maxSSTableRowId)
+                    {
+                        // The next greatest primary key is greater than all the primary keys in this sstable
                         break;
+                    }
                     PrimaryKey ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
-                    // Use a sublist to only search the remaining primary keys in range.
-                    // VSTODO if there are very few sstables, this could be less efficient than a simple linear search
-                    int nextIndexForCeiling = Collections.binarySearch(keysInRange.subList(i, keysInRange.size()), ceilingPrimaryKey);
-                    if (nextIndexForCeiling < 0)
-                        // We got: -(insertion point) - 1. Invert it so we get the insertion point.
-                        nextIndexForCeiling = -nextIndexForCeiling - 1;
-                    // Subtract 1 since the loop will increment next. Add to i since we searched the sublist.
-                    i += nextIndexForCeiling - 1;
+
+                    if (preferSeqScanToBsearch)
+                    {
+                        int j = 0;
+                        for ( ; i + j < keysInRange.size(); j++)
+                        {
+                            PrimaryKey nextPrimaryKey = primaryKeyMap.primaryKeyFromRowId(j);
+                            if (nextPrimaryKey.compareTo(ceilingPrimaryKey) >= 0)
+                                break;
+                        }
+                        comparisonsSavedByBsearch += j - ceil(logBase2(keysInRange.size() - i));
+                        i += j - 1; // -1 because loop will increment next
+                    }
+                    else
+                    {
+                        // Use a sublist to only search the remaining primary keys in range.
+                        var keysRemaining = keysInRange.subList(i, keysInRange.size());
+                        int nextIndexForCeiling = Collections.binarySearch(keysRemaining, ceilingPrimaryKey);
+                        if (nextIndexForCeiling < 0)
+                            // We got: -(insertion point) - 1. Invert it so we get the insertion point.
+                            nextIndexForCeiling = -nextIndexForCeiling - 1;
+
+                        comparisonsSavedByBsearch += nextIndexForCeiling - (int) ceil(logBase2(keysRemaining.size()));
+                        keysEvaluated++;
+                        i += nextIndexForCeiling - 1; // -1 because loop will increment next
+                    }
+                    preferSeqScanToBsearch = keysEvaluated > 10 && comparisonsSavedByBsearch < 0;
+
                     continue;
                 }
 
@@ -415,6 +441,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         var results = graph.search(queryVector, topK, limit, bits, context);
         updateExpectedNodes(results.getVisitedCount(), getRawExpectedNodes(topK, numRows));
         return toPrimaryKeyIterator(results, context);
+    }
+
+    public static double logBase2(double number) {
+        return Math.log(number) / Math.log(2);
     }
 
     private int getRawExpectedNodes(int topK, int nPermittedOrdinals)
