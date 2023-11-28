@@ -91,7 +91,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     }
 
     @Test
-    public void testCeiling() throws Exception
+    public void testCeilingWithoutTrackingState() throws Exception
     {
         testForDifferentByteComparableEncodings(this::doTestCeiling);
     }
@@ -111,43 +111,39 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
-        try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
-             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
-        {
-            ByteComparable key13 = asByteComparable.apply("A");
-            assertEquals(0, reader.ceiling(key13));
-            ByteComparable key12 = asByteComparable.apply("a");
-            assertEquals(0, reader.ceiling(key12));
-            ByteComparable key11 = asByteComparable.apply("z");
-            assertEquals(NOT_FOUND, reader.ceiling(key11));
-            ByteComparable key10 = asByteComparable.apply("ab");
-            assertEquals(0, reader.ceiling(key10));
-            ByteComparable key9 = asByteComparable.apply("abbb");
-            assertEquals(2, reader.ceiling(key9));
-            ByteComparable key8 = asByteComparable.apply("abc");
-            assertEquals(2, reader.ceiling(key8));
-            ByteComparable key7 = asByteComparable.apply("abca");
-            assertEquals(3, reader.ceiling(key7));
-            ByteComparable key6 = asByteComparable.apply("abb");
-            assertEquals(1, reader.ceiling(key6));
-            ByteComparable key5 = asByteComparable.apply("abba");
-            assertEquals(2, reader.ceiling(key5));
-            ByteComparable key4 = asByteComparable.apply("cb");
-            assertEquals(5, reader.ceiling(key4));
-            ByteComparable key3 = asByteComparable.apply("c");
-            assertEquals(5, reader.ceiling(key3));
-            ByteComparable key2 = asByteComparable.apply("cbb");
-            assertEquals(5, reader.ceiling(key2));
-            ByteComparable key1 = asByteComparable.apply("cbbb");
-            assertEquals(6, reader.ceiling(key1));
-            ByteComparable key = asByteComparable.apply("cbbbbb");
-            assertEquals(NOT_FOUND, reader.ceiling(key));
-        }
+        ByteComparable key13 = asByteComparable.apply("A");
+        readAndAssertCeiling(fp, 0, key13);
+        ByteComparable key12 = asByteComparable.apply("a");
+        readAndAssertCeiling(fp, 0, key12);
+        ByteComparable key11 = asByteComparable.apply("z");
+        readAndAssertCeiling(fp, NOT_FOUND, key11);
+        ByteComparable key10 = asByteComparable.apply("ab");
+        readAndAssertCeiling(fp, 0, key10);
+        ByteComparable key9 = asByteComparable.apply("abbb");
+        readAndAssertCeiling(fp, 2, key9);
+        ByteComparable key8 = asByteComparable.apply("abc");
+        readAndAssertCeiling(fp, 2, key8);
+        ByteComparable key7 = asByteComparable.apply("abca");
+        readAndAssertCeiling(fp, 3, key7);
+        ByteComparable key6 = asByteComparable.apply("abb");
+        readAndAssertCeiling(fp, 1, key6);
+        ByteComparable key5 = asByteComparable.apply("abba");
+        readAndAssertCeiling(fp, 2, key5);
+        ByteComparable key4 = asByteComparable.apply("cb");
+        readAndAssertCeiling(fp, 5, key4);
+        ByteComparable key3 = asByteComparable.apply("c");
+        readAndAssertCeiling(fp, 5, key3);
+        ByteComparable key2 = asByteComparable.apply("cbb");
+        readAndAssertCeiling(fp, 5, key2);
+        ByteComparable key1 = asByteComparable.apply("cbbb");
+        readAndAssertCeiling(fp, 6, key1);
+        ByteComparable key = asByteComparable.apply("cbbbbb");
+        readAndAssertCeiling(fp, NOT_FOUND, key);
     }
 
 
     @Test
-    public void testCeilingWithEmulatedPrimaryKey() throws Exception
+    public void testCeilingWihtoutTrackingStateWithEmulatedPrimaryKey() throws Exception
     {
         testForDifferentByteComparableEncodings(this::doTestCeilingWithEmulatedPrimaryKey);
     }
@@ -165,51 +161,58 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
             fp = writer.complete(new MutableLong());
         }
 
+        // Validate token only searches
+        ByteComparable key17 = primaryKey(asByteComparable, "a", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, 0, key17);
+        ByteComparable key16 = primaryKey(asByteComparable, "ab", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, 0, key16);
+        ByteComparable key15 = primaryKey(asByteComparable, "aa", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, 0, key15);
+        ByteComparable key14 = primaryKey(asByteComparable, "abc", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, NOT_FOUND, key14);
+        ByteComparable key13 = primaryKey(asByteComparable, "ba", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, NOT_FOUND, key13);
+
+        // Validate token and partition key only searches
+        ByteComparable key12 = primaryKey(asByteComparable, "a", "b", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, 0, key12);
+        ByteComparable key11 = primaryKey(asByteComparable, "ab", "b", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, 0, key11);
+        ByteComparable key10 = primaryKey(asByteComparable, "ab", "ce", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, 2, key10);
+        ByteComparable key9 = primaryKey(asByteComparable, "ab", "cee", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, 4, key9);
+        ByteComparable key8 = primaryKey(asByteComparable, "ab", "d", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, NOT_FOUND, key8);
+        ByteComparable key7 = primaryKey(asByteComparable, "abb", "a", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, NOT_FOUND, key7);
+        ByteComparable key6 = primaryKey(asByteComparable, "aa", "d", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, 0, key6);
+        ByteComparable key5 = primaryKey(asByteComparable, "abc", "a", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, NOT_FOUND, key5);
+        ByteComparable key4 = primaryKey(asByteComparable, "ba", "a", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, NOT_FOUND, key4);
+
+
+        // Validate token, partition key, and clustring column searches
+        ByteComparable key3 = primaryKey(asByteComparable, "a", "b", "c", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, 0, key3);
+        ByteComparable key2 = primaryKey(asByteComparable, "ab", "cdd", "a", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, 1, key2);
+        ByteComparable key1 = primaryKey(asByteComparable, "ab", "cde", "a", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, 1, key1);
+        ByteComparable key = primaryKey(asByteComparable, "ab", "cde", "z", ByteSource.LT_NEXT_COMPONENT);
+        readAndAssertCeiling(fp, 2, key);
+    }
+
+    // Tests using this method are verifying the correctness of individual calls to ceiling. Because the reader is
+    // stateful across calls to ceiling, a new one must be opened for each call.
+    private void readAndAssertCeiling(long root, long expected, ByteComparable key)
+    {
         try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
-             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), root))
         {
-            // Validate token only searches
-            ByteComparable key17 = primaryKey(asByteComparable, "a", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(0, reader.ceiling(key17));
-            ByteComparable key16 = primaryKey(asByteComparable, "ab", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(0, reader.ceiling(key16));
-            ByteComparable key15 = primaryKey(asByteComparable, "aa", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(0, reader.ceiling(key15));
-            ByteComparable key14 = primaryKey(asByteComparable, "abc", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(NOT_FOUND, reader.ceiling(key14));
-            ByteComparable key13 = primaryKey(asByteComparable, "ba", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(NOT_FOUND, reader.ceiling(key13));
-
-            // Validate token and partition key only searches
-            ByteComparable key12 = primaryKey(asByteComparable, "a", "b", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(0, reader.ceiling(key12));
-            ByteComparable key11 = primaryKey(asByteComparable, "ab", "b", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(0, reader.ceiling(key11));
-            ByteComparable key10 = primaryKey(asByteComparable, "ab", "ce", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(2, reader.ceiling(key10));
-            ByteComparable key9 = primaryKey(asByteComparable, "ab", "cee", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(4, reader.ceiling(key9));
-            ByteComparable key8 = primaryKey(asByteComparable, "ab", "d", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(NOT_FOUND, reader.ceiling(key8));
-            ByteComparable key7 = primaryKey(asByteComparable, "abb", "a", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(NOT_FOUND, reader.ceiling(key7));
-            ByteComparable key6 = primaryKey(asByteComparable, "aa", "d", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(0, reader.ceiling(key6));
-            ByteComparable key5 = primaryKey(asByteComparable, "abc", "a", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(NOT_FOUND, reader.ceiling(key5));
-            ByteComparable key4 = primaryKey(asByteComparable, "ba", "a", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(NOT_FOUND, reader.ceiling(key4));
-
-
-            // Validate token, partition key, and clustring column searches
-            ByteComparable key3 = primaryKey(asByteComparable, "a", "b", "c", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(0, reader.ceiling(key3));
-            ByteComparable key2 = primaryKey(asByteComparable, "ab", "cdd", "a", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(1, reader.ceiling(key2));
-            ByteComparable key1 = primaryKey(asByteComparable, "ab", "cde", "a", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(1, reader.ceiling(key1));
-            ByteComparable key = primaryKey(asByteComparable, "ab", "cde", "z", ByteSource.LT_NEXT_COMPONENT);
-            assertEquals(2, reader.ceiling(key));
+            assertEquals(expected, reader.ceiling(key));
         }
     }
 
