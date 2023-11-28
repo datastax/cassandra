@@ -192,13 +192,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             return rowIdToToken.exactRowId(key.token().getLongValue());
         }
 
-        return cursor.getExactPointId(v -> key.asComparableBytes(v));
-    }
-
-    @Override
-    public long nextAfter(PrimaryKey key)
-    {
-        return cursor.nextAfter(v -> key.asComparableBytesMinPrefix(v));
+        return cursor.ceiling(v -> key.asComparableBytesMinPrefix(v));
     }
 
     @Override

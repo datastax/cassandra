@@ -114,20 +114,34 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
         {
-            assertEquals(0, reader.ceiling(asByteComparable.apply("A")));
-            assertEquals(0, reader.ceiling(asByteComparable.apply("a")));
-            assertEquals(NOT_FOUND, reader.ceiling(asByteComparable.apply("z")));
-            assertEquals(0, reader.ceiling(asByteComparable.apply("ab")));
-            assertEquals(2, reader.ceiling(asByteComparable.apply("abbb")));
-            assertEquals(2, reader.ceiling(asByteComparable.apply("abc")));
-            assertEquals(3, reader.ceiling(asByteComparable.apply("abca")));
-            assertEquals(1, reader.ceiling(asByteComparable.apply("abb")));
-            assertEquals(2, reader.ceiling(asByteComparable.apply("abba")));
-            assertEquals(5, reader.ceiling(asByteComparable.apply("cb")));
-            assertEquals(5, reader.ceiling(asByteComparable.apply("c")));
-            assertEquals(5, reader.ceiling(asByteComparable.apply("cbb")));
-            assertEquals(6, reader.ceiling(asByteComparable.apply("cbbb")));
-            assertEquals(NOT_FOUND, reader.ceiling(asByteComparable.apply("cbbbbb")));
+            ByteComparable key13 = asByteComparable.apply("A");
+            assertEquals(0, reader.ceiling(key13));
+            ByteComparable key12 = asByteComparable.apply("a");
+            assertEquals(0, reader.ceiling(key12));
+            ByteComparable key11 = asByteComparable.apply("z");
+            assertEquals(NOT_FOUND, reader.ceiling(key11));
+            ByteComparable key10 = asByteComparable.apply("ab");
+            assertEquals(0, reader.ceiling(key10));
+            ByteComparable key9 = asByteComparable.apply("abbb");
+            assertEquals(2, reader.ceiling(key9));
+            ByteComparable key8 = asByteComparable.apply("abc");
+            assertEquals(2, reader.ceiling(key8));
+            ByteComparable key7 = asByteComparable.apply("abca");
+            assertEquals(3, reader.ceiling(key7));
+            ByteComparable key6 = asByteComparable.apply("abb");
+            assertEquals(1, reader.ceiling(key6));
+            ByteComparable key5 = asByteComparable.apply("abba");
+            assertEquals(2, reader.ceiling(key5));
+            ByteComparable key4 = asByteComparable.apply("cb");
+            assertEquals(5, reader.ceiling(key4));
+            ByteComparable key3 = asByteComparable.apply("c");
+            assertEquals(5, reader.ceiling(key3));
+            ByteComparable key2 = asByteComparable.apply("cbb");
+            assertEquals(5, reader.ceiling(key2));
+            ByteComparable key1 = asByteComparable.apply("cbbb");
+            assertEquals(6, reader.ceiling(key1));
+            ByteComparable key = asByteComparable.apply("cbbbbb");
+            assertEquals(NOT_FOUND, reader.ceiling(key));
         }
     }
 
@@ -155,29 +169,47 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
              TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
         {
             // Validate token only searches
-            assertEquals(0, reader.ceiling(primaryKey(asByteComparable, "a", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(0, reader.ceiling(primaryKey(asByteComparable, "ab", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(0, reader.ceiling(primaryKey(asByteComparable, "aa", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(NOT_FOUND, reader.ceiling(primaryKey(asByteComparable, "abc", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(NOT_FOUND, reader.ceiling(primaryKey(asByteComparable, "ba", ByteSource.LT_NEXT_COMPONENT)));
+            ByteComparable key17 = primaryKey(asByteComparable, "a", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(0, reader.ceiling(key17));
+            ByteComparable key16 = primaryKey(asByteComparable, "ab", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(0, reader.ceiling(key16));
+            ByteComparable key15 = primaryKey(asByteComparable, "aa", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(0, reader.ceiling(key15));
+            ByteComparable key14 = primaryKey(asByteComparable, "abc", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(NOT_FOUND, reader.ceiling(key14));
+            ByteComparable key13 = primaryKey(asByteComparable, "ba", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(NOT_FOUND, reader.ceiling(key13));
 
             // Validate token and partition key only searches
-            assertEquals(0, reader.ceiling(primaryKey(asByteComparable, "a", "b", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(0, reader.ceiling(primaryKey(asByteComparable, "ab", "b", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(2, reader.ceiling(primaryKey(asByteComparable, "ab", "ce", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(4, reader.ceiling(primaryKey(asByteComparable, "ab", "cee", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(NOT_FOUND, reader.ceiling(primaryKey(asByteComparable, "ab", "d", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(NOT_FOUND, reader.ceiling(primaryKey(asByteComparable, "abb", "a", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(0, reader.ceiling(primaryKey(asByteComparable, "aa", "d", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(NOT_FOUND, reader.ceiling(primaryKey(asByteComparable, "abc", "a", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(NOT_FOUND, reader.ceiling(primaryKey(asByteComparable, "ba", "a", ByteSource.LT_NEXT_COMPONENT)));
+            ByteComparable key12 = primaryKey(asByteComparable, "a", "b", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(0, reader.ceiling(key12));
+            ByteComparable key11 = primaryKey(asByteComparable, "ab", "b", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(0, reader.ceiling(key11));
+            ByteComparable key10 = primaryKey(asByteComparable, "ab", "ce", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(2, reader.ceiling(key10));
+            ByteComparable key9 = primaryKey(asByteComparable, "ab", "cee", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(4, reader.ceiling(key9));
+            ByteComparable key8 = primaryKey(asByteComparable, "ab", "d", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(NOT_FOUND, reader.ceiling(key8));
+            ByteComparable key7 = primaryKey(asByteComparable, "abb", "a", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(NOT_FOUND, reader.ceiling(key7));
+            ByteComparable key6 = primaryKey(asByteComparable, "aa", "d", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(0, reader.ceiling(key6));
+            ByteComparable key5 = primaryKey(asByteComparable, "abc", "a", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(NOT_FOUND, reader.ceiling(key5));
+            ByteComparable key4 = primaryKey(asByteComparable, "ba", "a", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(NOT_FOUND, reader.ceiling(key4));
 
 
             // Validate token, partition key, and clustring column searches
-            assertEquals(0, reader.ceiling(primaryKey(asByteComparable, "a", "b", "c", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(1, reader.ceiling(primaryKey(asByteComparable, "ab", "cdd", "a", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(1, reader.ceiling(primaryKey(asByteComparable, "ab", "cde", "a", ByteSource.LT_NEXT_COMPONENT)));
-            assertEquals(2, reader.ceiling(primaryKey(asByteComparable, "ab", "cde", "z", ByteSource.LT_NEXT_COMPONENT)));
+            ByteComparable key3 = primaryKey(asByteComparable, "a", "b", "c", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(0, reader.ceiling(key3));
+            ByteComparable key2 = primaryKey(asByteComparable, "ab", "cdd", "a", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(1, reader.ceiling(key2));
+            ByteComparable key1 = primaryKey(asByteComparable, "ab", "cde", "a", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(1, reader.ceiling(key1));
+            ByteComparable key = primaryKey(asByteComparable, "ab", "cde", "z", ByteSource.LT_NEXT_COMPONENT);
+            assertEquals(2, reader.ceiling(key));
         }
     }
 

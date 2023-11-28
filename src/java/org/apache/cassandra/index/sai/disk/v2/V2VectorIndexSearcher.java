@@ -182,7 +182,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
 
             // it will return the next row id if given key is not found.
-            long minSSTableRowId = primaryKeyMap.nextAfter(firstPrimaryKey);
+            long minSSTableRowId = primaryKeyMap.ceiling(firstPrimaryKey);
             // If we didn't find the first key, we won't find the last primary key either
             if (minSSTableRowId < 0)
                 return new BitsOrPostingList(PostingList.EMPTY);
