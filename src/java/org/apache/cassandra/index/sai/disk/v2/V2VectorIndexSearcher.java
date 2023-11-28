@@ -368,7 +368,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             boolean preferSeqScanToBsearch = false;
             for (int i = 0; i < keysInRange.size(); i++)
             {
-                PrimaryKey primaryKey = keysInRange.get(i);
+                var primaryKey = keysInRange.get(i);
                 long sstableRowId = primaryKeyMap.exactRowIdOrCeiling(primaryKey);
 
                 // The current primary key is not in this sstable. Use ceiling to search for the row id
@@ -381,14 +381,16 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                         // The next greatest primary key is greater than all the primary keys in this sstable
                         break;
                     }
-                    PrimaryKey ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
+                    var ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
 
+                    // adaptively choose either seq scan or bsearch to skip ahead in keysInRange until
+                    // we find one at least as large as the ceiling key
                     if (preferSeqScanToBsearch)
                     {
                         int j = 0;
                         for ( ; i + j < keysInRange.size(); j++)
                         {
-                            PrimaryKey nextPrimaryKey = primaryKeyMap.primaryKeyFromRowId(j);
+                            var nextPrimaryKey = primaryKeyMap.primaryKeyFromRowId(j);
                             if (nextPrimaryKey.compareTo(ceilingPrimaryKey) >= 0)
                                 break;
                         }
@@ -407,9 +409,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                         comparisonsSavedByBsearch.update(nextIndexForCeiling - (int) ceil(logBase2(keysRemaining.size())));
                         i += nextIndexForCeiling - 1; // -1 because loop will increment next
                     }
-                    var snapshot = comparisonsSavedByBsearch.getSnapshot();
-                    preferSeqScanToBsearch = comparisonsSavedByBsearch.getCount() >= 10 && snapshot.getMean() < 0;
 
+                    // update our estimate
+                    preferSeqScanToBsearch = comparisonsSavedByBsearch.getCount() >= 10
+                                             && comparisonsSavedByBsearch.getSnapshot().getMean() < 0;
                     continue;
                 }
 
@@ -417,6 +420,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 assert sstableRowId >= metadata.minSSTableRowId : String.format("sstableRowId %d < minSSTableRowId %d", sstableRowId, metadata.minSSTableRowId);
                 assert sstableRowId <= metadata.maxSSTableRowId : String.format("sstableRowId %d > maxSSTableRowId %d", sstableRowId, metadata.maxSSTableRowId);
 
+                // convert the global row id to segment row id and from segment row id to graph ordinal
                 int segmentRowId = metadata.toSegmentRowId(sstableRowId);
                 rowIds.add(segmentRowId);
                 int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
