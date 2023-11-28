@@ -93,7 +93,10 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
 
     /**
      * Returns the position associated with the least term greater than or equal to the given key, or
-     * a negative value if there is no such term.
+     * a negative value if there is no such term. In order to optimize the search, the trie is traversed
+     * statefully. Therefore, this method only returns correct results when called for increasing keys.
+     * Warning: ceiling is not idempotent. Calling ceiling() twice for the same key will return successive
+     * values instead of the same value. This is acceptable for the current usage of the method.
      * @param key the prefix to traverse in the trie
      * @return a position, if found, or a negative value if there is no such position
      */

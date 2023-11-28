@@ -141,6 +141,39 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         readAndAssertCeiling(fp, NOT_FOUND, key);
     }
 
+    @Test
+    public void testCeilingTrackingState() throws Exception
+    {
+        testForDifferentByteComparableEncodings(this::doTestCeilingStateful);
+    }
+
+    private void doTestCeilingStateful(Function<String, ByteComparable> asByteComparable) throws Exception
+    {
+        long fp;
+        try (TrieTermsDictionaryWriter writer = new TrieTermsDictionaryWriter(indexDescriptor, indexContext))
+        {
+            writer.add(asByteComparable.apply("ab"), 0);
+            writer.add(asByteComparable.apply("abb"), 1);
+            writer.add(asByteComparable.apply("abc"), 2);
+            writer.add(asByteComparable.apply("abcd"), 3);
+            writer.add(asByteComparable.apply("abd"), 4);
+            writer.add(asByteComparable.apply("cbb"), 5);
+            writer.add(asByteComparable.apply("cbbbb"), 6);
+            fp = writer.complete(new MutableLong());
+        }
+
+        try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
+        {
+            assertEquals(0, reader.ceiling(asByteComparable.apply("a")));
+            assertEquals(2, reader.ceiling(asByteComparable.apply("abc")));
+            assertEquals(3, reader.ceiling(asByteComparable.apply("abcc")));
+
+            // The current behavior is to advance past the node that the ceiling returns.
+            // As such, even though abccc is before abcd, the ceiling will return 4 for abd.
+            assertEquals(4, reader.ceiling(asByteComparable.apply("abccc")));
+        }
+    }
 
     @Test
     public void testCeilingWihtoutTrackingStateWithEmulatedPrimaryKey() throws Exception
