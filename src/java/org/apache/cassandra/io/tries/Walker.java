@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.io.tries;
 
-import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
 
@@ -41,7 +40,7 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
     /** Value used to indicate a branch (e.g. lesser/greaterBranch) does not exist. */
     public static int NONE = -1;
 
-    private final Rebufferer source;
+    protected final Rebufferer source;
     protected final long root;
 
     // State relating to current node.

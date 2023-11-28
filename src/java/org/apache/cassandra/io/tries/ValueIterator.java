@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.io.tries;
 
+import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.io.util.Rebufferer;
@@ -151,12 +153,37 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
     protected long nextPayloadedNode()
     {
         long toReturn = next;
-        if (next != -1)
+        if (next != NONE)
             next = advanceNode();
         return toReturn;
     }
 
-    protected ByteComparable nextCollectedValue()
+    protected boolean hasNext()
+    {
+        return next != NONE;
+    }
+
+    protected <VALUE> VALUE nextValue(Supplier<VALUE> supplier)
+    {
+        if (next == NONE)
+            return null;
+        go(next);
+        VALUE result = supplier.get();
+        next = advanceNode();
+        return result;
+    }
+
+    protected long nextValueAsLong(LongSupplier supplier, long valueIfNone)
+    {
+        if (next == NONE)
+            return valueIfNone;
+        go(next);
+        long result = supplier.getAsLong();
+        next = advanceNode();
+        return result;
+    }
+
+    protected ByteComparable collectedKey()
     {
         assert collector != null : "Cannot get a collected value from a non-collecting iterator";
         return collector.toByteComparable();
@@ -205,7 +232,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
     private void descendWith(int skipToFirstByte, ByteSource skipToRest, int limitByte, IterationPosition stackPrev, long startNode, LeftBoundTreatment admitPrefix)
     {
         int childIndex;
-        long payloadedNode = -1;
+        long payloadedNode = NONE;
         // Follow start position while we still have a prefix, stacking path and saving prefixes.
         go(startNode);
         while (true)
@@ -232,7 +259,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
                 else // went beyond the limit
                 {
                     stack = null;
-                    next = -1;
+                    next = NONE;
                     return;
                 }
             }
@@ -244,7 +271,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
 
         // Advancing now gives us first match if we didn't find one already.
         payloadedNode = maybeAcceptPayloadedNode(admitPrefix, skipToFirstByte, payloadedNode);
-        if (payloadedNode != -1)
+        if (payloadedNode != NONE)
             next = payloadedNode;
         else
             next = advanceNode();
@@ -262,7 +289,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
                 // else fall through
             case GREATER:
             default:
-                return -1;
+                return NONE;
         }
     }
 
@@ -277,7 +304,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
             }
             else
             {
-                payloadedNode = -1;
+                payloadedNode = NONE;
             }
         }
         return payloadedNode;
@@ -301,7 +328,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
                 if (collector != null)
                     collector.pop();
                 if (stack == null)        // exhausted whole trie
-                    return -1;
+                    return NONE;
                 go(stack.node);
                 continue;
             }

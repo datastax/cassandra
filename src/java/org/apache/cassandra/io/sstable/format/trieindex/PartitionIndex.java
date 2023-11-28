@@ -368,9 +368,6 @@ public class PartitionIndex implements Closeable
      */
     public static class IndexPosIterator extends ValueIterator<IndexPosIterator>
     {
-        static final long INVALID = -1;
-        long pos = INVALID;
-
         /**
          * @param index PartitionIndex to use for the iteration.
          *
@@ -392,18 +389,12 @@ public class PartitionIndex implements Closeable
          */
         protected long nextIndexPos()
         {
-            // without missing positions, we save and reuse the unreturned position.
-            if (pos == INVALID)
-            {
-                pos = nextPayloadedNode();
-                if (pos == INVALID)
-                    return NOT_FOUND;
-            }
+            return nextValueAsLong(this::getCurrentIndexPos, NOT_FOUND);
+        }
 
-            go(pos);
-
-            pos = INVALID; // make sure next time we call nextPayloadedNode() again
-            return getIndexPos(buf, payloadPosition(), payloadFlags()); // this should not throw
+        private long getCurrentIndexPos()
+        {
+            return getIndexPos(buf, payloadPosition(), payloadFlags());
         }
     }
 
