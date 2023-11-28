@@ -31,7 +31,6 @@ import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.SlidingWindowReservoir;
-import com.codahale.metrics.Snapshot;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.pq.BinaryQuantization;
 import io.github.jbellis.jvector.util.Bits;
@@ -58,8 +57,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
-import org.apache.cassandra.metrics.ClearableHistogram;
-import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.lang.Math.ceil;
@@ -356,16 +353,19 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             return new ListRangeIterator(metadata.minKey, metadata.maxKey, keysInRange);
 
         int topK = topKFor(limit);
-        // if we are brute forcing, we want to build a list of segment row ids, but if not,
-        // we want to build a bitset of ordinals corresponding to the rows.  We won't know which
-        // path to take until we have an accurate key count.
+        // if we are brute forcing the similarity search, we want to build a list of segment row ids,
+        // but if not, we want to build a bitset of ordinals corresponding to the rows.
+        // We won't know which path to take until we have an accurate key count.
         SparseFixedBitSet bits = bitSetForSearch();
         IntArrayList rowIds = new IntArrayList();
         try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var ordinalsView = graph.getOrdinalsView())
         {
+            // track whether we are saving comparisons by using binary search to skip ahead
+            // (if most of the keys belong to this sstable, bsearch will actually be slower)
             var comparisonsSavedByBsearch = new Histogram(new SlidingWindowReservoir(10));
             boolean preferSeqScanToBsearch = false;
+
             for (int i = 0; i < keysInRange.size(); i++)
             {
                 var primaryKey = keysInRange.get(i);
