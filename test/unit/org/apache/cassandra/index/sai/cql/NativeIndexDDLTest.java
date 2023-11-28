@@ -1282,7 +1282,8 @@ public class NativeIndexDDLTest extends SAITester
             (corruptionType != CorruptionType.REMOVED))
             return;
 
-        if (component == IndexComponentType.PARTITION_SIZES || component == IndexComponentType.PARTITION_KEY_BLOCKS ||
+        if (component == IndexComponentType.ROW_TO_TOKEN || component == IndexComponentType.ROW_TO_PARTITION ||
+            component == IndexComponentType.PARTITION_TO_SIZE || component == IndexComponentType.PARTITION_KEY_BLOCKS ||
             component == IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS || component == IndexComponentType.CLUSTERING_KEY_BLOCKS ||
             component == IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS)
             return;
