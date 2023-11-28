@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.io.tries;
 
+import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.io.util.Rebufferer;
@@ -28,8 +30,8 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * <p>
  * The main utility of this class is the {@link #nextPayloadedNode()} method, which lists all nodes that contain a
  * payload within the requested bounds. The treatment of the bounds is non-standard (see
- * {@link #ValueIterator(Rebufferer, long, ByteComparable, ByteComparable, boolean)}), necessary to properly walk
- * tries of prefixes and separators.
+ * {@link #ValueIterator(Rebufferer, long, ByteComparable, ByteComparable, LeftBoundTreatment, boolean)}), necessary to
+ * properly walk tries of prefixes and separators.
  */
 @NotThreadSafe
 public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Walker<CONCRETE>
@@ -39,7 +41,14 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
     protected IterationPosition stack;
     private long next;
 
-    public static class IterationPosition
+    protected enum LeftBoundTreatment
+    {
+        ADMIT_PREFIXES,
+        ADMIT_EXACT,
+        GREATER
+    }
+
+    protected static class IterationPosition
     {
         final long node;
         final int limit;
@@ -66,7 +75,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
     {
         this(source, root, false);
     }
-    
+
     protected ValueIterator(Rebufferer source, long root, boolean collecting)
     {
         super(source, root);
@@ -75,23 +84,24 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
         initializeNoLeftBound(root, 256);
     }
 
-    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, boolean admitPrefix)
+    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix)
     {
         this(source, root, start, end, admitPrefix, false);
     }
 
     /**
-     * Constrained iterator. The end position is always treated as inclusive, and we have two possible treatments for
-     * the start:
+     * Constrained iterator. The end position is always treated as inclusive, and we have three possible treatments for
+     * the start, specified in admitPrefix:
      * <ul>
-     *   <li> When {@code admitPrefix=false}, exact matches and any prefixes of the start are excluded.
-     *   <li> When {@code admitPrefix=true}, the longest prefix of the start present in the trie is also included,
+     *   <li> When {@code GREATER}, exact matches and any prefixes of the start are excluded.
+     *   <li> When {@code ADMIT_EXACT}, exact matches are included.
+     *   <li> When {@code ADMIT_PREFIXES}, the longest prefix of the start present in the trie is also included,
      *        provided that there is no entry in the trie between that prefix and the start. An exact match also
      *        satisfies this and is included.
      * </ul>
      * This behaviour is shared with the reverse counterpart {@link ReverseValueIterator}.
      */
-    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, boolean admitPrefix, boolean collecting)
+    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting)
     {
         super(source, root);
         limit = end != null ? end.asComparableBytes(BYTE_COMPARABLE_VERSION) : null;
@@ -103,58 +113,11 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
             initializeNoLeftBound(root, limit != null ? limit.next() : 256);
     }
 
-    private void initializeWithLeftBound(long root, ByteSource startStream, boolean admitPrefix, boolean atLimit)
+    private void initializeWithLeftBound(long root, ByteSource start, LeftBoundTreatment admitPrefix, boolean atLimit)
     {
-        IterationPosition prev = null;
-        int childIndex;
-        int limitByte;
-        long payloadedNode = -1;
-
         try
         {
-            // Follow start position while we still have a prefix, stacking path and saving prefixes.
-            go(root);
-            while (true)
-            {
-                int s = startStream.next();
-                childIndex = search(s);
-
-                // For a separator trie the latest payload met along the prefix is a potential match for start
-                if (admitPrefix)
-                {
-                    if (childIndex == 0 || childIndex == -1)
-                    {
-                        if (hasPayload())
-                            payloadedNode = position;
-                    }
-                    else
-                    {
-                        payloadedNode = -1;
-                    }
-                }
-
-                limitByte = 256;
-                if (atLimit)
-                {
-                    limitByte = limit.next();
-                    if (s < limitByte)
-                        atLimit = false;
-                }
-                if (childIndex < 0)
-                    break;
-
-                prev = new IterationPosition(position, childIndex, limitByte, prev);
-                go(transition(childIndex)); // child index is positive, transition must exist
-            }
-
-            childIndex = -1 - childIndex - 1;
-            stack = new IterationPosition(position, childIndex, limitByte, prev);
-
-            // Advancing now gives us first match if we didn't find one already.
-            if (payloadedNode != -1)
-                next = payloadedNode;
-            else
-                next = advanceNode();
+            descendWith(start.next(), start, atLimit ? limit.next() : 256, null, root, admitPrefix);
         }
         catch (Throwable t)
         {
@@ -183,31 +146,169 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
     }
 
     /**
-     * Returns the payload node position without advancing.
-     */
-    protected long peekNode()
-    {
-        return next;
-    }
-
-    /**
      * Returns the position of the next node with payload contained in the iterated span.
      */
     protected long nextPayloadedNode()
     {
         long toReturn = next;
-        if (next != -1)
+        if (next != NONE)
             next = advanceNode();
         return toReturn;
     }
 
-    protected ByteComparable nextCollectedValue()
+    protected boolean hasNext()
+    {
+        return next != NONE;
+    }
+
+    protected <VALUE> VALUE nextValue(Supplier<VALUE> supplier)
+    {
+        if (next == NONE)
+            return null;
+        go(next);
+        VALUE result = supplier.get();
+        next = advanceNode();
+        return result;
+    }
+
+    protected long nextValueAsLong(LongSupplier supplier, long valueIfNone)
+    {
+        if (next == NONE)
+            return valueIfNone;
+        go(next);
+        long result = supplier.getAsLong();
+        next = advanceNode();
+        return result;
+    }
+
+    protected ByteComparable collectedKey()
     {
         assert collector != null : "Cannot get a collected value from a non-collecting iterator";
         return collector.toByteComparable();
     }
 
-    private long advanceNode()
+    /**
+     * Skip to the given key or the closest after it in iteration order. Inclusive when admitPrefix = ADMIT_EXACT,
+     * exclusive when GREATER (ADMIT_PREFIXES is not supported).
+     * Requires that the iterator is collecting bytes.
+     * To get the next entry, use getNextPayloadedNode as normal.
+     */
+    protected void skipTo(ByteComparable skipTo, LeftBoundTreatment admitPrefix)
+    {
+        assert skipTo != null;
+        assert collector != null : "Cannot skip without collecting bytes";
+        // TODO: Figure out what you need to know to say if an earlier prefix would still be acceptable
+        // to support skipping with ADMIT_PREFIXES.
+        assert admitPrefix != LeftBoundTreatment.ADMIT_PREFIXES : "Skipping with ADMIT_PREFIXES is not supported";
+        if (stack == null)
+            return; // exhausted whole trie
+        ByteSource skipToBytes = skipTo.asComparableBytes(BYTE_COMPARABLE_VERSION);
+        int pos;
+        int nextByte = skipToBytes.next();
+        final int collectedLength = collector.pos;
+        final byte[] collectedBytes = collector.bytes;
+        for (pos = 0; pos < collectedLength; ++pos)
+        {
+            if (nextByte != collectedBytes[pos])
+            {
+                if (nextByte < collectedBytes[pos])
+                    return;    // the position we are already advanced to is beyond skipTo
+                else
+                    break;     // matched a prefix of skipTo, now we need to advance through the rest of it
+            }
+            nextByte = skipToBytes.next();
+        }
+        int upLevels = collectedLength - pos;
+        IterationPosition stack = this.stack;
+        for (int i = 0; i < upLevels; ++i)
+            stack = stack.prev;
+        collector.pos = pos;
+
+        descendWith(nextByte, skipToBytes, stack.limit, stack.prev, stack.node, admitPrefix);
+    }
+
+    private void descendWith(int skipToFirstByte, ByteSource skipToRest, int limitByte, IterationPosition stackPrev, long startNode, LeftBoundTreatment admitPrefix)
+    {
+        int childIndex;
+        long payloadedNode = NONE;
+        // Follow start position while we still have a prefix, stacking path and saving prefixes.
+        go(startNode);
+        while (true)
+        {
+            childIndex = search(skipToFirstByte);
+
+            // For a separator trie the latest payload met along the prefix is a potential match for start
+            payloadedNode = maybeCollectPayloadedNode(admitPrefix, childIndex, payloadedNode);
+
+            if (childIndex < 0)
+                break;
+
+            stackPrev = new IterationPosition(position, childIndex, limitByte, stackPrev);
+            if (collector != null)
+                collector.add(skipToFirstByte);
+            go(transition(childIndex)); // child index is positive, transition must exist
+
+            if (limitByte < 256)
+            {
+                if (skipToFirstByte == limitByte)
+                    limitByte = limit.next();
+                else if (skipToFirstByte < limitByte)
+                    limitByte = 256;
+                else // went beyond the limit
+                {
+                    stack = null;
+                    next = NONE;
+                    return;
+                }
+            }
+            skipToFirstByte = skipToRest.next();
+        }
+
+        childIndex = -1 - childIndex - 1;
+        stack = new IterationPosition(position, childIndex, limitByte, stackPrev);
+
+        // Advancing now gives us first match if we didn't find one already.
+        payloadedNode = maybeAcceptPayloadedNode(admitPrefix, skipToFirstByte, payloadedNode);
+        if (payloadedNode != NONE)
+            next = payloadedNode;
+        else
+            next = advanceNode();
+    }
+
+    private long maybeAcceptPayloadedNode(LeftBoundTreatment admitPrefix, int trailingByte, long payloadedNode)
+    {
+        switch (admitPrefix)
+        {
+            case ADMIT_PREFIXES:
+                return payloadedNode;
+            case ADMIT_EXACT:
+                if (trailingByte == ByteSource.END_OF_STREAM && hasPayload())
+                    return position;
+                // else fall through
+            case GREATER:
+            default:
+                return NONE;
+        }
+    }
+
+    private long maybeCollectPayloadedNode(LeftBoundTreatment admitPrefix, int childIndex, long payloadedNode)
+    {
+        if (admitPrefix == LeftBoundTreatment.ADMIT_PREFIXES)
+        {
+            if (childIndex == 0 || childIndex == -1)
+            {
+                if (hasPayload())
+                    payloadedNode = position;
+            }
+            else
+            {
+                payloadedNode = NONE;
+            }
+        }
+        return payloadedNode;
+    }
+
+    protected long advanceNode()
     {
         long child;
         int transitionByte;
@@ -225,7 +326,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
                 if (collector != null)
                     collector.pop();
                 if (stack == null)        // exhausted whole trie
-                    return -1;
+                    return NONE;
                 go(stack.node);
                 continue;
             }
