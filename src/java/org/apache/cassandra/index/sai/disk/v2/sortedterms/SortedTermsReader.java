@@ -69,7 +69,6 @@ import static org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWrit
 @ThreadSafe
 public class SortedTermsReader
 {
-    private static final long NOT_FOUND = -1;
     private final FileHandle termsData;
     private final SortedTermsMeta meta;
     private final FileHandle termsTrie;
@@ -163,11 +162,22 @@ public class SortedTermsReader
          * @param term
          * @return
          */
+        public long nextAfter(@Nonnull ByteComparable term)
+        {
+            Preconditions.checkNotNull(term, "term null");
+            return reader.nextAfter(term);
+        }
+
+        /**
+         * Returns the point id (ordinal) associated with the least term greater than or equal to the given term, or
+         * a negative value if there is no such term.
+         * @param term
+         * @return
+         */
         public long ceiling(@Nonnull ByteComparable term)
         {
             Preconditions.checkNotNull(term, "term null");
-            long result = reader.ceiling(term);
-            return result < 0 ? NOT_FOUND : result;
+            return reader.ceiling(term);
         }
 
         /**
@@ -179,8 +189,7 @@ public class SortedTermsReader
         public long getExactPointId(@Nonnull ByteComparable term)
         {
             Preconditions.checkNotNull(term, "term null");
-            long result = reader.exactMatch(term);
-            return result < 0 ? NOT_FOUND : result;
+            return reader.exactMatch(term);
         }
 
         /**
@@ -193,8 +202,7 @@ public class SortedTermsReader
         public long floor(@Nonnull ByteComparable term)
         {
             Preconditions.checkNotNull(term, "term null");
-            long result = reader.floor(term);
-            return result < 0 ? NOT_FOUND : result;
+            return reader.floor(term);
         }
 
         /**
