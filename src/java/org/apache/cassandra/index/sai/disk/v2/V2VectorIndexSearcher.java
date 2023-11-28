@@ -29,6 +29,9 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.SlidingWindowReservoir;
+import com.codahale.metrics.Snapshot;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.pq.BinaryQuantization;
 import io.github.jbellis.jvector.util.Bits;
@@ -55,6 +58,8 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.metrics.ClearableHistogram;
+import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.lang.Math.ceil;
@@ -359,8 +364,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var ordinalsView = graph.getOrdinalsView())
         {
-            int comparisonsSavedByBsearch = 0;
-            int keysEvaluated = 0;
+            var comparisonsSavedByBsearch = new Histogram(new SlidingWindowReservoir(10));
             boolean preferSeqScanToBsearch = false;
             for (int i = 0; i < keysInRange.size(); i++)
             {
@@ -388,7 +392,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                             if (nextPrimaryKey.compareTo(ceilingPrimaryKey) >= 0)
                                 break;
                         }
-                        comparisonsSavedByBsearch += j - ceil(logBase2(keysInRange.size() - i));
+                        comparisonsSavedByBsearch.update(j - (int) ceil(logBase2(keysInRange.size() - i)));
                         i += j - 1; // -1 because loop will increment next
                     }
                     else
@@ -400,11 +404,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                             // We got: -(insertion point) - 1. Invert it so we get the insertion point.
                             nextIndexForCeiling = -nextIndexForCeiling - 1;
 
-                        comparisonsSavedByBsearch += nextIndexForCeiling - (int) ceil(logBase2(keysRemaining.size()));
-                        keysEvaluated++;
+                        comparisonsSavedByBsearch.update(nextIndexForCeiling - (int) ceil(logBase2(keysRemaining.size())));
                         i += nextIndexForCeiling - 1; // -1 because loop will increment next
                     }
-                    preferSeqScanToBsearch = keysEvaluated > 10 && comparisonsSavedByBsearch < 0;
+                    var snapshot = comparisonsSavedByBsearch.getSnapshot();
+                    preferSeqScanToBsearch = comparisonsSavedByBsearch.getCount() >= 10 && snapshot.getMean() < 0;
 
                     continue;
                 }
