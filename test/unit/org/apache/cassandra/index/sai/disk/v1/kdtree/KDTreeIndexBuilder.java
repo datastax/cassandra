@@ -92,6 +92,12 @@ public class KDTreeIndexBuilder
         }
 
         @Override
+        public long nextAfter(PrimaryKey key)
+        {
+            return key.token().getLongValue();
+        }
+
+        @Override
         public long ceiling(PrimaryKey key)
         {
             return key.token().getLongValue();
