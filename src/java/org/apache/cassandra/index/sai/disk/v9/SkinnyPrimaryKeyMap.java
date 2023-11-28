@@ -59,9 +59,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
  * This uses the following on-disk structures:
  * <ul>
  *     <li>A block-packed structure for rowId to token lookups using {@link BlockPackedReader}.
- *     Uses the {@link IndexComponentType#TOKEN_VALUES} component.</li>
+ *     Uses the {@link IndexComponentType#ROW_TO_TOKEN} component.</li>
  *     <li>A monotonic block packed structure for rowId to partitionId lookups using {@link MonotonicBlockPackedReader}.
- *     Uses the {@link IndexComponentType#PARTITION_SIZES} component.</li>
+ *     Uses the {@link IndexComponentType#ROW_TO_PARTITION} component.</li>
  *     <li>A key store for rowId to {@link PrimaryKey} and {@link PrimaryKey} to rowId lookups using
  *     {@link KeyLookup}. Uses the {@link IndexComponentType#PARTITION_KEY_BLOCKS} and
  *     {@link IndexComponentType#PARTITION_KEY_BLOCK_OFFSETS} components.</li>
@@ -81,14 +81,14 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         protected final boolean hasStaticColumns;
 
         protected final MetadataSource metadataSource;
-        protected final LongArray.Factory tokenReaderFactory;
-        protected final LongArray.Factory partitionReaderFactory;
+        protected final LongArray.Factory rowToTokenReaderFactory;
+        protected final LongArray.Factory rowToPartitionReaderFactory;
         protected final KeyLookup partitionKeyReader;
         protected final IPartitioner partitioner;
         protected final OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory;
 
-        private FileHandle tokensFile = null;
-        private FileHandle partitionsFile = null;
+        private FileHandle rowToTokenFile = null;
+        private FileHandle rowToPartitionFile = null;
         private FileHandle partitionKeyBlockOffsetsFile = null;
         private FileHandle partitionKeyBlocksFile = null;
 
@@ -99,13 +99,13 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
                 this.perSSTableComponents = perSSTableComponents;
                 metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
 
-                NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.TOKEN_VALUES)));
-                this.tokensFile = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES).createFileHandle();
-                this.tokenReaderFactory = new BlockPackedReader(tokensFile, tokensMeta);
+                NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.ROW_TO_TOKEN)));
+                this.rowToTokenFile = perSSTableComponents.get(IndexComponentType.ROW_TO_TOKEN).createFileHandle();
+                this.rowToTokenReaderFactory = new BlockPackedReader(rowToTokenFile, tokensMeta);
 
-                NumericValuesMeta partitionsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PARTITION_SIZES)));
-                this.partitionsFile = perSSTableComponents.get(IndexComponentType.PARTITION_SIZES).createFileHandle();
-                this.partitionReaderFactory = new MonotonicBlockPackedReader(partitionsFile, partitionsMeta);
+                NumericValuesMeta partitionsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.ROW_TO_PARTITION)));
+                this.rowToPartitionFile = perSSTableComponents.get(IndexComponentType.ROW_TO_PARTITION).createFileHandle();
+                this.rowToPartitionReaderFactory = new MonotonicBlockPackedReader(rowToPartitionFile, partitionsMeta);
 
                 NumericValuesMeta partitionKeyBlockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS)));
                 KeyLookupMeta partitionKeysMeta = new KeyLookupMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PARTITION_KEY_BLOCKS)));
@@ -120,7 +120,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
             }
             catch (Throwable t)
             {
-                throw Throwables.unchecked(Throwables.close(t, tokensFile, partitionsFile, partitionKeyBlocksFile, partitionKeyBlockOffsetsFile));
+                throw Throwables.unchecked(Throwables.close(t, rowToTokenFile, rowToPartitionFile, partitionKeyBlocksFile, partitionKeyBlockOffsetsFile));
             }
         }
 
@@ -128,8 +128,8 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         @SuppressWarnings({ "resource", "RedundantSuppression" })
         public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
         {
-            LongArray rowIdToToken = new LongArray.DeferredLongArray(tokenReaderFactory::open);
-            LongArray rowIdToPartitionId = new LongArray.DeferredLongArray(partitionReaderFactory::open);
+            LongArray rowIdToToken = new LongArray.DeferredLongArray(rowToTokenReaderFactory::open);
+            LongArray rowIdToPartitionId = new LongArray.DeferredLongArray(rowToPartitionReaderFactory::open);
             try
             {
                 return new SkinnyPrimaryKeyMap(rowIdToToken,
@@ -149,28 +149,28 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         @Override
         public void close()
         {
-            FileUtils.closeQuietly(Arrays.asList(tokensFile, partitionsFile, partitionKeyBlocksFile, partitionKeyBlockOffsetsFile));
+            FileUtils.closeQuietly(Arrays.asList(rowToTokenFile, rowToPartitionFile, partitionKeyBlocksFile, partitionKeyBlockOffsetsFile));
         }
     }
 
-    protected final LongArray tokenArray;
-    protected final LongArray partitionArray;
+    protected final LongArray rowIdToTokenArray;
+    protected final LongArray rowIdToPartitionIdArray;
     protected final KeyLookup.Cursor partitionKeyCursor;
     protected final IPartitioner partitioner;
     protected final OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory;
     protected final SSTableId<?> sstableId;
     private final boolean hasStaticColumns;
 
-    protected SkinnyPrimaryKeyMap(LongArray tokenArray,
-                                  LongArray partitionArray,
+    protected SkinnyPrimaryKeyMap(LongArray rowIdToTokenArray,
+                                  LongArray rowIdToPartitionIdArray,
                                   KeyLookup.Cursor partitionKeyCursor,
                                   IPartitioner partitioner,
                                   OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
                                   SSTableId<?> sstableId,
                                   boolean hasStaticColumns)
     {
-        this.tokenArray = tokenArray;
-        this.partitionArray = partitionArray;
+        this.rowIdToTokenArray = rowIdToTokenArray;
+        this.rowIdToPartitionIdArray = rowIdToPartitionIdArray;
         this.partitionKeyCursor = partitionKeyCursor;
         this.partitioner = partitioner;
         this.primaryKeyFactory = primaryKeyFactory;
@@ -187,13 +187,13 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
     @Override
     public long count()
     {
-        return tokenArray.length();
+        return rowIdToTokenArray.length();
     }
 
     @Override
     public PrimaryKey primaryKeyFromRowId(long sstableRowId)
     {
-        long token = tokenArray.get(sstableRowId);
+        long token = rowIdToTokenArray.get(sstableRowId);
         return primaryKeyFactory.createDeferred(partitioner.getTokenFactory().fromLongValue(token), () -> supplier(sstableRowId));
     }
 
@@ -233,25 +233,25 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
     @Override
     public long exactRowIdOrInvertedCeiling(PrimaryKey key)
     {
-        return lookupRowId(key, tokenArray::indexOf, this::tokenCeilingCollisionDetection);
+        return lookupRowId(key, rowIdToTokenArray::indexOf, this::tokenCeilingCollisionDetection);
     }
 
     @Override
     public long ceiling(PrimaryKey key)
     {
-        return lookupRowId(key, tokenArray::ceilingRowId, this::tokenCeilingCollisionDetection);
+        return lookupRowId(key, rowIdToTokenArray::ceilingRowId, this::tokenCeilingCollisionDetection);
     }
 
     @Override
     public long floor(PrimaryKey key)
     {
-        return lookupRowId(key, tokenArray::floorRowId, this::tokenFloorCollisionDetection);
+        return lookupRowId(key, rowIdToTokenArray::floorRowId, this::tokenFloorCollisionDetection);
     }
 
     @Override
     public void close()
     {
-        FileUtils.closeQuietly(Arrays.asList(partitionKeyCursor, tokenArray, partitionArray));
+        FileUtils.closeQuietly(Arrays.asList(partitionKeyCursor, rowIdToTokenArray, rowIdToPartitionIdArray));
     }
 
     /**
@@ -272,7 +272,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
         long nextRowId = rowId + direction;
 
         // Look for collisions while we haven't reached the boundaries and tokens match
-        while (nextRowId >= 0 && nextRowId < tokenArray.length() && tokenValue == tokenArray.get(nextRowId))
+        while (nextRowId >= 0 && nextRowId < rowIdToTokenArray.length() && tokenValue == rowIdToTokenArray.get(nextRowId))
         {
             // For ceiling: check if the partition key at current rowId is >= lookup key
             // For floor: check if the partition key at current rowId is <= lookup key
@@ -304,7 +304,7 @@ public class SkinnyPrimaryKeyMap implements PrimaryKeyMap
 
     protected DecoratedKey readPartitionKey(long sstableRowId)
     {
-        long partitionId = partitionArray.get(sstableRowId);
+        long partitionId = rowIdToPartitionIdArray.get(sstableRowId);
         ByteSource.Peekable peekable = ByteSource.peekable(partitionKeyCursor.seekToPointId(partitionId).asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
 
         byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(peekable);

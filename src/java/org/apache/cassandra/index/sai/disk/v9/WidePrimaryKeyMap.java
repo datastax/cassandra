@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
+import org.apache.cassandra.index.sai.disk.v1.bitpack.BlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.disk.v2.PrimaryKeyWithSource;
 import org.apache.cassandra.index.sai.disk.v9.keystore.KeyLookup;
@@ -51,6 +52,8 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * <p>
  * This used the following additional on-disk structures to the {@link SkinnyPrimaryKeyMap}
  * <ul>
+ *     <li>A block-packed structure for partitionId to partition size (number of rows in the partition) lookups using
+ *     {@link BlockPackedReader}. Uses the {@link IndexComponentType#PARTITION_TO_SIZE} component</li>
  *     <li>A key store for rowId to {@link Clustering} and {@link Clustering} to rowId lookups using
  *     {@link KeyLookup}. Uses the {@link org.apache.cassandra.index.sai.disk.format.IndexComponentType#CLUSTERING_KEY_BLOCKS} and
  *     {@link org.apache.cassandra.index.sai.disk.format.IndexComponentType#CLUSTERING_KEY_BLOCK_OFFSETS} components</li>
@@ -67,8 +70,10 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         private final IndexComponents.ForRead perSSTableComponents;
         private final ClusteringComparator clusteringComparator;
         private final KeyLookup clusteringKeyReader;
+        private final LongArray.Factory partitionToSizeReaderFactory;
         private FileHandle clusteringKeyBlockOffsetsFile = null;
         private FileHandle clustingingKeyBlocksFile = null;
+        private FileHandle partitionToSizeFile = null;
 
         public Factory(IndexComponents.ForRead perSSTableComponents,
                        OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
@@ -82,6 +87,11 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
                 this.clusteringKeyBlockOffsetsFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS).createFileHandle();
                 this.clustingingKeyBlocksFile = perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS).createFileHandle();
                 this.clusteringComparator = sstable.metadata().comparator;
+
+                NumericValuesMeta partitionSizeMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PARTITION_TO_SIZE)));
+                this.partitionToSizeFile = perSSTableComponents.get(IndexComponentType.PARTITION_TO_SIZE).createFileHandle();
+                this.partitionToSizeReaderFactory = new BlockPackedReader(partitionToSizeFile, partitionSizeMeta);
+
                 NumericValuesMeta clusteringKeyBlockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS)));
                 KeyLookupMeta clusteringKeyMeta = new KeyLookupMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.CLUSTERING_KEY_BLOCKS)));
                 this.clusteringKeyReader = new KeyLookup(clustingingKeyBlocksFile, clusteringKeyBlockOffsetsFile,
@@ -97,13 +107,22 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         @SuppressWarnings({ "resource", "RedundantSuppression" })
         public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
         {
-            LongArray rowIdToToken = new LongArray.DeferredLongArray(tokenReaderFactory::open);
-            LongArray partitionIdToToken = new LongArray.DeferredLongArray(partitionReaderFactory::open);
+            LongArray rowIdToToken = new LongArray.DeferredLongArray(rowToTokenReaderFactory::open);
+            LongArray partitionIdToToken = new LongArray.DeferredLongArray(rowToPartitionReaderFactory::open);
+            LongArray partitionIdToSize = new LongArray.DeferredLongArray(partitionToSizeReaderFactory::open);
+
             try
             {
 
-                return new WidePrimaryKeyMap(rowIdToToken, partitionIdToToken, partitionKeyReader.openCursor(),
-                                             clusteringKeyReader.openCursor(), partitioner, primaryKeyFactory, clusteringComparator, sstableId,
+                return new WidePrimaryKeyMap(rowIdToToken,
+                                             partitionIdToToken,
+                                             partitionIdToSize,
+                                             partitionKeyReader.openCursor(),
+                                             clusteringKeyReader.openCursor(),
+                                             partitioner,
+                                             primaryKeyFactory,
+                                             clusteringComparator,
+                                             sstableId,
                                              hasStaticColumns);
             }
             catch (IOException e)
@@ -116,21 +135,25 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         public void close()
         {
             super.close();
-            FileUtils.closeQuietly(Arrays.asList(clustingingKeyBlocksFile, clusteringKeyBlockOffsetsFile));
+            FileUtils.closeQuietly(Arrays.asList(clustingingKeyBlocksFile, clusteringKeyBlockOffsetsFile, partitionToSizeFile));
         }
     }
 
+    private final LongArray partitionIdToSizeArray;
     private final ClusteringComparator clusteringComparator;
     private final KeyLookup.Cursor clusteringKeyCursor;
 
-    private WidePrimaryKeyMap(LongArray tokenArray,
-                              LongArray partitionArray, KeyLookup.Cursor partitionKeyCursor,
+    private WidePrimaryKeyMap(LongArray rowIdToTokenArray,
+                              LongArray rowIdToPartitionIdArray,
+                              LongArray partitionIdToSizeArray,
+                              KeyLookup.Cursor partitionKeyCursor,
                               KeyLookup.Cursor clusteringKeyCursor, IPartitioner partitioner, OptimizedRowAwarePrimaryKeyFactory primaryKeyFactory,
                               ClusteringComparator clusteringComparator, SSTableId<?> sstableId, boolean hasStaticColumns)
     {
-        super(tokenArray, partitionArray, partitionKeyCursor, partitioner, primaryKeyFactory,
+        super(rowIdToTokenArray, rowIdToPartitionIdArray, partitionKeyCursor, partitioner, primaryKeyFactory,
               sstableId, hasStaticColumns);
 
+        this.partitionIdToSizeArray = partitionIdToSizeArray;
         this.clusteringComparator = clusteringComparator;
         this.clusteringKeyCursor = clusteringKeyCursor;
     }
@@ -154,11 +177,11 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         }
 
         // Find the partition using the token array for initial lookup
-        long rowId = tokenArray.indexOf(key.token().getLongValue());
+        long rowId = rowIdToTokenArray.indexOf(key.token().getLongValue());
         if (key.isTokenOnly() || rowId < 0)
             return rowId;
         // If we have skipped a token (shouldn't happen with indexOf, but check for safety)
-        if (tokenArray.get(rowId) != key.token().getLongValue())
+        if (rowIdToTokenArray.get(rowId) != key.token().getLongValue())
             return rowId;
 
         // Handle token collisions by comparing partition keys using partitionKeyCursor
@@ -173,14 +196,9 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
         // clusteredSeekToKey returns the ceiling (next greater or equal key) or -1 if not found
         if (clusteringRowId < 0)
             return Long.MIN_VALUE;
-        assert clusteringRowId < tokenArray.length() : "Row ID should be negative and not after the last row";
+        assert clusteringRowId < rowIdToTokenArray.length() : "Row ID should be negative and not after the last row";
 
         Clustering<?> foundClustering = readClusteringKey(clusteringRowId);
-        // STATIC CLUSTERING should return only one row representing the entire partition.
-        // Thus, it returns the last row to avoid emitting more rows from the static partition.
-        if (foundClustering.isEmpty())
-            return startOfNextPartition(rowId) - 1;
-
         // Check if this is an exact match by comparing the clustering key
         int cmp = clusteringComparator.compare(foundClustering, key.clustering());
         if (cmp == 0)
@@ -245,15 +263,15 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
             // Floor reverts to return the first row in the partition instead.
             if (readClusteringKey(rowId).isEmpty())
             {
-                long partitionId = partitionArray.get(rowId);
-                return partitionArray.ceilingRowId(partitionId);
+                long partitionId = rowIdToPartitionIdArray.get(rowId);
+                return rowIdToPartitionIdArray.ceilingRowId(partitionId);
             }
 
             return rowId;
         }
 
         if (rowId == Long.MIN_VALUE)
-            return tokenArray.length() - 1;
+            return rowIdToTokenArray.length() - 1;
 
         // rowId is -(ceiling) - 1. The floor is the row immediately before the ceiling.
         return -rowId - 2;
@@ -263,7 +281,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
     public void close()
     {
         super.close();
-        FileUtils.closeQuietly(clusteringKeyCursor);
+        FileUtils.closeQuietly(clusteringKeyCursor, partitionIdToSizeArray);
     }
 
     @Override
@@ -288,10 +306,7 @@ public class WidePrimaryKeyMap extends SkinnyPrimaryKeyMap
     // Returns the rowId of the next partition or the number of rows if supplied rowId is in the last partition
     private long startOfNextPartition(long rowId)
     {
-        long partitionId = partitionArray.get(rowId);
-        long nextPartitionRowId = partitionArray.ceilingRowId(++partitionId);
-        if (nextPartitionRowId == -1)
-            nextPartitionRowId = partitionArray.length();
-        return nextPartitionRowId;
+        long partitionSize = partitionIdToSizeArray.get(rowIdToPartitionIdArray.get(rowId));
+        return partitionSize == -1 ? rowIdToPartitionIdArray.length() : rowId + partitionSize;
     }
 }

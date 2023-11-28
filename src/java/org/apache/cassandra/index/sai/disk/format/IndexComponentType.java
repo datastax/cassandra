@@ -119,11 +119,26 @@ public enum IndexComponentType
     DOC_LENGTHS("DocLengths"),
 
     /**
-     * An on-disk block-packed index containing the starting and ending rowIds for each partition.
+     * An on-disk block packed index mapping rowIds to token values.
      * <p>
      * V9
      */
-    PARTITION_SIZES("PartitionSizes"),
+    ROW_TO_TOKEN("RowToToken"),
+
+    /**
+     * An on-disk block packed index mapping rowIds to partitionIds.
+     * <p>
+     * V9
+     */
+    ROW_TO_PARTITION("RowToPartition"),
+
+    /**
+     * An on-disk block packed index mapping partitionIds to the number of rows for the partition.
+     * <p>
+     * V9
+     */
+    PARTITION_TO_SIZE("PartitionToSize"),
+
     /**
      * Prefix-compressed blocks of partition keys used for rowId to partition key lookups
      * <p>
