@@ -422,10 +422,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
                 // convert the global row id to segment row id and from segment row id to graph ordinal
                 int segmentRowId = metadata.toSegmentRowId(sstableRowId);
-                rowIds.add(segmentRowId);
                 int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
                 if (ordinal >= 0)
+                {
+                    rowIds.add(segmentRowId);
                     bits.set(ordinal);
+                }
             }
         }
 

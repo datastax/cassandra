@@ -114,7 +114,7 @@ public class MergePostingList implements PostingList
         // we can use it for the fast path
         long nextRowId = PostingList.END_OF_STREAM;
         PostingList nextPostingList = null;
-        for (int i = 0; i < postingLists.size(); )
+        for (int i = postingLists.size() - 1; i >= 0; i--) // index backwards to simplify the remove() case
         {
             var peekable = postingLists.get(i);
             long peeked = peekable.advanceWithoutConsuming(targetRowID);
@@ -123,11 +123,9 @@ public class MergePostingList implements PostingList
             if (peeked == PostingList.END_OF_STREAM)
             {
                 postingLists.remove(i);
-                // Do not increment i, because the next element has shifted to the current position
                 continue;
             }
 
-            i++;
             if (lastRowId <= peeked && peeked < nextRowId) {
                 nextRowId = peeked;
                 nextPostingList = peekable;
