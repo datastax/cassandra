@@ -20,13 +20,13 @@ package org.apache.cassandra.io.tries;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.PageAware;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.Rebufferer.BufferHolder;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.lucene.util.ArrayUtil;
@@ -44,9 +44,9 @@ import org.apache.lucene.util.ArrayUtil;
 public class Walker<CONCRETE extends Walker<CONCRETE>> implements AutoCloseable
 {
     /** Value used to indicate a branch (e.g. lesser/greaterBranch) does not exist. */
-    public static int NONE = TrieNode.NONE;
+    public static int NONE = -1;
 
-    private final Rebufferer source;
+    protected final Rebufferer source;
     protected final long root;
 
     // State relating to current node.
@@ -464,7 +464,7 @@ public class Walker<CONCRETE extends Walker<CONCRETE>> implements AutoCloseable
         @Override
         public String toString()
         {
-            return String.format("[Bytes %s, pos %d]", Arrays.toString(bytes), pos);
+            return ByteBufferUtil.bytesToHex(ByteBuffer.wrap(bytes, 0, pos));
         }
     }
 }
