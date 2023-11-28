@@ -369,7 +369,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             for (int i = 0; i < keysInRange.size(); i++)
             {
                 var primaryKey = keysInRange.get(i);
-                long sstableRowId = primaryKeyMap.exactRowIdOrCeiling(primaryKey);
+                long sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
 
                 // The current primary key is not in this sstable. Use ceiling to search for the row id
                 // of the next closest primary key in this sstable and skip to that primary key.

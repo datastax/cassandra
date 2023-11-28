@@ -76,7 +76,7 @@ public interface PrimaryKeyMap extends Closeable
      * @param key the {@link PrimaryKey} to lookup
      * @return the row Id associated with the {@link PrimaryKey}
      */
-    long exactRowIdOrCeiling(PrimaryKey key);
+    long exactRowIdOrInvertedCeiling(PrimaryKey key);
 
     /**
      * Returns the sstable row id associated with the least {@link PrimaryKey} greater than or equal to the given

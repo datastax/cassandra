@@ -144,7 +144,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     @Override
-    public long exactRowIdOrCeiling(PrimaryKey key)
+    public long exactRowIdOrInvertedCeiling(PrimaryKey key)
     {
         return rowIdToToken.exactRowId(key.token().getLongValue());
     }

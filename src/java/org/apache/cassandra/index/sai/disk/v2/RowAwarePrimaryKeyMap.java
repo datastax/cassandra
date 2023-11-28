@@ -180,7 +180,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     @Override
-    public long exactRowIdOrCeiling(PrimaryKey key)
+    public long exactRowIdOrInvertedCeiling(PrimaryKey key)
     {
         if (clusteringComparator.size() == 0)
         {
@@ -192,7 +192,12 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             return rowIdToToken.exactRowId(key.token().getLongValue());
         }
 
-        return cursor.ceiling(v -> key.asComparableBytesMinPrefix(v));
+        long pointId = cursor.getExactPointId(v -> key.asComparableBytes(v));
+        if (pointId >= 0)
+            return pointId;
+        long ceiling = cursor.ceiling(v -> key.asComparableBytesMinPrefix(v));
+        // Use min value since -(Long.MIN_VALUE) - 1 == Long.MAX_VALUE.
+        return ceiling < 0 ? Long.MIN_VALUE : -ceiling - 1;
     }
 
     @Override
