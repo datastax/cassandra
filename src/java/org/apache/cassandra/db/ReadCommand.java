@@ -407,8 +407,8 @@ public abstract class ReadCommand extends AbstractReadQuery
         try
         {
             iterator = withStateTracking(iterator);
-            iterator = RTBoundValidator.validate(withoutPurgeableTombstones(iterator, cfs, executionController), Stage.PURGED, false);
             iterator = withReadObserver(iterator);
+            iterator = RTBoundValidator.validate(withoutPurgeableTombstones(iterator, cfs, executionController), Stage.PURGED, false);
             iterator = withMetricsRecording(iterator, cfs.metric, startTimeNanos);
 
             // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
@@ -466,7 +466,7 @@ public abstract class ReadCommand extends AbstractReadQuery
             protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
             {
                 observer.onPartition(partition.partitionKey(), partition.partitionLevelDeletion());
-                return partition;
+                return Transformation.apply(partition, this);
             }
 
             @Override
