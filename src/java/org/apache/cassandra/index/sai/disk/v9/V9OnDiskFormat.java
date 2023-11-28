@@ -49,21 +49,21 @@ public class V9OnDiskFormat extends V8OnDiskFormat
 
     @VisibleForTesting
     protected static final Set<IndexComponentType> SKINNY_PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
-                                                                                           IndexComponentType.GROUP_META,
-                                                                                           IndexComponentType.TOKEN_VALUES,
-                                                                                           IndexComponentType.PARTITION_SIZES,
-                                                                                           IndexComponentType.PARTITION_KEY_BLOCKS,
-                                                                                           IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS);
+                                                                                              IndexComponentType.GROUP_META,
+                                                                                              IndexComponentType.ROW_TO_TOKEN,
+                                                                                              IndexComponentType.ROW_TO_PARTITION,
+                                                                                              IndexComponentType.PARTITION_KEY_BLOCKS,
+                                                                                              IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS);
 
     @VisibleForTesting
     protected static final Set<IndexComponentType> WIDE_PER_SSTABLE_COMPONENTS = EnumSet.of(IndexComponentType.GROUP_COMPLETION_MARKER,
-                                                                                         IndexComponentType.GROUP_META,
-                                                                                         IndexComponentType.TOKEN_VALUES,
-                                                                                         IndexComponentType.PARTITION_SIZES,
-                                                                                         IndexComponentType.PARTITION_KEY_BLOCKS,
-                                                                                         IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS,
-                                                                                         IndexComponentType.CLUSTERING_KEY_BLOCKS,
-                                                                                         IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS);
+                                                                                            IndexComponentType.GROUP_META,
+                                                                                            IndexComponentType.ROW_TO_TOKEN,
+                                                                                            IndexComponentType.ROW_TO_PARTITION,
+                                                                                            IndexComponentType.PARTITION_KEY_BLOCKS,
+                                                                                            IndexComponentType.PARTITION_KEY_BLOCK_OFFSETS,
+                                                                                            IndexComponentType.CLUSTERING_KEY_BLOCKS,
+                                                                                            IndexComponentType.CLUSTERING_KEY_BLOCK_OFFSETS);
 
     public static final V9OnDiskFormat instance = new V9OnDiskFormat();
 
@@ -113,8 +113,8 @@ public class V9OnDiskFormat extends V8OnDiskFormat
         {
             case META:
             case GROUP_META:
-            case TOKEN_VALUES:
-            case PARTITION_SIZES:
+            case ROW_TO_TOKEN:
+            case ROW_TO_PARTITION:
             case PARTITION_KEY_BLOCKS:
             case CLUSTERING_KEY_BLOCKS:
             case PARTITION_KEY_BLOCK_OFFSETS:
