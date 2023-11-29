@@ -93,7 +93,7 @@ public class KDTreeIndexBuilder
         }
 
         @Override
-        public long nextAfter(PrimaryKey key)
+        public long exactRowIdOrInvertedCeiling(PrimaryKey key)
         {
             return key.token().getLongValue();
         }
