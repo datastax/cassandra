@@ -90,6 +90,9 @@ public class PostingListRangeIterator extends RangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
+        // If skipToToken is equal to nextKey, we take the nextKey because in practice, it is greater than or equal
+        // to the skipToToken. This is because token only PKs are considered equal to all PKs with the same token,
+        // and for a range query, we first skip on the token-only PK.
         if (skipToToken != null && skipToToken.compareTo(nextKey) > 0)
             return;
 
