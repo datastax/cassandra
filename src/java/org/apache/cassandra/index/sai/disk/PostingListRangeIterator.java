@@ -159,7 +159,6 @@ public class PostingListRangeIterator extends RangeIterator
         long segmentRowId;
         if (needsSkipping)
         {
-            needsSkipping = false;
             long targetRowID;
             if (skipToToken instanceof PrimaryKeyWithSource
                 && ((PrimaryKeyWithSource) skipToToken).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
@@ -175,7 +174,9 @@ public class PostingListRangeIterator extends RangeIterator
                     return PostingList.END_OF_STREAM;
                 }
             }
+
             segmentRowId = postingList.advance(targetRowID - searcherContext.segmentRowIdOffset);
+            needsSkipping = false;
         }
         else
         {
