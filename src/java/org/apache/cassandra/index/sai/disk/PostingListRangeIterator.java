@@ -90,7 +90,7 @@ public class PostingListRangeIterator extends RangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        if (skipToToken != null && skipToToken.compareTo(nextKey) >= 0)
+        if (skipToToken != null && skipToToken.compareTo(nextKey) > 0)
             return;
 
         skipToToken = nextKey;
