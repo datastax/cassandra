@@ -389,7 +389,7 @@ public class PartitionIndex implements Closeable
          */
         protected long nextIndexPos()
         {
-            return nextValueAsLong(this::getCurrentIndexPos, NOT_FOUND);
+            return nextValueAsLong(this::getCurrentIndexPos, NOT_FOUND, true);
         }
 
         private long getCurrentIndexPos()

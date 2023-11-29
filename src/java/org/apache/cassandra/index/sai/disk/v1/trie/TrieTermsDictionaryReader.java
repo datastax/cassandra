@@ -103,12 +103,12 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
     public long ceiling(ByteComparable key)
     {
         skipTo(key, LeftBoundTreatment.ADMIT_EXACT);
-        return nextAsLong();
+        return peekNextAsLong();
     }
 
-    public long nextAsLong()
+    public long peekNextAsLong()
     {
-        return nextValueAsLong(this::getCurrentPayload, NOT_FOUND);
+        return nextValueAsLong(this::getCurrentPayload, NOT_FOUND, false);
     }
 
     @Override

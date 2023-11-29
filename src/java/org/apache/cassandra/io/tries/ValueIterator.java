@@ -173,13 +173,14 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
         return result;
     }
 
-    protected long nextValueAsLong(LongSupplier supplier, long valueIfNone)
+    protected long nextValueAsLong(LongSupplier supplier, long valueIfNone, boolean advanceNode)
     {
         if (next == NONE)
             return valueIfNone;
         go(next);
         long result = supplier.getAsLong();
-        next = advanceNode();
+        if (advanceNode)
+            next = advanceNode();
         return result;
     }
 
