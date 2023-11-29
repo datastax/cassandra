@@ -271,15 +271,15 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
                             tokenCount = Math.min(tokenCount, range.getMaxKeys());
                         else
                             tokenCount = range.getMaxKeys();
+
+                        // check if new range is disjoint with already added ranges, which means that this intersection
+                        // is not going to produce any results, so we can cleanup range storage and never added anything to it.
+                        isOverlapping &= isOverlapping(min, max, range);
                         break;
 
                     default:
                         throw new IllegalStateException("Unknown iterator type: " + iteratorType);
                 }
-
-                // check if new range is disjoint with already added ranges, which means that this intersection
-                // is not going to produce any results, so we can cleanup range storage and never added anything to it.
-                isOverlapping &= isOverlapping(min, max, range);
 
                 minRange = minRange == null ? range : min(minRange, range);
                 maxRange = maxRange == null ? range : max(maxRange, range);
