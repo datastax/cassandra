@@ -224,7 +224,9 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             // While this worked in BDP, it was not efficient and caused problems because the
             // sstable reader was using 64k page sizes, and this caused page cache thrashing.
             long rowId = rowIdToToken.exactRowId(key.token().getLongValue());
-            if (rowId < 0)
+            if (rowId >= 0)
+                return rowId;
+            else
                 if (rowId == Long.MIN_VALUE)
                     return -1;
                 else
