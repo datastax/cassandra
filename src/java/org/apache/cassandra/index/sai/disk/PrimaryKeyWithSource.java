@@ -88,8 +88,8 @@ public class PrimaryKeyWithSource implements PrimaryKey
         if (o instanceof PrimaryKeyWithSource)
         {
             var other = (PrimaryKeyWithSource) o;
-            if (sourceRowId == other.sourceRowId && sourceSstableId.equals(other.sourceSstableId))
-                return 0;
+            if (sourceSstableId.equals(other.sourceSstableId))
+                return Long.compare(sourceRowId, other.sourceRowId);
         }
         return primaryKey.compareTo(o);
     }
