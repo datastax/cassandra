@@ -63,7 +63,6 @@ public class RangeUnionIterator extends RangeIterator
                 int cmp = candidate.compareTo(range.peek());
                 if (cmp == 0)
                 {
-                    candidate = PrimaryKeyWithSource.mergeSources(candidate, range.peek());
                     candidates.add(range);
                 }
                 else if (cmp > 0)

@@ -34,33 +34,15 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public class PrimaryKeyWithSource implements PrimaryKey
 {
     private final PrimaryKey primaryKey;
-    // VSTODO which set implementation is best here?
-    private final Set<PKSource> sources = new HashSet<>();
+    private final SSTableId<?> sourceSstableId;
+    private final long sourceRowId;
 
     public PrimaryKeyWithSource(PrimaryKey primaryKey, SSTableId<?> sstableId, long sstableRowId)
     {
         assert primaryKey != null : "Cannot construct a PrimaryKeyWithSource with a null primaryKey";
         this.primaryKey = primaryKey;
-        sources.add(new PKSource(sstableId, sstableRowId));
-    }
-
-    public static PrimaryKey mergeSources(PrimaryKey pk1, PrimaryKey pk2)
-    {
-        if (pk1 instanceof PrimaryKeyWithSource)
-        {
-            ((PrimaryKeyWithSource) pk1).mergeSources(pk2);
-            return pk1;
-        }
-        // If pk1 is not a PrimaryKeyWithSource, then there is nothing to merge.
-        return pk2;
-    }
-
-    private void mergeSources(PrimaryKey other)
-    {
-        if (other instanceof PrimaryKeyWithSource)
-        {
-            sources.addAll(((PrimaryKeyWithSource) other).sources);
-        }
+        this.sourceSstableId = sstableId;
+        this.sourceRowId = sstableRowId;
     }
 
     @Override
@@ -109,35 +91,11 @@ public class PrimaryKeyWithSource implements PrimaryKey
     public int compareTo(PrimaryKey o)
     {
         if (o instanceof PrimaryKeyWithSource)
-            if (!Collections.disjoint(sources, ((PrimaryKeyWithSource) o).sources))
+        {
+            var other = (PrimaryKeyWithSource) o;
+            if (sourceRowId == other.sourceRowId && sourceSstableId.equals(other.sourceSstableId))
                 return 0;
+        }
         return primaryKey.compareTo(o);
-    }
-
-    static class PKSource
-    {
-        private final SSTableId<?> sstableId;
-        private final long sstableRowId;
-
-        PKSource(SSTableId<?> sstableId, long sstableRowId)
-        {
-            this.sstableId = sstableId;
-            this.sstableRowId = sstableRowId;
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hash(sstableId, sstableRowId);
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (!(o instanceof PKSource))
-                return false;
-            PKSource other = (PKSource) o;
-            return sstableId.equals(other.sstableId) && sstableRowId == other.sstableRowId;
-        }
     }
 }
