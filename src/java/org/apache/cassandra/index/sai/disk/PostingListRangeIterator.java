@@ -168,12 +168,13 @@ public class PostingListRangeIterator extends RangeIterator
             }
             else
             {
-                targetRowID = primaryKeyMap.ceiling(skipToToken);
-                // skipToToken is larger than max token in token file
+                targetRowID = primaryKeyMap.exactRowIdOrInvertedCeiling(skipToToken);
                 if (targetRowID < 0)
-                {
-                    return PostingList.END_OF_STREAM;
-                }
+                    // VSTODO is it possible for sstable to actually have Long.MAX_VALUE as row id?
+                    if (targetRowID == Long.MIN_VALUE)
+                        return PostingList.END_OF_STREAM;
+                    else
+                        targetRowID = -targetRowID - 1;
             }
             segmentRowId = postingList.advance(targetRowID - searcherContext.segmentRowIdOffset);
         }
