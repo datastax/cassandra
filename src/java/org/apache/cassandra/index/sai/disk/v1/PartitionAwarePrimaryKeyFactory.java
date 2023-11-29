@@ -145,21 +145,6 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         }
 
         @Override
-        public int compareComparableBytes(PrimaryKey o)
-        {
-            int cmp = token().compareTo(o.token());
-            if (cmp != 0)
-                return cmp;
-
-            if (partitionKey == null)
-                return o.partitionKey() == null ? 0 : -1;
-            if (o.partitionKey() == null)
-                return 1;
-
-            return partitionKey.compareTo(o.partitionKey());
-        }
-
-        @Override
         public int hashCode()
         {
             return Objects.hash(token);

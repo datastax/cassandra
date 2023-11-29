@@ -19,74 +19,48 @@
 package org.apache.cassandra.index.sai.disk.v2;
 
 import java.nio.ByteBuffer;
+import java.util.function.Supplier;
 
 import org.junit.Test;
 
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyTester;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-public class RowAwarePrimaryKeyTest extends PrimaryKeyTester
+public class RowAwarePrimaryKeyTest extends SAITester
 {
-    public RowAwarePrimaryKeyTest()
-    {
-        super(Version.BA.onDiskFormat()::primaryKeyFactory);
-    }
-
     @Test
-    public void testBAFormatProducesRowAwarePrimaryKeyFactory()
+    public void testHashCodeForDeffer()
     {
-        // Tests in this class rely on this implementation detail
-        assertTrue(super.factory instanceof RowAwarePrimaryKeyFactory);
-    }
+        var factory = Version.BA.onDiskFormat().primaryKeyFactory(EMPTY_COMPARATOR);
 
-    // Clustering columns are only covered by the RowAwarePrimaryKeyFactory right now, so this cannot go into
-    // super's implementation
-    @Test
-    public void testCompareClusteringColumns()
-    {
-        var clusteringComparator = new ClusteringComparator(Int32Type.instance);
-        var factory = Version.BA.onDiskFormat().primaryKeyFactory(clusteringComparator);
+        // Test relies on this implementation detail
+        assertTrue(factory instanceof RowAwarePrimaryKeyFactory);
 
-        // Test uses the same token and partition key because we're covering clustering columns only
+        // Set up the primary key
         Token token = new Murmur3Partitioner.LongToken(1);
-        DecoratedKey partitionKey = new BufferDecoratedKey(token, ByteBuffer.allocate(1));
+        DecoratedKey key = new BufferDecoratedKey(token, ByteBuffer.allocate(1));
+        Supplier<PrimaryKey> supplier = () -> factory.create(key, Clustering.EMPTY);
+        PrimaryKey primaryKey1 = factory.createDeferred(token, supplier);
 
-        PrimaryKey partitionKeyOnly = factory.createPartitionKeyOnly(partitionKey);
+        // Verify the results
+        int hash1 = primaryKey1.hashCode();
+        // Equals triggers loading the primary key
+        assertEquals(primaryKey1, primaryKey1);
+        assertEquals(hash1, primaryKey1.hashCode());
 
-        // Create clusterings with different values
-        var clustering1 = Clustering.make(ByteBuffer.allocate(4).putInt(0, 1));
-        var clustering2 = Clustering.make(ByteBuffer.allocate(4).putInt(0,2));
-
-        PrimaryKey pk1 = factory.create(partitionKey, clustering1);
-        PrimaryKey pk2 = factory.create(partitionKey, clustering2);
-
-        // Verify regular compareTo
-        assertEquals(-1, pk1.compareTo(pk2));
-        assertEquals(0, partitionKeyOnly.compareTo(pk1));
-        assertEquals(0, pk1.compareTo(partitionKeyOnly));
-        assertEquals(1, pk2.compareTo(pk1));
-
-        // Verify byte compareComparableBytes
-        assertEquals(-1, pk1.compareComparableBytes(pk2));
-        assertEquals(-1, partitionKeyOnly.compareComparableBytes(pk1));
-        assertEquals(1, pk1.compareComparableBytes(partitionKeyOnly));
-        assertEquals(1, pk2.compareComparableBytes(pk1));
-
-        // Verify that compareComparableBytes matches the ByteComparable.compare implementation
-        assertEquals(compareBytes(pk1, pk2), pk1.compareComparableBytes(pk2));
-        assertEquals(compareBytes(partitionKeyOnly, pk1), partitionKeyOnly.compareComparableBytes(pk1));
-        assertEquals(compareBytes(pk1, partitionKeyOnly), pk1.compareComparableBytes(partitionKeyOnly));
-        assertEquals(compareBytes(pk2, pk1), pk2.compareComparableBytes(pk1));
+        // Do again with explicit loading
+        PrimaryKey primaryKey2 = factory.createDeferred(token, supplier);
+        int hash2 = primaryKey2.hashCode();
+        primaryKey2.loadDeferred();
+        assertEquals(hash2, primaryKey2.hashCode());
     }
 }

@@ -178,12 +178,4 @@ public interface PrimaryKey extends Comparable<PrimaryKey>
      * @return the {@code ByteSource} max prefix byte comparable.
      */
     ByteSource asComparableBytesMaxPrefix(ByteComparable.Version version);
-
-    /**
-     * A variation of the {@link #compareTo} method that returns the result of comparing the
-     * {@link #asComparableBytes(ByteComparable.Version)}.
-     * @param other the {@link PrimaryKey} to compare to
-     * @return the result of comparing the {@link #asComparableBytes(ByteComparable.Version)} of each key
-     */
-    int compareComparableBytes(PrimaryKey other);
 }

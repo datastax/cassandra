@@ -90,13 +90,7 @@ public class PostingListRangeIterator extends RangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        // We defer the actual skipping logic until the next call to computeNext() because skipping requires reading
-        // from disk in order to get the row id at or after the nextKey. As such, we use compareComparableBytes, which
-        // implements a comparison that is equivalent to comparing PrimaryKey byteComparable representations.
-        // This is necessary to prevent issues that can occur if skipToToken is already set to a token-only PrimaryKey
-        // and the nextKey is a PrimaryKey with partition key information because the compareTo method would consider
-        // these two keys equal.
-        if (skipToToken != null && skipToToken.compareComparableBytes(nextKey) >= 0)
+        if (skipToToken != null && skipToToken.compareTo(nextKey) >= 0)
             return;
 
         skipToToken = nextKey;

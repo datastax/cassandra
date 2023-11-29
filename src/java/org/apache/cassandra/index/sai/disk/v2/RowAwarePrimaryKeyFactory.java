@@ -183,45 +183,6 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         }
 
         @Override
-        public int compareComparableBytes(PrimaryKey o)
-        {
-            // Implementation note:
-            // We do not actually need to create the ByteSource object to get the correct byte comparison result.
-            // It is sufficient to compare the token, then the partition key, then the clustering columns with the
-            // detail that a null value is less than a non-null value. The compareTo implementation considers
-            // a null value and a non-null value to be equal.
-            int cmp = token().compareTo(o.token());
-
-            // If the tokens don't match then we don't need to compare any more of the key.
-            if (cmp != 0)
-                return cmp;
-
-            if (partitionKey() == null)
-                // If both are null, then they are equal. If this is null and the other is not,
-                // then this is less than the other
-                return o.partitionKey() == null ? 0 : -1;
-            else if (o.partitionKey() == null)
-                // Our partition key is not null, so it is greater than the other one
-                return 1;
-
-            // Next compare the partition keys. If they are not equal or
-            // this is a single row partition key or there are no
-            // clusterings then we can return the result of this without
-            // needing to compare the clusterings
-            cmp = partitionKey().compareTo(o.partitionKey());
-            if (cmp != 0)
-                return cmp;
-
-            // Same logic as above, but for clustering
-            if (hasEmptyClustering())
-                return o.hasEmptyClustering() ? 0 : -1;
-            else if (o.hasEmptyClustering())
-                return 1;
-
-            return clusteringComparator.compare(clustering(), o.clustering());
-        }
-
-        @Override
         public int hashCode()
         {
             return Objects.hash(token(), partitionKey(), clustering());
