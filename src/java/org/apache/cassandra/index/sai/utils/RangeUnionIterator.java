@@ -23,6 +23,7 @@ import java.util.List;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -62,6 +63,7 @@ public class RangeUnionIterator extends RangeIterator
                 int cmp = candidate.compareTo(range.peek());
                 if (cmp == 0)
                 {
+                    candidate = PrimaryKeyWithSource.mergeSources(candidate, range.peek());
                     candidates.add(range);
                 }
                 else if (cmp > 0)

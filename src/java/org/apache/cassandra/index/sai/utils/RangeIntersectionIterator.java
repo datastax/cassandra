@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -97,6 +98,7 @@ public class RangeIntersectionIterator extends RangeIterator
                     assert comparisonResult == 0 :
                            String.format("skipTo skipped to an item smaller than the target; " +
                                          "iterator: %s, target key: %s, returned key: %s", range, highestKey, nextKey);
+                    highestKey = PrimaryKeyWithSource.mergeSources(highestKey, nextKey);
                 }
             }
             // If we reached here, next() has been called at least once on each range iterator and

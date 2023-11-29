@@ -112,7 +112,8 @@ public class PostingListRangeIterator extends RangeIterator
             if (rowId == PostingList.END_OF_STREAM)
                 return endOfData();
 
-            return primaryKeyMap.primaryKeyFromRowId(rowId);
+            var primaryKey = primaryKeyMap.primaryKeyFromRowId(rowId);
+            return new PrimaryKeyWithSource(primaryKey, primaryKeyMap.getSSTableId(), rowId);
         }
         catch (Throwable t)
         {

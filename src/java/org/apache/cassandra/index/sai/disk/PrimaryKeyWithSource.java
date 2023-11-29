@@ -1,0 +1,143 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.index.sai.disk;
+
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
+
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+
+public class PrimaryKeyWithSource implements PrimaryKey
+{
+    private final PrimaryKey primaryKey;
+    // VSTODO which set implementation is best here?
+    private final Set<PKSource> sources = new HashSet<>();
+
+    public PrimaryKeyWithSource(PrimaryKey primaryKey, SSTableId<?> sstableId, long sstableRowId)
+    {
+        assert primaryKey != null : "Cannot construct a PrimaryKeyWithSource with a null primaryKey";
+        this.primaryKey = primaryKey;
+        sources.add(new PKSource(sstableId, sstableRowId));
+    }
+
+    public static PrimaryKey mergeSources(PrimaryKey pk1, PrimaryKey pk2)
+    {
+        if (pk1 instanceof PrimaryKeyWithSource)
+        {
+            ((PrimaryKeyWithSource) pk1).mergeSources(pk2);
+            return pk1;
+        }
+        // If pk1 is not a PrimaryKeyWithSource, then there is nothing to merge.
+        return pk2;
+    }
+
+    private void mergeSources(PrimaryKey other)
+    {
+        if (other instanceof PrimaryKeyWithSource)
+        {
+            sources.addAll(((PrimaryKeyWithSource) other).sources);
+        }
+    }
+
+    @Override
+    public Token token()
+    {
+        return primaryKey.token();
+    }
+
+    @Override
+    public DecoratedKey partitionKey()
+    {
+        return primaryKey.partitionKey();
+    }
+
+    @Override
+    public Clustering clustering()
+    {
+        return primaryKey.clustering();
+    }
+
+    @Override
+    public PrimaryKey loadDeferred()
+    {
+        return primaryKey.loadDeferred();
+    }
+
+    @Override
+    public ByteSource asComparableBytes(ByteComparable.Version version)
+    {
+        return primaryKey.asComparableBytes(version);
+    }
+
+    @Override
+    public ByteSource asComparableBytesMinPrefix(ByteComparable.Version version)
+    {
+        return primaryKey.asComparableBytesMinPrefix(version);
+    }
+
+    @Override
+    public ByteSource asComparableBytesMaxPrefix(ByteComparable.Version version)
+    {
+        return primaryKey.asComparableBytesMaxPrefix(version);
+    }
+
+    @Override
+    public int compareTo(PrimaryKey o)
+    {
+        if (o instanceof PrimaryKeyWithSource)
+            if (!Collections.disjoint(sources, ((PrimaryKeyWithSource) o).sources))
+                return 0;
+        return primaryKey.compareTo(o);
+    }
+
+    static class PKSource
+    {
+        private final SSTableId<?> sstableId;
+        private final long sstableRowId;
+
+        PKSource(SSTableId<?> sstableId, long sstableRowId)
+        {
+            this.sstableId = sstableId;
+            this.sstableRowId = sstableRowId;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(sstableId, sstableRowId);
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (!(o instanceof PKSource))
+                return false;
+            PKSource other = (PKSource) o;
+            return sstableId.equals(other.sstableId) && sstableRowId == other.sstableRowId;
+        }
+    }
+}
