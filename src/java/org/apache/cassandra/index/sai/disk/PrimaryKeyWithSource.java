@@ -40,6 +40,16 @@ public class PrimaryKeyWithSource implements PrimaryKey
         this.sourceRowId = sstableRowId;
     }
 
+    public long getSourceRowId()
+    {
+        return sourceRowId;
+    }
+
+    public SSTableId<?> getSourceSstableId()
+    {
+        return sourceSstableId;
+    }
+
     @Override
     public Token token()
     {
