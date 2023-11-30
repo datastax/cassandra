@@ -24,6 +24,9 @@ import java.util.function.LongFunction;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.SAITester;
 
+/**
+ * A {@link RangeIterator} that iterates over a list of longs for testing purposes.
+ */
 public class LongIterator extends RangeIterator
 {
     private final List<PrimaryKey> keys;
@@ -55,6 +58,10 @@ public class LongIterator extends RangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextToken)
     {
+        if (state == State.READY && nextToken.compareTo(next) <= 0)
+            return;
+        state = State.NOT_READY;
+
         for ( ; currentIdx < keys.size(); currentIdx++)
         {
             PrimaryKey token = keys.get(currentIdx);

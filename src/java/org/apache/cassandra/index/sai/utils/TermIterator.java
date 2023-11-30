@@ -120,6 +120,10 @@ public class TermIterator extends RangeIterator
 
     protected void performSkipTo(PrimaryKey nextKey)
     {
+        if (state == State.READY && nextKey.compareTo(next) <= 0)
+            return;
+        state = State.NOT_READY;
+
         try
         {
             union.skipTo(nextKey);

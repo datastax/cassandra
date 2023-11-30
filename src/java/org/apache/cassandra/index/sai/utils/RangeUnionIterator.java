@@ -82,6 +82,10 @@ public class RangeUnionIterator extends RangeIterator
 
     protected void performSkipTo(PrimaryKey nextKey)
     {
+        if (state == State.READY && nextKey.compareTo(next) <= 0)
+            return;
+        state = State.NOT_READY;
+
         // Resist the temptation to call range.hasNext before skipTo: this is a pessimisation, hasNext will invoke
         // computeNext under the hood, which is an expensive operation to produce a value that we plan to throw away.
         // Instead, it is the responsibility of the child iterators to make skipTo fast when the iterator is exhausted.

@@ -76,11 +76,15 @@ public class OrderingFilterRangeIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(PrimaryKey nextToken)
+    protected void performSkipTo(PrimaryKey nextKey)
     {
-        input.skipTo(nextToken);
+        if (state == State.READY && nextKey.compareTo(next) <= 0)
+            return;
+        state = State.NOT_READY;
+
+        input.skipTo(nextKey);
         if (nextIterator != null)
-            nextIterator.skipTo(nextToken);
+            nextIterator.skipTo(nextKey);
     }
 
     public void close() {

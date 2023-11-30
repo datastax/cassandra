@@ -45,6 +45,10 @@ public class ListRangeIterator extends RangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
+        if (state == State.READY && nextKey.compareTo(next) <= 0)
+            return;
+        state = State.NOT_READY;
+
         while (keyQueue.hasNext())
         {
             if (keyQueue.peek().compareTo(nextKey) >= 0)

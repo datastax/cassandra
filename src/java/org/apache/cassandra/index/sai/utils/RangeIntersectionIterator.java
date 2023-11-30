@@ -94,9 +94,9 @@ public class RangeIntersectionIterator extends RangeIterator
                         // the other iterators except this one to match the new highest key.
                         continue outer;
                     }
-                    assert comparisonResult == 0 :
-                           String.format("skipTo skipped to an item smaller than the target; " +
-                                         "iterator: %s, target key: %s, returned key: %s", range, highestKey, nextKey);
+                    if (comparisonResult != 0)
+                        throw new AssertionError(String.format("skipTo skipped to an item smaller than the target; " +
+                                                               "iterator: %s, target key: %s, returned key: %s", range, highestKey, nextKey));
                 }
             }
             // If we reached here, next() has been called at least once on each range iterator and
@@ -106,13 +106,17 @@ public class RangeIntersectionIterator extends RangeIterator
         return endOfData();
     }
 
-    protected void performSkipTo(PrimaryKey nextToken)
+    protected void performSkipTo(PrimaryKey nextKey)
     {
+        if (state == State.READY && nextKey.compareTo(next) <= 0)
+            return;
+        state = State.NOT_READY;
+
         // Resist the temptation to call range.hasNext before skipTo: this is a pessimisation, hasNext will invoke
         // computeNext under the hood, which is an expensive operation to produce a value that we plan to throw away.
         // Instead, it is the responsibility of the child iterators to make skipTo fast when the iterator is exhausted.
         for (var range : ranges)
-            range.skipTo(nextToken);
+            range.skipTo(nextKey);
     }
 
     /**

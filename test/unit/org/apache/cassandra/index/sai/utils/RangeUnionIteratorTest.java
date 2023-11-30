@@ -26,11 +26,13 @@ import java.util.stream.Collectors;
 import org.junit.Assert;
 import org.junit.Test;
 
+import com.carrotsearch.randomizedtesting.annotations.Seed;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.index.sai.utils.LongIterator.convert;
 
+@Seed("69C7B6549E483258:9A6DB1291505F246")
 public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
 {
     @Test

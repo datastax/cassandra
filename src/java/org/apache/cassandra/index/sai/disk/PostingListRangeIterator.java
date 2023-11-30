@@ -95,6 +95,7 @@ public class PostingListRangeIterator extends RangeIterator
 
         skipToToken = nextKey;
         needsSkipping = true;
+        state = State.NOT_READY;
     }
 
     @Override
@@ -175,7 +176,12 @@ public class PostingListRangeIterator extends RangeIterator
                     return PostingList.END_OF_STREAM;
                 }
             }
-            segmentRowId = postingList.advance(targetRowID - searcherContext.segmentRowIdOffset);
+            // avoid calling advance() twice to the same rowId, since advance() always moves ahead at least one.
+            // this is something of an abuse of the AbstractIterator next field, but it feels unavoidable.
+            if (next != null && targetRowID <= ((PrimaryKeyWithSource) next).getSourceRowId())
+                segmentRowId = ((PrimaryKeyWithSource) next).getSourceRowId();
+            else
+                segmentRowId = postingList.advance(targetRowID - searcherContext.segmentRowIdOffset);
         }
         else
         {

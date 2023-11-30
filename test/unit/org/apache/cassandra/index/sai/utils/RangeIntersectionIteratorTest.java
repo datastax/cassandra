@@ -19,8 +19,10 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.junit.Assert;
@@ -391,4 +393,22 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
 
         assertEquals(convert(2L, 4L, 6L), convert(intersection));
     }
+
+//    @Test
+//    public void testUnionOfRandom()
+//    {
+//        for (int testIteration = 0; testIteration < 16; testIteration++)
+//        {
+//            var allValues = new HashSet<Long>();
+//            var builder = RangeIntersectionIterator.builder();
+//            for (int i = 0; i < nextInt(2, 3); i++)
+//            {
+//                var p = createRandomIterator();
+//                builder.add(p.left);
+//                allValues.addAll(Arrays.stream(p.right).boxed().collect(Collectors.toList()));
+//            }
+//            long[] totalOrdered = allValues.stream().mapToLong(Long::longValue).sorted().toArray();
+//            validateWithSkipping(builder.build(), totalOrdered);
+//        }
+//    }
 }

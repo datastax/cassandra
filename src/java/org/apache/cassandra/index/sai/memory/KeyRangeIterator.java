@@ -80,6 +80,10 @@ public class KeyRangeIterator extends RangeIterator
 
     protected void performSkipTo(PrimaryKey nextKey)
     {
+        if (state == State.READY && nextKey.compareTo(next) <= 0)
+            return;
+        state = State.NOT_READY;
+
         while (!keys.isEmpty())
         {
             PrimaryKey key = keys.peek();

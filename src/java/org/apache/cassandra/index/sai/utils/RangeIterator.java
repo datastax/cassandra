@@ -92,11 +92,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         if (state == State.DONE)
             return;
 
-        if (state == State.READY && next.compareTo(nextToken) >= 0)
-            return;
-
         performSkipTo(nextToken);
-        state = State.NOT_READY;
     }
 
     /**

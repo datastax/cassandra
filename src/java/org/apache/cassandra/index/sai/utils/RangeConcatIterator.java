@@ -52,18 +52,22 @@ public class RangeConcatIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(PrimaryKey primaryKey)
+    protected void performSkipTo(PrimaryKey nextKey)
     {
+        if (state == State.READY && nextKey.compareTo(next) <= 0)
+            return;
+        state = State.NOT_READY;
+
         while (true)
         {
-            if (currentRange.getMaximum().compareTo(primaryKey) >= 0)
+            if (currentRange.getMaximum().compareTo(nextKey) >= 0)
             {
-                currentRange.skipTo(primaryKey);
+                currentRange.skipTo(nextKey);
                 return;
             }
             if (!ranges.hasNext())
             {
-                currentRange.skipTo(primaryKey);
+                currentRange.skipTo(nextKey);
                 return;
             }
             currentRange = ranges.next();
