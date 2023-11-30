@@ -18,7 +18,10 @@
 
 package org.apache.cassandra.db;
 
+import java.util.Collection;
+
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 public class EverythingCollidesTracker implements ITokenCollisionTracker
 {
@@ -26,5 +29,15 @@ public class EverythingCollidesTracker implements ITokenCollisionTracker
     public boolean isUnique(Token token)
     {
         return false;
+    }
+
+    @Override
+    public void onFlush(SSTableReader newSstable)
+    {
+    }
+
+    @Override
+    public void onCompacted(Collection<Token> removedTokens)
+    {
     }
 }

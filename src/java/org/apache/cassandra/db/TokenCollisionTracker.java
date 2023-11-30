@@ -39,34 +39,32 @@ public class TokenCollisionTracker implements ITokenCollisionTracker
 
     private final LongHashSet tokenCollisions;
     private final IFilter allTokens;
+    private final Function<ByteBuffer, Token> tokenProvider;
+    private long nEntries;
+    private long resizeAt;
 
-    public TokenCollisionTracker(long estimatedEntries)
+    public TokenCollisionTracker(long initialEntries, Function<ByteBuffer, Token> tokenProvider)
     {
+        this.tokenProvider = tokenProvider;
         tokenCollisions = new LongHashSet();
+        resizeAt = entriesToAllocate(initialEntries);
+        nEntries = 0;
         // 10 buckets per element gives us < 1% false positive rate; see BloomCalculations.probs
-        allTokens = FilterFactory.getFilter(estimatedEntries, 10);
+        allTokens = FilterFactory.getFilter(resizeAt, 10);
+    }
+
+    private static long entriesToAllocate(long initialEntries)
+    {
+        return initialEntries < 10_000_000 ? initialEntries * 2 : (long) (initialEntries * 1.5);
     }
 
     public static TokenCollisionTracker build(Collection<SSTableReader> sstables, Function<ByteBuffer, Token> tokenProvider)
     {
         var nRows = sstables.stream().mapToLong(SSTableReader::estimatedKeys).sum();
-        var tracker = new TokenCollisionTracker(nRows);
+        var tracker = new TokenCollisionTracker(nRows, tokenProvider);
         for (var sstable: sstables)
-        {
-            try (var it = sstable.allKeysIterator())
-            {
-                do
-                {
-                    // VSTODO this is inefficient since we only care about the token, not the DK
-                    Token token = tokenProvider.apply(it.key());
-                    tracker.addToken(token);
-                } while (it.advance());
-            }
-            catch (IOException e)
-            {
-                throw new UncheckedIOException(e);
-            }
-        }
+            tracker.checkOneSSTable(sstable);
+
         logger.info("For {} rows across {} SSTables, token collision count (including BF false positives) is {}.",
                     nRows,
                     sstables.size(),
@@ -74,9 +72,30 @@ public class TokenCollisionTracker implements ITokenCollisionTracker
         return tracker;
     }
 
-    private int getCollisionCount()
+    private synchronized void checkOneSSTable(SSTableReader sstable)
     {
-        return tokenCollisions.size();
+        try (var it = sstable.allKeysIterator())
+        {
+            do
+            {
+                // VSTODO this is inefficient since we only care about the token, not the DK
+                Token token = tokenProvider.apply(it.key());
+                addToken(token);
+                nEntries++;
+            } while (it.advance());
+        }
+        catch (IOException e)
+        {
+            throw new UncheckedIOException(e);
+        }
+
+        if (nEntries > resizeAt)
+        {
+            logger.debug("Resizing token collision tracker to {} entries", nEntries);
+            resizeAt = entriesToAllocate(nEntries);
+            // FIXME how do we get a consistent view of existing sstables, such that we're sure to be
+            // notified of new ones without gaps or redundancies?
+        }
     }
 
     private void addToken(Token token)
@@ -91,10 +110,27 @@ public class TokenCollisionTracker implements ITokenCollisionTracker
         allTokens.add(key);
     }
 
+    private int getCollisionCount()
+    {
+        return tokenCollisions.size();
+    }
+
     @Override
     public boolean isUnique(Token token)
     {
         return !tokenCollisions.contains(token.getLongValue());
+    }
+
+    @Override
+    public void onFlush(SSTableReader newSstable)
+    {
+        checkOneSSTable(newSstable);
+    }
+
+    @Override
+    public void onCompacted(Collection<Token> removedTokens)
+    {
+        throw new UnsupportedOperationException(); // VSTODO
     }
 
     private static class TokenFilterKey implements IFilter.FilterKey

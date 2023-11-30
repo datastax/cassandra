@@ -19,7 +19,6 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.io.PrintStream;
-import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -80,7 +79,6 @@ import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.carrotsearch.hppc.LongHashSet;
 import org.apache.cassandra.cache.CounterCacheKey;
 import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.RowCacheKey;
@@ -153,6 +151,7 @@ import org.apache.cassandra.metrics.Sampler.Sample;
 import org.apache.cassandra.metrics.Sampler.SamplerType;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.repair.TableRepairManager;
 import org.apache.cassandra.repair.consistent.admin.PendingStat;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -174,7 +173,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.DefaultValue;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -585,9 +583,21 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             sstables = storageHandler.loadInitialSSTables();
 
         if (sstables == null)
+        {
             tokenCollisions = new EverythingCollidesTracker();
+        }
         else
+        {
             tokenCollisions = TokenCollisionTracker.build(sstables, (key) -> metadata().partitioner.decorateKey(key).getToken());
+            getTracker().subscribe((notification, sender) -> {
+                if (notification instanceof SSTableAddedNotification)
+                {
+                    SSTableAddedNotification notice = (SSTableAddedNotification) notification;
+                    for (SSTableReader sstable : notice.added)
+                        tokenCollisions.onFlush(sstable);
+                }
+            });
+        }
 
         // compaction strategy should be created after the CFS has been prepared
         this.strategyFactory = new CompactionStrategyFactory(this);

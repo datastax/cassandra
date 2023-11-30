@@ -18,9 +18,17 @@
 
 package org.apache.cassandra.db;
 
+import java.util.Collection;
+
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 public interface ITokenCollisionTracker
 {
     boolean isUnique(Token token);
+
+    void onFlush(SSTableReader newSstable);
+
+    // FIXME this is not called anywhere (and it doesn't have an implementation yet)
+    void onCompacted(Collection<Token> removedTokens);
 }
