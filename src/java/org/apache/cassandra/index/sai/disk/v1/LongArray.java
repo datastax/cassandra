@@ -37,11 +37,20 @@ public interface LongArray extends Closeable
     long length();
 
     /**
-     * Using the given token returns the first row ID corresponding to the token.
-     * @param targetToken Token to lookup and it must not be smaller than previous value
-     * @return The row ID of the given token or negative value if target token is greater than all tokens
+     * @param targetToken Token to look up.  Must not be smaller than previous value queried
+     *                    (the method is stateful)
+     * @return The row ID of the first token equal to or greater than the target,
+     *         or negative value if target token is greater than all tokens
      */
-    long findTokenRowID(long targetToken);
+    long ceilingRowId(long targetToken);
+
+    /**
+     * @param targetToken Token to look up.  Must not be smaller than previous value queried
+     *                    (the method is stateful)
+     * @return The row ID of the target token, or `-(insertion point) - 1` if the target token is not found where
+     *        `insertion point` is the index of the first element greater than the targetToken
+     */
+    long exactRowId(long targetToken);
 
     @Override
     default void close() throws IOException { }
@@ -72,10 +81,17 @@ public interface LongArray extends Closeable
         }
 
         @Override
-        public long findTokenRowID(long targetToken)
+        public long ceilingRowId(long targetToken)
         {
             open();
-            return longArray.findTokenRowID(targetToken);
+            return longArray.ceilingRowId(targetToken);
+        }
+
+        @Override
+        public long exactRowId(long targetToken)
+        {
+            open();
+            return longArray.exactRowId(targetToken);
         }
 
         @Override

@@ -29,6 +29,7 @@ import org.junit.Before;
 
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
+import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorEncoding;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -50,6 +51,11 @@ public class VectorTester extends SAITester
         // override maxBruteForceRows to a random number between 0 and 4 so that we make sure
         // the non-brute-force path gets called during tests (which mostly involve small numbers of rows)
         var n = getRandom().nextIntBetween(0, 4);
+        setMaxBruteForceRows(n);
+    }
+
+    static void setMaxBruteForceRows(int n) throws Throwable
+    {
         var limitToTopResults = InvokePointBuilder.newInvokePoint()
                                                   .onClass("org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher")
                                                   .onMethod("limitToTopResults")
@@ -94,7 +100,7 @@ public class VectorTester extends SAITester
                                            VectorEncoding.FLOAT32,
                                            VectorSimilarityFunction.COSINE,
                                            graphBuilder.getGraph(),
-                                           null);
+                                           Bits.ALL);
 
         List<float[]> nearestNeighbors = new ArrayList<>();
         for (var ns : results.getNodes())

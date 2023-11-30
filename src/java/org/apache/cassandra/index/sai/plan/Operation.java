@@ -90,7 +90,7 @@ public class Operation
             AbstractAnalyzer analyzer = analyzerFactory.create();
             try
             {
-                analyzer.reset(e.getIndexValue().duplicate());
+                analyzer.reset(e.getIndexValue());
 
                 // EQ/LIKE_*/NOT_EQ can have multiple expressions e.g. text = "Hello World",
                 // becomes text = "Hello" OR text = "World" because "space" is always interpreted as a split point (by analyzer),
@@ -137,6 +137,14 @@ public class Operation
                         }
                         while (analyzer.hasNext());
                     }
+                }
+                else if (e instanceof RowFilter.GeoDistanceExpression)
+                {
+                    var distance = ((RowFilter.GeoDistanceExpression) e);
+                    var expression = new Expression(indexContext)
+                                     .add(distance.getDistanceOperator(), distance.getDistance().duplicate())
+                                     .add(Operator.BOUNDED_ANN, e.getIndexValue().duplicate());
+                    perColumn.add(expression);
                 }
                 else
                 // "range" or not-equals operator, combines both bounds together into the single expression,

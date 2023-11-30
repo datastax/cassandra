@@ -33,9 +33,11 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -44,6 +46,7 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.cql.GeoDistanceAccuracyTest;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
@@ -55,6 +58,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class VectorDistributedTest extends TestBaseImpl
 {
+    private static final Logger logger = LoggerFactory.getLogger(VectorDistributedTest.class);
 
     @Rule
     public SAITester.FailureWatcher failureRule = new SAITester.FailureWatcher();
@@ -69,6 +73,8 @@ public class VectorDistributedTest extends TestBaseImpl
     private static final String INVALID_LIMIT_MESSAGE = "Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than 1000";
 
     private static final double MIN_RECALL = 0.8;
+    // Multiple runs of the geo search test shows the recall test results in between 89% and 97%
+    private static final double MIN_GEO_SEARCH_RECALL = 0.85;
 
     private static final int NUM_REPLICAS = 3;
     private static final int RF = 2;
@@ -202,6 +208,53 @@ public class VectorDistributedTest extends TestBaseImpl
     }
 
     @Test
+    public void testBasicGeoDistance()
+    {
+        dimensionCount = 2;
+        cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
+        // geo requries euclidean similarity function
+        cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val") + " WITH OPTIONS = {'similarity_function' : 'euclidean'}"));
+        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        // disable compaction
+        String tableName = table;
+        cluster.forEach(n -> n.runOnInstance(() -> {
+            Keyspace keyspace = Keyspace.open(KEYSPACE);
+            keyspace.getColumnFamilyStore(tableName).disableAutoCompaction();
+        }));
+
+        int vectorCountPerSSTable = getRandom().nextIntBetween(3000, 5000);
+        int sstableCount = getRandom().nextIntBetween(7, 10);
+        List<float[]> allVectors = new ArrayList<>(sstableCount * vectorCountPerSSTable);
+
+        int pk = 0;
+        for (int i = 0; i < sstableCount; i++)
+        {
+            List<float[]> vectors = generateUSBoundedGeoVectors(vectorCountPerSSTable);
+            for (float[] vector : vectors)
+                execute("INSERT INTO %s (pk, val) VALUES (" + (pk++) + ", " + vectorString(vector) + " )");
+
+            allVectors.addAll(vectors);
+            cluster.forEach(n -> n.flush(KEYSPACE));
+        }
+
+        // Run the query 50 times to get an average of several queries
+        int queryCount = 50;
+        double recallSum = 0;
+        for (int i = 0; i < queryCount; i++)
+        {
+            // query multiple sstable indexes in multiple node
+            int searchRadiusMeters = getRandom().nextIntBetween(500, 20000);
+            float[] queryVector = randomUSVector();
+            Object[][] result = execute("SELECT val FROM %s WHERE GEO_DISTANCE(val, " + Arrays.toString(queryVector) + ") < " + searchRadiusMeters);
+
+            var recall = getGeoRecall(allVectors, queryVector, searchRadiusMeters, getVectors(result));
+            recallSum += recall;
+        }
+        logger.info("Observed recall rate: {}", recallSum / queryCount);
+        assertThat(recallSum / queryCount).isGreaterThanOrEqualTo(MIN_GEO_SEARCH_RECALL);
+    }
+
+    @Test
     public void testPartitionRestrictedVectorSearch()
     {
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
@@ -305,6 +358,44 @@ public class VectorDistributedTest extends TestBaseImpl
                 assertThat(recall).isGreaterThanOrEqualTo(0.8);
             }
         }
+    }
+
+    @Test
+    public void testInvalidVectorQueriesWithCosineSimilarity()
+    {
+        dimensionCount = 2;
+        cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
+        // geo requries euclidean similarity function
+        cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val") + " WITH OPTIONS = {'similarity_function' : 'cosine'}"));
+        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [0.0, 0.0])")).hasMessage("Zero vectors cannot be indexed or queried with cosine similarity");
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [1, NaN])")).hasMessage("non-finite value at vector[1]=NaN");
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [1, Infinity])")).hasMessage("non-finite value at vector[1]=Infinity");
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [-Infinity, 1])")).hasMessage("non-finite value at vector[0]=-Infinity");
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [0.0, 0.0] LIMIT 2")).hasMessage("Zero vectors cannot be indexed or queried with cosine similarity");
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [1, NaN] LIMIT 2")).hasMessage("non-finite value at vector[1]=NaN");
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [1, Infinity] LIMIT 2")).hasMessage("non-finite value at vector[1]=Infinity");
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [-Infinity, 1] LIMIT 2")).hasMessage("non-finite value at vector[0]=-Infinity");
+    }
+
+    @Test
+    public void testInvalidVectorQueriesWithDefaultSimilarity()
+    {
+        dimensionCount = 2;
+        cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
+        // geo requries euclidean similarity function
+        cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val")));
+        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [0.0, 0.0])")).hasMessage("Zero vectors cannot be indexed or queried with cosine similarity");
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [1, NaN])")).hasMessage("non-finite value at vector[1]=NaN");
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [1, Infinity])")).hasMessage("non-finite value at vector[1]=Infinity");
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [-Infinity, 1])")).hasMessage("non-finite value at vector[0]=-Infinity");
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [0.0, 0.0] LIMIT 2")).hasMessage("Zero vectors cannot be indexed or queried with cosine similarity");
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [1, NaN] LIMIT 2")).hasMessage("non-finite value at vector[1]=NaN");
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [1, Infinity] LIMIT 2")).hasMessage("non-finite value at vector[1]=Infinity");
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [-Infinity, 1] LIMIT 2")).hasMessage("non-finite value at vector[0]=-Infinity");
     }
 
     private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize) throws Throwable
@@ -435,6 +526,42 @@ public class VectorDistributedTest extends TestBaseImpl
         }
         return rawVector;
     }
+
+    private List<float[]> generateUSBoundedGeoVectors(int vectorCount)
+    {
+        return IntStream.range(0, vectorCount).mapToObj(s -> randomUSVector()).collect(Collectors.toList());
+    }
+
+    private float[] randomUSVector()
+    {
+        // Approximate bounding box for contiguous US locations
+        var lat = getRandom().nextFloatBetween(24, 49);
+        var lon = getRandom().nextFloatBetween(-124, -67);
+        return new float[] {lat, lon};
+    }
+
+    private double getGeoRecall(List<float[]> allVectors, float[] query, float distance, List<float[]> resultVectors)
+    {
+        assertThat(allVectors).containsAll(resultVectors);
+        var expectdVectors = allVectors.stream().filter(v -> GeoDistanceAccuracyTest.isWithinDistance(v, query, distance))
+                                 .collect(Collectors.toSet());
+        int matches = 0;
+        for (float[] expectedVector : expectdVectors)
+        {
+            for (float[] resultVector : resultVectors)
+            {
+                if (Arrays.compare(expectedVector, resultVector) == 0)
+                {
+                    matches++;
+                    break;
+                }
+            }
+        }
+        if (expectdVectors.isEmpty() && resultVectors.isEmpty())
+            return 1.0;
+        return matches * 1.0 / expectdVectors.size();
+    }
+
 
     private static Object[][] execute(String query)
     {

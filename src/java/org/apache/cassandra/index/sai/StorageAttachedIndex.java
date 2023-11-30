@@ -105,11 +105,14 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VALIDATE_TERMS_AT_COORDINATOR;
 import static org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig.MAX_TOP_K;
 
 public class StorageAttachedIndex implements Index
 {
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
+
+    private static final boolean VALIDATE_TERMS_AT_COORDINATOR = SAI_VALIDATE_TERMS_AT_COORDINATOR.getBoolean();
 
     private static class StorageAttachedIndexBuildingSupport implements IndexBuildingSupport
     {
@@ -187,6 +190,7 @@ public class StorageAttachedIndex implements Index
     private static final Set<String> VALID_OPTIONS = ImmutableSet.of(NonTokenizingOptions.CASE_SENSITIVE,
                                                                      NonTokenizingOptions.NORMALIZE,
                                                                      NonTokenizingOptions.ASCII,
+                                                                     // For now, we leave this for backward compatibility even though it's not used
                                                                      IndexContext.ENABLE_SEGMENT_COMPACTION_OPTION_NAME,
                                                                      IndexTarget.TARGET_OPTION_NAME,
                                                                      IndexTarget.CUSTOM_INDEX_OPTION_NAME,
@@ -336,7 +340,13 @@ public class StorageAttachedIndex implements Index
     public void register(IndexRegistry registry)
     {
         // index will be available for writes
-        registry.registerIndex(this, StorageAttachedIndexGroup.class, () -> new StorageAttachedIndexGroup(baseCfs));
+        registry.registerIndex(this, StorageAttachedIndexGroup.GROUP_KEY, () -> new StorageAttachedIndexGroup(baseCfs));
+    }
+
+    @Override
+    public void unregister(IndexRegistry registry)
+    {
+        registry.unregisterIndex(this, StorageAttachedIndexGroup.GROUP_KEY);
     }
 
     @Override
@@ -615,13 +625,16 @@ public class StorageAttachedIndex implements Index
     @Override
     public void validate(ReadCommand command) throws InvalidRequestException
     {
-        if (!getIndexContext().isVector())
+        var indexQueryPlan = command.indexQueryPlan();
+        if (indexQueryPlan == null || !indexQueryPlan.isTopK())
             return;
 
         // to avoid overflow HNSW internal data structure and avoid OOM when filtering top-k
         if (command.limits().isUnlimited() || command.limits().count() > MAX_TOP_K)
             throw new InvalidRequestException(String.format("Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than %s. LIMIT was %s",
                                                             MAX_TOP_K, command.limits().isUnlimited() ? "NO LIMIT" : command.limits().count()));
+
+        indexContext.validate(command.rowFilter());
     }
 
     @Override
@@ -638,8 +651,14 @@ public class StorageAttachedIndex implements Index
 
     @Override
     public void validate(PartitionUpdate update) throws InvalidRequestException
-    {}
+    {
+        if (!VALIDATE_TERMS_AT_COORDINATOR)
+            return;
 
+        DecoratedKey key = update.partitionKey();
+        for (Row row : update)
+            indexContext.validate(key, row);
+    }
     /**
      * This method is called by the startup tasks to find SSTables that don't have indexes. The method is
      * synchronized so that the view is unchanged between validation and the selection of non-indexed SSTables.

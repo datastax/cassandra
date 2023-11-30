@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
@@ -174,17 +175,6 @@ public class BKDReaderTest extends SaiRandomizedTest
         reader1.close();
         reader2.close();
         reader.close();
-    }
-
-    private PostingList intersect(List<PostingList.PeekablePostingList> postings)
-    {
-        if (postings == null || postings.isEmpty())
-            return null;
-
-        PriorityQueue<PostingList.PeekablePostingList> queue = new PriorityQueue<>(Comparator.comparingLong(PostingList.PeekablePostingList::peek));
-        queue.addAll(postings);
-
-        return MergePostingList.merge(queue, () -> postings.forEach(posting -> FileUtils.closeQuietly(posting)));
     }
 
     private BKDReader createReader(int numRows) throws IOException
@@ -374,8 +364,7 @@ public class BKDReaderTest extends SaiRandomizedTest
                                                                  Integer.BYTES,
                                                                  Math.toIntExact(buffer.numRows()),
                                                                  buffer.numRows(),
-                                                                 new IndexWriterConfig("test", 2, 8),
-                                                                 false);
+                                                                 new IndexWriterConfig("test", 2, 8));
 
         final SegmentMetadata.ComponentMetadataMap metadata = writer.writeAll(buffer.asPointValues());
         final long bkdPosition = metadata.get(IndexComponent.KD_TREE).root;
@@ -400,8 +389,7 @@ public class BKDReaderTest extends SaiRandomizedTest
                                                                  Integer.BYTES,
                                                                  Math.toIntExact(numRows),
                                                                  numRows,
-                                                                 new IndexWriterConfig("test", 2, 8),
-                                                                 false);
+                                                                 new IndexWriterConfig("test", 2, 8));
 
         final SegmentMetadata.ComponentMetadataMap metadata = writer.writeAll(values);
         final long bkdPosition = metadata.get(IndexComponent.KD_TREE).root;

@@ -151,11 +151,6 @@ public class IndexWriterConfig
         return similarityFunction;
     }
 
-    public OptimizeFor getOptimizeFor()
-    {
-        return optimizeFor;
-    }
-
     public static IndexWriterConfig fromOptions(String indexName, AbstractType<?> type, Map<String, String> options)
     {
         int minLeaves = DEFAULT_POSTING_LIST_MIN_LEAVES;

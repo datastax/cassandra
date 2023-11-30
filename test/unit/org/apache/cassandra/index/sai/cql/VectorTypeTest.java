@@ -736,13 +736,35 @@ public class VectorTypeTest extends VectorTester
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
 
         // Put one row in the first ss table to guarantee brute force method. This vector is also the most similar.
-        execute("INSERT INTO %s (pk, vec) VALUES (10, [1,1])");
+        execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 10, vector(1f, 1f));
         flush();
 
         // Must be enough rows to go to graph
         for (int j = 1; j <= 10; j++)
         {
-            execute("INSERT INTO %s (pk, vec) VALUES (?, [?,?])", j, j, j);
+            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", j, vector(j, j));
+        }
+        flush();
+
+        assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2"), row(1), row(2));
+    }
+
+    @Test
+    public void testSamePKWithBruteForceAndOnDiskGraphBasedScoring()
+    {
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
+        // Use euclidean distance to more easily verify correctness of caching
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
+
+        // Put one row in the first ss table to guarantee brute force method. This vector is also the most similar.
+        execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 10, vector(1f, 1f));
+        flush();
+
+        // over 1024 vectors to guarantee PQ on disk
+        // Must be enough rows to go to graph
+        for (int j = 1; j <= 1100; j++)
+        {
+            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", j, vector((float) j, (float) j));
         }
         flush();
 
@@ -798,5 +820,87 @@ public class VectorTypeTest extends VectorTester
         execute("INSERT INTO %s (pk, name, body, vals) VALUES (4, 'Bea', 'I repeat: wear your helmet!', [0.3, -0.2])");
         var result = execute("SELECT pk FROM %s WHERE name='Bea' OR name='Ann' ORDER BY vals ANN OF [0.3, 0.1] LIMIT 5");
         assertRowsIgnoringOrder(result, row(1), row(2), row(4));
+    }
+
+    @Test
+    public void testIntersectionWithMatchingPrimaryKeyDownToClusteringValues() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, a int, b int, c int, vec vector<float, 2>, PRIMARY KEY(pk, a))");
+        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // This row is created so that it matches the query parameters, and so that the PK is before the other PKs.
+        // The token for 5 is -7509452495886106294 and the token for 1 is -4069959284402364209.
+        execute("INSERT INTO %s (pk, a, b, c, vec) VALUES (?, ?, ?, ?, ?)", 5, 1, 1, 2, vector(1, 1));
+        // This row is created so that it matches one, but not both, predicates, and so that it has the same token
+        // as the third row, but is technically before it when sorting using clustering columns.
+        execute("INSERT INTO %s (pk, a, b, c, vec) VALUES (?, ?, ?, ?, ?)", 1, 1, 1, 0, vector(1, 1));
+        // This row is the only valid match and is the final row in the sstable.
+        execute("INSERT INTO %s (pk, a, b, c, vec) VALUES (?, ?, ?, ?, ?)", 1, 2, 1, 2, vector(1, 1));
+
+        beforeAndAfterFlush(
+        () -> {
+            // Query has three important details. First, we restrict by the partition, then we have an intersection
+            // on b and c. It is a vector query because there is a separate code path for it.
+            assertRows(execute("SELECT a FROM %s WHERE b = 1 AND c = 2 AND pk = 1 ORDER BY vec ANN OF [1,1] LIMIT 3"), row(2));
+            // Verify this works for the non vector code path as well, which was also broken.
+            assertRows(execute("SELECT a FROM %s WHERE b = 1 AND c = 2 AND pk = 1"), row(2));
+        });
+    }
+
+    @Test
+    public void testHybridSearchWithPrimaryKeyHoles() throws Throwable
+    {
+        setMaxBruteForceRows(0);
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, val text, vec vector<float, 2>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+
+        // Insert rows into two sstables. The tokens for each PK are in each line's comment.
+        execute("INSERT INTO %s (pk, val, vec) VALUES (1, 'A', [1, 3])"); // -4069959284402364209
+        execute("INSERT INTO %s (pk, val, vec) VALUES (2, 'A', [1, 2])"); // -3248873570005575792
+        // Make the last row in the sstable the correct result. That way we verify the ceiling logic
+        // works correctly.
+        execute("INSERT INTO %s (pk, val, vec) VALUES (3, 'A', [1, 1])"); // 9010454139840013625
+        flush();
+        execute("INSERT INTO %s (pk, val, vec) VALUES (5, 'A', [1, 5])"); // -7509452495886106294
+        execute("INSERT INTO %s (pk, val, vec) VALUES (4, 'A', [1, 4])"); // -2729420104000364805
+        execute("INSERT INTO %s (pk, val, vec) VALUES (6, 'A', [1, 6])"); // 2705480034054113608
+        flush();
+
+        // Get all rows using first predicate, then filter to get top 1
+        // Use a small limit to ensure we do not use brute force
+        assertRows(execute("SELECT pk FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"),
+                   row(3));
+    }
+
+    // Clustering columns hit a different code path, we need both sets of tests, even though queries
+    // that expose the underlying regression are the same.
+    @Test
+    public void testHybridSearchWithPrimaryKeyHolesAndWithClusteringColumns() throws Throwable
+    {
+        setMaxBruteForceRows(0);
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2>, PRIMARY KEY(pk, a))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+
+        // Insert rows into two sstables. The tokens for each PK are in each line's comment.
+        execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, 1, 'A', [1, 3])"); // -4069959284402364209
+        execute("INSERT INTO %s (pk, a, val, vec) VALUES (2, 1, 'A', [1, 2])"); // -3248873570005575792
+        // Make the last row in the sstable the correct result. That way we verify the ceiling logic
+        // works correctly.
+        execute("INSERT INTO %s (pk, a, val, vec) VALUES (3, 1, 'A', [1, 1])"); // 9010454139840013625
+        flush();
+        execute("INSERT INTO %s (pk, a, val, vec) VALUES (5, 1, 'A', [1, 5])"); // -7509452495886106294
+        execute("INSERT INTO %s (pk, a, val, vec) VALUES (4, 1, 'A', [1, 4])"); // -2729420104000364805
+        execute("INSERT INTO %s (pk, a, val, vec) VALUES (6, 1, 'A', [1, 6])"); // 2705480034054113608
+        flush();
+
+        // Get all rows using first predicate, then filter to get top 1
+        // Use a small limit to ensure we do not use brute force
+        assertRows(execute("SELECT pk FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"),
+                   row(3));
     }
 }
