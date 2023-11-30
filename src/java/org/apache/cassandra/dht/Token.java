@@ -39,6 +39,10 @@ public abstract class Token implements RingPosition<Token>, Serializable
     {
         public abstract ByteBuffer toByteArray(Token token);
         public abstract Token fromByteArray(ByteBuffer bytes);
+        public Token fromLong(long longValue)
+        {
+            throw new UnsupportedOperationException();
+        }
 
         /**
          * Produce a weakly prefix-free byte-comparable representation of the token, i.e. such a sequence of bytes that any

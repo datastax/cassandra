@@ -362,9 +362,16 @@ public class Murmur3Partitioner implements IPartitioner
             return 8;
         }
 
+        @Override
         public Token fromByteArray(ByteBuffer bytes)
         {
             return new LongToken(ByteBufferUtil.toLong(bytes));
+        }
+
+        @Override
+        public Token fromLong(long longValue)
+        {
+            return new LongToken(longValue);
         }
 
         @Override

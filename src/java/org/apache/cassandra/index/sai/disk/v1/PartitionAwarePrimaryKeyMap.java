@@ -132,9 +132,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public PrimaryKey primaryKeyFromRowId(long sstableRowId)
     {
-        tokenBuffer.putLong(rowIdToToken.get(sstableRowId));
-        tokenBuffer.rewind();
-        return primaryKeyFactory.createDeferred(partitioner.getTokenFactory().fromByteArray(tokenBuffer), () -> supplier(sstableRowId));
+        return primaryKeyFactory.createDeferred(partitioner.getTokenFactory().fromLong(sstableRowId),
+                                                () -> supplier(sstableRowId));
     }
 
     @Override
