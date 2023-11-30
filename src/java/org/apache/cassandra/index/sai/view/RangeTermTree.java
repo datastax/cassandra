@@ -45,10 +45,10 @@ public class RangeTermTree implements TermTree
     
     private final IntervalTree<Term, SSTableIndex, Interval<Term, SSTableIndex>> rangeTree;
 
-    private RangeTermTree(IntervalTree<Term, SSTableIndex, Interval<Term, SSTableIndex>> rangeTree, AbstractType<?> comparator)
+    private RangeTermTree(ByteBuffer min, ByteBuffer max, IntervalTree<Term, SSTableIndex, Interval<Term, SSTableIndex>> rangeTree, AbstractType<?> comparator)
     {
-        this.min = rangeTree.isEmpty() ? null : rangeTree.min().term;
-        this.max = rangeTree.isEmpty() ? null : rangeTree.max().term;
+        this.min = min;
+        this.max = max;
         this.rangeTree = rangeTree;
         this.comparator = comparator;
     }
@@ -91,7 +91,7 @@ public class RangeTermTree implements TermTree
 
         public TermTree build()
         {
-            return new RangeTermTree(IntervalTree.build(intervals), comparator);
+            return new RangeTermTree(min, max, IntervalTree.build(intervals), comparator);
         }
     }
 
