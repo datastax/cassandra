@@ -71,7 +71,7 @@ public class RangeIntersectionIterator extends RangeIterator
         int alreadyAvanced = 0;
 
         outer:
-        while (highestKey != null && highestKey.compareTo(getMaximum()) <= 0)
+        while (highestKey != null)
         {
             // Try advance all iterators to the highest key seen so far.
             // Once this inner loop finishes normally, all iterators are guaranteed to be at the same value.
