@@ -19,9 +19,23 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -54,7 +68,10 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.base.Throwables;
-import com.google.common.collect.*;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -63,6 +80,7 @@ import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.carrotsearch.hppc.LongHashSet;
 import org.apache.cassandra.cache.CounterCacheKey;
 import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.RowCacheKey;
@@ -119,9 +137,9 @@ import org.apache.cassandra.io.sstable.BloomFilterTracker;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
+import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.StorageHandler;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -156,6 +174,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.DefaultValue;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -208,7 +227,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                                                                                                new LinkedBlockingQueue<>(),
                                                                                                new NamedThreadFactory("MemtableReclaimMemory"),
                                                                                                "internal");
-
     /**
      * Reason for initiating a memtable flush.
      */
@@ -360,6 +378,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     ShardBoundaries cachedShardBoundaries = null;
 
     private volatile boolean neverPurgeTombstones = false;
+
+    public final LongHashSet tokenCollisions;
 
     // BloomFilterTracker is updated from corresponding {@link SSTableReader}s. Metrics are queried via CFS instance.
     private final BloomFilterTracker bloomFilterTracker = BloomFilterTracker.createMeterTracker();
@@ -563,6 +583,42 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         // scan for sstables corresponding to this cf and load them
         if (loadSSTables)
             sstables = storageHandler.loadInitialSSTables();
+
+        if (sstables == null)
+        {
+            // FIXME this will probably break something
+            tokenCollisions = null;
+        }
+        else
+        {
+            tokenCollisions = new LongHashSet();
+            var nRows = sstables.stream().mapToLong(SSTableReader::estimatedKeys).sum();
+            // 10 buckets per element gives us < 1% false positive rate; see BloomCalculations.probs
+            var allTokens = FilterFactory.getFilter(nRows, 10);
+            for (var sstable: sstables)
+            {
+                try (var it = sstable.allKeysIterator())
+                {
+                    do
+                    {
+                        // VSTODO this is inefficient since we only care about the token, not the DK
+                        Token token = decorateKey(it.key()).getToken();
+                        var key = new TokenFilterKey(token);
+                        if (allTokens.isPresent(key))
+                            tokenCollisions.add(token.getLongValue());
+                        allTokens.add(key);
+                    } while (it.advance());
+                }
+                catch (IOException e)
+                {
+                    throw new UncheckedIOException(e);
+                }
+            }
+            logger.info("For {} rows across {} SSTables, token collision count (including BF false positives) is {}.",
+                        nRows,
+                        sstables.size(),
+                        tokenCollisions.size());
+        }
 
         // compaction strategy should be created after the CFS has been prepared
         this.strategyFactory = new CompactionStrategyFactory(this);

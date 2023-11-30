@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.function.Supplier;
 
+import com.carrotsearch.hppc.LongHashSet;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
@@ -106,9 +107,12 @@ public interface PrimaryKey extends Comparable<PrimaryKey>
      */
     static Factory factory(ClusteringComparator clusteringComparator, IndexFeatureSet indexFeatureSet)
     {
-        return indexFeatureSet.isRowAware() ? new RowAwarePrimaryKeyFactory(clusteringComparator)
+        // FIXME empty hashset here is incorrect
+        return indexFeatureSet.isRowAware() ? new RowAwarePrimaryKeyFactory(clusteringComparator, () -> new LongHashSet())
                                             : new PartitionAwarePrimaryKeyFactory();
     }
+
+    boolean isTokenOnly();
 
     /**
      * Returns the {@link Token} associated with this primary key.

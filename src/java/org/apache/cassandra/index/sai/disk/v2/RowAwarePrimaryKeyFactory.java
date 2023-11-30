@@ -23,6 +23,7 @@ import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.carrotsearch.hppc.LongHashSet;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
@@ -39,43 +40,60 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
     private final ClusteringComparator clusteringComparator;
+    // creating with a Supplier allows us to break a circular dependency when creating the Keyspace + CFS
+    private Supplier<LongHashSet> collisionsSupplier;
+    private LongHashSet tokenCollisions;
 
-    public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
+    public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator, Supplier<LongHashSet> collisionsSupplier)
     {
         this.clusteringComparator = clusteringComparator;
+        this.collisionsSupplier = collisionsSupplier;
     }
 
     @Override
     public PrimaryKey createTokenOnly(Token token)
     {
-        return new RowAwarePrimaryKey(token, null, null, null);
+        return new RowAwarePrimaryKey(token, false, null, null, null);
     }
 
     @Override
     public PrimaryKey createDeferred(Token token, Supplier<PrimaryKey> primaryKeySupplier)
     {
-        return new RowAwarePrimaryKey(token, null, null, primaryKeySupplier);
+        if (tokenCollisions == null)
+            tokenCollisions = collisionsSupplier.get();
+        return new RowAwarePrimaryKey(token, !tokenCollisions.contains(token.getLongValue()), null, null, primaryKeySupplier);
     }
 
     @Override
     public PrimaryKey create(DecoratedKey partitionKey, Clustering clustering)
     {
-        return new RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
+        if (tokenCollisions == null)
+            tokenCollisions = collisionsSupplier.get();
+        var token = partitionKey.getToken();
+        return new RowAwarePrimaryKey(token, tokenCollisions.contains(token.getLongValue()), partitionKey, clustering, null);
     }
 
     private class RowAwarePrimaryKey implements PrimaryKey
     {
-        private Token token;
+        private final Token token;
+        private final boolean tokenIsUnique;
         private DecoratedKey partitionKey;
         private Clustering clustering;
         private Supplier<PrimaryKey> primaryKeySupplier;
 
-        private RowAwarePrimaryKey(Token token, DecoratedKey partitionKey, Clustering clustering, Supplier<PrimaryKey> primaryKeySupplier)
+        private RowAwarePrimaryKey(Token token, boolean tokenIsUnique, DecoratedKey partitionKey, Clustering clustering, Supplier<PrimaryKey> primaryKeySupplier)
         {
             this.token = token;
+            this.tokenIsUnique = tokenIsUnique;
             this.partitionKey = partitionKey;
             this.clustering = clustering;
             this.primaryKeySupplier = primaryKeySupplier;
+        }
+
+        @Override
+        public boolean isTokenOnly()
+        {
+            return partitionKey == null && primaryKeySupplier == null;
         }
 
         @Override
@@ -169,7 +187,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             // Otherwise if this key has no deferred loader and it's partition key is null
             // or the other partition key is null then one or both of the keys
             // are token only so we can only compare tokens
-            if ((cmp != 0) || (primaryKeySupplier == null && partitionKey == null) || o.partitionKey() == null)
+            if ((cmp != 0) || tokenIsUnique || isTokenOnly() || o.isTokenOnly())
                 return cmp;
 
             // Next compare the partition keys. If they are not equal or

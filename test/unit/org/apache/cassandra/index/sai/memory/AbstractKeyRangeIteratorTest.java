@@ -38,7 +38,7 @@ public abstract class AbstractKeyRangeIteratorTest
     @Before
     public void setup()
     {
-        primaryKeyFactory = new RowAwarePrimaryKeyFactory(SAITester.EMPTY_COMPARATOR);
+        primaryKeyFactory = new RowAwarePrimaryKeyFactory(SAITester.EMPTY_COMPARATOR, tokenCollisions);
     }
 
     @Test

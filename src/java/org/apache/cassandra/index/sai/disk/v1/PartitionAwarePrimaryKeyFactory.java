@@ -69,6 +69,12 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         }
 
         @Override
+        public boolean isTokenOnly()
+        {
+            return partitionKey == null && primaryKeySupplier == null;
+        }
+
+        @Override
         public PrimaryKey loadDeferred()
         {
             if (primaryKeySupplier != null && partitionKey == null)

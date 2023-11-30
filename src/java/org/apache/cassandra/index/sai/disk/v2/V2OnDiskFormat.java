@@ -22,10 +22,12 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.EnumSet;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.carrotsearch.hppc.LongHashSet;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
@@ -87,9 +89,9 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator)
+    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator, Supplier<LongHashSet> tokenCollisions)
     {
-        return new RowAwarePrimaryKeyFactory(comparator);
+        return new RowAwarePrimaryKeyFactory(comparator, tokenCollisions);
     }
 
     @Override

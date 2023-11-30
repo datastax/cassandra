@@ -22,10 +22,12 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.EnumSet;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.carrotsearch.hppc.LongHashSet;
 import com.codahale.metrics.Gauge;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -42,7 +44,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.OnDiskFormat;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.metrics.AbstractMetrics;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
@@ -131,7 +132,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator)
+    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator, Supplier<LongHashSet> tokenCollisions)
     {
         return new PartitionAwarePrimaryKeyFactory();
     }

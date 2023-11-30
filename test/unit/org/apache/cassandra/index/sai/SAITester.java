@@ -125,7 +125,7 @@ public class SAITester extends CQLTester
 
     public static final ClusteringComparator EMPTY_COMPARATOR = new ClusteringComparator();
 
-    public static final PrimaryKey.Factory TEST_FACTORY = Version.LATEST.onDiskFormat().primaryKeyFactory(EMPTY_COMPARATOR);
+    public static final PrimaryKey.Factory TEST_FACTORY = Version.LATEST.onDiskFormat().primaryKeyFactory(EMPTY_COMPARATOR, cfs.tokenCollisions);
 
 
     static
