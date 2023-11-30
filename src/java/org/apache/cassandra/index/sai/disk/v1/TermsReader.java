@@ -265,19 +265,19 @@ public class TermsReader implements Closeable
          * Build an in-memory heap of row ids from the posting lists of the matching terms.
          * @return an ordered {@link LongHeap} of row ids
          */
-        private LongHeap materializeResults(Iterator<Pair<ByteSource,Long>> trieEntries) throws IOException
+        private LongHeap materializeResults(Iterator<Pair<ByteSource,Long>> triePairs) throws IOException
         {
-            assert trieEntries.hasNext();
+            assert triePairs.hasNext();
             LongHeap heap = null;
             try (var postingsInput = IndexFileUtils.instance.openInput(postingsFile);
                  var postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile))
             {
                 do
                 {
-                    Pair<ByteSource, Long> nextTrieEntry = trieEntries.next();
-                    ByteSource key = nextTrieEntry.left;
-                    long postingsOffset = nextTrieEntry.right;
-                    byte[] nextBytes = ByteSourceInverse.readBytes(key);
+                    Pair<ByteSource, Long> nextTriePair = triePairs.next();
+                    ByteSource mapEntry = nextTriePair.left;
+                    long postingsOffset = nextTriePair.right;
+                    byte[] nextBytes = ByteSourceInverse.readBytes(mapEntry);
                     if (exp.isSatisfiedBy(ByteBuffer.wrap(nextBytes)))
                     {
                         var blocksSummary = new PostingsReader.BlocksSummary(postingsSummaryInput, postingsOffset, PostingsReader.InputCloser.NOOP);
@@ -296,7 +296,7 @@ public class TermsReader implements Closeable
                             heap.push(nextPosting);
                         }
                     }
-                } while (trieEntries.hasNext());
+                } while (triePairs.hasNext());
                 return heap != null ? heap : new LongHeap(1);
             }
         }
