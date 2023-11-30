@@ -28,10 +28,9 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
@@ -50,13 +49,12 @@ public class KDTreeIndexSearcher extends IndexSearcher
     private final BKDReader bkdReader;
     private final QueryEventListener.BKDIndexEventListener perColumnEventListener;
 
-    KDTreeIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
+    KDTreeIndexSearcher(SSTableContext ssTableContext,
                         PerIndexFiles perIndexFiles,
                         SegmentMetadata segmentMetadata,
-                        IndexDescriptor indexDescriptor,
                         IndexContext indexContext) throws IOException
     {
-        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
+        super(ssTableContext, perIndexFiles, segmentMetadata, indexContext);
 
         final long bkdPosition = metadata.getIndexRoot(IndexComponent.KD_TREE);
         assert bkdPosition >= 0;

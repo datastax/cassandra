@@ -24,6 +24,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PostingListRangeIterator;
@@ -47,16 +48,15 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
     final IndexDescriptor indexDescriptor;
     protected final IndexContext indexContext;
 
-    protected IndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
+    protected IndexSearcher(SSTableContext ssTableContext,
                             PerIndexFiles perIndexFiles,
                             SegmentMetadata segmentMetadata,
-                            IndexDescriptor indexDescriptor,
                             IndexContext indexContext)
     {
-        this.primaryKeyMapFactory = primaryKeyMapFactory;
+        this.primaryKeyMapFactory = ssTableContext.primaryKeyMapFactory;
         this.indexFiles = perIndexFiles;
         this.metadata = segmentMetadata;
-        this.indexDescriptor = indexDescriptor;
+        this.indexDescriptor = ssTableContext.indexDescriptor;
         this.indexContext = indexContext;
     }
 

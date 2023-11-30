@@ -19,22 +19,8 @@
 package org.apache.cassandra.db;
 
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.utils.IFilter;
 
-public class TokenFilterKey implements IFilter.FilterKey
+public interface ITokenCollisionTracker
 {
-    private final Token token;
-
-    public TokenFilterKey(Token token)
-    {
-        this.token = token;
-    }
-
-    @Override
-    public void filterHash(long[] dest)
-    {
-        var m = token.getLongValue();
-        dest[0] = m >> 32;
-        dest[1] = (int) m;
-    }
+    boolean isUnique(Token token);
 }

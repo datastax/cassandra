@@ -20,8 +20,7 @@ package org.apache.cassandra.index.sai.disk.v3;
 import java.io.IOException;
 
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
@@ -31,12 +30,11 @@ import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
  */
 public class V3VectorIndexSearcher extends V2VectorIndexSearcher
 {
-    public V3VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
+    public V3VectorIndexSearcher(SSTableContext ssTableContext,
+                                 IndexContext indexContext,
                                  PerIndexFiles perIndexFiles,
-                                 SegmentMetadata segmentMetadata,
-                                 IndexDescriptor indexDescriptor,
-                                 IndexContext indexContext) throws IOException
+                                 SegmentMetadata segmentMetadata) throws IOException
     {
-        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext, new CassandraDiskAnn(segmentMetadata.componentMetadatas, perIndexFiles, indexContext));
+        super(ssTableContext, indexContext, perIndexFiles, segmentMetadata, new CassandraDiskAnn(segmentMetadata.componentMetadatas, perIndexFiles, indexContext));
     }
 }

@@ -119,7 +119,7 @@ public class QueryController
         DataRange last = ranges.get(ranges.size() - 1);
         this.mergeRange = ranges.size() == 1 ? first.keyRange() : first.keyRange().withNewRight(last.keyRange().right);
 
-        this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
+        this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet, () -> cfs.tokenCollisions);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
         this.lastPrimaryKey = keyFactory.createTokenOnly(mergeRange.right.getToken());
     }

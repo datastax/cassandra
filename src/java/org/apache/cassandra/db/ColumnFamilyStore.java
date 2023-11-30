@@ -379,7 +379,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     private volatile boolean neverPurgeTombstones = false;
 
-    public final LongHashSet tokenCollisions;
+    public final ITokenCollisionTracker tokenCollisions;
 
     // BloomFilterTracker is updated from corresponding {@link SSTableReader}s. Metrics are queried via CFS instance.
     private final BloomFilterTracker bloomFilterTracker = BloomFilterTracker.createMeterTracker();
@@ -585,40 +585,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             sstables = storageHandler.loadInitialSSTables();
 
         if (sstables == null)
-        {
-            // FIXME this will probably break something
-            tokenCollisions = null;
-        }
+            tokenCollisions = new EverythingCollidesTracker();
         else
-        {
-            tokenCollisions = new LongHashSet();
-            var nRows = sstables.stream().mapToLong(SSTableReader::estimatedKeys).sum();
-            // 10 buckets per element gives us < 1% false positive rate; see BloomCalculations.probs
-            var allTokens = FilterFactory.getFilter(nRows, 10);
-            for (var sstable: sstables)
-            {
-                try (var it = sstable.allKeysIterator())
-                {
-                    do
-                    {
-                        // VSTODO this is inefficient since we only care about the token, not the DK
-                        Token token = decorateKey(it.key()).getToken();
-                        var key = new TokenFilterKey(token);
-                        if (allTokens.isPresent(key))
-                            tokenCollisions.add(token.getLongValue());
-                        allTokens.add(key);
-                    } while (it.advance());
-                }
-                catch (IOException e)
-                {
-                    throw new UncheckedIOException(e);
-                }
-            }
-            logger.info("For {} rows across {} SSTables, token collision count (including BF false positives) is {}.",
-                        nRows,
-                        sstables.size(),
-                        tokenCollisions.size());
-        }
+            tokenCollisions = TokenCollisionTracker.build(sstables, (key) -> metadata().partitioner.decorateKey(key).getToken());
 
         // compaction strategy should be created after the CFS has been prepared
         this.strategyFactory = new CompactionStrategyFactory(this);

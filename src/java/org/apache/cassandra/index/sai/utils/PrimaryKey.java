@@ -19,10 +19,11 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.function.Supplier;
 
-import com.carrotsearch.hppc.LongHashSet;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.ITokenCollisionTracker;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
@@ -32,7 +33,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 /**
  * Representation of the primary key for a row consisting of the {@link DecoratedKey} and
- * {@link Clustering} associated with a {@link org.apache.cassandra.db.rows.Row}.
+ * {@link Clustering} associated with a {@link Row}.
  *
  * For legacy V1 support only the {@link DecoratedKey} will ever be supported for a row.
  *
@@ -101,14 +102,14 @@ public interface PrimaryKey extends Comparable<PrimaryKey>
      *
      * @param clusteringComparator the {@link ClusteringComparator} used by the
      *                             {@link RowAwarePrimaryKeyFactory} for clustering comparisons
-     * @param indexFeatureSet the {@link IndexFeatureSet} used to decide the type of
-     *                        factory to use
+     * @param indexFeatureSet      the {@link IndexFeatureSet} used to decide the type of
+     *                             factory to use
+     * @param collisionsSupplier
      * @return a {@link Factory} for {@link PrimaryKey} creation
      */
-    static Factory factory(ClusteringComparator clusteringComparator, IndexFeatureSet indexFeatureSet)
+    static Factory factory(ClusteringComparator clusteringComparator, IndexFeatureSet indexFeatureSet, Supplier<ITokenCollisionTracker> collisionsSupplier)
     {
-        // FIXME empty hashset here is incorrect
-        return indexFeatureSet.isRowAware() ? new RowAwarePrimaryKeyFactory(clusteringComparator, () -> new LongHashSet())
+        return indexFeatureSet.isRowAware() ? new RowAwarePrimaryKeyFactory(clusteringComparator, collisionsSupplier)
                                             : new PartitionAwarePrimaryKeyFactory();
     }
 

@@ -22,8 +22,8 @@ import java.io.IOException;
 import java.util.Set;
 import java.util.function.Supplier;
 
-import com.carrotsearch.hppc.LongHashSet;
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ITokenCollisionTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
@@ -80,7 +80,7 @@ public interface OnDiskFormat
      * @param tokenCollisions
      * @return the primary key factory
      */
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator, Supplier<LongHashSet> tokenCollisions);
+    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator, Supplier<ITokenCollisionTracker> tokenCollisions);
 
     /**
      * Returns true if the per-sstable index components have been built and are valid.

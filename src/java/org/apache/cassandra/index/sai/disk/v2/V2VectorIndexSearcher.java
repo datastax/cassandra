@@ -40,9 +40,9 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -57,6 +57,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.lang.Math.ceil;
@@ -77,25 +78,25 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private final AtomicRatio actualExpectedRatio = new AtomicRatio();
     private final ThreadLocal<SparseFixedBitSet> cachedBitSets;
 
-    public V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
+    public V2VectorIndexSearcher(SSTableContext ssTableContext,
+                                 IndexContext indexContext,
                                  PerIndexFiles perIndexFiles,
-                                 SegmentMetadata segmentMetadata,
-                                 IndexDescriptor indexDescriptor,
-                                 IndexContext indexContext) throws IOException
+                                 SegmentMetadata segmentMetadata) throws IOException
     {
-        this(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext, new CassandraOnDiskHnsw(segmentMetadata.componentMetadatas, perIndexFiles, indexContext));
+        this(ssTableContext, indexContext, perIndexFiles, segmentMetadata, new CassandraOnDiskHnsw(segmentMetadata.componentMetadatas, perIndexFiles, indexContext));
     }
 
-    protected V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
+    protected V2VectorIndexSearcher(SSTableContext ssTableContext,
+                                    IndexContext indexContext,
                                     PerIndexFiles perIndexFiles,
                                     SegmentMetadata segmentMetadata,
-                                    IndexDescriptor indexDescriptor,
-                                    IndexContext indexContext,
                                     JVectorLuceneOnDiskGraph graph)
     {
-        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
+        super(ssTableContext, perIndexFiles, segmentMetadata, indexContext);
         this.graph = graph;
-        this.keyFactory = PrimaryKey.factory(indexContext.comparator(), indexContext.indexFeatureSet());
+        this.keyFactory = PrimaryKey.factory(indexContext.comparator(),
+                                             indexContext.indexFeatureSet(),
+                                             () -> Schema.instance.getColumnFamilyStoreInstance(ssTableContext.sstable.metadata().id).tokenCollisions);
         cachedBitSets = ThreadLocal.withInitial(() -> new SparseFixedBitSet(graph.size()));
 
         globalBruteForceRows = Integer.MAX_VALUE;

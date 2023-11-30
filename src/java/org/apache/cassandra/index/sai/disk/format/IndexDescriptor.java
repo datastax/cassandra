@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
+import com.google.common.base.Supplier;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
@@ -34,6 +35,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ITokenCollisionTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -49,9 +51,11 @@ import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.lucene.store.IndexInput;
@@ -62,7 +66,7 @@ import org.apache.lucene.util.IOUtils;
  * specific information about the on-disk state of a {@link StorageAttachedIndex}.
  *
  * The {@IndexDescriptor} is primarily responsible for maintaining a view of the on-disk state
- * of an index for a specific {@link org.apache.cassandra.io.sstable.SSTable}. It maintains mappings
+ * of an index for a specific {@link SSTable}. It maintains mappings
  * of the current on-disk components and files. It is responsible for opening files for use by
  * writers and readers.
  *
@@ -83,18 +87,18 @@ public class IndexDescriptor
     public final Map<IndexComponent, File> onDiskPerSSTableFileMap = Maps.newHashMap();
     public final Map<Pair<IndexComponent, String>, File> onDiskPerIndexFileMap = Maps.newHashMap();
 
-    private IndexDescriptor(Version version, Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
+    private IndexDescriptor(Version version, Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator, Supplier<ITokenCollisionTracker> collisionsSupplier)
     {
         this.version = version;
         this.descriptor = descriptor;
         this.partitioner = partitioner;
         this.clusteringComparator = clusteringComparator;
-        this.primaryKeyFactory = PrimaryKey.factory(clusteringComparator, version.onDiskFormat().indexFeatureSet());
+        this.primaryKeyFactory = PrimaryKey.factory(clusteringComparator, version.onDiskFormat().indexFeatureSet(), collisionsSupplier::get);
     }
 
-    public static IndexDescriptor create(Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
+    public static IndexDescriptor create(Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator, Supplier<ITokenCollisionTracker> collisionTracker)
     {
-        return new IndexDescriptor(Version.LATEST, descriptor, partitioner, clusteringComparator);
+        return new IndexDescriptor(Version.LATEST, descriptor, partitioner, clusteringComparator, collisionTracker);
     }
 
     public static IndexDescriptor create(SSTableReader sstable)
@@ -104,7 +108,8 @@ public class IndexDescriptor
             IndexDescriptor indexDescriptor = new IndexDescriptor(version,
                                                                   sstable.descriptor,
                                                                   sstable.metadata().partitioner,
-                                                                  sstable.metadata().comparator);
+                                                                  sstable.metadata().comparator,
+                                                                  () -> Schema.instance.getColumnFamilyStoreInstance(sstable.metadata().id).tokenCollisions);
 
             if (version.onDiskFormat().isPerSSTableBuildComplete(indexDescriptor))
             {
@@ -115,7 +120,8 @@ public class IndexDescriptor
         return new IndexDescriptor(Version.LATEST,
                                    sstable.descriptor,
                                    sstable.metadata().partitioner,
-                                   sstable.metadata().comparator);
+                                   sstable.metadata().comparator,
+                                   () -> Schema.instance.getColumnFamilyStoreInstance(sstable.metadata().id).tokenCollisions);
     }
 
     public boolean hasComponent(IndexComponent indexComponent)

@@ -27,8 +27,8 @@ import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.carrotsearch.hppc.LongHashSet;
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ITokenCollisionTracker;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
@@ -89,7 +89,7 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator, Supplier<LongHashSet> tokenCollisions)
+    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator, Supplier<ITokenCollisionTracker> tokenCollisions)
     {
         return new RowAwarePrimaryKeyFactory(comparator, tokenCollisions);
     }
@@ -107,7 +107,7 @@ public class V2OnDiskFormat extends V1OnDiskFormat
                                           SegmentMetadata segmentMetadata) throws IOException
     {
         if (indexContext.isVector())
-            return new V2VectorIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor, indexContext);
+            return new V2VectorIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
         return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
     }
 

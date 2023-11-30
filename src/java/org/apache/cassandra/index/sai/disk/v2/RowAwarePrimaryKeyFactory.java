@@ -23,10 +23,10 @@ import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import com.carrotsearch.hppc.LongHashSet;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.ITokenCollisionTracker;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -41,10 +41,10 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
     private final ClusteringComparator clusteringComparator;
     // creating with a Supplier allows us to break a circular dependency when creating the Keyspace + CFS
-    private Supplier<LongHashSet> collisionsSupplier;
-    private LongHashSet tokenCollisions;
+    private Supplier<ITokenCollisionTracker> collisionsSupplier;
+    private ITokenCollisionTracker tokenCollisions;
 
-    public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator, Supplier<LongHashSet> collisionsSupplier)
+    public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator, Supplier<ITokenCollisionTracker> collisionsSupplier)
     {
         this.clusteringComparator = clusteringComparator;
         this.collisionsSupplier = collisionsSupplier;
@@ -61,16 +61,15 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
     {
         if (tokenCollisions == null)
             tokenCollisions = collisionsSupplier.get();
-        return new RowAwarePrimaryKey(token, !tokenCollisions.contains(token.getLongValue()), null, null, primaryKeySupplier);
+        return new RowAwarePrimaryKey(token, tokenCollisions.isUnique(token), null, null, primaryKeySupplier);
     }
 
     @Override
     public PrimaryKey create(DecoratedKey partitionKey, Clustering clustering)
     {
-        if (tokenCollisions == null)
-            tokenCollisions = collisionsSupplier.get();
+        // this is used in the memtable, where we don't have accurate collision information yet
         var token = partitionKey.getToken();
-        return new RowAwarePrimaryKey(token, tokenCollisions.contains(token.getLongValue()), partitionKey, clustering, null);
+        return new RowAwarePrimaryKey(token, false, partitionKey, clustering, null);
     }
 
     private class RowAwarePrimaryKey implements PrimaryKey

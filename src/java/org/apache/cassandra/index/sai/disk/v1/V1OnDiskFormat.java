@@ -27,10 +27,10 @@ import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.carrotsearch.hppc.LongHashSet;
 import com.codahale.metrics.Gauge;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ITokenCollisionTracker;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -132,7 +132,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator, Supplier<LongHashSet> tokenCollisions)
+    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator, Supplier<ITokenCollisionTracker> tokenCollisions)
     {
         return new PartitionAwarePrimaryKeyFactory();
     }
@@ -172,8 +172,8 @@ public class V1OnDiskFormat implements OnDiskFormat
                                           SegmentMetadata segmentMetadata) throws IOException
     {
         if (indexContext.isLiteral())
-            return new InvertedIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor, indexContext);
-        return new KDTreeIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor, indexContext);
+            return new InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
+        return new KDTreeIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
     }
 
     @Override
