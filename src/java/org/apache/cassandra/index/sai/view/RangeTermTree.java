@@ -82,8 +82,8 @@ public class RangeTermTree implements TermTree
                 IndexContext context = index.getIndexContext();
                 logger.trace(context.logMessage("Adding index for SSTable {} with minTerm={} and maxTerm={}..."), 
                                                 index.getSSTable().descriptor, 
-                                                comparator.compose(index.minTerm()), 
-                                                comparator.compose(index.maxTerm()));
+                                                index.minTerm() != null ? comparator.compose(index.minTerm()) : null,
+                                                index.maxTerm() != null ? comparator.compose(index.maxTerm()) : null);
             }
 
             intervals.add(interval);
