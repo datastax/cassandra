@@ -370,14 +370,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             for (int i = 0; i < keysInRange.size(); i++)
             {
                 // turn the pk back into a row id, with a fast path for the case where the pk is from this sstable
-                long sstableRowId = -1;
                 var primaryKey = keysInRange.get(i);
                 assert primaryKey instanceof PrimaryKeyWithSource : "Expected PrimaryKeyWithSource, got " + primaryKey;
                 var pkws = (PrimaryKeyWithSource) primaryKey;
+                long sstableRowId;
                 if (pkws.getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
                     sstableRowId = pkws.getSourceRowId();
-                // not from this table, find the matching rowId (or the next highest) using PKM
-                if (sstableRowId == -1)
+                else
                     sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
                 if (sstableRowId < 0)
                 {
