@@ -247,8 +247,7 @@ public class QueryContext
     public void recordShadowedPrimaryKey(PrimaryKey primaryKey)
     {
         boolean isNewKey = shadowedPrimaryKeys.add(primaryKey);
-        // FIXME VectorUpdateDeleteTest.shadowedPrimaryKeyWithSharedVectorAndOtherPredicates fails this assertion
-        // assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query.";
+        assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query.";
     }
 
     // Returns true if the row ID will be included or false if the row ID will be shadowed
