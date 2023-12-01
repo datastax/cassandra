@@ -32,6 +32,7 @@ import org.apache.cassandra.index.sai.disk.v1.bitpack.MonotonicBlockPackedReader
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.IKeyFetcher;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -63,6 +64,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         private final SSTableReader sstable;
         private final IPartitioner partitioner;
         private final PrimaryKey.Factory primaryKeyFactory;
+        private final SSTableId<?> sstableId;
 
         private FileHandle token = null;
         private FileHandle offset = null;
@@ -83,6 +85,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
                 this.partitioner = indexDescriptor.partitioner;
                 this.sstable = sstable;
                 this.primaryKeyFactory = indexDescriptor.primaryKeyFactory;
+                this.sstableId = sstable.getId();
             }
             catch (Throwable t)
             {
@@ -102,7 +105,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
                 rowIdToOffset = new LongArray.DeferredLongArray(() -> offsetReaderFactory.open());
                 keyFetcher = sstable.openKeyFetcher(false);
 
-                return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory);
+                return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory, sstableId);
             }
             catch (RuntimeException | Error e)
             {
@@ -123,19 +126,28 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     private final IPartitioner partitioner;
     private final IKeyFetcher keyFetcher;
     private final PrimaryKey.Factory primaryKeyFactory;
+    private final SSTableId<?> sstableId;
     private final ByteBuffer tokenBuffer = ByteBuffer.allocate(Long.BYTES);
 
     private PartitionAwarePrimaryKeyMap(LongArray rowIdToToken,
                                         LongArray rowIdToOffset,
                                         IPartitioner partitioner,
                                         IKeyFetcher keyFetcher,
-                                        PrimaryKey.Factory primaryKeyFactory)
+                                        PrimaryKey.Factory primaryKeyFactory,
+                                        SSTableId<?> sstableId)
     {
         this.rowIdToToken = rowIdToToken;
         this.rowIdToOffset = rowIdToOffset;
         this.partitioner = partitioner;
         this.keyFetcher = keyFetcher;
         this.primaryKeyFactory = primaryKeyFactory;
+        this.sstableId = sstableId;
+    }
+
+    @Override
+    public SSTableId<?> getSSTableId()
+    {
+        return sstableId;
     }
 
     @Override
@@ -149,13 +161,13 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public long exactRowIdForPrimaryKey(PrimaryKey key)
     {
-        return rowIdToToken.exactRowId(key.token().getLongValue());
+        return rowIdToToken.indexOf(key.token().getLongValue());
     }
 
     @Override
     public long exactRowIdOrInvertedCeiling(PrimaryKey key)
     {
-        return rowIdToToken.exactRowId(key.token().getLongValue());
+        return rowIdToToken.indexOf(key.token().getLongValue());
     }
 
     @Override
