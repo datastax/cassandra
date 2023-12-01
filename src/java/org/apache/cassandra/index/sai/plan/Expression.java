@@ -252,12 +252,12 @@ public class Expression
 
     public boolean isSatisfiedBy(ByteBuffer columnValue)
     {
+        if (columnValue == null)
+            return false;
+
         // ANN accepts all results
         if (operation == Op.ANN)
             return true;
-
-        if (columnValue == null)
-            return false;
 
         if (!TypeUtil.isValid(columnValue, validator))
         {
