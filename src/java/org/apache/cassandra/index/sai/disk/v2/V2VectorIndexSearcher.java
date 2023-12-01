@@ -178,7 +178,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             // not restricted
             if (RangeUtil.coversFullRing(keyRange))
-                return new BitsOrPostingList(context.bitsetForShadowedPrimaryKeys(metadata, primaryKeyMap, graph));
+                return BitsOrPostingList.ALL_BITS;
 
             PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
 
@@ -194,7 +194,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
             // if it covers entire segment, skip bit set
             if (minSSTableRowId <= metadata.minSSTableRowId && maxSSTableRowId >= metadata.maxSSTableRowId)
-                return new BitsOrPostingList(context.bitsetForShadowedPrimaryKeys(metadata, primaryKeyMap, graph));
+                return BitsOrPostingList.ALL_BITS;
 
             minSSTableRowId = Math.max(minSSTableRowId, metadata.minSSTableRowId);
             maxSSTableRowId = min(maxSSTableRowId, metadata.maxSSTableRowId);
@@ -492,6 +492,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
     private static class BitsOrPostingList
     {
+        public static final BitsOrPostingList ALL_BITS = new BitsOrPostingList(Bits.ALL, -1);
         private final Bits bits;
         private final int rawExpectedNodes;
         private final PostingList postingList;
@@ -501,13 +502,6 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             this.bits = bits;
             this.rawExpectedNodes = rawExpectedNodes;
             this.postingList = null;
-        }
-
-        public BitsOrPostingList(Bits bits)
-        {
-            this.bits = bits;
-            this.postingList = null;
-            this.rawExpectedNodes = -1;
         }
 
         public BitsOrPostingList(PostingList postingList)

@@ -283,6 +283,7 @@ public class QueryController
                                                                                  .stream()
                                                                                  .map(e -> createRowIdIterator(e, true, limit))
                                                                                  .collect(Collectors.toList());
+            // TODO do an anti-joint of known shadow keys
             return TermIterator.build(sstableIntersections, memtableResults, queryView.referencedIndexes, queryContext);
         }
         catch (Throwable t)
@@ -296,6 +297,7 @@ public class QueryController
     // This is a hybrid query. We apply all other predicates before ordering and limiting.
     public RangeIterator getTopKRows(RangeIterator source, RowFilter.Expression expression)
     {
+        // TODO do an anti-joint of known shadow keys
         return new OrderingFilterRangeIterator(source,
                                                ORDER_CHUNK_SIZE,
                                                list -> this.getTopKRows(list, expression));
