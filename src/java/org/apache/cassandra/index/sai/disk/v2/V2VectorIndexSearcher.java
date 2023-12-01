@@ -376,11 +376,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 var pkws = (PrimaryKeyWithSource) primaryKey;
                 if (pkws.getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
                     sstableRowId = pkws.getSourceRowId();
-
-                // The current primary key is not in this sstable. Use ceiling to search for the row id
-                // of the next closest primary key in this sstable and skip to that primary key.
+                // not from this table, find the matching rowId (or the next highest) using PKM
+                if (sstableRowId == -1)
+                    sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
                 if (sstableRowId < 0)
                 {
+                    // The given PK doesn't exist in this sstable, so sstableRowId represents the negation
+                    // of the next-highest.  Turn that back into a PK so we can skip ahead in keysInRange.
                     long ceilingRowId = - sstableRowId - 1;
                     if (ceilingRowId > metadata.maxSSTableRowId)
                     {
