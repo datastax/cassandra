@@ -378,6 +378,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     sstableRowId = pkws.getSourceRowId();
                 else
                     sstableRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(primaryKey);
+
                 if (sstableRowId < 0)
                 {
                     // The given PK doesn't exist in this sstable, so sstableRowId represents the negation
