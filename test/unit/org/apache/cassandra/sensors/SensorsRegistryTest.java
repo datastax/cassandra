@@ -34,8 +34,6 @@ import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.schema.KeyspaceParams;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
 
 public class SensorsRegistryTest
 {
@@ -108,8 +106,7 @@ public class SensorsRegistryTest
     @Test
     public void testCannotGetSensorForMissingKeyspace()
     {
-        assertNull(SensorsRegistry.instance.getOrCreateSensor(context1, type1).orElse(null));
-
+        assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).isEmpty();
     }
 
     @Test
@@ -117,7 +114,7 @@ public class SensorsRegistryTest
     {
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
 
-        assertNull(SensorsRegistry.instance.getOrCreateSensor(context1, type1).orElse(null));
+        assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).isEmpty();
     }
 
     @Test
@@ -127,7 +124,7 @@ public class SensorsRegistryTest
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
 
         SensorsRegistry.instance.updateSensor(context1, type1, 1.0);
-        assertEquals(1.0, SensorsRegistry.instance.getOrCreateSensor(context1, type1).get().getValue(), 0);
+        assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(1.0));
     }
 
     @Test
@@ -137,7 +134,6 @@ public class SensorsRegistryTest
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
 
         SensorsRegistry.instance.updateSensorAsync(context1, type1, 1.0, 1, TimeUnit.MILLISECONDS).get(1, TimeUnit.SECONDS);
-        assertEquals(1.0, SensorsRegistry.instance.getOrCreateSensor(context1, type1).get().getValue(), 0);
-
+        assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(1.0));
     }
 }

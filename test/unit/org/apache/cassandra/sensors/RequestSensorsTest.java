@@ -23,10 +23,7 @@ import java.util.Optional;
 import org.junit.Before;
 import org.junit.Test;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -61,15 +58,15 @@ public class RequestSensorsTest
     public void testRegistration()
     {
         Optional<Sensor> sensor = context1Sensors.getSensor(type1);
-        assertNull(sensor.orElse(null));
+        assertThat(sensor).isEmpty();
 
         context1Sensors.registerSensor(type1);
 
         sensor = context1Sensors.getSensor(type1);
-        assertNotNull(sensor.orElse(null));
+        assertThat(sensor).isPresent();
 
         context1Sensors.registerSensor(type1);
-        assertEquals(sensor.get(), context1Sensors.getSensor(type1).get());
+        assertThat(context1Sensors.getSensor(type1)).isEqualTo(sensor);
     }
 
     @Test
@@ -78,7 +75,7 @@ public class RequestSensorsTest
         context1Sensors.registerSensor(type1);
         context1Sensors.registerSensor(type2);
 
-        assertNotEquals(context1Sensors.getSensor(type1).get(), context1Sensors.getSensor(type2).get());
+        assertThat(context1Sensors.getSensor(type1)).isNotEqualTo(context1Sensors.getSensor(type2));
     }
 
     @Test
@@ -87,15 +84,15 @@ public class RequestSensorsTest
         context1Sensors.registerSensor(type1);
         context2Sensors.registerSensor(type1);
 
-        assertNotEquals(context1Sensors.getSensor(type1).get(), context2Sensors.getSensor(type1).get());
+        assertThat(context1Sensors.getSensor(type1)).isNotEqualTo(context2Sensors.getSensor(type1));
     }
 
     @Test
     public void testIncrement()
     {
         context1Sensors.registerSensor(type1);
-        context1Sensors.getSensor(type1).get().increment(1.0);
-        assertEquals(1.0, context1Sensors.getSensor(type1).get().getValue(), 0);
+        context1Sensors.getSensor(type1).ifPresent(s -> s.increment(1.0));
+        assertThat(context1Sensors.getSensor(type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(1.0));
     }
 
     @Test
