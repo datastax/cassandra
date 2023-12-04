@@ -35,6 +35,7 @@ import org.apache.cassandra.distributed.test.TestBaseImpl;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.awaitility.Awaitility.await;
 import static org.junit.Assert.assertEquals;
 
@@ -67,8 +68,8 @@ public class TraceTest extends TestBaseImpl
             cluster.forEach(c -> c.flush(KEYSPACE));
 
             SAIUtil.waitForIndexQueryable(cluster, "trace_ks");
-
-            UUID sessionId = UUID.randomUUID();
+            
+            UUID sessionId = nextTimeUUID().asUUID();
             cluster.coordinator(1).executeWithTracingWithResult(sessionId, "SELECT * from trace_ks.tbl WHERE v1 < 30 AND v2 = '0'", ConsistencyLevel.ONE);
 
             await().atMost(5, TimeUnit.SECONDS).until(() -> {
