@@ -259,7 +259,7 @@ public class NativeIndexDDLTest extends SAITester
 
         createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s(val) USING 'StorageAttachedIndex' ");
 
-        createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s(val) USING 'StorageAttachedIndex' ");
+        createIndexAsync("CREATE CUSTOM INDEX IF NOT EXISTS ON %s(val) USING 'StorageAttachedIndex' ");
 
         assertEquals(1, NDI_CREATION_COUNTER.get());
     }
@@ -537,6 +537,7 @@ public class NativeIndexDDLTest extends SAITester
         flush();
 
         executeNet("CREATE CUSTOM INDEX index_1 ON %s(v1) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable(KEYSPACE, "index_1");
 
         // same name
         assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX index_1 ON %s(v1) USING 'StorageAttachedIndex'"))
@@ -610,7 +611,7 @@ public class NativeIndexDDLTest extends SAITester
             execute("INSERT INTO %s (id1, v1, v2) VALUES ('" + i + "', " + i + ", '0')");
 
         Injections.inject(forceFlushPause);
-        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
 
         assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v1>=0")).isInstanceOf(ReadFailureException.class);
     }
@@ -627,7 +628,7 @@ public class NativeIndexDDLTest extends SAITester
         flush();
 
         Injections.inject(failNDIInitialializaion);
-        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         waitForAssert(() -> assertEquals(1, INDEX_BUILD_COUNTER.get()));
         waitForCompactions();
 
@@ -1202,7 +1203,7 @@ public class NativeIndexDDLTest extends SAITester
                                                                    .build();
 
         Injections.inject(delayIndexBuilderCompletion);
-        String indexv1Name = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        String indexv1Name = createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
 
         // Stop initial index build by interrupting active and pending compactions
         int attempt = 10;
