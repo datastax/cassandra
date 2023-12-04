@@ -1131,6 +1131,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             }
             switch (operator) {
                 case EQ:
+                case NEQ: // NEQ is inverted in calling method. We do this to simplify handling of null cells.
                     return comp == 0;
                 case LT:
                     return comp < 0;
