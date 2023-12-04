@@ -403,10 +403,10 @@ public class QueryController
     int currentSoftLimitEstimate()
     {
         var K = getExactLimit();
-        if (!allowSpeculativeLimits)
-            return K;
-
         int M = queryContext.getShadowedPrimaryKeys().size();
+        if (!allowSpeculativeLimits)
+            return K + M;
+
         if (M == 0)
             return K;
 
