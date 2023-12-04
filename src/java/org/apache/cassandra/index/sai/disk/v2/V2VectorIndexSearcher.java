@@ -53,7 +53,7 @@ import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
 import org.apache.cassandra.index.sai.utils.AtomicRatio;
-import org.apache.cassandra.index.sai.utils.ListRangeIterator;
+import org.apache.cassandra.index.sai.utils.CollectionRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -351,7 +351,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
         logAndTrace("SAI predicates produced {} rows out of limit {}", keysInRange.size(), limit);
         if (keysInRange.size() <= limit)
-            return new ListRangeIterator(metadata.minKey, metadata.maxKey, keysInRange);
+            return new CollectionRangeIterator(metadata.minKey, metadata.maxKey, keysInRange);
 
         int topK = topKFor(limit);
         // if we are brute forcing the similarity search, we want to build a list of segment row ids,

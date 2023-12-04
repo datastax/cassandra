@@ -60,9 +60,9 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
-import org.apache.cassandra.index.sai.memory.KeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.CollectionRangeIterator;
 import org.apache.cassandra.index.sai.utils.OrderingFilterRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
@@ -388,7 +388,7 @@ public class QueryController
             return source;
         // This logic used to be managed at the vector index level. However, that led to a lot of complexity,
         // especially when multiple rows shared the same value. For now, we just filter the results here.
-        return RangeAntiJoinIterator.create(source, new KeyRangeIterator(queryContext.getShadowedPrimaryKeys()));
+        return RangeAntiJoinIterator.create(source, new CollectionRangeIterator(queryContext.getShadowedPrimaryKeys()));
     }
 
     public int getExactLimit()
