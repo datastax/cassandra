@@ -38,6 +38,8 @@ import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.utils.Shared;
 
+import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
+import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.apache.cassandra.distributed.shared.AssertUtils.fail;
 import static org.apache.cassandra.distributed.shared.AssertUtils.row;
 import static org.junit.Assert.assertEquals;
@@ -84,7 +86,7 @@ public class IndexConsistencyTest extends TestBaseImpl
     public static void setupCluster() throws Exception
     {
         cluster = Cluster.build(NUM_REPLICAS)
-                         .withConfig(config -> config.set("hinted_handoff_enabled", false))
+                         .withConfig(config -> config.set("hinted_handoff_enabled", false).with(GOSSIP, NETWORK))
                          .withInstanceInitializer((cl, nodeNumber) -> {
                              Byteman.createFromText(String.format(INJECTION_SCRIPT, nodeNumber, nodeNumber)).install(cl);
                          })

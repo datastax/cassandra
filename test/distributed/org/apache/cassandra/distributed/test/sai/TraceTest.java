@@ -33,6 +33,8 @@ import org.apache.cassandra.distributed.api.TokenSupplier;
 import org.apache.cassandra.distributed.impl.TracingUtil;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 
+import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
+import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.awaitility.Awaitility.await;
 import static org.junit.Assert.assertEquals;
 
@@ -48,6 +50,7 @@ public class TraceTest extends TestBaseImpl
         TokenSupplier even = TokenSupplier.evenlyDistributedTokens(3);
 
         try (Cluster cluster = init(Cluster.build(3)
+                                           .withConfig(config -> config.with(GOSSIP, NETWORK))
                                            .withTokenSupplier(TokenSupplier.evenlyDistributedTokens(3))
                                            .start()))
         {

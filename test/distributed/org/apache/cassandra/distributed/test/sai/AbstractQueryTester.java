@@ -36,6 +36,9 @@ import org.apache.cassandra.index.sai.cql.DataModel;
 import org.apache.cassandra.index.sai.cql.IndexQuerySupport;
 import org.apache.cassandra.utils.Shared;
 
+import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
+import static org.apache.cassandra.distributed.api.Feature.NETWORK;
+
 @RunWith(Parameterized.class)
 public class AbstractQueryTester extends TestBaseImpl
 {
@@ -63,7 +66,7 @@ public class AbstractQueryTester extends TestBaseImpl
     public static void setupCluster() throws Exception
     {
         cluster = Cluster.build(3)
-                         .withConfig(config -> config.set("hinted_handoff_enabled", false))
+                         .withConfig(config -> config.set("hinted_handoff_enabled", false).with(GOSSIP, NETWORK))
                          .withInstanceInitializer((cl, nodeNumber) -> {
                              Byteman.createFromText(INJECTION_SCRIPT).install(cl);
                          })
