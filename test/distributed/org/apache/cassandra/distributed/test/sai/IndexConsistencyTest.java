@@ -92,6 +92,8 @@ public class IndexConsistencyTest extends TestBaseImpl
                          })
                          .start();
 
+        cluster.setUncaughtExceptionsFilter((instance, ex) -> true);
+        
         cluster.schemaChange(withKeyspace("CREATE KEYSPACE %s WITH replication = " +
                                           "{'class': 'SimpleStrategy', 'replication_factor': " + NUM_REPLICAS + "};"));
     }
