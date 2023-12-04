@@ -24,6 +24,7 @@ import java.io.IOException;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.io.sstable.SSTableId;
 
 /**
  * A bidirectional map of {@link PrimaryKey} to row Id. Implementations of this interface
@@ -51,6 +52,12 @@ public interface PrimaryKeyMap extends Closeable
         {
         }
     }
+
+    /**
+     * Returns the {@link SSTableId} associated with this {@link PrimaryKeyMap}
+     * @return an {@link SSTableId}
+     */
+    SSTableId<?> getSSTableId();
 
     /**
      * Returns a {@link PrimaryKey} for a row Id
@@ -99,6 +106,11 @@ public interface PrimaryKeyMap extends Closeable
      * @return an sstable row id or a negative value if no row is found
      */
     long floor(PrimaryKey key);
+
+    /**
+     * Returns the number of primary keys in the map
+     */
+    long count();
 
     @Override
     default void close() throws IOException
