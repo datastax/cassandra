@@ -231,22 +231,22 @@ public class TermsReader implements Closeable
 
         public PostingList execute()
         {
+            // This works by creating an iterator over all the map entries for a given key and then filtering
+            // the results in the materializeResults method.
             final ByteComparable lower = exp.lower != null ? ByteComparable.fixedLength(exp.getLowerBound()) : null;
             final ByteComparable upper = exp.upper != null ? ByteComparable.fixedLength(exp.getUpperBound()) : null;
-            try (TrieRangeIterator reader = new TrieRangeIterator(termDictionaryFile.instantiateRebufferer(),
-                                                                  termDictionaryRoot,
-                                                                  lower,
-                                                                  upper,
-                                                                  exp.lowerInclusive,
-                                                                  exp.upperInclusive))
+            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(),
+                                                                                  termDictionaryRoot,
+                                                                                  lower,
+                                                                                  upper,
+                                                                                  true))
             {
-                var iter = reader.iterator();
-                if (!iter.hasNext())
+                if (!reader.hasNext())
                     return PostingList.EMPTY;
 
                 context.checkpoint();
                 // Because postings are not sorted, we need to eagerly materialize the results and sort them.
-                LongHeap postings = materializeResults(iter);
+                LongHeap postings = materializeResults(reader);
 
                 listener.onTraversalComplete(System.nanoTime() - lookupStartTime, TimeUnit.NANOSECONDS);
 
@@ -265,7 +265,7 @@ public class TermsReader implements Closeable
          * Build an in-memory heap of row ids from the posting lists of the matching terms.
          * @return an ordered {@link LongHeap} of row ids
          */
-        private LongHeap materializeResults(Iterator<Pair<ByteSource,Long>> triePairs) throws IOException
+        private LongHeap materializeResults(Iterator<Pair<ByteComparable,Long>> triePairs) throws IOException
         {
             assert triePairs.hasNext();
             LongHeap heap = null;
@@ -274,8 +274,8 @@ public class TermsReader implements Closeable
             {
                 do
                 {
-                    Pair<ByteSource, Long> nextTriePair = triePairs.next();
-                    ByteSource mapEntry = nextTriePair.left;
+                    Pair<ByteComparable, Long> nextTriePair = triePairs.next();
+                    ByteSource mapEntry = nextTriePair.left.asComparableBytes(ByteComparable.Version.OSS41);
                     long postingsOffset = nextTriePair.right;
                     byte[] nextBytes = ByteSourceInverse.readBytes(mapEntry);
                     if (exp.isSatisfiedBy(ByteBuffer.wrap(nextBytes)))
