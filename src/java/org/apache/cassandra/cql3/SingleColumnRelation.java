@@ -102,6 +102,11 @@ public final class SingleColumnRelation extends Relation
         return new SingleColumnRelation(entity, null, Operator.IN, null, inValues);
     }
 
+    public static SingleColumnRelation createNotInRelation(ColumnIdentifier entity, List<Term.Raw> inValues)
+    {
+        return new SingleColumnRelation(entity, null, Operator.NOT_IN, null, inValues);
+    }
+
     public ColumnIdentifier getEntity()
     {
         return entity;
@@ -191,7 +196,24 @@ public final class SingleColumnRelation extends Relation
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);
         Term entryValue = toTerm(Collections.singletonList(receivers.get(1)), value, table.keyspace, boundNames);
-        return new SingleColumnRestriction.ContainsRestriction(columnDef, entryKey, entryValue);
+        return new SingleColumnRestriction.ContainsRestriction(columnDef, entryKey, entryValue, false);
+    }
+
+    @Override
+    protected Restriction newNEQRestriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        ColumnMetadata columnDef = table.getExistingColumn(entity);
+        if (mapKey == null)
+        {
+            Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
+            MarkerOrTerms skippedValues = new MarkerOrTerms.Terms(Collections.singletonList(term));
+            return SingleColumnRestriction.SliceRestriction.fromSkippedValues(columnDef, skippedValues);
+        }
+
+        List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
+        Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);
+        Term entryValue = toTerm(Collections.singletonList(receivers.get(1)), value, table.keyspace, boundNames);
+        return new SingleColumnRestriction.ContainsRestriction(columnDef, entryKey, entryValue, true);
     }
 
     @Override
@@ -203,14 +225,33 @@ public final class SingleColumnRelation extends Relation
         if (terms == null)
         {
             Term term = toTerm(receivers, value, table.keyspace, boundNames);
-            return new SingleColumnRestriction.InRestrictionWithMarker(columnDef, (Lists.Marker) term);
+            return new SingleColumnRestriction.INRestriction(columnDef, new MarkerOrTerms.Marker((Lists.Marker) term));
         }
 
         // An IN restrictions with only one element is the same than an EQ restriction
         if (terms.size() == 1)
             return new SingleColumnRestriction.EQRestriction(columnDef, terms.get(0));
 
-        return new SingleColumnRestriction.InRestrictionWithValues(columnDef, terms);
+        return new SingleColumnRestriction.INRestriction(columnDef, new MarkerOrTerms.Terms(terms));
+    }
+
+    @Override
+    protected Restriction newNotINRestriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        ColumnMetadata columnDef = table.getExistingColumn(entity);
+        List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
+        List<Term> terms = toTerms(receivers, inValues, table.keyspace, boundNames);
+        MarkerOrTerms values;
+        if (terms == null)
+        {
+            Term term = toTerm(receivers, value, table.keyspace, boundNames);
+            values = new MarkerOrTerms.Marker((Lists.Marker) term);
+        }
+        else
+        {
+            values = new MarkerOrTerms.Terms(terms);
+        }
+        return SingleColumnRestriction.SliceRestriction.fromSkippedValues(columnDef, values);
     }
 
     @Override
@@ -230,7 +271,7 @@ public final class SingleColumnRelation extends Relation
         }
 
         Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
-        return new SingleColumnRestriction.SliceRestriction(columnDef, bound, inclusive, term);
+        return SingleColumnRestriction.SliceRestriction.fromBound(columnDef, bound, inclusive, term);
     }
 
     @Override
@@ -240,7 +281,17 @@ public final class SingleColumnRelation extends Relation
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
         Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
-        return new SingleColumnRestriction.ContainsRestriction(columnDef, term, isKey);
+        return new SingleColumnRestriction.ContainsRestriction(columnDef, term, isKey, false);
+    }
+
+    @Override
+    protected Restriction newNotContainsRestriction(TableMetadata table,
+                                                 VariableSpecifications boundNames,
+                                                 boolean isKey) throws InvalidRequestException
+    {
+        ColumnMetadata columnDef = table.getExistingColumn(entity);
+        Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
+        return new SingleColumnRestriction.ContainsRestriction(columnDef, term, isKey, true);
     }
 
     @Override
@@ -299,13 +350,15 @@ public final class SingleColumnRelation extends Relation
 
         checkFalse(isContainsKey() && !(receiver.type instanceof MapType), "Cannot use CONTAINS KEY on non-map column %s", receiver.name);
         checkFalse(isContains() && !(receiver.type.isCollection()), "Cannot use CONTAINS on non-collection column %s", receiver.name);
+        checkFalse(isNotContainsKey() && !(receiver.type instanceof MapType), "Cannot use NOT CONTAINS KEY on non-map column %s", receiver.name);
+        checkFalse(isNotContains() && !(receiver.type.isCollection()), "Cannot use NOT CONTAINS on non-collection column %s", receiver.name);
 
         if (mapKey != null)
         {
             checkFalse(receiver.type instanceof ListType, "Indexes on list entries (%s[index] = value) are not currently supported.", receiver.name);
             checkTrue(receiver.type instanceof MapType, "Column %s cannot be used as a map", receiver.name);
             checkTrue(receiver.type.isMultiCell(), "Map-entry equality predicates on frozen map column %s are not supported", receiver.name);
-            checkTrue(isEQ(), "Only EQ relations are supported on map entries");
+            checkTrue(isEQ() || isNEQ(), "Only EQ and NEQ relations are supported on map entries");
         }
 
         // Non-frozen UDTs don't support any operator
@@ -323,11 +376,11 @@ public final class SingleColumnRelation extends Relation
                        receiver.type.asCQL3Type(),
                        operator());
 
-            if (isContainsKey() || isContains())
+            if (isContainsKey() || isContains() || isNotContains() || isNotContainsKey())
             {
-                receiver = makeCollectionReceiver(receiver, isContainsKey());
+                receiver = makeCollectionReceiver(receiver, isContainsKey() || isNotContainsKey());
             }
-            else if (receiver.type.isMultiCell() && mapKey != null && isEQ())
+            else if (receiver.type.isMultiCell() && mapKey != null && (isEQ() || isNEQ()))
             {
                 List<ColumnSpecification> receivers = new ArrayList<>(2);
                 receivers.add(makeCollectionReceiver(receiver, true));
@@ -346,12 +399,12 @@ public final class SingleColumnRelation extends Relation
 
     private boolean isLegalRelationForNonFrozenCollection()
     {
-        return isContainsKey() || isContains() || isMapEntryEquality();
+        return isContainsKey() || isContains() || isNotContains() || isNotContainsKey() || isMapEntryEquality();
     }
 
     private boolean isMapEntryEquality()
     {
-        return mapKey != null && isEQ();
+        return mapKey != null && (isEQ() || isNEQ());
     }
 
     private boolean canHaveOnlyOneValue()

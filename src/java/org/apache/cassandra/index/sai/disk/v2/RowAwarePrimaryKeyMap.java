@@ -167,6 +167,11 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         return sstableId;
     }
 
+    public long count()
+    {
+        return rowIdToToken.length();
+    }
+
     @Override
     public PrimaryKey primaryKeyFromRowId(long sstableRowId)
     {
@@ -225,13 +230,13 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                     return -rowId - 1;
         }
 
-        return cursor.ceiling(v -> key.asComparableBytesMinPrefix(v));
+        return cursor.ceiling(key::asComparableBytesMinPrefix);
     }
 
     @Override
     public long floor(PrimaryKey key)
     {
-        return cursor.floor(v -> key.asComparableBytesMaxPrefix(v));
+        return cursor.floor(key::asComparableBytesMaxPrefix);
     }
 
 
