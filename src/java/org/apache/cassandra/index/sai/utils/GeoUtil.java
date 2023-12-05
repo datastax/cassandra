@@ -30,14 +30,14 @@ public class GeoUtil
     /**
      * Determines the worst ratio for meters to degrees for a given latitude. The worst ratio will be the distance in
      * meters of 1 degree longitude.
-     * @param vector the search vector
+     * @param lat the search latitude
      * @return
      */
-    private static double metersToDegreesRatioForLatitude(float[] vector)
+    private static double metersToDegreesRatioForLatitude(float lat)
     {
         // Got this formula from https://sciencing.com/what-parallels-maps-4689046.html. It seems
         // to produce accurate results, but it'd be good to find additional support for its correctness.
-        return Math.cos(Math.toRadians(vector[0])) * DISTANCE_PER_DEGREE_LONGITUDE_AT_EQUATOR;
+        return Math.cos(Math.toRadians(lat)) * DISTANCE_PER_DEGREE_LONGITUDE_AT_EQUATOR;
     }
 
     /**
@@ -51,7 +51,7 @@ public class GeoUtil
     public static float amplifiedEuclideanSimilarityThreshold(float[] vector, float distanceInMeters)
     {
         // Get the conversion ratio for meters to degrees at the given latitude.
-        double distanceBetweenDegreeLatitude = metersToDegreesRatioForLatitude(vector);
+        double distanceBetweenDegreeLatitude = metersToDegreesRatioForLatitude(vector[0]);
 
         // Calculate the number of degrees that the search radius represents because we're finding the distance between
         // two points that are also using degrees as their units.
@@ -69,5 +69,25 @@ public class GeoUtil
     public static float maximumSquareDistanceForCorrectLatLongSimilarity(float distanceInMeters)
     {
         return (float) Math.pow(distanceInMeters / DISTANCE_PER_DEGREE_LATITUDE, 2);
+    }
+
+    /**
+     * Determine if the lat/lon intersects with the anti-meridian for the given distance.
+     * @param lat the latitude
+     * @param lon the longitude
+     * @param distanceInMeters the search radius
+     * @return true if the search radius crosses the anti-meridian
+     */
+    public static boolean crossesAntiMeridian(float lat, float lon, float distanceInMeters)
+    {
+        // Get the conversion ratio for meters to degrees at the given latitude.
+        // Result is always non-negative.
+        double distanceBetweenDegreeLatitude = metersToDegreesRatioForLatitude(lat);
+
+        // Calculate the number of degrees that the search radius represents because we're finding the distance between
+        // two points that are also using degrees as their units.
+        double degrees = distanceInMeters / distanceBetweenDegreeLatitude;
+
+        return Math.abs(lon) + degrees > 180;
     }
 }

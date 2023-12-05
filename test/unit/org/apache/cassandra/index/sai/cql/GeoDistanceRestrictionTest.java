@@ -226,4 +226,67 @@ public class GeoDistanceRestrictionTest extends VectorTester
                        row(1), row(3), row(4));
         });
     }
+
+    @Test
+    public void testGeoDistanceNearAntiMerridianQueriesForLargeDistances() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, v) VALUES (0, [0, -179])");
+        execute("INSERT INTO %s (pk, v) VALUES (1, [0, 179])");
+        execute("INSERT INTO %s (pk, v) VALUES (2, [45, -179])");
+        execute("INSERT INTO %s (pk, v) VALUES (3, [45, 179])");
+        execute("INSERT INTO %s (pk, v) VALUES (4, [90, -179])");
+        execute("INSERT INTO %s (pk, v) VALUES (5, [90, 179])");
+        execute("INSERT INTO %s (pk, v) VALUES (6, [0, 0])");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [0, -179]) < 6000000"),
+                       row(0), row(1), row(2), row(3));
+
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [45, 179]) < 6000000"),
+                                    row(0), row(1), row(2), row(3), row(4), row(5));
+        });
+    }
+
+    @Test
+    public void testGeoDistanceNearAntiMerridianQueriesForCloseDistances() throws Throwable
+    {
+        createTable("CREATE TABLE %s (location text PRIMARY KEY, coords vector<float, 2>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(coords) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        waitForIndexQueryable();
+
+        // Here are the distances (these distances a not transitive, but do provide general motivation for the
+        // results observed in the test)
+        // Suva to Tubou is 292 km
+        // Suva to Dakuiloa is 328 km
+        // Tubou to Dakuiloa is 41.3 km
+        execute("INSERT INTO %s (location, coords) VALUES ('suva', [-18.1236146,178.4217888])"); // Suva, Fiji
+        execute("INSERT INTO %s (location, coords) VALUES ('tubou', [-18.2357357,-178.8109825])"); // Tubou, Fiji
+        execute("INSERT INTO %s (location, coords) VALUES ('dakuiloa', [-18.4452221,-178.4884278])"); // Dakuiloa, Fiji
+
+        beforeAndAfterFlush(() -> {
+            // Search from Suva
+            assertRowsIgnoringOrder(execute("SELECT location FROM %s WHERE GEO_DISTANCE(coords, [-18.1236146,178.4217888]) < 293000"),
+                                    row("suva"), row("tubou"));
+            // Search from Tubou
+            assertRowsIgnoringOrder(execute("SELECT location FROM %s WHERE GEO_DISTANCE(coords, [-18.2357357,-178.8109825]) < 293000"),
+                                    row("suva"), row("tubou"), row("dakuiloa"));
+            // Search from Dakuiloa
+            assertRowsIgnoringOrder(execute("SELECT location FROM %s WHERE GEO_DISTANCE(coords, [-18.4452221,-178.4884278]) < 293000"),
+                                    row("tubou"), row("dakuiloa"));
+            // Search from Dakuiloa with a smaller radius
+            assertRowsIgnoringOrder(execute("SELECT location FROM %s WHERE GEO_DISTANCE(coords, [-18.4452221,-178.4884278]) < 40000"),
+                                    row("dakuiloa"));
+            // Search from a point in between all three on the anti-meridian
+            assertRowsIgnoringOrder(execute("SELECT location FROM %s WHERE GEO_DISTANCE(coords, [-18.3,-180]) < 170000"),
+                                    row("suva"), row("tubou"), row("dakuiloa"));
+            // Search from a point in between all three on the anti-meridian
+            assertRowsIgnoringOrder(execute("SELECT location FROM %s WHERE GEO_DISTANCE(coords, [-18.3,180]) < 170000"),
+                                    row("suva"), row("tubou"), row("dakuiloa"));
+        });
+    }
 }

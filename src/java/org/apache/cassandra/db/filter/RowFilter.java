@@ -309,7 +309,29 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
         public void addGeoDistanceExpression(ColumnMetadata def, ByteBuffer point, Operator op, ByteBuffer distance)
         {
-            add(new GeoDistanceExpression(def, point, op, distance));
+            var primaryGeoSearch = new GeoDistanceExpression(def, point, op, distance);
+            if (primaryGeoSearch.crossesAntiMeridian())
+            {
+                var shiftedGeoSearch = primaryGeoSearch.buildShiftedExpression();
+                if (current.isDisjunction)
+                {
+                    add(primaryGeoSearch);
+                    add(shiftedGeoSearch);
+                }
+                else
+                {
+                    var builder = new FilterElement.Builder(true);
+                    primaryGeoSearch.validate();
+                    shiftedGeoSearch.validate();
+                    builder.expressions.add(primaryGeoSearch);
+                    builder.expressions.add(shiftedGeoSearch);
+                    current.children.add(builder.build());
+                }
+            }
+            else
+            {
+                add(primaryGeoSearch);
+            }
         }
 
         public void addCustomIndexExpression(TableMetadata metadata, IndexMetadata targetIndex, ByteBuffer value)
@@ -1234,11 +1256,19 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         private final float searchRadiusDegreesSquared;
         private final float searchLat;
         private final float searchLon;
+        // Whether this is a shifted expression, which is used to handle crossing the anti-meridian
+        private final boolean isShifted;
 
         public GeoDistanceExpression(ColumnMetadata column, ByteBuffer point, Operator operator, ByteBuffer distance)
         {
+            this(column, point, operator, distance, false);
+        }
+
+        private GeoDistanceExpression(ColumnMetadata column, ByteBuffer point, Operator operator, ByteBuffer distance, boolean isShifted)
+        {
             super(column, Operator.BOUNDED_ANN, point);
             assert column.type instanceof VectorType && (operator == Operator.LTE || operator == Operator.LT);
+            this.isShifted = isShifted;
             this.distanceOperator = operator;
             this.distance = distance;
             searchRadiusMeters = FloatType.instance.compose(distance);
@@ -1250,6 +1280,18 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             searchLon = pointVector[1];
         }
 
+        public boolean crossesAntiMeridian()
+        {
+            return GeoUtil.crossesAntiMeridian(searchLat, searchLon, searchRadiusMeters);
+        }
+
+        public GeoDistanceExpression buildShiftedExpression()
+        {
+            float shiftedLon = searchLon > 0 ? searchLon - 360 : searchLon + 360;
+            var newPoint = VectorType.getInstance(FloatType.instance, 2)
+                                     .decompose(List.of(searchLat, shiftedLon));
+            return new GeoDistanceExpression(column, newPoint, distanceOperator, distance, true);
+        }
 
         public Operator getDistanceOperator()
         {
@@ -1272,7 +1314,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
             if (searchLat < -90 || searchLat > 90)
                 throw new InvalidRequestException("GEO_DISTANCE latitude must be between -90 and 90 degrees, got " + searchLat);
-            if (searchLon < -180 || searchLon > 180)
+            if (!isShifted && (searchLon < -180 || searchLon > 180))
                 throw new InvalidRequestException("GEO_DISTANCE longitude must be between -180 and 180 degrees, got " + searchLon);
         }
 
