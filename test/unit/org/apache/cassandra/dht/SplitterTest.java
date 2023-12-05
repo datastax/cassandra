@@ -313,7 +313,7 @@ public class SplitterTest
         testSplit(partitioner, 2,
                   newHashSet(Pair.create(max.subtract(BigInteger.valueOf(8)), min)),
                   newHashSet(Pair.create(max.subtract(BigInteger.valueOf(8)), max.subtract(BigInteger.valueOf(4))),
-                             Pair.create(max.subtract(BigInteger.valueOf(4)), isRandom ? first : min)));
+                             Pair.create(max.subtract(BigInteger.valueOf(4)), min)));
         testSplit(partitioner, 2,
                   newHashSet(Pair.create(max.subtract(BigInteger.valueOf(8)), max)),
                   newHashSet(Pair.create(max.subtract(BigInteger.valueOf(8)), max.subtract(BigInteger.valueOf(4))),
