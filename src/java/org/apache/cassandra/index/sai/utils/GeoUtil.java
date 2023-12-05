@@ -58,13 +58,13 @@ public class GeoUtil
     }
 
     /**
-     * Determine if the lat/lon intersects with the anti-meridian for the given distance.
+     * Determine if the lat/lon intersects with the antimeridian for the given distance.
      * @param lat the latitude
      * @param lon the longitude
      * @param distanceInMeters the search radius
-     * @return true if the search radius crosses the anti-meridian
+     * @return true if the search radius crosses the antimeridian
      */
-    public static boolean crossesAntiMeridian(float lat, float lon, float distanceInMeters)
+    public static boolean crossesAntimeridian(float lat, float lon, float distanceInMeters)
     {
         // Get the conversion ratio for meters to degrees at the given latitude.
         // Result is always non-negative.

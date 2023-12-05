@@ -32,7 +32,6 @@ import com.google.common.base.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.vector.VectorUtil;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
@@ -311,8 +310,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         {
             var primaryGeoSearch = new GeoDistanceExpression(def, point, op, distance);
             // The following logic optionally adds a second search expression in the event that the query area
-            // crosses then anti-meridian.
-            if (primaryGeoSearch.crossesAntiMeridian())
+            // crosses then antimeridian.
+            if (primaryGeoSearch.crossesAntimeridian())
             {
                 var shiftedGeoSearch = primaryGeoSearch.buildShiftedExpression();
                 if (current.isDisjunction)
@@ -1257,7 +1256,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         private final float searchRadiusMeters;
         private final float searchLat;
         private final float searchLon;
-        // Whether this is a shifted expression, which is used to handle crossing the anti-meridian
+        // Whether this is a shifted expression, which is used to handle crossing the antimeridian
         private final boolean isShifted;
 
         public GeoDistanceExpression(ColumnMetadata column, ByteBuffer point, Operator operator, ByteBuffer distance)
@@ -1280,11 +1279,16 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             searchLon = pointVector[1];
         }
 
-        public boolean crossesAntiMeridian()
+        public boolean crossesAntimeridian()
         {
-            return GeoUtil.crossesAntiMeridian(searchLat, searchLon, searchRadiusMeters);
+            return GeoUtil.crossesAntimeridian(searchLat, searchLon, searchRadiusMeters);
         }
 
+        /**
+         * Build a new {@link GeoDistanceExpression} that is shifted by 360 degrees and can correctly search
+         * on the opposite side of the antimeridian.
+         * @return
+         */
         public GeoDistanceExpression buildShiftedExpression()
         {
             float shiftedLon = searchLon > 0 ? searchLon - 360 : searchLon + 360;

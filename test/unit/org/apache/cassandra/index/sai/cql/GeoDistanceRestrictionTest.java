@@ -337,10 +337,10 @@ public class GeoDistanceRestrictionTest extends VectorTester
             // Search from Dakuiloa with a smaller radius
             assertRowsIgnoringOrder(execute("SELECT location FROM %s WHERE GEO_DISTANCE(coords, [-18.4452221,-178.4884278]) < 40000"),
                                     row("dakuiloa"));
-            // Search from a point in between all three on the anti-meridian
+            // Search from a point in between all three on the antimeridian
             assertRowsIgnoringOrder(execute("SELECT location FROM %s WHERE GEO_DISTANCE(coords, [-18.3,-180]) < 170000"),
                                     row("suva"), row("tubou"), row("dakuiloa"));
-            // Search from a point in between all three on the anti-meridian
+            // Search from a point in between all three on the antimeridian
             assertRowsIgnoringOrder(execute("SELECT location FROM %s WHERE GEO_DISTANCE(coords, [-18.3,180]) < 170000"),
                                     row("suva"), row("tubou"), row("dakuiloa"));
         });
