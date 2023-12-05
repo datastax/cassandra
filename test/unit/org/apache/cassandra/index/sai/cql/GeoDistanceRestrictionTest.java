@@ -346,4 +346,28 @@ public class GeoDistanceRestrictionTest extends VectorTester
                                     row("suva"), row("tubou"), row("dakuiloa"));
         });
     }
+
+    @Test
+    public void testSearchesNearPoles() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, coords vector<float, 2>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(coords) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, coords) VALUES (0, [90,0])");
+        execute("INSERT INTO %s (pk, coords) VALUES (1, [89.99999, 0])");
+        execute("INSERT INTO %s (pk, coords) VALUES (2, [89.99999, 179])");
+        execute("INSERT INTO %s (pk, coords) VALUES (3, [89.99999, -179])");
+        execute("INSERT INTO %s (pk, coords) VALUES (4, [89.999, 0])");
+        execute("INSERT INTO %s (pk, coords) VALUES (5, [89.999, 179])");
+        execute("INSERT INTO %s (pk, coords) VALUES (5, [89.999, -179])");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(coords, [90, 0]) < 0.01"),
+                                    row(0));
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(coords, [90, 0]) < 1"),
+                                    row(0), row(1), row(2), row(3));
+        });
+
+    }
 }
