@@ -283,7 +283,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             try
             {
-                if (!IndexBuildDecider.instance.onInitialBuild().skipped()) 
+                if (!index.shouldSkipInitialization()) 
                 {
                     Callable<?> call = index.getInitializationTask();
                     if (call != null)
@@ -300,7 +300,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         // if there's no initialization, just mark as built (if it should be queryable) and return:
         if (initialBuildTask == null)
         {
-            if (!IndexBuildDecider.instance.onInitialBuild().skipped() || IndexBuildDecider.instance.isIndexQueryableWithoutInitialBuild(baseCfs))
+            if (IndexBuildDecider.instance.isIndexQueryableAfterInitialBuild(baseCfs))
                 markIndexBuilt(index, true);
             return ImmediateFuture.success(null);
         }
@@ -312,7 +312,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         // This is because Keyspace.open("system") can transitively attempt to open Keyspace.open("system")
         initialBuildTask.addCallback(
             success -> {
-                markIndexBuilt(index, true);
+                if (IndexBuildDecider.instance.isIndexQueryableAfterInitialBuild(baseCfs))
+                    markIndexBuilt(index, true);
                 initialization.trySuccess(null);
             },
             failure -> {
