@@ -299,4 +299,6 @@ public abstract class ColumnData implements IMeasurableMemory
     public abstract ColumnData purgeDataOlderThan(long timestamp);
 
     public abstract long maxTimestamp();
+
+    public abstract long minTimestamp();
 }
