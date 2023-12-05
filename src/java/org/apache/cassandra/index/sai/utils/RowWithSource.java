@@ -389,4 +389,16 @@ public class RowWithSource implements Row
                ", source=" + source +
                '}';
     }
+
+    @Override
+    public long minTimestamp()
+    {
+        return row.minTimestamp();
+    }
+
+    @Override
+    public long maxTimestamp()
+    {
+        return row.maxTimestamp();
+    }
 }
