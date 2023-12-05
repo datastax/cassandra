@@ -18,11 +18,8 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.io.IOException;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.NavigableSet;
-import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
@@ -34,10 +31,7 @@ import io.github.jbellis.jvector.util.Bits;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
-import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
-import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
@@ -252,8 +246,7 @@ public class QueryContext
     public void recordShadowedPrimaryKey(PrimaryKey primaryKey)
     {
         boolean isNewKey = shadowedPrimaryKeys.add(primaryKey);
-        // FIXME VectorUpdateDeleteTest.shadowedPrimaryKeyWithSharedVectorAndOtherPredicates fails this assertion
-        // assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query.";
+        assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query.";
     }
 
     // Returns true if the row ID will be included or false if the row ID will be shadowed
@@ -281,69 +274,6 @@ public class QueryContext
             return Bits.ALL;
 
         return new IgnoredKeysBits(graph, getShadowedPrimaryKeys());
-    }
-
-    public Bits bitsetForShadowedPrimaryKeys(SegmentMetadata metadata, PrimaryKeyMap primaryKeyMap, JVectorLuceneOnDiskGraph graph) throws IOException
-    {
-        Set<Integer> ignoredOrdinals = null;
-        try (OrdinalsView ordinalsView = graph.getOrdinalsView())
-        {
-            for (PrimaryKey primaryKey : getShadowedPrimaryKeys())
-            {
-                // not in current segment
-                if (primaryKey.compareTo(metadata.minKey) < 0 || primaryKey.compareTo(metadata.maxKey) > 0)
-                    continue;
-
-                long sstableRowId = primaryKeyMap.exactRowIdForPrimaryKey(primaryKey);
-                if (sstableRowId < 0) // not found
-                    continue;
-
-                int segmentRowId = metadata.toSegmentRowId(sstableRowId);
-                // not in segment yet
-                if (segmentRowId < 0)
-                    continue;
-                // end of segment
-                if (segmentRowId > metadata.maxSSTableRowId)
-                    break;
-
-                int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                if (ordinal >= 0)
-                {
-                    if (ignoredOrdinals == null)
-                        ignoredOrdinals = new HashSet<>();
-                    ignoredOrdinals.add(ordinal);
-                }
-            }
-        }
-
-        if (ignoredOrdinals == null)
-            return Bits.ALL;
-
-        return new IgnoringBits(ignoredOrdinals, graph.size());
-    }
-
-    private static class IgnoringBits implements Bits
-    {
-        private final Set<Integer> ignoredOrdinals;
-        private final int maxOrdinal;
-
-        public IgnoringBits(Set<Integer> ignoredOrdinals, int maxOrdinal)
-        {
-            this.ignoredOrdinals = ignoredOrdinals;
-            this.maxOrdinal = maxOrdinal;
-        }
-
-        @Override
-        public boolean get(int index)
-        {
-            return !ignoredOrdinals.contains(index);
-        }
-
-        @Override
-        public int length()
-        {
-            return maxOrdinal;
-        }
     }
 
     private static class IgnoredKeysBits implements Bits
