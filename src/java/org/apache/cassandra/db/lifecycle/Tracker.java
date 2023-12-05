@@ -55,6 +55,7 @@ import org.apache.cassandra.notifications.MemtableDiscardedNotification;
 import org.apache.cassandra.notifications.MemtableRenewedNotification;
 import org.apache.cassandra.notifications.MemtableSwitchedNotification;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
+import org.apache.cassandra.notifications.SSTableAddingNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
 import org.apache.cassandra.notifications.SSTableListChangedNotification;
 import org.apache.cassandra.notifications.SSTableRepairStatusChanged;
@@ -280,6 +281,7 @@ public class Tracker
                                      boolean maybeIncrementallyBackup,
                                      boolean updateSize)
     {
+        notifyAdding(sstables, operationType);
         if (!isDummy())
             setupOnline(sstables);
         apply(updateLiveSet(emptySet(), sstables));
@@ -494,10 +496,12 @@ public class Tracker
         // back up before creating a new Snapshot (which makes the new one eligible for compaction)
         maybeIncrementallyBackup(sstables);
 
+        Throwable fail;
+        fail = notifyAdding(sstables, memtable, null, OperationType.FLUSH, operationId);
+
         apply(View.replaceFlushed(memtable, sstables));
 
-        Throwable fail;
-        fail = updateSizeTracking(emptySet(), sstables, null);
+        fail = updateSizeTracking(emptySet(), sstables, fail);
 
         // TODO: if we're invalidated, should we notifyadded AND removed, or just skip both?
         fail = notifyAdded(sstables, OperationType.FLUSH, operationId, false, memtable, fail);
@@ -592,6 +596,28 @@ public class Tracker
             }
         }
         return accumulate;
+    }
+
+    Throwable notifyAdding(Iterable<SSTableReader> added, @Nullable Memtable memtable, Throwable accumulate, OperationType type, Optional<TimeUUID> operationId)
+    {
+        INotification notification = new SSTableAddingNotification(added, memtable, type, operationId);
+        for (INotificationConsumer subscriber : subscribers)
+        {
+            try
+            {
+                subscriber.handleNotification(notification, this);
+            }
+            catch (Throwable t)
+            {
+                accumulate = merge(accumulate, t);
+            }
+        }
+        return accumulate;
+    }
+
+    public void notifyAdding(Iterable<SSTableReader> added, OperationType operationType)
+    {
+        maybeFail(notifyAdding(added, null, null, operationType, Optional.empty()));
     }
 
     @VisibleForTesting
