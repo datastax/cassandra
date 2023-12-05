@@ -289,7 +289,6 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, v) VALUES (0, [0, -179])");
