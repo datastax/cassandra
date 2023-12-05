@@ -310,6 +310,8 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
         public void addGeoDistanceExpression(ColumnMetadata def, ByteBuffer point, Operator op, ByteBuffer distance)
         {
             var primaryGeoSearch = new GeoDistanceExpression(def, point, op, distance);
+            // The following logic optionally adds a second search expression in the event that the query area
+            // crosses then anti-meridian.
             if (primaryGeoSearch.crossesAntiMeridian())
             {
                 var shiftedGeoSearch = primaryGeoSearch.buildShiftedExpression();
