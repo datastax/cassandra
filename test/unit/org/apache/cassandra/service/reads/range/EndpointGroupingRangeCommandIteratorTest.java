@@ -19,7 +19,6 @@
 package org.apache.cassandra.service.reads.range;
 
 import java.util.Arrays;
-import java.util.Iterator;
 import java.util.List;
 
 import com.google.common.collect.Iterables;
@@ -29,7 +28,6 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -39,17 +37,13 @@ import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.service.StorageProxy;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.MAX_CONCURRENT_RANGE_REQUESTS;
 import static org.junit.Assert.assertEquals;
 
 public class EndpointGroupingRangeCommandIteratorTest extends CQLTester
@@ -65,7 +59,7 @@ public class EndpointGroupingRangeCommandIteratorTest extends CQLTester
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
-        System.setProperty("cassandra.max_concurrent_range_requests", String.valueOf(MAX_CONCURRENCY_FACTOR));
+        MAX_CONCURRENT_RANGE_REQUESTS.setString(String.valueOf(MAX_CONCURRENCY_FACTOR));
 
         requireNetwork();
 

@@ -38,6 +38,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -65,14 +66,15 @@ public class MultiRangeReadCommand extends ReadCommand
                                   int digestVersion,
                                   boolean acceptsTransient,
                                   TableMetadata metadata,
-                                  int nowInSec,
+                                  long nowInSec,
                                   ColumnFilter columnFilter,
                                   RowFilter rowFilter,
                                   DataLimits limits,
                                   List<DataRange> dataRanges,
-                                  Index.QueryPlan indexQueryPlan)
+                                  Index.QueryPlan indexQueryPlan,
+                                  boolean trackWarnings)
     {
-        super(Kind.MULTI_RANGE, isDigest, digestVersion, acceptsTransient, metadata, nowInSec, columnFilter, rowFilter, limits, indexQueryPlan);
+        super(Kind.MULTI_RANGE, isDigest, digestVersion, acceptsTransient, metadata, nowInSec, columnFilter, rowFilter, limits, indexQueryPlan, trackWarnings);
 
         assert dataRanges.size() > 0;
         this.dataRanges = dataRanges;
@@ -101,7 +103,8 @@ public class MultiRangeReadCommand extends ReadCommand
                                          command.rowFilter(),
                                          isRangeContinuation ? command.limits() : command.limits().withoutState(),
                                          dataRanges,
-                                         command.indexQueryPlan());
+                                         command.indexQueryPlan(),
+                                         false);
     }
 
     /**
@@ -129,7 +132,8 @@ public class MultiRangeReadCommand extends ReadCommand
                                          command.rowFilter(),
                                          command.limits(),
                                          dataRanges,
-                                         command.indexQueryPlan());
+                                         command.indexQueryPlan(),
+                                         false);
     }
 
     /**
@@ -138,6 +142,33 @@ public class MultiRangeReadCommand extends ReadCommand
     public List<DataRange> ranges()
     {
         return dataRanges;
+    }
+
+    @Override
+    public String loggableTokens()
+    {
+        StringBuilder loggableTokens = new StringBuilder();
+        boolean first = true;
+        for (DataRange dataRange : dataRanges)
+        {
+            if (first)
+                first = false;
+            else
+                loggableTokens.append(", ");
+            loggableTokens.append(loggableTokens(dataRange));
+        }
+        return loggableTokens.toString();
+    }
+
+    private StringBuilder loggableTokens(DataRange dataRange)
+    {
+        return new StringBuilder()
+                .append("token range: ")
+                .append(dataRange.keyRange.inclusiveLeft() ? '[' : '(')
+                .append(dataRange.keyRange.left.getToken().toString())
+                .append(", ")
+                .append(dataRange.keyRange.right.getToken().toString())
+                .append(dataRange.keyRange.inclusiveRight() ? ']' : ')');
     }
 
     @Override
@@ -192,7 +223,8 @@ public class MultiRangeReadCommand extends ReadCommand
                                          rowFilter(),
                                          newLimits,
                                          dataRanges,
-                                         indexQueryPlan());
+                                         indexQueryPlan(),
+                                         isTrackingWarnings());
     }
 
     @Override
@@ -232,7 +264,8 @@ public class MultiRangeReadCommand extends ReadCommand
                                          rowFilter(),
                                          limits(),
                                          dataRanges,
-                                         indexQueryPlan());
+                                         indexQueryPlan(),
+                                         isTrackingWarnings());
     }
 
     @Override
@@ -247,7 +280,8 @@ public class MultiRangeReadCommand extends ReadCommand
                                           rowFilter(),
                                           limits(),
                                           dataRanges,
-                                          indexQueryPlan());
+                                          indexQueryPlan(),
+                                          isTrackingWarnings());
     }
 
     @Override
@@ -263,6 +297,12 @@ public class MultiRangeReadCommand extends ReadCommand
                                                              .map(this::toPartitionRangeReadCommand)
                                                              .map(command -> command.queryStorage(cfs, executionController))
                                                              .collect(Collectors.toList()));
+    }
+
+    @Override
+    protected boolean intersects(SSTableReader sstable)
+    {
+        return dataRanges.stream().anyMatch(dataRange -> dataRange.clusteringIndexFilter.intersects(sstable.metadata().comparator, sstable.getSSTableMetadata().coveredClustering));
     }
 
     @Override
@@ -285,7 +325,7 @@ public class MultiRangeReadCommand extends ReadCommand
 
     private PartitionRangeReadCommand toPartitionRangeReadCommand(DataRange dataRange)
     {
-        return PartitionRangeReadCommand.create(metadata(), nowInSec(), columnFilter(), rowFilter(), limits(), dataRange, indexQueryPlan());
+        return PartitionRangeReadCommand.create(metadata(), nowInSec(), columnFilter(), rowFilter(), limits(), dataRange, indexQueryPlan(), isTrackingWarnings());
     }
 
     @Override
@@ -309,7 +349,7 @@ public class MultiRangeReadCommand extends ReadCommand
     @Override
     protected void appendCQLWhereClause(StringBuilder sb)
     {
-        if (ranges().size() == 1 && ranges().get(0).isUnrestricted() && rowFilter().isEmpty())
+        if (ranges().size() == 1 && ranges().get(0).isUnrestricted(metadata()) && rowFilter().isEmpty())
             return;
 
         sb.append(" WHERE ");
@@ -324,12 +364,12 @@ public class MultiRangeReadCommand extends ReadCommand
         for (int i = 0; i < ranges().size(); i++)
         {
             DataRange dataRange = ranges().get(i);
-            if (!dataRange.isUnrestricted())
+            if (!dataRange.isUnrestricted(metadata()))
             {
                 if (!isFirst)
                     sb.append(" AND ");
                 isFirst = false;
-                sb.append(dataRange.toCQLString(metadata()));
+                sb.append(dataRange.toCQLString(metadata(), rowFilter()));
             }
         }
     }
@@ -396,7 +436,7 @@ public class MultiRangeReadCommand extends ReadCommand
                                        int digestVersion,
                                        boolean acceptsTransient,
                                        TableMetadata metadata,
-                                       int nowInSec,
+                                       long nowInSec,
                                        ColumnFilter columnFilter,
                                        RowFilter rowFilter,
                                        DataLimits limits,
@@ -418,7 +458,8 @@ public class MultiRangeReadCommand extends ReadCommand
                                              rowFilter,
                                              limits,
                                              ranges,
-                                             indexQueryPlan);
+                                             indexQueryPlan,
+                                             false);
         }
     }
 }

@@ -19,7 +19,6 @@
 package org.apache.cassandra.service.reads.range;
 
 import org.apache.cassandra.db.PartitionRangeReadCommand;
-import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.tracing.Tracing;

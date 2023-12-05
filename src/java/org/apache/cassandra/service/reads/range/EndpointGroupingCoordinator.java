@@ -55,6 +55,8 @@ import org.apache.cassandra.service.reads.ShortReadProtection;
 import org.apache.cassandra.service.reads.repair.NoopReadRepair;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
 
+import javax.annotation.Nullable;
+
 /**
  * Coordinates the process of endpoint grouping queries for given vnode ranges based on concurrency factor:
  * <ol>
@@ -283,7 +285,7 @@ public class EndpointGroupingCoordinator
      * But with endpoint grouping, each source is queried with different token ranges. So we need a shared
      * cross-range counter for each replica to know if given endpoint has more data.
      */
-    private class EndpointDataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>> extends DataResolver<E, P>
+    private class EndpointDataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>> extends DataResolver<E, P>
     {
         public EndpointDataResolver(ReadCommand command, ReplicaPlan.Shared replicaPlan, ReadRepair readRepair, long queryStartNanoTime)
         {
@@ -291,7 +293,7 @@ public class EndpointGroupingCoordinator
         }
 
         @Override
-        protected UnfilteredPartitionIterator shortReadProtectedResponse(int i, DataResolver.ResolveContext context)
+        protected UnfilteredPartitionIterator shortReadProtectedResponse(int i, DataResolver.ResolveContext context, @Nullable Runnable onShortRead)
         {
             UnfilteredPartitionIterator originalResponse = responses.get(i).payload.makeIterator(command);
 
@@ -302,7 +304,7 @@ public class EndpointGroupingCoordinator
                                                   command,
                                                   new EndpointShortReadResponseProtection(command,
                                                                                           context.replicas.get(i),
-                                                                                          () -> responses.clearUnsafe(i),
+                                                                                          () -> { responses.clearUnsafe(i); if (onShortRead != null) onShortRead.run(); },
                                                                                           singleResultCounter,
                                                                                           context.mergedResultCounter(),
                                                                                           queryStartNanoTime),

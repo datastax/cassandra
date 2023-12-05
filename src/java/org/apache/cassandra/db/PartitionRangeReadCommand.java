@@ -123,23 +123,25 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
     }
 
     public static PartitionRangeReadCommand create(TableMetadata metadata,
-                                                   int nowInSec,
+                                                   long nowInSec,
                                                    ColumnFilter columnFilter,
                                                    RowFilter rowFilter,
                                                    DataLimits limits,
                                                    DataRange dataRange,
-                                                   Index.QueryPlan indexQueryPlan)
+                                                   Index.QueryPlan indexQueryPlan,
+                                                   boolean trackWarnings)
     {
         return new PartitionRangeReadCommand(false,
-                0,
-                false,
-                metadata,
-                nowInSec,
-                columnFilter,
-                rowFilter,
-                limits,
-                dataRange,
-                indexQueryPlan);
+                                             0,
+                                             false,
+                                             metadata,
+                                             nowInSec,
+                                             columnFilter,
+                                             rowFilter,
+                                             limits,
+                                             dataRange,
+                                             indexQueryPlan,
+                                             trackWarnings);
     }
 
     public static PartitionRangeReadCommand create(TableMetadata metadata,

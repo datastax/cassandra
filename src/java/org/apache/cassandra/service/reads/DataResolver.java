@@ -187,7 +187,7 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         UnfilteredPartitionIterator getResponse(int i);
     }
 
-    protected UnfilteredPartitionIterator shortReadProtectedResponse(int i, ResolveContext context)
+    protected UnfilteredPartitionIterator shortReadProtectedResponse(int i, ResolveContext context, @Nullable Runnable onShortRead)
     {
         UnfilteredPartitionIterator originalResponse = responses.get(i).payload.makeIterator(command);
 
@@ -198,7 +198,7 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
                                               command,
                                               new ShortReadPartitionsProtection(command,
                                                                                 context.replicas.get(i),
-                                                                                () -> responses.clearUnsafe(i),
+                                                                                () -> { responses.clearUnsafe(i); if (onShortRead != null) onShortRead.run(); },
                                                                                 singleResultCounter,
                                                                                 context.mergedResultCounter(),
                                                                                 queryStartNanoTime),
