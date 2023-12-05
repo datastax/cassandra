@@ -287,23 +287,31 @@ public class GeoDistanceRestrictionTest extends VectorTester
     @Test
     public void testGeoDistanceNearAntiMerridianQueriesForLargeDistances() throws Throwable
     {
-        createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
+        createTable("CREATE TABLE %s (pk int, num int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
 
-        execute("INSERT INTO %s (pk, v) VALUES (0, [0, -179])");
-        execute("INSERT INTO %s (pk, v) VALUES (1, [0, 179])");
-        execute("INSERT INTO %s (pk, v) VALUES (2, [45, -179])");
-        execute("INSERT INTO %s (pk, v) VALUES (3, [45, 179])");
-        execute("INSERT INTO %s (pk, v) VALUES (4, [90, -179])");
-        execute("INSERT INTO %s (pk, v) VALUES (5, [90, 179])");
-        execute("INSERT INTO %s (pk, v) VALUES (6, [0, 0])");
+        execute("INSERT INTO %s (pk, num, v) VALUES (0, 1, [0, -179])");
+        execute("INSERT INTO %s (pk, num, v) VALUES (1, 1, [0, 179])");
+        execute("INSERT INTO %s (pk, num, v) VALUES (2, 1, [45, -179])");
+        execute("INSERT INTO %s (pk, num, v) VALUES (3, 1, [45, 179])");
+        execute("INSERT INTO %s (pk, num, v) VALUES (4, 1, [90, -179])");
+        execute("INSERT INTO %s (pk, num, v) VALUES (5, 1, [90, 179])");
+        execute("INSERT INTO %s (pk, num, v) VALUES (6, 1, [0, 0])");
 
         beforeAndAfterFlush(() -> {
             assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [0, -179]) < 6000000"),
                        row(0), row(1), row(2), row(3));
 
             assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [45, 179]) < 6000000"),
+                                    row(0), row(1), row(2), row(3), row(4), row(5));
+
+            // Search using AND and OR to cover different code paths
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [0, -179]) < 6000000 AND num = 1"),
+                                    row(0), row(1), row(2), row(3));
+
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [45, 179]) < 6000000 OR num = 0"),
                                     row(0), row(1), row(2), row(3), row(4), row(5));
         });
     }
