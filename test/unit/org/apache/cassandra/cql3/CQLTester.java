@@ -2225,6 +2225,13 @@ public abstract class CQLTester
         }
     }
 
+    public static List<String> warningsFromResultSet(List<String> ignoredWarnings, ResultSet rs)
+    {
+        return rs.getExecutionInfo().getWarnings()
+                 .stream().filter(w -> ignoredWarnings.stream().noneMatch(w::contains))
+                 .collect(Collectors.toList());
+    }
+
     private static String queryInfo(String query, Object[] values)
     {
         return USE_PREPARED_VALUES
