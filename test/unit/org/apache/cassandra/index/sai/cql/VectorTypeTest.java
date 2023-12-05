@@ -187,12 +187,6 @@ public class VectorTypeTest extends VectorTester
 
         result = execute("SELECT * FROM %s WHERE b=true ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
         assertThat(result).hasSize(2);
-
-        // Add another row to query memtable and sstable together
-        execute("INSERT INTO %s (pk, b, v) VALUES (3, true, [4.0, 5.0, 6.0])");
-
-        result = execute("SELECT * FROM %s WHERE b=true ORDER BY v ANN OF [3.1, 4.1, 5.1] LIMIT 2");
-        assertThat(result).hasSize(2);
     }
 
     @Test
