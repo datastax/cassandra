@@ -216,6 +216,7 @@ public enum CassandraRelevantProperties
      */
     CUSTOM_NATIVE_LIBRARY("cassandra.custom_native_library"),
     CUSTOM_QUERY_HANDLER_CLASS("cassandra.custom_query_handler_class"),
+    CUSTOM_READ_OBSERVER_FACTORY("cassandra.custom_read_observer_factory_class"),
     CUSTOM_REPLAY_FILTER_CLASS("cassandra.custom_replay_filter_class"),
     /** Watcher used when opening sstables to discover extra components, eg. archive component */
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
@@ -692,6 +693,7 @@ public enum CassandraRelevantProperties
     USE_NIX_RECURSIVE_DELETE("cassandra.use_nix_recursive_delete"),
     USE_RANDOM_ALLOCATION_IF_NOT_SUPPORTED("cassandra.token_allocation.use_random_if_not_supported"),
     /** Gossiper compute expiration timeout. Default value 3 days. */
+    VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("cassandra.sai.validate_max_term_size_at_coordinator"),
     VERY_LONG_TIME_MS("cassandra.very_long_time_ms", "259200000"),
     WAIT_FOR_TRACING_EVENTS_TIMEOUT_SECS("cassandra.wait_for_tracing_events_timeout_secs", "0");
 

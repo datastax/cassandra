@@ -51,6 +51,7 @@ import org.apache.cassandra.notifications.MemtableDiscardedNotification;
 import org.apache.cassandra.notifications.MemtableRenewedNotification;
 import org.apache.cassandra.notifications.MemtableSwitchedNotification;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
+import org.apache.cassandra.notifications.SSTableAddingNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
 import org.apache.cassandra.notifications.SSTableListChangedNotification;
 import org.apache.cassandra.notifications.SSTableRepairStatusChanged;
@@ -172,9 +173,11 @@ public class TrackerTest
         tracker.addInitialSSTables(copyOf(readers));
 
         Assert.assertEquals(3, tracker.view.get().sstables.size());
-        Assert.assertEquals(1, listener.senders.size());
-        Assert.assertEquals(1, listener.received.size());
-        Assert.assertTrue(listener.received.get(0) instanceof InitialSSTableAddedNotification);
+        Assert.assertEquals(2, listener.senders.size()); // one sender sent two notifications
+        Assert.assertEquals(listener.senders.get(0), listener.senders.get(1));
+        Assert.assertEquals(2, listener.received.size());
+        Assert.assertTrue(listener.received.get(0) instanceof SSTableAddingNotification);
+        Assert.assertTrue(listener.received.get(1) instanceof InitialSSTableAddedNotification);
 
         for (SSTableReader reader : readers)
             if (reader instanceof KeyCacheSupport<?>)
@@ -206,10 +209,12 @@ public class TrackerTest
         }
 
         Assert.assertEquals(17 + 121 + 9, cfs.metric.liveDiskSpaceUsed.getCount());
-        Assert.assertEquals(1, listener.senders.size());
-        Assert.assertEquals(1, listener.received.size());
+        Assert.assertEquals(2, listener.senders.size()); // one tracker issued two notifications
+        Assert.assertEquals(2, listener.received.size()); // 'adding' and 'added' notifications
         Assert.assertEquals(tracker, listener.senders.get(0));
-        Assert.assertTrue(listener.received.get(0) instanceof SSTableAddedNotification);
+        Assert.assertEquals(tracker, listener.senders.get(1));
+        Assert.assertTrue(listener.received.get(0) instanceof SSTableAddingNotification);
+        Assert.assertTrue(listener.received.get(1) instanceof SSTableAddedNotification);
         DatabaseDescriptor.setIncrementalBackupsEnabled(backups);
     }
 
@@ -263,16 +268,17 @@ public class TrackerTest
             Assert.assertNull(tracker.dropSSTables(reader -> reader != readers.get(0), OperationType.UNKNOWN, null));
 
             Assert.assertEquals(1, tracker.getView().sstables.size());
-            Assert.assertEquals(4, listener.received.size());
+            Assert.assertEquals(5, listener.received.size());
             Assert.assertEquals(tracker, listener.senders.get(0));
-            Assert.assertTrue(listener.received.get(0) instanceof InitialSSTableAddedNotification);
-            Assert.assertTrue(listener.received.get(1) instanceof SSTableDeletingNotification);
-            Assert.assertTrue(listener.received.get(2) instanceof  SSTableDeletingNotification);
-            Assert.assertTrue(listener.received.get(3) instanceof SSTableListChangedNotification);
-            Assert.assertEquals(readers.get(1), ((SSTableDeletingNotification) listener.received.get(1)).deleting);
-            Assert.assertEquals(readers.get(2), ((SSTableDeletingNotification)listener.received.get(2)).deleting);
-            Assert.assertEquals(2, ((SSTableListChangedNotification) listener.received.get(3)).removed.size());
-            Assert.assertEquals(0, ((SSTableListChangedNotification) listener.received.get(3)).added.size());
+            Assert.assertTrue(listener.received.get(0) instanceof SSTableAddingNotification);
+            Assert.assertTrue(listener.received.get(1) instanceof InitialSSTableAddedNotification);
+            Assert.assertTrue(listener.received.get(2) instanceof SSTableDeletingNotification);
+            Assert.assertTrue(listener.received.get(3) instanceof  SSTableDeletingNotification);
+            Assert.assertTrue(listener.received.get(4) instanceof SSTableListChangedNotification);
+            Assert.assertEquals(readers.get(1), ((SSTableDeletingNotification) listener.received.get(2)).deleting);
+            Assert.assertEquals(readers.get(2), ((SSTableDeletingNotification)listener.received.get(3)).deleting);
+            Assert.assertEquals(2, ((SSTableListChangedNotification) listener.received.get(4)).removed.size());
+            Assert.assertEquals(0, ((SSTableListChangedNotification) listener.received.get(4)).added.size());
             Assert.assertEquals(9, cfs.metric.liveDiskSpaceUsed.getCount());
             readers.get(0).selfRef().release();
         }
@@ -388,10 +394,10 @@ public class TrackerTest
         SSTableReader reader = MockSchema.sstable(0, 10, false, cfs);
         tracker.replaceFlushed(prev2, singleton(reader), Optional.empty());
         Assert.assertEquals(1, tracker.getView().sstables.size());
-        Assert.assertEquals(2, listener.received.size());
-        Assert.assertEquals(singleton(reader), ((SSTableAddedNotification) listener.received.get(0)).added);
-        Assert.assertEquals(Optional.of(prev2), ((SSTableAddedNotification) listener.received.get(0)).memtable());
-        Assert.assertEquals(prev2, ((MemtableDiscardedNotification) listener.received.get(1)).memtable);
+        Assert.assertEquals(3, listener.received.size());
+        Assert.assertEquals(singleton(reader), ((SSTableAddedNotification) listener.received.get(1)).added);
+        Assert.assertEquals(Optional.of(prev2), ((SSTableAddedNotification) listener.received.get(1)).memtable());
+        Assert.assertEquals(prev2, ((MemtableDiscardedNotification) listener.received.get(2)).memtable);
         listener.received.clear();
         if (reader instanceof KeyCacheSupport<?>)
             Assert.assertTrue(((KeyCacheSupport<?>) reader).getKeyCache().isEnabled());
@@ -410,13 +416,13 @@ public class TrackerTest
         Assert.assertEquals(0, tracker.getView().sstables.size());
         Assert.assertEquals(0, tracker.getView().flushingMemtables.size());
         Assert.assertEquals(0, cfs.metric.liveDiskSpaceUsed.getCount());
-        Assert.assertEquals(5, listener.received.size());
+        Assert.assertEquals(6, listener.received.size());
         Assert.assertEquals(prev1, ((MemtableSwitchedNotification) listener.received.get(0)).memtable);
-        Assert.assertEquals(singleton(reader), ((SSTableAddedNotification) listener.received.get(1)).added);
-        Assert.assertEquals(Optional.of(prev1), ((SSTableAddedNotification) listener.received.get(1)).memtable());
-        Assert.assertEquals(prev1, ((MemtableDiscardedNotification) listener.received.get(2)).memtable);
-        Assert.assertTrue(listener.received.get(3) instanceof SSTableDeletingNotification);
-        Assert.assertEquals(1, ((SSTableListChangedNotification) listener.received.get(4)).removed.size());
+        Assert.assertEquals(singleton(reader), ((SSTableAddedNotification) listener.received.get(2)).added);
+        Assert.assertEquals(Optional.of(prev1), ((SSTableAddedNotification) listener.received.get(2)).memtable());
+        Assert.assertEquals(prev1, ((MemtableDiscardedNotification) listener.received.get(3)).memtable);
+        Assert.assertTrue(listener.received.get(4) instanceof SSTableDeletingNotification);
+        Assert.assertEquals(1, ((SSTableListChangedNotification) listener.received.get(5)).removed.size());
         DatabaseDescriptor.setIncrementalBackupsEnabled(backups);
     }
 
