@@ -56,6 +56,7 @@ import org.apache.cassandra.index.sai.utils.AbstractIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -74,6 +75,12 @@ public class KDTreeIndexBuilder
         private final PrimaryKey.Factory primaryKeyFactory = new PartitionAwarePrimaryKeyFactory();
 
         @Override
+        public SSTableId<?> getSSTableId()
+        {
+            return null;
+        }
+
+        @Override
         public PrimaryKey primaryKeyFromRowId(long sstableRowId)
         {
             return primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(sstableRowId));
@@ -81,6 +88,12 @@ public class KDTreeIndexBuilder
 
         @Override
         public long exactRowIdForPrimaryKey(PrimaryKey key)
+        {
+            return key.token().getLongValue();
+        }
+
+        @Override
+        public long exactRowIdOrInvertedCeiling(PrimaryKey key)
         {
             return key.token().getLongValue();
         }
@@ -97,6 +110,11 @@ public class KDTreeIndexBuilder
             return key.token().getLongValue();
         }
 
+        @Override
+        public long count()
+        {
+            return Long.MAX_VALUE;
+        }
     };
     public static final PrimaryKeyMap.Factory TEST_PRIMARY_KEY_MAP_FACTORY = () -> TEST_PRIMARY_KEY_MAP;
 

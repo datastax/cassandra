@@ -90,7 +90,10 @@ public class PostingListRangeIterator extends RangeIterator
     @Override
     protected void performSkipTo(PrimaryKey nextKey)
     {
-        if (skipToToken != null && skipToToken.compareTo(nextKey) >= 0)
+        // If skipToToken is equal to nextKey, we take the nextKey because in practice, it is greater than or equal
+        // to the skipToToken. This is because token only PKs are considered equal to all PKs with the same token,
+        // and for a range query, we first skip on the token-only PK.
+        if (skipToToken != null && skipToToken.compareTo(nextKey) > 0)
             return;
 
         skipToToken = nextKey;
@@ -112,16 +115,22 @@ public class PostingListRangeIterator extends RangeIterator
             if (rowId == PostingList.END_OF_STREAM)
                 return endOfData();
 
-            return primaryKeyMap.primaryKeyFromRowId(rowId);
+            var primaryKey = primaryKeyMap.primaryKeyFromRowId(rowId);
+            return new PrimaryKeyWithSource(primaryKey, primaryKeyMap.getSSTableId(), rowId);
         }
         catch (Throwable t)
         {
-            //TODO We aren't tidying up resources here
             if (!(t instanceof AbortedOperationException))
                 logger.error(indexContext.logMessage("Unable to provide next token!"), t);
 
+            closeOnException(t);
             throw Throwables.cleaned(t);
         }
+    }
+
+    private void closeOnException(Throwable t)
+    {
+        FileUtils.closeQuietly(this);
     }
 
     @Override
@@ -158,11 +167,20 @@ public class PostingListRangeIterator extends RangeIterator
         long segmentRowId;
         if (needsSkipping)
         {
-            long targetRowID = primaryKeyMap.ceiling(skipToToken);
-            // skipToToken is larger than max token in token file
-            if (targetRowID < 0)
+            long targetRowID;
+            if (skipToToken instanceof PrimaryKeyWithSource
+                && ((PrimaryKeyWithSource) skipToToken).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
             {
-                return PostingList.END_OF_STREAM;
+                targetRowID = ((PrimaryKeyWithSource) skipToToken).getSourceRowId();
+            }
+            else
+            {
+                targetRowID = primaryKeyMap.ceiling(skipToToken);
+                // skipToToken is larger than max token in token file
+                if (targetRowID < 0)
+                {
+                    return PostingList.END_OF_STREAM;
+                }
             }
 
             segmentRowId = postingList.advance(targetRowID - searcherContext.segmentRowIdOffset);

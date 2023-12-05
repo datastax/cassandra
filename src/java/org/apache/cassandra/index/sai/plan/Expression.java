@@ -26,6 +26,8 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 
@@ -38,6 +40,7 @@ import org.slf4j.LoggerFactory;
 import io.github.jbellis.jvector.vector.VectorUtil;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
@@ -52,7 +55,10 @@ public class Expression
 
     public enum Op
     {
-        EQ, MATCH, PREFIX, NOT_EQ, RANGE, CONTAINS_KEY, CONTAINS_VALUE, IN, ANN, BOUNDED_ANN;
+        EQ, MATCH, PREFIX, NOT_EQ, RANGE,
+        CONTAINS_KEY, CONTAINS_VALUE,
+        NOT_CONTAINS_VALUE, NOT_CONTAINS_KEY,
+        IN, ANN, BOUNDED_ANN;
 
         public static Op valueOf(Operator operator)
         {
@@ -69,6 +75,12 @@ public class Expression
 
                 case CONTAINS_KEY:
                     return CONTAINS_KEY; // non-frozen map: value contains key term;
+
+                case NOT_CONTAINS:
+                    return NOT_CONTAINS_VALUE;
+
+                case NOT_CONTAINS_KEY:
+                    return NOT_CONTAINS_KEY;
 
                 case LT:
                 case GT:
@@ -105,6 +117,19 @@ public class Expression
         public boolean isEqualityOrRange()
         {
             return isEquality() || this == RANGE;
+        }
+
+        public boolean isNonEquality()
+        {
+            return this == NOT_EQ || this == NOT_CONTAINS_KEY || this == NOT_CONTAINS_VALUE;
+        }
+
+        public boolean isContains()
+        {
+            return this == CONTAINS_KEY
+                   || this == CONTAINS_VALUE
+                   || this == NOT_CONTAINS_KEY
+                   || this == NOT_CONTAINS_VALUE;
         }
     }
 
@@ -148,6 +173,8 @@ public class Expression
             case EQ:
             case CONTAINS:
             case CONTAINS_KEY:
+            case NOT_CONTAINS:
+            case NOT_CONTAINS_KEY:
                 lower = new Bound(value, validator, true);
                 upper = lower;
                 operation = Op.valueOf(op);
@@ -214,7 +241,6 @@ public class Expression
                 lower = new Bound(value, validator, true);
                 assert upper != null;
                 searchRadiusMeters = FloatType.instance.compose(upper.value.raw);
-                searchRadiusDegreesSquared = GeoUtil.maximumSquareDistanceForCorrectLatLongSimilarity(searchRadiusMeters);
                 boundedAnnEuclideanDistanceThreshold = GeoUtil.amplifiedEuclideanSimilarityThreshold(lower.value.vector, searchRadiusMeters);
                 break;
         }
@@ -224,8 +250,12 @@ public class Expression
         return this;
     }
 
+    // VSTODO seems like we could optimize for CompositeType here since we know we have a key match
     public boolean isSatisfiedBy(ByteBuffer columnValue)
     {
+        if (columnValue == null)
+            return false;
+
         // ANN accepts all results
         if (operation == Op.ANN)
             return true;
@@ -240,13 +270,6 @@ public class Expression
 
         if (operation == Op.BOUNDED_ANN)
         {
-            double squareDistance = VectorUtil.squareDistance(lower.value.vector, value.vector);
-            // If we are within the search radius degrees, then we are within the search radius meters.
-            // This relies on the fact that lat/long distort distance by making close points further apart.
-            if (squareDistance <= searchRadiusDegreesSquared)
-                return true;
-            // Otherwise, we need to compute the more expensive haversine distance to determine if we are within the
-            // search radius meters.
             double haversineDistance = SloppyMath.haversinMeters(lower.value.vector[0], lower.value.vector[1], value.vector[0], value.vector[1]);
             return upperInclusive ? haversineDistance <= searchRadiusMeters : haversineDistance < searchRadiusMeters;
         }
@@ -265,8 +288,11 @@ public class Expression
                 int cmp = TypeUtil.comparePostFilter(lower.value, value, validator);
 
                 // in case of (NOT_)EQ lower == upper
-                if (operation == Op.EQ || operation == Op.CONTAINS_KEY || operation == Op.CONTAINS_VALUE || operation == Op.NOT_EQ)
+                if (operation == Op.EQ || operation == Op.CONTAINS_KEY || operation == Op.CONTAINS_VALUE)
                     return cmp == 0;
+
+                if (operation == Op.NOT_EQ || operation == Op.NOT_CONTAINS_KEY || operation == Op.NOT_CONTAINS_VALUE)
+                    return cmp != 0;
 
                 if (cmp > 0 || (cmp == 0 && !lowerInclusive))
                     return false;
@@ -302,6 +328,41 @@ public class Expression
         return true;
     }
 
+    public ByteBuffer getLowerBound()
+    {
+        return getBound(lower, true);
+    }
+
+    public ByteBuffer getUpperBound()
+    {
+        return getBound(upper, false);
+    }
+
+    private ByteBuffer getBound(Bound bound, boolean isLowerBound)
+    {
+        if (bound == null)
+            return null;
+        // TODO verify other usages of CompositeType, and possibly consider using a different type.
+        if (validator instanceof CompositeType)
+            return CompositeType.extractFirstComponentAsTrieSearchPrefix(bound.value.encoded, isLowerBound);
+        return bound.value.encoded;
+    }
+
+    public boolean isSatisfiedBy(Iterator<ByteBuffer> values)
+    {
+        if (values == null)
+            values = Collections.emptyIterator();
+
+        boolean success = operation.isNonEquality();
+        while (values.hasNext())
+        {
+            ByteBuffer v = values.next();
+            if (isSatisfiedBy(v) ^ success)
+                return !success;
+        }
+        return success;
+    }
+
     private boolean validateStringValue(ByteBuffer columnValue, ByteBuffer requestedValue)
     {
         AbstractAnalyzer analyzer = analyzerFactory.create();
@@ -321,8 +382,12 @@ public class Expression
                         // here we just need to make sure that term matched it
                     case CONTAINS_KEY:
                     case CONTAINS_VALUE:
-                    case NOT_EQ:
                         isMatch = validator.compare(term, requestedValue) == 0;
+                        break;
+                    case NOT_EQ:
+                    case NOT_CONTAINS_KEY:
+                    case NOT_CONTAINS_VALUE:
+                        isMatch = validator.compare(term, requestedValue) != 0;
                         break;
                     case RANGE:
                         isMatch = isLowerSatisfiedBy(term) && isUpperSatisfiedBy(term);
@@ -419,6 +484,32 @@ public class Expression
                 && Objects.equals(lower, o.lower)
                 && Objects.equals(upper, o.upper)
                 && exclusions.equals(o.exclusions);
+    }
+
+    /**
+     * Returns an expression that matches keys not matched by this expression.
+     */
+    public Expression negated()
+    {
+        Expression result = new Expression(context);
+        result.lower = lower;
+        result.upper = upper;
+
+        switch (operation)
+        {
+            case NOT_EQ:
+                result.operation = Op.EQ;
+                break;
+            case NOT_CONTAINS_KEY:
+                result.operation = Op.CONTAINS_KEY;
+                break;
+            case NOT_CONTAINS_VALUE:
+                result.operation = Op.CONTAINS_VALUE;
+                break;
+            default:
+                throw new UnsupportedOperationException(String.format("Negation of operator %s not supported", operation));
+        }
+        return result;
     }
 
     /**

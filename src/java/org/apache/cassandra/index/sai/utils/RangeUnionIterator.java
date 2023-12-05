@@ -33,8 +33,6 @@ public class RangeUnionIterator extends RangeIterator
 {
     private final List<RangeIterator> ranges;
 
-    private final List<RangeIterator> candidates = new ArrayList<>();
-
     private RangeUnionIterator(Builder.Statistics statistics, List<RangeIterator> ranges)
     {
         super(statistics);
@@ -43,49 +41,39 @@ public class RangeUnionIterator extends RangeIterator
 
     public PrimaryKey computeNext()
     {
-        candidates.clear();
-        PrimaryKey candidate = null;
+        // Keep track of the next best candidate. If another candidate has the same value, advance it to prevent
+        // duplicate results. This design avoids unnecessary list operations.
+        RangeIterator candidate = null;
         for (RangeIterator range : ranges)
         {
-            if (range.hasNext())
+            if (!range.hasNext())
+                continue;
+
+            if (candidate == null)
             {
-                // Avoid repeated values but only if we have read at least one value
-                while (next != null && range.hasNext() && range.peek().compareTo(getCurrent()) == 0)
+                candidate = range;
+            }
+            else
+            {
+                int cmp = candidate.peek().compareTo(range.peek());
+                if (cmp == 0)
                     range.next();
-                if (!range.hasNext())
-                    continue;
-                if (candidate == null)
-                {
-                    candidate = range.peek();
-                    candidates.add(range);
-                }
-                else
-                {
-                    int cmp = candidate.compareTo(range.peek());
-                    if (cmp == 0)
-                        candidates.add(range);
-                    else if (cmp > 0)
-                    {
-                        candidates.clear();
-                        candidate = range.peek();
-                        candidates.add(range);
-                    }
-                }
+                else if (cmp > 0)
+                    candidate = range;
             }
         }
-        if (candidates.isEmpty())
+        if (candidate == null)
             return endOfData();
-        candidates.forEach(RangeIterator::next);
-        return candidate;
+        return candidate.next();
     }
 
     protected void performSkipTo(PrimaryKey nextKey)
     {
+        // Resist the temptation to call range.hasNext before skipTo: this is a pessimisation, hasNext will invoke
+        // computeNext under the hood, which is an expensive operation to produce a value that we plan to throw away.
+        // Instead, it is the responsibility of the child iterators to make skipTo fast when the iterator is exhausted.
         for (RangeIterator range : ranges)
-        {
-            if (range.hasNext())
-                range.skipTo(nextKey);
-        }
+            range.skipTo(nextKey);
     }
 
     public void close() throws IOException
@@ -124,7 +112,7 @@ public class RangeUnionIterator extends RangeIterator
             if (range == null)
                 return this;
 
-            if (range.getCount() > 0)
+            if (range.getMaxKeys() > 0)
             {
                 rangeIterators.add(range);
                 statistics.update(range);

@@ -80,7 +80,6 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                 try (RangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
                         .add(Operator.EQ, wrap(termsEnum.get(t).left)), null, new QueryContext(), false, LIMIT))
                 {
-                    assertEquals(results.getMinimum(), results.getCurrent());
                     assertTrue(results.hasNext());
 
                     for (int p = 0; p < numPostings; ++p)
@@ -96,7 +95,6 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                 try (RangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
                         .add(Operator.EQ, wrap(termsEnum.get(t).left)), null, new QueryContext(), false, LIMIT))
                 {
-                    assertEquals(results.getMinimum(), results.getCurrent());
                     assertTrue(results.hasNext());
 
                     // test skipping to the last block
@@ -136,7 +134,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
         {
             searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
-                            .add(Operator.GT, UTF8Type.instance.decompose("a")), null, new QueryContext(), false, LIMIT);
+                            .add(Operator.NEQ, UTF8Type.instance.decompose("a")), null, new QueryContext(), false, LIMIT);
 
             fail("Expect IllegalArgumentException thrown, but didn't");
         }

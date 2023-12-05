@@ -213,14 +213,7 @@ public class QueryController
 
     public UnfilteredRowIterator executePartitionReadCommand(SinglePartitionReadCommand command, ReadExecutionController executionController)
     {
-        try
-        {
-            return command.queryMemtableAndDisk(cfs, executionController);
-        }
-        finally
-        {
-            queryContext.checkpoint();
-        }
+        return command.queryMemtableAndDisk(cfs, executionController);
     }
 
     /**
@@ -526,7 +519,7 @@ public class QueryController
         {
             // NO_EQ and non-index column query should only act as FILTER BY for satisfiedBy(Row) method
             // because otherwise it likely to go through the whole index.
-            if (!e.context.isIndexed() || e.getOp() == Expression.Op.NOT_EQ)
+            if (!e.context.isIndexed())
             {
                 continue;
             }
