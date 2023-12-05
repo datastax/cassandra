@@ -22,7 +22,9 @@ package org.apache.cassandra.index.sai.cql;
 
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -32,13 +34,16 @@ import java.util.stream.LongStream;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.exceptions.InvalidConfigurationInQueryException;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import com.datastax.driver.core.exceptions.ReadFailureException;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.restrictions.IndexRestrictions;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -71,6 +76,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 import org.mockito.Mockito;
 
@@ -111,6 +117,12 @@ public class NativeIndexDDLTest extends SAITester
                                                                                                 .onMethod("<init>"))
                                                                          .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
                                                                          .build();
+
+    @BeforeClass
+    public static void init()
+    {
+        CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR.setBoolean(true);
+    }
 
     @Before
     public void setup() throws Throwable
@@ -637,6 +649,44 @@ public class NativeIndexDDLTest extends SAITester
         waitForCompactions();
 
         assertThatThrownBy(() -> executeNet("SELECT id1 FROM %s WHERE v1>=0")).isInstanceOf(ReadFailureException.class);
+    }
+
+    @Test
+    public void testMaxTermSize() throws Throwable
+    {
+        createTable(KEYSPACE, "CREATE TABLE %s (k int PRIMARY KEY, v text, m map<text, text>,)");
+
+        String largeTerm = UTF8Type.instance.compose(ByteBuffer.allocate(FBUtilities.MAX_UNSIGNED_SHORT / 2 + 1));
+        ResultSet resultSet = executeNet("INSERT INTO %s (k, v, m) VALUES (0, ?, {'" + largeTerm + "': ''})", largeTerm);
+        List<String> warnings = CQLTester.warningsFromResultSet(Collections.emptyList(), resultSet);
+        warnings.sort(String::compareTo);
+
+        assertEquals(2, warnings.size());
+        assertTrue(warnings.get(0).contains("Can't add term of column m"));
+        assertTrue(warnings.get(1).contains("Can't add term of column v"));
+
+        // verify memtable index can not be read
+        assertRows(execute("SELECT k,v,m FROM %s"), row(0, largeTerm, map(largeTerm, "")));
+        assertEmpty(execute("SELECT k,v,m FROM %s WHERE v = ?", largeTerm));
+        assertEmpty(execute("SELECT k,v,m FROM %s WHERE m[?] = ''", largeTerm));
+        flush();
+
+        // verify on-disk index can not be read
+        assertRows(execute("SELECT k,v,m FROM %s"), row(0, largeTerm, map(largeTerm, "")));
+        assertEmpty(execute("SELECT k,v,m FROM %s WHERE v = ?", largeTerm));
+        assertEmpty(execute("SELECT k,v,m FROM %s WHERE m[?] = ''", largeTerm));
+
+
+        executeNet("INSERT INTO %s (k, v, m) VALUES (0, ?, {'" + largeTerm + "': ''})", largeTerm);
+        flush();
+
+        // max term size was applied during compaction or building index on existing sstable.
+        compact();
+
+        // verify on-disk index can not be read after compaction
+        assertRows(execute("SELECT k,v,m FROM %s"), row(0, largeTerm, map(largeTerm, "")));
+        assertEmpty(execute("SELECT k,v,m FROM %s WHERE v = ?", largeTerm));
+        assertEmpty(execute("SELECT k,v,m FROM %s WHERE m[?] = ''", largeTerm));
     }
 
     @Test
@@ -1226,10 +1276,9 @@ public class NativeIndexDDLTest extends SAITester
 
         Injections.inject(delayIndexBuilderCompletion);
 
-        IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
+        IndexContext numericIndexContext = createIndexContext(createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
 
         waitForAssert(() -> assertTrue(getCompactionTasks() > 0), 1000, TimeUnit.MILLISECONDS);
-        String indexv1Name = createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
 
         // Stop initial index build by interrupting active and pending compactions
         int attempt = 20;
