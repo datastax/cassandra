@@ -233,6 +233,12 @@ public class CellWithSource<T> extends Cell<T>
         return cell.maxTimestamp();
     }
 
+    @Override
+    public long minTimestamp()
+    {
+        return cell.minTimestamp();
+    }
+
     private Cell<?> wrapIfNew(Cell<?> maybeNewCell)
     {
         if (maybeNewCell == null)

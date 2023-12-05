@@ -43,8 +43,6 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_FROZEN_TERM_SIZE;
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_STRING_TERM_SIZE;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 /**
@@ -56,18 +54,11 @@ public class SSTableIndexWriter implements PerIndexWriter
     private static final Logger logger = LoggerFactory.getLogger(SSTableIndexWriter.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    public static final int MAX_STRING_TERM_SIZE = SAI_MAX_STRING_TERM_SIZE.getInt(1) * 1024;
-    public static final int MAX_FROZEN_TERM_SIZE = SAI_MAX_FROZEN_TERM_SIZE.getInt(5) * 1024;
-    public static final String TERM_OVERSIZE_MESSAGE =
-            "Can't add term of column {} to index for key: {}, term size {} " +
-                    "max allowed size {}, use analyzed = true (if not yet set) for that column.";
-
     private final IndexDescriptor indexDescriptor;
     private final IndexContext indexContext;
     private final long nowInSec = FBUtilities.nowInSeconds();
     private final AbstractAnalyzer analyzer;
     private final NamedMemoryLimiter limiter;
-    private final int maxTermSize;
     private final BooleanSupplier isIndexValid;
 
     private boolean aborted = false;
@@ -84,7 +75,6 @@ public class SSTableIndexWriter implements PerIndexWriter
         this.analyzer = indexContext.getAnalyzerFactory().create();
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;
-        this.maxTermSize = indexContext.isFrozen() ? MAX_FROZEN_TERM_SIZE : MAX_STRING_TERM_SIZE;
     }
 
     @Override
@@ -209,15 +199,8 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private void addTerm(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type) throws IOException
     {
-        if (term.remaining() >= maxTermSize)
-        {
-            noSpamLogger.warn(indexContext.logMessage(TERM_OVERSIZE_MESSAGE),
-                              indexContext.getColumnName(),
-                              indexContext.keyValidator().getString(key.partitionKey().getKey()),
-                              FBUtilities.prettyPrintMemory(term.remaining()),
-                              FBUtilities.prettyPrintMemory(maxTermSize));
+        if (!indexContext.validateMaxTermSize(key.partitionKey(), term, false))
             return;
-        }
 
         if (currentBuilder == null)
         {

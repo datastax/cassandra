@@ -166,6 +166,18 @@ public class RangeTombstoneBoundMarker extends AbstractRangeTombstoneMarker<Clus
         return EMPTY_SIZE + deletion.unsharedHeapSize();
     }
 
+    @Override
+    public long minTimestamp()
+    {
+        return deletion.markedForDeleteAt();
+    }
+
+    @Override
+    public long maxTimestamp()
+    {
+        return deletion.markedForDeleteAt();
+    }
+
     public String toString(TableMetadata metadata)
     {
         return String.format("Marker %s@%d/%d", bound.toString(metadata), deletion.markedForDeleteAt(), deletion.localDeletionTime());
