@@ -62,8 +62,10 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.CollectionRangeIterator;
 import org.apache.cassandra.index.sai.utils.OrderingFilterRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
@@ -213,14 +215,7 @@ public class QueryController
 
     public UnfilteredRowIterator executePartitionReadCommand(SinglePartitionReadCommand command, ReadExecutionController executionController)
     {
-        try
-        {
-            return command.queryMemtableAndDisk(cfs, executionController);
-        }
-        finally
-        {
-            queryContext.checkpoint();
-        }
+        return command.queryMemtableAndDisk(cfs, executionController);
     }
 
     /**
@@ -283,7 +278,8 @@ public class QueryController
                                                                                  .stream()
                                                                                  .map(e -> createRowIdIterator(e, true, limit))
                                                                                  .collect(Collectors.toList());
-            return TermIterator.build(sstableIntersections, memtableResults, queryView.referencedIndexes, queryContext);
+            var result = TermIterator.build(sstableIntersections, memtableResults, queryView.referencedIndexes, queryContext);
+            return filterShadowedPrimaryKeys(result);
         }
         catch (Throwable t)
         {
@@ -296,9 +292,8 @@ public class QueryController
     // This is a hybrid query. We apply all other predicates before ordering and limiting.
     public RangeIterator getTopKRows(RangeIterator source, RowFilter.Expression expression)
     {
-        return new OrderingFilterRangeIterator(source,
-                                               ORDER_CHUNK_SIZE,
-                                               list -> this.getTopKRows(list, expression));
+        var result = new OrderingFilterRangeIterator(source, ORDER_CHUNK_SIZE, list -> this.getTopKRows(list, expression));
+        return filterShadowedPrimaryKeys(result);
     }
 
     private RangeIterator getTopKRows(List<PrimaryKey> rawSourceKeys, RowFilter.Expression expression)
@@ -374,6 +369,21 @@ public class QueryController
         return RangeUnionIterator.builder(subIterators.size()).add(subIterators).build();
     }
 
+    /**
+     * Filter out shadowed {@link PrimaryKey} from the source iterator. This is only necessary when a query is ordering
+     * and limiting results.
+     * @param source the source iterator
+     * @return a filtered iterator
+     */
+    private RangeIterator filterShadowedPrimaryKeys(RangeIterator source)
+    {
+        if (queryContext.getShadowedPrimaryKeys().isEmpty())
+            return source;
+        // This logic used to be managed at the vector index level. However, that led to a lot of complexity,
+        // especially when multiple rows shared the same value. For now, we just filter the results here.
+        return RangeAntiJoinIterator.create(source, new CollectionRangeIterator(queryContext.getShadowedPrimaryKeys()));
+    }
+
     public int getExactLimit()
     {
         return command.limits().count();
@@ -386,10 +396,10 @@ public class QueryController
     int currentSoftLimitEstimate()
     {
         var K = getExactLimit();
-        if (!allowSpeculativeLimits)
-            return K;
-
         int M = queryContext.getShadowedPrimaryKeys().size();
+        if (!allowSpeculativeLimits)
+            return K + M;
+
         if (M == 0)
             return K;
 
