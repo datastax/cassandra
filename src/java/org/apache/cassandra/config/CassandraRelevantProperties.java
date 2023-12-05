@@ -218,6 +218,7 @@ public enum CassandraRelevantProperties
      */
     CUSTOM_NATIVE_LIBRARY("cassandra.custom_native_library"),
     CUSTOM_QUERY_HANDLER_CLASS("cassandra.custom_query_handler_class"),
+    CUSTOM_READ_OBSERVER_FACTORY("cassandra.custom_read_observer_factory_class"),
     CUSTOM_REPLAY_FILTER_CLASS("cassandra.custom_replay_filter_class"),
     /** Watcher used when opening sstables to discover extra components, eg. archive component */
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
@@ -739,6 +740,7 @@ public enum CassandraRelevantProperties
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
 
     /** Gossiper compute expiration timeout. Default value 3 days. */
+    VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("cassandra.sai.validate_max_term_size_at_coordinator"),
     VERY_LONG_TIME_MS("cassandra.very_long_time_ms", "259200000"),
     /** Controls output format for Collection-type settings in system_views.settings table */
     VIRTUAL_TABLE_COMPLEX_SETTINGS_FORMAT_JSON("cassandra.virtual_table_complex_settings_format_json", "false"),
