@@ -447,6 +447,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 iterator = withQuerySizeTracking(iterator);
                 iterator = maybeSlowDownForTesting(iterator);
                 iterator = withQueryCancellation(iterator);
+                iterator = withReadObserver(iterator);
                 iterator = RTBoundValidator.validate(withoutPurgeableTombstones(iterator, cfs, executionController), Stage.PURGED, false);
                 iterator = withMetricsRecording(iterator, cfs.metric, startTimeNanos);
 
@@ -494,6 +495,55 @@ public abstract class ReadCommand extends AbstractReadQuery
         {
             COMMAND.set(null);
         }
+    }
+
+    public UnfilteredPartitionIterator withReadObserver(UnfilteredPartitionIterator partitions)
+    {
+        ReadObserver observer = ReadObserverFactory.instance.create(this.metadata());
+
+        // skip if observer is disabled
+        if (observer == ReadObserver.NO_OP)
+            return partitions;
+
+        class ReadObserverTransformation extends Transformation<UnfilteredRowIterator>
+        {
+            @Override
+            protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
+            {
+                observer.onPartition(partition.partitionKey(), partition.partitionLevelDeletion());
+                return Transformation.apply(partition, this);
+            }
+
+            @Override
+            protected Row applyToStatic(Row row)
+            {
+                if (!row.isEmpty())
+                    observer.onStaticRow(row);
+                return row;
+            }
+
+            @Override
+            protected Row applyToRow(Row row)
+            {
+                observer.onUnfiltered(row);
+                return row;
+            }
+
+            @Override
+            protected RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
+            {
+                observer.onUnfiltered(marker);
+                return marker;
+            }
+
+            @Override
+            protected void onClose()
+            {
+                observer.onComplete();
+            }
+        }
+
+        return Transformation.apply(partitions, new ReadObserverTransformation());
     }
 
     public UnfilteredPartitionIterator searchStorage(Index.Searcher searcher, ReadExecutionController executionController)

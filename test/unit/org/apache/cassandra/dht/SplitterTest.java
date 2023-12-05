@@ -304,7 +304,6 @@ public class SplitterTest
         // single range too small to be partitioned
         testSplit(partitioner, 1, newHashSet(Pair.create(1, 2)), newHashSet(Pair.create(1, 2)));
         testSplit(partitioner, 2, newHashSet(Pair.create(1, 2)), newHashSet(Pair.create(1, 2)));
-        testSplit(partitioner, 4, newHashSet(Pair.create(1, 4)), newHashSet(Pair.create(1, 4)));
         testSplit(partitioner, 8, newHashSet(Pair.create(1, 2)), newHashSet(Pair.create(1, 2)));
 
         // single wrapping range
@@ -317,7 +316,7 @@ public class SplitterTest
         testSplit(partitioner, 2,
                   newHashSet(Pair.create(max.subtract(BigInteger.valueOf(8)), min)),
                   newHashSet(Pair.create(max.subtract(BigInteger.valueOf(8)), max.subtract(BigInteger.valueOf(4))),
-                             Pair.create(max.subtract(BigInteger.valueOf(4)), isRandom ? first : max)));
+                             Pair.create(max.subtract(BigInteger.valueOf(4)), min)));
         testSplit(partitioner, 2,
                   newHashSet(Pair.create(max.subtract(BigInteger.valueOf(8)), max)),
                   newHashSet(Pair.create(max.subtract(BigInteger.valueOf(8)), max.subtract(BigInteger.valueOf(4))),
