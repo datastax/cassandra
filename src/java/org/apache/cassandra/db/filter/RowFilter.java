@@ -308,30 +308,36 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
 
         public void addGeoDistanceExpression(ColumnMetadata def, ByteBuffer point, Operator op, ByteBuffer distance)
         {
-            var primaryGeoSearch = new GeoDistanceExpression(def, point, op, distance);
+            var primaryGeoDistanceExpression = new GeoDistanceExpression(def, point, op, distance);
             // The following logic optionally adds a second search expression in the event that the query area
             // crosses then antimeridian.
-            if (primaryGeoSearch.crossesAntimeridian())
+            if (primaryGeoDistanceExpression.crossesAntimeridian())
             {
-                var shiftedGeoSearch = primaryGeoSearch.buildShiftedExpression();
+                // The primry GeoDistanceExpression includes points on/over the antimeridian. Since we search
+                // using the lat/lon coordinates, we must create a shifted expression that will collect
+                // results on the other side of the antimeridian.
+                var shiftedGeoDistanceExpression = primaryGeoDistanceExpression.buildShiftedExpression();
                 if (current.isDisjunction)
                 {
-                    add(primaryGeoSearch);
-                    add(shiftedGeoSearch);
+                    // We can add both expressions to this level of the tree because it is a disjunction.
+                    add(primaryGeoDistanceExpression);
+                    add(shiftedGeoDistanceExpression);
                 }
                 else
                 {
+                    // We need to add a new level to the tree so that we can get all results that match the primary
+                    // or the shifted expressions.
                     var builder = new FilterElement.Builder(true);
-                    primaryGeoSearch.validate();
-                    shiftedGeoSearch.validate();
-                    builder.expressions.add(primaryGeoSearch);
-                    builder.expressions.add(shiftedGeoSearch);
+                    primaryGeoDistanceExpression.validate();
+                    shiftedGeoDistanceExpression.validate();
+                    builder.expressions.add(primaryGeoDistanceExpression);
+                    builder.expressions.add(shiftedGeoDistanceExpression);
                     current.children.add(builder.build());
                 }
             }
             else
             {
-                add(primaryGeoSearch);
+                add(primaryGeoDistanceExpression);
             }
         }
 
