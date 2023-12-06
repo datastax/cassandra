@@ -103,4 +103,10 @@ public class PrimaryKeyWithSource implements PrimaryKey
         }
         return primaryKey.compareTo(o);
     }
+
+    @Override
+    public String toString()
+    {
+        return String.format("%s (source sstable: %s, %s)", primaryKey, sourceSstableId, sourceRowId);
+    }
 }
