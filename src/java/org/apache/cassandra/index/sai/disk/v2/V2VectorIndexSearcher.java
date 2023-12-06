@@ -29,8 +29,6 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.codahale.metrics.Histogram;
-import com.codahale.metrics.SlidingWindowReservoir;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.pq.BinaryQuantization;
 import io.github.jbellis.jvector.util.Bits;
@@ -58,6 +56,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.lang.Math.ceil;
@@ -364,7 +363,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             // track whether we are saving comparisons by using binary search to skip ahead
             // (if most of the keys belong to this sstable, bsearch will actually be slower)
-            var comparisonsSavedByBsearch = new Histogram(new SlidingWindowReservoir(10));
+            var comparisonsSavedByBsearch = new QuickSlidingWindowReservoir(10);
             boolean preferSeqScanToBsearch = false;
 
             for (int i = 0; i < keysInRange.size(); i++)
@@ -418,8 +417,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     }
 
                     // update our estimate
-                    preferSeqScanToBsearch = comparisonsSavedByBsearch.getCount() >= 10
-                                             && comparisonsSavedByBsearch.getSnapshot().getMean() < 0;
+                    preferSeqScanToBsearch = comparisonsSavedByBsearch.size() >= 10
+                                             && comparisonsSavedByBsearch.getMean() < 0;
                     continue;
                 }
 
