@@ -71,6 +71,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.utils.GeoUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -493,7 +494,37 @@ public class RowFilter implements Iterable<RowFilter.Expression>
 
         public void addGeoDistanceExpression(ColumnMetadata def, ByteBuffer point, Operator op, ByteBuffer distance)
         {
-            add(new GeoDistanceExpression(def, point, op, distance));
+            var primaryGeoDistanceExpression = new GeoDistanceExpression(def, point, op, distance);
+            // The following logic optionally adds a second search expression in the event that the query area
+            // crosses then antimeridian.
+            if (primaryGeoDistanceExpression.crossesAntimeridian())
+            {
+                // The primry GeoDistanceExpression includes points on/over the antimeridian. Since we search
+                // using the lat/lon coordinates, we must create a shifted expression that will collect
+                // results on the other side of the antimeridian.
+                var shiftedGeoDistanceExpression = primaryGeoDistanceExpression.buildShiftedExpression();
+                if (current.isDisjunction)
+                {
+                    // We can add both expressions to this level of the tree because it is a disjunction.
+                    add(primaryGeoDistanceExpression);
+                    add(shiftedGeoDistanceExpression);
+                }
+                else
+                {
+                    // We need to add a new level to the tree so that we can get all results that match the primary
+                    // or the shifted expressions.
+                    var builder = new FilterElement.Builder(true);
+                    primaryGeoDistanceExpression.validate();
+                    shiftedGeoDistanceExpression.validate();
+                    builder.expressions.add(primaryGeoDistanceExpression);
+                    builder.expressions.add(shiftedGeoDistanceExpression);
+                    current.children.add(builder.build());
+                }
+            }
+            else
+            {
+                add(primaryGeoDistanceExpression);
+            }
         }
 
         public void addCustomIndexExpression(TableMetadata metadata, IndexMetadata targetIndex, ByteBuffer value)
@@ -1436,11 +1467,19 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         private final float searchRadiusMeters;
         private final float searchLat;
         private final float searchLon;
+        // Whether this is a shifted expression, which is used to handle crossing the antimeridian
+        private final boolean isShifted;
 
         public GeoDistanceExpression(ColumnMetadata column, ByteBuffer point, Operator operator, ByteBuffer distance)
         {
+            this(column, point, operator, distance, false);
+        }
+
+        private GeoDistanceExpression(ColumnMetadata column, ByteBuffer point, Operator operator, ByteBuffer distance, boolean isShifted)
+        {
             super(column, Operator.BOUNDED_ANN, point);
             assert column.type instanceof VectorType && (operator == Operator.LTE || operator == Operator.LT);
+            this.isShifted = isShifted;
             this.distanceOperator = operator;
             this.distance = distance;
             searchRadiusMeters = FloatType.instance.compose(distance);
@@ -1451,6 +1490,23 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             searchLon = pointVector[1];
         }
 
+        public boolean crossesAntimeridian()
+        {
+            return GeoUtil.crossesAntimeridian(searchLat, searchLon, searchRadiusMeters);
+        }
+
+        /**
+         * Build a new {@link GeoDistanceExpression} that is shifted by 360 degrees and can correctly search
+         * on the opposite side of the antimeridian.
+         * @return
+         */
+        public GeoDistanceExpression buildShiftedExpression()
+        {
+            float shiftedLon = searchLon > 0 ? searchLon - 360 : searchLon + 360;
+            var newPoint = VectorType.getInstance(FloatType.instance, 2)
+                                     .decompose(List.of(searchLat, shiftedLon));
+            return new GeoDistanceExpression(column, newPoint, distanceOperator, distance, true);
+        }
 
         public Operator getDistanceOperator()
         {
@@ -1469,11 +1525,11 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             checkBindValueSet(value, "Unsupported unset vector value for column %s", column.name);
 
             if (searchRadiusMeters <= 0)
-                throw new InvalidRequestException("GEO_DISTANCE radius must be non-negative, got " + searchRadiusMeters);
+                throw new InvalidRequestException("GEO_DISTANCE radius must be positive, got " + searchRadiusMeters);
 
             if (searchLat < -90 || searchLat > 90)
                 throw new InvalidRequestException("GEO_DISTANCE latitude must be between -90 and 90 degrees, got " + searchLat);
-            if (searchLon < -180 || searchLon > 180)
+            if (!isShifted && (searchLon < -180 || searchLon > 180))
                 throw new InvalidRequestException("GEO_DISTANCE longitude must be between -180 and 180 degrees, got " + searchLon);
         }
 
