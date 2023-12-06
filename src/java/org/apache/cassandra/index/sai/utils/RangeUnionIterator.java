@@ -32,6 +32,7 @@ import org.apache.cassandra.io.util.FileUtils;
 public class RangeUnionIterator extends RangeIterator
 {
     private final List<RangeIterator> ranges;
+    private PrimaryKey lastKey;
 
     private RangeUnionIterator(Builder.Statistics statistics, List<RangeIterator> ranges)
     {
@@ -46,6 +47,11 @@ public class RangeUnionIterator extends RangeIterator
         RangeIterator candidate = null;
         for (RangeIterator range : ranges)
         {
+            if (lastKey != null)
+                // Skip duplicate values
+                while (range.hasNext() && range.peek().compareTo(lastKey) == 0)
+                    range.next();
+
             if (!range.hasNext())
                 continue;
 
@@ -64,7 +70,8 @@ public class RangeUnionIterator extends RangeIterator
         }
         if (candidate == null)
             return endOfData();
-        return candidate.next();
+        lastKey = candidate.next;
+        return lastKey;
     }
 
     protected void performSkipTo(PrimaryKey nextKey)
