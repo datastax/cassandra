@@ -268,8 +268,13 @@ public class VectorMemtableIndex implements MemtableIndex
         // If we need to make this even more accurate, the relationship to B and to log(N) may be the best
         // places to start.
         var raw = (int) (100 + 0.025 * pow(log(N), 2) * pow(K, 0.95) * ((double) N / B));
+        return ensureSaneEstimate(raw, limit, graphSize);
+    }
+
+    public static int ensureSaneEstimate(int rawEstimate, int limit, int graphSize)
+    {
         // we will always visit at least min(limit, graphSize) nodes, and we can't visit more nodes than exist in the graph
-        return min(max(raw, min(limit, graphSize)), graphSize);
+        return min(max(rawEstimate, min(limit, graphSize)), graphSize);
     }
 
     @Override

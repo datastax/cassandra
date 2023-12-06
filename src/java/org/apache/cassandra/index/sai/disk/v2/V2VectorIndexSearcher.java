@@ -50,12 +50,13 @@ import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
-import org.apache.cassandra.index.sai.utils.AtomicRatio;
 import org.apache.cassandra.index.sai.utils.CollectionRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.metrics.LinearFit;
+import org.apache.cassandra.metrics.PairedSlidingWindowReservoir;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -74,7 +75,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private final JVectorLuceneOnDiskGraph graph;
     private final PrimaryKey.Factory keyFactory;
     private int globalBruteForceRows; // not final so test can inject its own setting
-    private final AtomicRatio actualExpectedRatio = new AtomicRatio();
+    private final PairedSlidingWindowReservoir actualExpectedNodesVisited = new PairedSlidingWindowReservoir(20);
     private final ThreadLocal<SparseFixedBitSet> cachedBitSets;
 
     public V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
@@ -132,8 +133,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             return bitsOrPostingList.postingList();
 
         var vectorPostings = graph.search(queryVector, topK, exp.getEuclideanSearchThreshold(), limit, bitsOrPostingList.getBits(), context);
-        if (bitsOrPostingList.rawExpectedNodes >= 0)
-            updateExpectedNodes(vectorPostings.getVisitedCount(), bitsOrPostingList.rawExpectedNodes);
+        if (bitsOrPostingList.cost != null)
+            bitsOrPostingList.cost.updateStatistics(vectorPostings.getVisitedCount());
         return vectorPostings;
     }
 
@@ -198,15 +199,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             minSSTableRowId = Math.max(minSSTableRowId, metadata.minSSTableRowId);
             maxSSTableRowId = min(maxSSTableRowId, metadata.maxSSTableRowId);
 
-            // If num of matches are not bigger than topK, skip ANN.
-            // (nRows should not include shadowed rows, but context doesn't break those out by segment,
-            // so we will live with the inaccuracy.)
+            // Upper-bound cost based on maximum possible rows included
             int nRows = Math.toIntExact(maxSSTableRowId - minSSTableRowId + 1);
-            int maxBruteForceRows = min(globalBruteForceRows, maxBruteForceRows(topK, nRows));
+            var cost = estimateCost(topK, nRows);
             logAndTrace("Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
-                        nRows, maxBruteForceRows, graph.size(), topK);
+                        nRows, cost.expectedNodesVisited, graph.size(), topK);
             // if we have a small number of results then let TopK processor do exact NN computation
-            if (nRows <= maxBruteForceRows)
+            if (cost.shouldUseBruteForce())
             {
                 var segmentRowIds = new IntArrayList(nRows, 0);
                 for (long i = minSSTableRowId; i <= maxSSTableRowId; i++)
@@ -241,11 +240,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             {
                 throw new RuntimeException(e);
             }
+            // We can make a more accurate cost estimate now
+            cost = estimateCost(topK, bits.cardinality());
 
             if (!hasMatches)
                 return new BitsOrPostingList(PostingList.EMPTY);
 
-            return new BitsOrPostingList(bits, getRawExpectedNodes(topK, nRows));
+            return new BitsOrPostingList(bits, cost);
         }
     }
 
@@ -296,37 +297,51 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         return max;
     }
 
-    private int maxBruteForceRows(int limit, int nPermittedOrdinals)
+    private class CostEstimate
     {
-        int expectedNodes = expectedNodesVisited(limit, nPermittedOrdinals);
-        // ANN index will do a bunch of extra work besides the full comparisons (performing PQ similarity for each edge);
-        // brute force from sstable will also do a bunch of extra work (going through trie index to look up row).
-        // VSTODO I'm not sure which one is more expensive (and it depends on things like sstable chunk cache hit ratio)
-        // so I'm leaving it as a 1:1 ratio for now.
-        return max(limit, expectedNodes);
+        public final int nFilteredRows;
+        public final int rawExpectedNodesVisited;
+        public final int expectedNodesVisited;
+
+        public CostEstimate(int nFilteredRows, int rawExpectedNodesVisited, int expectedNodesVisited)
+        {
+            assert rawExpectedNodesVisited >= 0 : rawExpectedNodesVisited;
+            assert expectedNodesVisited >= 0 : expectedNodesVisited;
+
+            this.nFilteredRows = nFilteredRows;
+            this.rawExpectedNodesVisited = rawExpectedNodesVisited;
+            this.expectedNodesVisited = expectedNodesVisited;
+        }
+
+        public boolean shouldUseBruteForce()
+        {
+            // ANN index will do a bunch of extra work besides the full comparisons (performing PQ similarity for each edge);
+            // brute force from sstable will also do a bunch of extra work (going through trie index to look up row).
+            // VSTODO I'm not sure which one is more expensive (and it depends on things like sstable chunk cache hit ratio)
+            // so I'm leaving it as a 1:1 ratio for now.
+            return nFilteredRows <= min(globalBruteForceRows, expectedNodesVisited);
+        }
+
+        public void updateStatistics(int actualNodesVisited)
+        {
+            assert actualNodesVisited >= 0 : actualNodesVisited;
+            actualExpectedNodesVisited.update(actualNodesVisited, rawExpectedNodesVisited);
+
+            if (actualNodesVisited >= 1000 && (actualNodesVisited > 2 * expectedNodesVisited || actualNodesVisited < 0.5 * expectedNodesVisited))
+                logger.warn("Predicted visiting {} nodes, but actually visited {} (observed:predicted ratio is {})",
+                            expectedNodesVisited, actualNodesVisited, (double) actualNodesVisited / expectedNodesVisited);
+        }
     }
 
-    private int expectedNodesVisited(int limit, int nPermittedOrdinals)
+    private CostEstimate estimateCost(int limit, int nFilteredRows)
     {
-        return (int) (getObservedNodesRatio() * getRawExpectedNodes(limit, nPermittedOrdinals));
-    }
+        // update the raw expected value with a linear interpolation based on observed data
+        var interceptSlope = LinearFit.interceptSlopeFor(actualExpectedNodesVisited.getSnapshot().values);
+        int rawExpectedNodes = getRawExpectedNodes(limit, nFilteredRows);
+        int expectedNodes = (int) (interceptSlope.left + interceptSlope.right * rawExpectedNodes);
 
-    /** the ratio of nodes visited by a graph search, to our estimate */
-    private double getObservedNodesRatio()
-    {
-        return actualExpectedRatio.getUpdateCount() >= 10 ? actualExpectedRatio.get() : 1.0;
-    }
-
-    private void updateExpectedNodes(int actualNodesVisited, int rawExpectedNodes)
-    {
-        assert rawExpectedNodes >= 0 : rawExpectedNodes;
-        assert actualNodesVisited >= 0 : actualNodesVisited;
-        double ratio = getObservedNodesRatio();
-        var expectedNodes = (int) (ratio * rawExpectedNodes);
-        if (actualNodesVisited >= 1000 && (actualNodesVisited > 2 * expectedNodes || actualNodesVisited < 0.5 * expectedNodes))
-            logger.warn("Predicted visiting {} nodes, but actually visited {} (observed:predicted ratio is {})",
-                        expectedNodes, actualNodesVisited, ratio);
-        actualExpectedRatio.updateAndGet(actualNodesVisited, rawExpectedNodes);
+        int sanitizedEstimate = VectorMemtableIndex.ensureSaneEstimate(expectedNodes, limit, graph.size());
+        return new CostEstimate(nFilteredRows, rawExpectedNodes, sanitizedEstimate);
     }
 
     private SparseFixedBitSet bitSetForSearch()
@@ -438,14 +453,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         }
 
         var numRows = rowIds.size();
-        var maxBruteForceRows = min(globalBruteForceRows, maxBruteForceRows(topK, numRows));
-        logAndTrace("{} rows relevant to current sstable; max brute force rows is {} for index with {} nodes, LIMIT {}",
-                    numRows, maxBruteForceRows, graph.size(), limit);
+        var cost = estimateCost(topK, numRows);
+        logAndTrace("{} rows relevant to current sstable; cost estimate is {} for index with {} nodes, LIMIT {}",
+                    numRows, cost.expectedNodesVisited, graph.size(), limit);
         if (numRows == 0) {
             return RangeIterator.empty();
         }
 
-        if (numRows <= maxBruteForceRows)
+        if (cost.shouldUseBruteForce())
         {
             // brute force using the in-memory compressed vectors to cut down the number of results returned
             var queryVector = exp.lower.value.vector;
@@ -455,7 +470,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         // else ask the index to perform a search limited to the bits we created
         float[] queryVector = exp.lower.value.vector;
         var results = graph.search(queryVector, topK, limit, bits, context);
-        updateExpectedNodes(results.getVisitedCount(), getRawExpectedNodes(topK, numRows));
+        cost.updateStatistics(results.getVisitedCount());
+
         return toPrimaryKeyIterator(results, context);
     }
 
@@ -490,23 +506,23 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
     private static class BitsOrPostingList
     {
-        public static final BitsOrPostingList ALL_BITS = new BitsOrPostingList(Bits.ALL, -1);
+        public static final BitsOrPostingList ALL_BITS = new BitsOrPostingList(Bits.ALL, null);
         private final Bits bits;
-        private final int rawExpectedNodes;
+        private final CostEstimate cost;
         private final PostingList postingList;
 
-        public BitsOrPostingList(Bits bits, int rawExpectedNodes)
+        public BitsOrPostingList(Bits bits, CostEstimate cost)
         {
             this.bits = bits;
-            this.rawExpectedNodes = rawExpectedNodes;
+            this.cost = cost;
             this.postingList = null;
         }
 
         public BitsOrPostingList(PostingList postingList)
         {
-            this.bits = null;
             this.postingList = Preconditions.checkNotNull(postingList);
-            this.rawExpectedNodes = -1;
+            this.bits = null;
+            this.cost = null;
         }
 
         @Nullable

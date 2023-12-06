@@ -23,8 +23,8 @@ import com.codahale.metrics.Snapshot;
 import com.codahale.metrics.UniformSnapshot;
 
 /**
- * A reservoir that stores the last N measurements.
- * Same as com.codahale.metrics.SlidingWindowReservoir but provides a snapshot-free getMean().
+ * A reservoir that stores the last N measurements, following the same design
+ * as com.codahale.metrics.SlidingWindowReservoir but adding a snapshot-free getMean().
  */
 public class QuickSlidingWindowReservoir implements Reservoir
 {
