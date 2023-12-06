@@ -1320,7 +1320,7 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             checkBindValueSet(value, "Unsupported unset vector value for column %s", column.name);
 
             if (searchRadiusMeters <= 0)
-                throw new InvalidRequestException("GEO_DISTANCE radius must be posititve, got " + searchRadiusMeters);
+                throw new InvalidRequestException("GEO_DISTANCE radius must be positive, got " + searchRadiusMeters);
 
             if (searchLat < -90 || searchLat > 90)
                 throw new InvalidRequestException("GEO_DISTANCE latitude must be between -90 and 90 degrees, got " + searchLat);
