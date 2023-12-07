@@ -281,6 +281,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         // top K ascending
         for (int i = end; i >= 0; i--)
             postings[end - i] = pairs.get(i).node;
+        // Rows are sorted now so that we get the PrimaryKeys in order for correct deduplication in the
+        // RangeUnionIterator, where we merge the results from all sstables.
         Arrays.sort(postings);
         return postings;
     }
