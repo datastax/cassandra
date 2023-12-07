@@ -394,7 +394,7 @@ public class VectorMemtableIndex implements MemtableIndex
             var pks = graph.keysFromOrdinal(i);
             for (var pk : pks)
                 // We use this class when we have more than maxBruteForceRows results, so binary search
-                // should always be faster than linear search. We could possibly
+                // should always be faster than linear search.
                 if (Collections.binarySearch(results, pk) >= 0)
                     return true;
             return false;
