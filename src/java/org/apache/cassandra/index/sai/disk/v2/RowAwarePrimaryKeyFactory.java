@@ -185,7 +185,8 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public int hashCode()
         {
-            return Objects.hash(token(), partitionKey(), clustering());
+            // It is expensive to hash PrimaryKeys because it can lead to disk reads. Choose another datastructure.
+            throw new UnsupportedOperationException();
         }
 
         @Override
