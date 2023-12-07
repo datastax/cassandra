@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -374,18 +375,25 @@ public class VectorMemtableIndex implements MemtableIndex
 
     private class KeyFilteringBits implements Bits
     {
-        private final Set<PrimaryKey> results;
+        private final List<PrimaryKey> results;
 
         public KeyFilteringBits(List<PrimaryKey> results)
         {
-            this.results = new HashSet<>(results);
+            this.results = results;
         }
 
         @Override
         public boolean get(int i)
         {
-            var pk = graph.keysFromOrdinal(i);
-            return results.stream().anyMatch(pk::contains);
+            // pks is not ordered. If it were, we could use the result from binarySearch to search a sublist of
+            // results on subsequent searches. It's not common to have multiple PKs for an ordinal, though.
+            var pks = graph.keysFromOrdinal(i);
+            for (var pk : pks)
+                // We use this class when we have more than maxBruteForceRows results, so binary search
+                // should always be faster than linear search. We could possibly
+                if (Collections.binarySearch(results, pk) >= 0)
+                    return true;
+            return false;
         }
 
         @Override
