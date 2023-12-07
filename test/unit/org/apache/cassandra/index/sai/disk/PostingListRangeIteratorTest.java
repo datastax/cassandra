@@ -22,12 +22,14 @@ import java.io.IOException;
 
 import org.junit.Test;
 
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.mockito.Mockito.mock;
 
 public class PostingListRangeIteratorTest
 {
@@ -38,6 +40,7 @@ public class PostingListRangeIteratorTest
     {
         @SuppressWarnings("resource")
         var postingList = new ArrayPostingList(new int[]{1,1,2,2,3});
+        var mockIndexContext = mock(IndexContext.class);
         var indexContext = new IndexSearcherContext(pkm.primaryKeyFromRowId(1),
                                                     pkm.primaryKeyFromRowId(3),
                                                     0,
@@ -45,7 +48,7 @@ public class PostingListRangeIteratorTest
                                                     0,
                                                     new QueryContext(10000),
                                                     postingList.peekable());
-        try (var iterator = new PostingListRangeIterator(null, pkm, indexContext))
+        try (var iterator = new PostingListRangeIterator(mockIndexContext, pkm, indexContext))
         {
             assertEquals(pkm.primaryKeyFromRowId(1), iterator.next());
             assertEquals(pkm.primaryKeyFromRowId(2), iterator.next());
