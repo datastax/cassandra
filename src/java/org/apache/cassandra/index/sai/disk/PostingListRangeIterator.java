@@ -192,7 +192,7 @@ public class PostingListRangeIterator extends RangeIterator
             {
                 segmentRowId = postingList.nextPosting();
                 // Do not produce a duplicate segment row id.
-            } while (segmentRowId == lastSegmentRowId);
+            } while (segmentRowId == lastSegmentRowId && segmentRowId != PostingList.END_OF_STREAM);
         }
         lastSegmentRowId = segmentRowId;
         return segmentRowId != PostingList.END_OF_STREAM
