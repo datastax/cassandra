@@ -28,17 +28,20 @@ import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadCommandVerbHandler;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class SensorsReadTest
 {
@@ -86,11 +89,7 @@ public class SensorsReadTest
     public void testMemtableRead()
     {
         store = discardSSTables(KEYSPACE1, CF_STANDARD);
-
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
-        RequestSensors sensors = new RequestSensors(context);
-        sensors.registerSensor(Type.READ_BYTES);
-        RequestTracker.instance.set(sensors);
 
         for (int j = 0; j < 10; j++)
         {
@@ -101,21 +100,17 @@ public class SensorsReadTest
         }
 
         DecoratedKey key = store.getPartitioner().decorateKey(ByteBufferUtil.bytes("4"));
-        Util.getAll(Util.cmd(store, key).build());
-        long bytes = (long) RequestTracker.instance.get().getSensor(Type.READ_BYTES).get().getValue();
-        assertTrue(bytes > 0);
-        assertEquals(bytes, SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_BYTES).get().getValue(), 0);
+        ReadCommand command = Util.cmd(store, key).build();
+        handleReadCommand(command);
+
+        assertRequestAndRegistrySensorsEquality(context);
     }
 
     @Test
     public void testSinglePartitionReadCommand_ByPartitionKey()
     {
         store = discardSSTables(KEYSPACE1, CF_STANDARD);
-
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
-        RequestSensors sensors = new RequestSensors(context);
-        sensors.registerSensor(Type.READ_BYTES);
-        RequestTracker.instance.set(sensors);
 
         for (int j = 0; j < 10; j++)
         {
@@ -130,21 +125,17 @@ public class SensorsReadTest
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
 
         DecoratedKey key = sstable.decorateKey(ByteBufferUtil.bytes("4"));
-        Util.getAll(Util.cmd(store, key).build());
-        long bytes = (long) RequestTracker.instance.get().getSensor(Type.READ_BYTES).get().getValue();
-        assertTrue(bytes > 0);
-        assertEquals(bytes, SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_BYTES).get().getValue(), 0);
+        ReadCommand command = Util.cmd(store, key).build();
+        handleReadCommand(command);
+
+        assertRequestAndRegistrySensorsEquality(context);
     }
 
     @Test
     public void testSinglePartitionReadCommand_ByClustering()
     {
         store = discardSSTables(KEYSPACE1, CF_STANDARD_CLUSTERING);
-
         Context context = new Context(KEYSPACE1, CF_STANDARD_CLUSTERING, store.metadata.id.toString());
-        RequestSensors sensors = new RequestSensors(context);
-        sensors.registerSensor(Type.READ_BYTES);
-        RequestTracker.instance.set(sensors);
 
         for (int j = 0; j < 10; j++)
         {
@@ -160,21 +151,17 @@ public class SensorsReadTest
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
 
         DecoratedKey key = sstable.decorateKey(ByteBufferUtil.bytes("0"));
-        Util.getAll(Util.cmd(store, key).includeRow("0").build());
-        long bytes = (long) RequestTracker.instance.get().getSensor(Type.READ_BYTES).get().getValue();
-        assertTrue(bytes > 0);
-        assertEquals(bytes, SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_BYTES).get().getValue(), 0);
+        ReadCommand command = Util.cmd(store, key).includeRow("0").build();
+        handleReadCommand(command);
+
+        assertRequestAndRegistrySensorsEquality(context);
     }
 
     @Test
     public void testSinglePartitionReadCommand_AllowFiltering()
     {
         store = discardSSTables(KEYSPACE1, CF_STANDARD_CLUSTERING);
-
         Context context = new Context(KEYSPACE1, CF_STANDARD_CLUSTERING, store.metadata.id.toString());
-        RequestSensors sensors = new RequestSensors(context);
-        sensors.registerSensor(Type.READ_BYTES);
-        RequestTracker.instance.set(sensors);
 
         for (int j = 0; j < 10; j++)
         {
@@ -190,28 +177,31 @@ public class SensorsReadTest
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
 
         DecoratedKey key = sstable.decorateKey(ByteBufferUtil.bytes("0"));
-        Util.getAll(Util.cmd(store, key).includeRow("0").build());
-        long bytes = (long) RequestTracker.instance.get().getSensor(Type.READ_BYTES).get().getValue();
-        assertTrue(bytes > 0);
-        assertEquals(bytes, SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_BYTES).get().getValue(), 0);
+        ReadCommand command1 = Util.cmd(store, key).includeRow("0").build();
+        handleReadCommand(command1);
 
-        RequestTracker.instance.get().getSensor(Type.READ_BYTES).get().reset();
+        Sensor request1Sensor = getThreadLocalRequestSensor();
+        // Extract the value as later we will reset the thread local and the sensor value will be lost
+        long request1Bytes = (long) request1Sensor.getValue();
 
-        Util.getAll(Util.cmd(store, key).filterOn("val", Operator.EQ, "9").build());
-        long bytes2 = (long) RequestTracker.instance.get().getSensor(Type.READ_BYTES).get().getValue();
-        assertEquals(bytes * 10, bytes2);
-        assertEquals(bytes + bytes * 10, SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_BYTES).get().getValue(), 0);
+        assertThat(request1Sensor.getValue()).isGreaterThan(0);
+        assertThat(request1Sensor).isEqualTo(getRegistrySensor(context));
+
+        getThreadLocalRequestSensor().reset();
+
+        ReadCommand command2 = Util.cmd(store, key).filterOn("val", Operator.EQ, "9").build();
+        handleReadCommand(command2);
+
+        Sensor request2Sensor = getThreadLocalRequestSensor();
+        assertThat(request2Sensor.getValue()).isEqualTo(request1Bytes * 10);
+        assertThat(getRegistrySensor(context).getValue()).isEqualTo(request1Bytes + request2Sensor.getValue());
     }
 
     @Test
     public void testPartitionRangeReadCommand_ByPartitionKey()
     {
         store = discardSSTables(KEYSPACE1, CF_STANDARD);
-
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
-        RequestSensors sensors = new RequestSensors(context);
-        sensors.registerSensor(Type.READ_BYTES);
-        RequestTracker.instance.set(sensors);
 
         for (int j = 0; j < 10; j++)
         {
@@ -226,17 +216,24 @@ public class SensorsReadTest
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
 
         DecoratedKey key = sstable.decorateKey(ByteBufferUtil.bytes("0"));
-        Util.getAll(Util.cmd(store, key).build());
-        long bytes = (long) RequestTracker.instance.get().getSensor(Type.READ_BYTES).get().getValue();
-        assertTrue(bytes > 0);
-        assertEquals(bytes, SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_BYTES).get().getValue(), 0);
+        ReadCommand command1 = Util.cmd(store, key).build();
+        handleReadCommand(command1);
 
-        RequestTracker.instance.get().getSensor(Type.READ_BYTES).get().reset();
+        Sensor request1Sensor = getThreadLocalRequestSensor();
+        // Extract the value as later we will reset the thread local and the sensor value will be lost
+        long request1Bytes = (long) request1Sensor.getValue();
 
-        Util.getAll(Util.cmd(store).fromKeyIncl("0").toKeyIncl("9").build());
-        long bytes2 = (long) RequestTracker.instance.get().getSensor(Type.READ_BYTES).get().getValue();
-        assertEquals(bytes * 10, bytes2);
-        assertEquals(bytes + bytes * 10, SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_BYTES).get().getValue(), 0);
+        assertThat(request1Sensor.getValue()).isGreaterThan(0);
+        assertThat(request1Sensor).isEqualTo(getRegistrySensor(context));
+
+        getThreadLocalRequestSensor().reset();
+
+        ReadCommand command2 = Util.cmd(store).fromKeyIncl("0").toKeyIncl("9").build();
+        handleReadCommand(command2);
+
+        Sensor request2Sensor = getThreadLocalRequestSensor();
+        assertThat(request2Sensor.getValue()).isEqualTo(request1Bytes * 10);
+        assertThat(getRegistrySensor(context).getValue()).isEqualTo(request1Bytes + request2Sensor.getValue());
     }
 
     private ColumnFamilyStore discardSSTables(String ks, String cf)
@@ -245,5 +242,39 @@ public class SensorsReadTest
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cf);
         cfs.discardSSTables(System.currentTimeMillis());
         return cfs;
+    }
+
+    private static void handleReadCommand(ReadCommand command)
+    {
+        ReadCommandVerbHandler.instance.doVerb(Message.builder(Verb.READ_REQ, command).build());
+    }
+
+
+    private void assertRequestAndRegistrySensorsEquality(Context context)
+    {
+        Sensor localSensor = getThreadLocalRequestSensor();
+        assertThat(localSensor.getValue()).isGreaterThan(0);
+
+        Sensor registrySensor = getRegistrySensor(context);
+        assertThat(registrySensor).isEqualTo(localSensor);
+    }
+
+    /**
+     * Returns the read sensor with the given context from the global registry
+     * @param context the sensor context
+     * @return the requested read sensor from the global registry
+     */
+    private static Sensor getRegistrySensor(Context context)
+    {
+        return SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_BYTES).get();
+    }
+
+    /**
+     * Returns the read sensor registered in the thread local {@link RequestSensors}
+     * @return the thread local read sensor
+     */
+    private static Sensor getThreadLocalRequestSensor()
+    {
+        return RequestTracker.instance.get().getSensor(Type.READ_BYTES).get();
     }
 }

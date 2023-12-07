@@ -20,6 +20,9 @@ package org.apache.cassandra.sensors;
 
 import java.util.Objects;
 
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.schema.TableMetadata;
+
 /**
  * Represents the context for a (group of) {@link Sensor}(s), made up of:
  * <ul>
@@ -79,5 +82,11 @@ public class Context
                ", table='" + table + '\'' +
                ", tableId='" + tableId + '\'' +
                '}';
+    }
+
+    public static Context from(ReadCommand command)
+    {
+        TableMetadata table = command.metadata();
+        return new Context(table.keyspace, table.name, table.id.toString());
     }
 }
