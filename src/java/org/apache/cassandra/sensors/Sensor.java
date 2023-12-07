@@ -95,6 +95,7 @@ public class Sensor
     {
         return "Sensor{" +
                "context=" + context +
+               ", type=" + type +
                ", value=" + value +
                '}';
     }

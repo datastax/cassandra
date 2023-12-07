@@ -19,20 +19,26 @@
 package org.apache.cassandra.sensors;
 
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -55,10 +61,24 @@ import org.apache.cassandra.utils.concurrent.Timer;
  * <br/><br/>
  * Given sensors are tied to a context, that is to a given keyspace and table, their global instance will be deleted
  * if the related keyspace/table is dropped.
+ * <br/><br/>
+ * It's also possible to:
+ * <ul>
+ *     <li>
+ *         Register listeners via the {@link #registerListener(SensorsRegistryListener)} method.
+ *         Such listeners will get notified on creation and removal of sensors.
+ *     </li>
+ *     <li>
+ *         Unregister listeners via the {@link #unregisterListener(SensorsRegistryListener)} method.
+ *         Such listeners will not be notified anymore about creation or removal of sensors.
+ *     </li>
+ * </ul>
  */
 public class SensorsRegistry implements SchemaChangeListener
 {
     public static final SensorsRegistry instance = new SensorsRegistry();
+
+    private static final Logger logger = LoggerFactory.getLogger(SensorsRegistry.class);
 
     private final Timer asyncUpdater = Timer.INSTANCE;
 
@@ -71,39 +91,55 @@ public class SensorsRegistry implements SchemaChangeListener
     private final ConcurrentMap<String, Set<Sensor>> byKeyspace = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Set<Sensor>> byTableId = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Set<Sensor>> byType = new ConcurrentHashMap<>();
+    private final CopyOnWriteArrayList<SensorsRegistryListener> listeners = new CopyOnWriteArrayList<>();
 
     private SensorsRegistry()
     {
         Schema.instance.registerListener(this);
     }
 
+    public void registerListener(SensorsRegistryListener listener)
+    {
+        listeners.add(listener);
+        logger.debug("Listener {} registered", listener);
+    }
+
+    public void unregisterListener(SensorsRegistryListener listener)
+    {
+        listeners.remove(listener);
+        logger.debug("Listener {} unregistered", listener);
+    }
+
     public Optional<Sensor> getOrCreateSensor(Context context, Type type)
     {
-        if (updateLock.readLock().tryLock() && keyspaces.contains(context.getKeyspace()) && tableIds.contains(context.getTableId()))
+        updateLock.readLock().lock();
+
+        try
         {
-            try
-            {
-                // Create a candidate sensor and try inserting in the identity map: this is to make sure concurrent calls will
-                // use the same sensor below
-                Sensor candidate = new Sensor(context, type);
-                Sensor sensor = identity.computeIfAbsent(Pair.create(candidate.getContext(), candidate.getType()),
-                                                         (ignored) -> candidate);
+            if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
+                return Optional.empty();
 
-                Set<Sensor> keyspaceSet = byKeyspace.computeIfAbsent(sensor.getContext().getKeyspace(), (ignored) -> Sets.newConcurrentHashSet());
-                keyspaceSet.add(sensor);
-                Set<Sensor> tableSet = byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
-                tableSet.add(sensor);
-                Set<Sensor> opSet = byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
-                opSet.add(sensor);
+            // Create a candidate sensor and try inserting in the identity map: this is to make sure concurrent calls will
+            // use the same sensor below
+            Sensor sensor = identity.computeIfAbsent(Pair.create(context, type), (ignored) -> {
+                Sensor created = new Sensor(context, type);
+                notifyOnSensorCreated(created);
+                return created;
+            });
 
-                return Optional.of(sensor);
-            }
-            finally
-            {
-                updateLock.readLock().unlock();
-            }
+            Set<Sensor> keyspaceSet = byKeyspace.computeIfAbsent(sensor.getContext().getKeyspace(), (ignored) -> Sets.newConcurrentHashSet());
+            keyspaceSet.add(sensor);
+            Set<Sensor> tableSet = byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
+            tableSet.add(sensor);
+            Set<Sensor> opSet = byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
+            opSet.add(sensor);
+
+            return Optional.of(sensor);
         }
-        return Optional.empty();
+        finally
+        {
+            updateLock.readLock().unlock();
+        }
     }
 
     protected void updateSensor(Context context, Type type, double value)
@@ -153,7 +189,10 @@ public class SensorsRegistry implements SchemaChangeListener
         {
             keyspaces.remove(keyspace.name);
             byKeyspace.remove(keyspace.name);
-            removeSensor(ImmutableSet.of(identity.values()), s -> s.getContext().getKeyspace().equals(keyspace.name));
+
+            Set<Sensor> removed = removeSensor(ImmutableSet.of(identity.values()), s -> s.getContext().getKeyspace().equals(keyspace.name));
+            removed.forEach(this::notifyOnSensorRemoved);
+
             removeSensor(byTableId.values(), s -> s.getContext().getKeyspace().equals(keyspace.name));
             removeSensor(byType.values(), s -> s.getContext().getKeyspace().equals(keyspace.name));
         }
@@ -172,7 +211,10 @@ public class SensorsRegistry implements SchemaChangeListener
             String tableId = table.id.toString();
             tableIds.remove(tableId);
             byTableId.remove(tableId);
-            removeSensor(ImmutableSet.of(identity.values()), s -> s.getContext().getTableId().equals(tableId));
+
+            Set<Sensor> removed = removeSensor(ImmutableSet.of(identity.values()), s -> s.getContext().getTableId().equals(tableId));
+            removed.forEach(this::notifyOnSensorRemoved);
+
             removeSensor(byKeyspace.values(), s -> s.getContext().getTableId().equals(tableId));
             removeSensor(byType.values(), s -> s.getContext().getTableId().equals(tableId));
         }
@@ -182,8 +224,17 @@ public class SensorsRegistry implements SchemaChangeListener
         }
     }
 
-    private void removeSensor(Collection<? extends Collection<Sensor>> candidates, Predicate<Sensor> accept)
+    /**
+     * Remove sensors from a collection of candidates based on the given predicate
+     *
+     * @param candidates the candidates to remove from
+     * @param accept the predicate used to select the sensors to remove
+     * @return the set of removed sensors
+     */
+    private Set<Sensor> removeSensor(Collection<? extends Collection<Sensor>> candidates, Predicate<Sensor> accept)
     {
+        Set<Sensor> removed = new HashSet<>();
+
         for (Collection<Sensor> sensors : candidates)
         {
             Iterator<Sensor> sensorIt = sensors.iterator();
@@ -191,11 +242,14 @@ public class SensorsRegistry implements SchemaChangeListener
             {
                 Sensor sensor = sensorIt.next();
                 if (!accept.test(sensor))
-                    break;
+                    continue;
 
                 sensorIt.remove();
+                removed.add(sensor);
             }
         }
+
+        return removed;
     }
 
     @VisibleForTesting
@@ -207,5 +261,31 @@ public class SensorsRegistry implements SchemaChangeListener
         byKeyspace.clear();
         byTableId.clear();
         byType.clear();
+    }
+
+    private void notifyOnSensorCreated(Sensor sensor)
+    {
+        tryNotifyListeners(sensor, SensorsRegistryListener::onSensorCreated, "created");
+    }
+
+    private void notifyOnSensorRemoved(Sensor sensor)
+    {
+        tryNotifyListeners(sensor, SensorsRegistryListener::onSensorRemoved, "removed");
+    }
+
+    private void tryNotifyListeners(Sensor sensor, BiConsumer<SensorsRegistryListener, Sensor> notification, String action)
+    {
+        for (SensorsRegistryListener l: listeners)
+        {
+            try
+            {
+                notification.accept(l, sensor);
+                logger.trace("Listener {} correctly notified on sensor {} being {}", l, sensor, action);
+            }
+            catch (Throwable t)
+            {
+                logger.error("Failed to notify listener {} on sensor {} being {}", l, sensor, action);
+            }
+        }
     }
 }

@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -32,8 +33,14 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 public class SensorsRegistryTest
 {
@@ -135,5 +142,66 @@ public class SensorsRegistryTest
 
         SensorsRegistry.instance.updateSensorAsync(context1, type1, 1.0, 1, TimeUnit.MILLISECONDS).get(1, TimeUnit.SECONDS);
         assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(1.0));
+    }
+
+    @Test
+    public void testSensorRegistryListener()
+    {
+        SensorsRegistryListener listener = Mockito.mock(SensorsRegistryListener.class);
+        SensorsRegistry.instance.registerListener(listener);
+
+        // The sensor will not be created as the keyspace has not been created yet
+        Optional<Sensor> emptySensor = SensorsRegistry.instance.getOrCreateSensor(context1, type1);
+        assertThat(emptySensor).isEmpty();
+        verify(listener, never()).onSensorCreated(any());
+        verify(listener, never()).onSensorRemoved(any());
+
+        // Initialize the schema
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2).metadata());
+
+        // Create sensors and verify the listener is notified
+        Sensor context1Type1Sensor = SensorsRegistry.instance.getOrCreateSensor(context1, type1).get();
+        verify(listener, times(1)).onSensorCreated(context1Type1Sensor);
+
+        Sensor context1Type2Sensor = SensorsRegistry.instance.getOrCreateSensor(context1, type2).get();
+        verify(listener, times(1)).onSensorCreated(context1Type2Sensor);
+
+        Sensor context2Type1Sensor = SensorsRegistry.instance.getOrCreateSensor(context2, type1).get();
+        verify(listener, times(1)).onSensorCreated(context2Type1Sensor);
+
+        Sensor context2Type2Sensor = SensorsRegistry.instance.getOrCreateSensor(context2, type2).get();
+        verify(listener, times(1)).onSensorCreated(context2Type2Sensor);
+
+        verify(listener, never()).onSensorRemoved(any());
+
+        // Drop the table and verify the listener is notified about removal of related sensors
+        SensorsRegistry.instance.onDropTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2).metadata(), false);
+        verify(listener, times(1)).onSensorRemoved(context2Type1Sensor);
+        verify(listener, times(1)).onSensorRemoved(context2Type2Sensor);
+        verify(listener, never()).onSensorRemoved(context1Type1Sensor);
+        verify(listener, never()).onSensorRemoved(context1Type2Sensor);
+
+        // Drop the keyspace and verify the listener is notified about removal of the remaining sensors
+        SensorsRegistry.instance.onDropKeyspace(Keyspace.open(KEYSPACE).getMetadata(), false);
+        verify(listener, times(1)).onSensorRemoved(context1Type1Sensor);
+        verify(listener, times(1)).onSensorRemoved(context1Type2Sensor);
+        verify(listener, times(1)).onSensorRemoved(context2Type1Sensor);
+        verify(listener, times(1)).onSensorRemoved(context2Type2Sensor);
+
+        // Unregister the listener and verify it is not notified anymore about creation and removal of sensors
+        clearInvocations(listener);
+        SensorsRegistry.instance.unregisterListener(listener);
+
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
+
+        assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).isPresent();
+        SensorsRegistry.instance.onDropKeyspace(Keyspace.open(KEYSPACE).getMetadata(), false);
+
+        verify(listener, never()).onSensorCreated(any());
+        verify(listener, never()).onSensorRemoved(any());
     }
 }
