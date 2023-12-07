@@ -23,6 +23,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -323,7 +324,7 @@ public class SerializationHeader
         {
             try
             {
-                type.validateForColumn(columnName, isPrimaryKeyColumn, table.isCounter());
+                type.validateForColumn(columnName, isPrimaryKeyColumn, table.isCounter(), table.getDroppedColumn(columnName) != null);
                 return type;
             }
             catch (InvalidColumnTypeException e)
@@ -428,12 +429,39 @@ public class SerializationHeader
                                                                 metadata.clusteringColumns(),
                                                                 clusteringTypes);
 
+            RegularAndStaticColumns headerColumns = builder.build();
+            checkColumnsOrder(headerColumns.regulars, regularColumns.entrySet());
+            checkColumnsOrder(headerColumns.statics, staticColumns.entrySet());
+
             return new SerializationHeader(true,
                                            partitionKeys,
                                            clusterings,
-                                           builder.build(),
+                                           headerColumns,
                                            stats,
                                            typeMap);
+        }
+
+        private void checkColumnsOrder(Iterable<ColumnMetadata> headerColumns, Iterable<Map.Entry<ByteBuffer, AbstractType<?>>> serializedColumns)
+        {
+            Iterator<ColumnMetadata> h = headerColumns.iterator();
+            Iterator<Map.Entry<ByteBuffer, AbstractType<?>>> s = serializedColumns.iterator();
+            while (h.hasNext() && s.hasNext())
+            {
+                ColumnMetadata headerColumn = h.next();
+                Map.Entry<ByteBuffer, AbstractType<?>> serializedColumn = s.next();
+                if (!headerColumn.name.bytes.equals(serializedColumn.getKey()) || headerColumn.type.isMultiCell() != serializedColumn.getValue().isMultiCell())
+                {
+                    String headerColumnsString =
+                            Iterables.toString(Iterables.transform(headerColumns,
+                                                                   cm -> String.format("%s: %s", cm.name.toCQLString(), cm.type.asCQL3Type())));
+                    String serializedColumnsString =
+                            Iterables.toString(Iterables.transform(serializedColumns,
+                                                                   e -> String.format("%s: %s", ColumnIdentifier.toCQLString(e.getKey()), e.getValue().asCQL3Type())));
+                    throw new IllegalStateException(String.format("Invalid order of columns in serialization header around column %s. " +
+                                                                  "Expecting header columns: %s to be the same as serialized columns %s",
+                                                                  headerColumn.name, headerColumnsString, serializedColumnsString));
+                }
+            }
         }
 
         @Override

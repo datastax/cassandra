@@ -42,6 +42,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ColumnData;
@@ -465,6 +466,24 @@ public final class JsonTransformer
                 // cellType of udt
                 Short fieldPosition = ((UserType) type).nameComparator().compose(cell.path().get(0));
                 cellType = ((UserType) type).fieldType(fieldPosition);
+            }
+            else if (type.isTuple() && type.isMultiCell()) // non-frozen tuple
+            {
+                TupleType tt = (TupleType) type;
+                json.writeFieldName("path");
+                arrayIndenter.setCompact(true);
+                json.writeStartArray();
+                for (int i = 0; i < cell.path().size(); i++)
+                {
+                    Short elementIndex = tt.nameComparator().compose(cell.path().get(i));
+                    json.writeString(elementIndex.toString());
+                }
+                json.writeEndArray();
+                arrayIndenter.setCompact(false);
+
+                // cellType of tuple
+                Short elementIndex = ((TupleType) type).nameComparator().compose(cell.path().get(0));
+                cellType = tt.type(elementIndex);
             }
             else
             {
