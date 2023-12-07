@@ -376,6 +376,11 @@ public class VectorMemtableIndex implements MemtableIndex
     {
         private final List<PrimaryKey> results;
 
+        /**
+         * A {@link Bits} implementation that filters out all ordinals that do not correspond to a {@link PrimaryKey}
+         * in the provided list.
+         * @param results - an ordered list of {@link PrimaryKey}s
+         */
         public KeyFilteringBits(List<PrimaryKey> results)
         {
             this.results = results;
