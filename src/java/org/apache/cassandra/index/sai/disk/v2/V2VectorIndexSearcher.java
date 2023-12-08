@@ -354,7 +354,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             while (index < keys.size() - 1 && keys.get(index + 1).equals(key))
                 index++;
-            // We must include the PrimaryKey that
+            // We must include the PrimaryKey at the boundary
             index++;
         }
         return index;
