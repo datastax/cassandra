@@ -397,7 +397,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                         int j = 0;
                         for ( ; i + j < keysInRange.size(); j++)
                         {
-                            var nextPrimaryKey = primaryKeyMap.primaryKeyFromRowId(j);
+                            var nextPrimaryKey = keys.get(i + j);
                             if (nextPrimaryKey.compareTo(ceilingPrimaryKey) >= 0)
                                 break;
                         }
