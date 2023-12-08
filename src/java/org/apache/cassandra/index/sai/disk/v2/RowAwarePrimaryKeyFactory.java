@@ -39,10 +39,13 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
     private final ClusteringComparator clusteringComparator;
+    private final boolean hasEmptyClustering;
+
 
     public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
     {
         this.clusteringComparator = clusteringComparator;
+        this.hasEmptyClustering = clusteringComparator.size() == 0;
     }
 
     @Override
@@ -185,10 +188,9 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public int hashCode()
         {
-            if (primaryKeySupplier != null)
-                // It is expensive to hash deffered PrimaryKeys because it triggers disk reads.
-                throw new UnsupportedOperationException("Cannot hash deferred PrimaryKey");
-            return Objects.hash(token, partitionKey, clustering);
+            if (hasEmptyClustering)
+                return Objects.hash(token);
+            return Objects.hash(token, clustering());
         }
 
         @Override
