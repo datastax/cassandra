@@ -342,7 +342,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         // The minKey and maxKey are only partition keys, they do not have clustering column data. As such,
         // if Collections.binarySearch finds an index matching key, we need to scan until we find the boundary
         // because binarySearch provides no guarantees for equal list entries.
-        var key = findMin ? metadata.minPartitionKey : metadata.maxPartitionKey;
+        var key = findMin ? metadata.minKey : metadata.maxKey;
         int index = Collections.binarySearch(keys, key);
         if (index < 0)
             return -index - 1;
@@ -375,7 +375,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
         logAndTrace("SAI predicates produced {} rows out of limit {}", keysInRange.size(), limit);
         if (keysInRange.size() <= limit)
-            return new CollectionRangeIterator(metadata.minPartitionKey, metadata.maxPartitionKey, keysInRange);
+            return new CollectionRangeIterator(metadata.minKey, metadata.maxKey, keysInRange);
 
         int topK = topKFor(limit);
         // if we are brute forcing the similarity search, we want to build a list of segment row ids,

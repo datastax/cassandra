@@ -91,8 +91,8 @@ public class V1SearchableIndex implements SearchableIndex
             segments = segmentsBuilder.build();
             assert !segments.isEmpty();
 
-            this.minKey = metadatas.get(0).minPartitionKey.partitionKey();
-            this.maxKey = metadatas.get(metadatas.size() - 1).maxPartitionKey.partitionKey();
+            this.minKey = metadatas.get(0).minKey.partitionKey();
+            this.maxKey = metadatas.get(metadatas.size() - 1).maxKey.partitionKey();
 
             this.minTerm = metadatas.stream().map(m -> m.minTerm).min(TypeUtil.comparator(indexContext.getValidator())).orElse(null);
             this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(indexContext.getValidator())).orElse(null);
@@ -204,8 +204,8 @@ public class V1SearchableIndex implements SearchableIndex
                    .column(CELL_COUNT, metadata.numRows)
                    .column(MIN_SSTABLE_ROW_ID, metadata.minSSTableRowId)
                    .column(MAX_SSTABLE_ROW_ID, metadata.maxSSTableRowId)
-                   .column(START_TOKEN, tokenFactory.toString(metadata.minPartitionKey.partitionKey().getToken()))
-                   .column(END_TOKEN, tokenFactory.toString(metadata.maxPartitionKey.partitionKey().getToken()))
+                   .column(START_TOKEN, tokenFactory.toString(metadata.minKey.partitionKey().getToken()))
+                   .column(END_TOKEN, tokenFactory.toString(metadata.maxKey.partitionKey().getToken()))
                    .column(MIN_TERM, minTerm)
                    .column(MAX_TERM, maxTerm)
                    .column(COMPONENT_METADATA, metadata.componentMetadatas.asMap());

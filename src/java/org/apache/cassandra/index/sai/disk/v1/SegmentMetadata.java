@@ -69,8 +69,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     /**
      * Ordered by their token position in current segment
      */
-    public final PrimaryKey minPartitionKey;
-    public final PrimaryKey maxPartitionKey;
+    public final PrimaryKey minKey;
+    public final PrimaryKey maxKey;
 
     /**
      * Minimum and maximum indexed column value ordered by its {@link org.apache.cassandra.db.marshal.AbstractType}.
@@ -89,15 +89,15 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                            long numRows,
                            long minSSTableRowId,
                            long maxSSTableRowId,
-                           PrimaryKey minPartitionKey,
-                           PrimaryKey maxPartitionKey,
+                           PrimaryKey minKey,
+                           PrimaryKey maxKey,
                            ByteBuffer minTerm,
                            ByteBuffer maxTerm,
                            ComponentMetadataMap componentMetadatas)
     {
         assert numRows < Integer.MAX_VALUE;
-        Objects.requireNonNull(minPartitionKey);
-        Objects.requireNonNull(maxPartitionKey);
+        Objects.requireNonNull(minKey);
+        Objects.requireNonNull(maxKey);
         Objects.requireNonNull(minTerm);
         Objects.requireNonNull(maxTerm);
 
@@ -105,8 +105,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.minSSTableRowId = minSSTableRowId;
         this.maxSSTableRowId = maxSSTableRowId;
         this.numRows = numRows;
-        this.minPartitionKey = minPartitionKey;
-        this.maxPartitionKey = maxPartitionKey;
+        this.minKey = minKey;
+        this.maxKey = maxKey;
         this.minTerm = minTerm;
         this.maxTerm = maxTerm;
         this.componentMetadatas = componentMetadatas;
@@ -121,8 +121,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.numRows = input.readLong();
         this.minSSTableRowId = input.readLong();
         this.maxSSTableRowId = input.readLong();
-        this.minPartitionKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
-        this.maxPartitionKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
+        this.minKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
+        this.maxKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
         this.minTerm = readBytes(input);
         this.maxTerm = readBytes(input);
         this.componentMetadatas = new SegmentMetadata.ComponentMetadataMap(input);
@@ -162,8 +162,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                 output.writeLong(metadata.minSSTableRowId);
                 output.writeLong(metadata.maxSSTableRowId);
 
-                Stream.of(metadata.minPartitionKey.partitionKey().getKey(),
-                          metadata.maxPartitionKey.partitionKey().getKey(),
+                Stream.of(metadata.minKey.partitionKey().getKey(),
+                          metadata.maxKey.partitionKey().getKey(),
                           metadata.minTerm, metadata.maxTerm).forEach(bb -> writeBytes(bb, output));
 
                 metadata.componentMetadatas.write(output);

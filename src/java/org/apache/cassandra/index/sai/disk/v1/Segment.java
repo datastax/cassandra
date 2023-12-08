@@ -65,8 +65,8 @@ public class Segment implements Closeable, SegmentOrdering
 
     public Segment(IndexContext indexContext, SSTableContext sstableContext, PerIndexFiles indexFiles, SegmentMetadata metadata) throws IOException
     {
-        this.minKeyBound = metadata.minPartitionKey.token().minKeyBound();
-        this.maxKeyBound = metadata.maxPartitionKey.token().maxKeyBound();
+        this.minKeyBound = metadata.minKey.token().minKeyBound();
+        this.maxKeyBound = metadata.maxKey.token().maxKeyBound();
 
         this.primaryKeyMapFactory = sstableContext.primaryKeyMapFactory();
         this.indexFiles = indexFiles;
