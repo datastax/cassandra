@@ -337,14 +337,36 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         return bits;
     }
 
+    private int binarySearchWithToken(List<PrimaryKey> keys, boolean findMin)
+    {
+        // The minKey and maxKey are only partition keys, they do not have clustering column data. As such,
+        // if Collections.binarySearch finds an index matching key, we need to scan until we find the boundary
+        // because binarySearch provides no guarantees for equal list entries.
+        var key = findMin ? metadata.minKey : metadata.maxKey;
+        int index = Collections.binarySearch(keys, key);
+        if (index < 0)
+            return -index - 1;
+        // Use the token to prevent unnecessary loading of partition key at the potential risk of considering
+        // more rows than necessary in the event of a token collision.
+        if (findMin)
+        {
+            while (index > 0 && keys.get(index - 1).token().equals(key.token()))
+                index--;
+        }
+        else
+        {
+            while (index < keys.size() - 1 && keys.get(index + 1).token().equals(key.token()))
+                index++;
+        }
+        return index;
+    }
+
     @Override
     public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         // create a sublist of the keys within this segment's bounds
-        int minIndex = Collections.binarySearch(keys, metadata.minKey);
-        minIndex = minIndex < 0 ? -minIndex - 1 : minIndex;
-        int maxIndex = Collections.binarySearch(keys, metadata.maxKey);
-        maxIndex = maxIndex < 0 ? -maxIndex - 1 : maxIndex + 1;
+        int minIndex = binarySearchWithToken(keys, true);
+        int maxIndex = binarySearchWithToken(keys, false);
         List<PrimaryKey> keysInRange = keys.subList(minIndex, maxIndex);
         if (keysInRange.isEmpty())
             return RangeIterator.empty();
