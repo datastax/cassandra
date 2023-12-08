@@ -82,8 +82,8 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
         if (postingList == null || postingList.size() == 0)
             return RangeIterator.empty();
 
-        IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
-                                                                        metadata.maxKey,
+        IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minPartitionKey,
+                                                                        metadata.maxPartitionKey,
                                                                         metadata.minSSTableRowId,
                                                                         metadata.maxSSTableRowId,
                                                                         metadata.segmentRowIdOffset,
