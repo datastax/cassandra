@@ -32,7 +32,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -101,11 +100,6 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         Objects.requireNonNull(maxPartitionKey);
         Objects.requireNonNull(minTerm);
         Objects.requireNonNull(maxTerm);
-
-        // This class currently assumes that the min/max PrimaryKeys only have the partition key component.
-        // This requirement may change in the future, and that may require changes to the usage of these keys.
-        assert Clustering.EMPTY.equals(minPartitionKey.clustering()) : "minPartitionKey should not have clustering";
-        assert Clustering.EMPTY.equals(maxPartitionKey.clustering()) : "maxPartitionKey should not have clustering";
 
         this.segmentRowIdOffset = segmentRowIdOffset;
         this.minSSTableRowId = minSSTableRowId;
