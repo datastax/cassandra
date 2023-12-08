@@ -185,8 +185,10 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public int hashCode()
         {
-            // It is expensive to hash PrimaryKeys because it can lead to disk reads. Choose another datastructure.
-            throw new UnsupportedOperationException();
+            if (primaryKeySupplier != null)
+                // It is expensive to hash deffered PrimaryKeys because it triggers disk reads.
+                throw new UnsupportedOperationException("Cannot hash deferred PrimaryKey");
+            return Objects.hash(token, partitionKey, clustering);
         }
 
         @Override

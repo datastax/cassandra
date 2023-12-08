@@ -147,8 +147,7 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public int hashCode()
         {
-            // It is expensive to hash PrimaryKeys because it can lead to disk reads. Choose another datastructure.
-            throw new UnsupportedOperationException();
+            return Objects.hash(token);
         }
 
         @Override
