@@ -339,23 +339,20 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
     private int findBoundaryIndex(List<PrimaryKey> keys, boolean findMin)
     {
-        // The minKey and maxKey are only partition keys, they do not have clustering column data. As such,
-        // if Collections.binarySearch finds an index matching key, we need to scan until we find the boundary
-        // because binarySearch provides no guarantees for equal list entries.
+        // The minKey and maxKey are sometimes just partition keys (not primary keys), so binarySearch
+        // may not return the index of the least/greatest match.
         var key = findMin ? metadata.minKey : metadata.maxKey;
         int index = Collections.binarySearch(keys, key);
         if (index < 0)
             return -index - 1;
-        // Use the token to prevent unnecessary loading of partition key at the potential risk of considering
-        // more rows than necessary in the event of a token collision.
         if (findMin)
         {
-            while (index > 0 && keys.get(index - 1).token().equals(key.token()))
+            while (index > 0 && keys.get(index - 1).equals(key))
                 index--;
         }
         else
         {
-            while (index < keys.size() - 1 && keys.get(index + 1).token().equals(key.token()))
+            while (index < keys.size() - 1 && keys.get(index + 1).equals(key))
                 index++;
             // We must include the PrimaryKey that
             index++;
