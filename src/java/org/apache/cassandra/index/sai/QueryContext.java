@@ -18,11 +18,8 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.io.IOException;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.NavigableSet;
-import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
@@ -34,10 +31,7 @@ import io.github.jbellis.jvector.util.Bits;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
-import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
-import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
@@ -252,7 +246,7 @@ public class QueryContext
     public void recordShadowedPrimaryKey(PrimaryKey primaryKey)
     {
         boolean isNewKey = shadowedPrimaryKeys.add(primaryKey);
-        assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query.";
+        assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query. " + primaryKey;
     }
 
     // Returns true if the row ID will be included or false if the row ID will be shadowed
