@@ -135,6 +135,12 @@ public class TermIterator extends RangeIterator
         }
     }
 
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    {
+        return union.intersect(nextKey);
+    }
+
     public void close()
     {
         FileUtils.closeQuietly(union);

@@ -76,6 +76,12 @@ public class OrderingFilterRangeIterator extends RangeIterator
     }
 
     @Override
+    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    {
+        throw new UnsupportedOperationException("Cannot perform intersect on OrderingFilterRangeIterator");
+    }
+
+    @Override
     protected void performSkipTo(PrimaryKey nextToken)
     {
         input.skipTo(nextToken);

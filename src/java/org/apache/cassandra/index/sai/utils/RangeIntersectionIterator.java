@@ -20,8 +20,6 @@ package org.apache.cassandra.index.sai.utils;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -70,74 +68,50 @@ public class RangeIntersectionIterator extends RangeIterator
     {
         // The highest primary key seen on any range iterator so far.
         // It can become null when we reach the end of the iterator.
-        PrimaryKey highestKey = ranges.get(0).hasNext() ? ranges.get(0).next() : null;
-        // Index of the range iterator that has advanced beyond the others
-        int alreadyAvanced = 0;
-        rangeStats[0]++;
 
         outer:
-        while (highestKey != null)
+        while (true)
         {
+            PrimaryKey highestKey = ranges.get(0).hasNext() ? ranges.get(0).next() : null;
+            if (highestKey == null)
+                return endOfData();
             // Try advance all iterators to the highest key seen so far.
             // Once this inner loop finishes normally, all iterators are guaranteed to be at the same value.
-            for (int index = 0; index < ranges.size(); index++)
+            for (int index = 1; index < ranges.size(); index++)
             {
-                if (index != alreadyAvanced)
+                RangeIterator range = ranges.get(index);
+                switch (range.intersect(highestKey))
                 {
-                    RangeIterator range = ranges.get(index);
-                    PrimaryKey nextKey = nextOrNull(range, highestKey);
-                    rangeStats[index]++;
-                    int comparisonResult;
-                    if (nextKey == null || (comparisonResult = nextKey.compareTo(highestKey)) > 0)
-                    {
-                        // We jumped over the highest key seen so far, so make it the new highest key.
-                        highestKey = nextKey;
-                        // Remember this iterator to avoid advancing it again, because it is already at the highest key
-                        alreadyAvanced = index;
-                        // This iterator jumped over, so the other iterators are lagging behind now,
-                        // including the ones already advanced in the earlier cycles of the inner loop.
-                        // Therefore, restart the inner loop in order to advance
-                        // the other iterators except this one to match the new highest key.
+                    case MATCH:
+                        continue;
+                    case MISS:
                         continue outer;
-                    }
-                    assert comparisonResult == 0 :
-                           String.format("skipTo skipped to an item smaller than the target; " +
-                                         "iterator: %s, target key: %s, returned key: %s", range, highestKey, nextKey);
+                    case EXHAUSTED:
+                        return endOfData();
                 }
             }
             // If we reached here, next() has been called at least once on each range iterator and
             // the last call to next() on each iterator returned a value equal to the highestKey.
-
-            // Move the iterator that was called the least times to the start of the list.
-            // This is an optimisation assuming that iterator is likely a more selective one.
-            // E.g.if the first range produces (1, 2, 3, ... 100) and the second one (10, 20, 30, .. 100)
-            // we'd want to start with the second.
-            int idxOfSmallest = getIdxOfSmallest(rangeStats);
-
-            if (idxOfSmallest != 0)
-            {
-                Collections.swap(ranges, 0, idxOfSmallest);
-                // swap stats as well
-                int a = rangeStats[0];
-                int b = rangeStats[idxOfSmallest];
-                rangeStats[0] = b;
-                rangeStats[idxOfSmallest] = a;
-            }
-
             return highestKey;
         }
-        return endOfData();
     }
 
-    private static int getIdxOfSmallest(int[] rangeStats)
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey nextKey)
     {
-        int idxOfSmallest = 0;
-        for (int i = 1; i < rangeStats.length; i++)
+        for (var range : ranges)
         {
-            if (rangeStats[i] < rangeStats[idxOfSmallest])
-                idxOfSmallest = i;
+            switch(range.intersect(nextKey))
+            {
+                case MATCH:
+                    continue;
+                case MISS:
+                    return IntersectionResult.MISS;
+                case EXHAUSTED:
+                    return IntersectionResult.EXHAUSTED;
+            }
         }
-        return idxOfSmallest;
+        return IntersectionResult.MATCH;
     }
 
     protected void performSkipTo(PrimaryKey nextToken)
@@ -147,16 +121,6 @@ public class RangeIntersectionIterator extends RangeIterator
         // Instead, it is the responsibility of the child iterators to make skipTo fast when the iterator is exhausted.
         for (var range : ranges)
             range.skipTo(nextToken);
-    }
-
-    /**
-     * Fetches the next available item from the iterator, such that the item is not lower than the given key.
-     * If no such items are available, returns null.
-     */
-    private PrimaryKey nextOrNull(RangeIterator iterator, PrimaryKey minKey)
-    {
-        iterator.skipTo(minKey);
-        return iterator.hasNext() ? iterator.next() : null;
     }
 
     public void close() throws IOException

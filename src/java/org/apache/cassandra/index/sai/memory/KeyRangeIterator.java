@@ -91,6 +91,22 @@ public class KeyRangeIterator extends RangeIterator
         }
     }
 
+    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    {
+        while (!keys.isEmpty())
+        {
+            PrimaryKey key = keys.peek();
+            int cmp = key.compareTo(nextKey);
+            if (cmp < 0)
+                keys.poll();
+            else if (cmp == 0)
+                return IntersectionResult.MATCH;
+            else
+                return IntersectionResult.MISS;
+        }
+        return IntersectionResult.EXHAUSTED;
+    }
+
     public void close() throws IOException
     {}
 }

@@ -76,6 +76,25 @@ public class RangeUnionIterator extends RangeIterator
             range.skipTo(nextKey);
     }
 
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    {
+        int countExhausted = 0;
+        for (var range : ranges)
+        {
+            switch(range.intersect(nextKey))
+            {
+                case MATCH:
+                    return IntersectionResult.MATCH;
+                case MISS:
+                    continue;
+                case EXHAUSTED:
+                    countExhausted++;
+            }
+        }
+        return countExhausted == ranges.size() ? IntersectionResult.EXHAUSTED : IntersectionResult.MISS;
+    }
+
     public void close() throws IOException
     {
         // Due to lazy key fetching, we cannot close iterator immediately

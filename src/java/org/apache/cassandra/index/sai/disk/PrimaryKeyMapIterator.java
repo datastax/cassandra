@@ -117,6 +117,18 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     }
 
     @Override
+    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    {
+        long result = keys.exactRowIdOrInvertedCeiling(nextKey);
+        if (result == Long.MIN_VALUE)
+            return IntersectionResult.EXHAUSTED;
+        else if (result < 0)
+            return IntersectionResult.MISS;
+        else
+            return IntersectionResult.MATCH;
+    }
+
+    @Override
     public void close() throws IOException
     {
         keys.close();

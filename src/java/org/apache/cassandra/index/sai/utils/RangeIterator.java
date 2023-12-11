@@ -33,6 +33,10 @@ import org.apache.cassandra.io.util.FileUtils;
  */
 public abstract class RangeIterator extends AbstractIterator<PrimaryKey> implements Closeable
 {
+    protected enum IntersectionResult
+    {
+        MATCH, MISS, EXHAUSTED
+    }
     private static final Builder.EmptyRangeIterator EMPTY = new Builder.EmptyRangeIterator();
 
     private final PrimaryKey min, max;
@@ -109,6 +113,19 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
      * calling computeNext() will return nextKey or the first one after it.
      */
     protected abstract void performSkipTo(PrimaryKey nextKey);
+
+    protected final IntersectionResult intersect(PrimaryKey nextKey)
+    {
+        if (state == State.DONE)
+            return IntersectionResult.EXHAUSTED;
+
+        var result = performIntersect(nextKey);
+        if (result == IntersectionResult.EXHAUSTED)
+            state = State.DONE;
+        return result;
+    }
+
+    protected abstract IntersectionResult performIntersect(PrimaryKey nextKey);
 
     public static RangeIterator empty()
     {
@@ -197,6 +214,10 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             EmptyRangeIterator() { super(null, null, 0); }
             public org.apache.cassandra.index.sai.utils.PrimaryKey computeNext() { return endOfData(); }
             protected void performSkipTo(org.apache.cassandra.index.sai.utils.PrimaryKey nextToken) { }
+            protected IntersectionResult performIntersect(org.apache.cassandra.index.sai.utils.PrimaryKey nextKey)
+            {
+                return IntersectionResult.EXHAUSTED;
+            }
             public void close() { }
         }
 

@@ -145,6 +145,13 @@ public class MemtableRangeIterator extends RangeIterator
         return endOfData();
     }
 
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    {
+        // TODO figure out implementation
+        throw new IllegalArgumentException();
+    }
+
     private static boolean hasNextRow(UnfilteredRowIterator rowIterator)
     {
         return rowIterator != null && rowIterator.hasNext();

@@ -159,6 +159,55 @@ public class PostingListRangeIterator extends RangeIterator
         return needsSkipping && skipToToken.compareTo(getMaximum()) > 0;
     }
 
+    long segmentRowId = 0;
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    {
+        try
+        {
+            long targetRowID;
+            if (nextKey instanceof PrimaryKeyWithSource
+                && ((PrimaryKeyWithSource) nextKey).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
+            {
+                // We know the row is in the sstable, but not whether it's in the postinglist.
+                targetRowID = ((PrimaryKeyWithSource) nextKey).getSourceRowId();
+            }
+            else
+            {
+                targetRowID = primaryKeyMap.exactRowIdOrInvertedCeiling(nextKey);
+                // nextKey is larger than max token in token file
+                if (targetRowID == Long.MIN_VALUE)
+                    return IntersectionResult.EXHAUSTED;
+                // nextKey is not in this sstable, so it cannot be in the posting list
+                else if (targetRowID < 0)
+                    return IntersectionResult.MISS;
+            }
+
+            long targetSegmentRowID = targetRowID - searcherContext.segmentRowIdOffset;
+            if (segmentRowId > targetSegmentRowID)
+                return IntersectionResult.MISS;
+            else if (targetSegmentRowID == segmentRowId)
+                return IntersectionResult.MATCH;
+
+            // TODO what is the relevative cost of nextPosting vs advance?
+            if (targetSegmentRowID + 1 == segmentRowId)
+                segmentRowId = postingList.nextPosting();
+            else
+                segmentRowId = postingList.advance(targetSegmentRowID);
+
+            if (segmentRowId == PostingList.END_OF_STREAM)
+                return IntersectionResult.EXHAUSTED;
+            else if (segmentRowId == targetSegmentRowID)
+                return IntersectionResult.MATCH;
+            else
+                return IntersectionResult.MISS;
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
     /**
      * reads the next sstable row ID from the underlying posting list, potentially skipping to get there.
      */

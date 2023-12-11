@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
 
+import org.apache.commons.lang3.NotImplementedException;
+
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -50,6 +52,12 @@ public class RangeAntiJoinIterator extends RangeIterator
     {
         left.skipTo(nextKey);
         right.skipTo(nextKey);
+    }
+
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    {
+        throw new NotImplementedException("todo");
     }
 
     public void close() throws IOException

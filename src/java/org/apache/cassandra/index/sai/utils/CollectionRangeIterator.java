@@ -65,6 +65,22 @@ public class CollectionRangeIterator extends RangeIterator
     }
 
     @Override
+    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    {
+        while (!keyQueue.hasNext())
+        {
+            int cmp = keyQueue.peek().compareTo(nextKey);
+            if (cmp < 0)
+                keyQueue.next();
+            else if (cmp == 0)
+                return IntersectionResult.MATCH;
+            else
+                return IntersectionResult.MISS;
+        }
+        return IntersectionResult.EXHAUSTED;
+    }
+
+    @Override
     public void close() {}
 
     @Override
