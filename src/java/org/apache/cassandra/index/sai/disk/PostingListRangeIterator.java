@@ -163,6 +163,12 @@ public class PostingListRangeIterator extends RangeIterator
     @Override
     protected IntersectionResult performIntersect(PrimaryKey nextKey)
     {
+        // TODO is this guard valuable or too expensive? It seems like preventing unnecessary calls
+        // to advance is worth it.
+        if (getMaximum().compareTo(nextKey) < 0)
+            return IntersectionResult.EXHAUSTED;
+        if (nextKey.compareTo(getMinimum()) < 0)
+            return IntersectionResult.MISS;
         try
         {
             long targetRowID;
