@@ -431,8 +431,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                         }
                         comparisonsSavedByBsearch.update(keysToSkip - (int) ceil(logBase2(keysInRange.size() - i)));
                         i += keysToSkip;
-                        if (cmp == 0)
-                            ceilingPrimaryKeyMatchesKeyInRange = true;
+                        ceilingPrimaryKeyMatchesKeyInRange = cmp == 0;
                     }
                     else
                     {
