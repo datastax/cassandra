@@ -454,6 +454,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     if (ceilingPrimaryKeyMatchesKeyInRange)
                         sstableRowId = ceilingRowId;
                     else
+                        // without incrementing i further. ceilingPrimaryKey is less than the current key at index i.
                         continue;
                 }
                 // Increment here to simplify the sstableRowId < 0 logic.
