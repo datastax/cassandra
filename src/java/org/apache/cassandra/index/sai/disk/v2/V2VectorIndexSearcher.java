@@ -133,8 +133,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             return bitsOrPostingList.postingList();
 
         var vectorPostings = graph.search(queryVector, topK, exp.getEuclideanSearchThreshold(), limit, bitsOrPostingList.getBits(), context);
-        if (bitsOrPostingList.cost != null)
-            bitsOrPostingList.cost.updateStatistics(vectorPostings.getVisitedCount());
+        bitsOrPostingList.updateStatistics(vectorPostings.getVisitedCount());
         return vectorPostings;
     }
 
@@ -541,6 +540,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         public boolean skipANN()
         {
             return postingList != null;
+        }
+
+        public void updateStatistics(int visitedCount)
+        {
+            if (cost != null)
+                cost.updateStatistics(visitedCount);
         }
     }
 }
