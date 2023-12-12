@@ -174,7 +174,7 @@ public class PostingListRangeIterator extends RangeIterator
             int cmp = nextKey.compareTo(next);
             next = null;
             if (cmp == 0) return IntersectionResult.MATCH;
-            if (cmp > 0) return IntersectionResult.MISS;
+            if (cmp < 0) return IntersectionResult.MISS;
         }
         try
         {
