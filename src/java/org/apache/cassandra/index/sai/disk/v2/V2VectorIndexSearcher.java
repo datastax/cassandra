@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v2;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import javax.annotation.Nullable;
@@ -201,8 +202,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             // Upper-bound cost based on maximum possible rows included
             int nRows = Math.toIntExact(maxSSTableRowId - minSSTableRowId + 1);
             var cost = estimateCost(topK, nRows);
-            logAndTrace("Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
-                        nRows, cost.expectedNodesVisited, graph.size(), topK);
+            Tracing.logAndTrace(logger, "Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
+                                nRows, cost.expectedNodesVisited, graph.size(), topK);
             // if we have a small number of results then let TopK processor do exact NN computation
             if (cost.shouldUseBruteForce())
             {
@@ -279,6 +280,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         // top K ascending
         for (int i = end; i >= 0; i--)
             postings[end - i] = pairs.get(i).node;
+        // Rows are sorted now so that we get the PrimaryKeys in order for correct deduplication in the
+        // RangeUnionIterator, where we merge the results from all sstables.
+        Arrays.sort(postings);
         return postings;
     }
 
@@ -350,21 +354,44 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         return bits;
     }
 
+    private int findBoundaryIndex(List<PrimaryKey> keys, boolean findMin)
+    {
+        // The minKey and maxKey are sometimes just partition keys (not primary keys), so binarySearch
+        // may not return the index of the least/greatest match.
+        var key = findMin ? metadata.minKey : metadata.maxKey;
+        int index = Collections.binarySearch(keys, key);
+        if (index < 0)
+            return -index - 1;
+        if (findMin)
+        {
+            while (index > 0 && keys.get(index - 1).equals(key))
+                index--;
+        }
+        else
+        {
+            while (index < keys.size() - 1 && keys.get(index + 1).equals(key))
+                index++;
+            // We must include the PrimaryKey at the boundary
+            index++;
+        }
+        return index;
+    }
+
     @Override
     public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         // create a sublist of the keys within this segment's bounds
-        int minIndex = Collections.binarySearch(keys, metadata.minKey);
-        minIndex = minIndex < 0 ? -minIndex - 1 : minIndex;
-        int maxIndex = Collections.binarySearch(keys, metadata.maxKey);
-        maxIndex = maxIndex < 0 ? -maxIndex - 1 : maxIndex + 1;
+        int minIndex = findBoundaryIndex(keys, true);
+        int maxIndex = findBoundaryIndex(keys, false);
         List<PrimaryKey> keysInRange = keys.subList(minIndex, maxIndex);
         if (keysInRange.isEmpty())
             return RangeIterator.empty();
 
-        logAndTrace("SAI predicates produced {} rows out of limit {}", keysInRange.size(), limit);
         if (keysInRange.size() <= limit)
+        {
+            Tracing.logAndTrace(logger, "Only {} keys in sstable range out of limit {}", keysInRange.size(), limit);
             return new CollectionRangeIterator(metadata.minKey, metadata.maxKey, keysInRange);
+        }
 
         int topK = topKFor(limit);
         // if we are brute forcing the similarity search, we want to build a list of segment row ids,
@@ -410,7 +437,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                         int j = 0;
                         for ( ; i + j < keysInRange.size(); j++)
                         {
-                            var nextPrimaryKey = primaryKeyMap.primaryKeyFromRowId(j);
+                            var nextPrimaryKey = keys.get(i + j);
                             if (nextPrimaryKey.compareTo(ceilingPrimaryKey) >= 0)
                                 break;
                         }
@@ -453,7 +480,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
         var numRows = rowIds.size();
         var cost = estimateCost(topK, numRows);
-        logAndTrace("{} rows relevant to current sstable; cost estimate is {} for index with {} nodes, LIMIT {}",
+        Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; max brute force rows is {} for index with {} nodes, LIMIT {}",
                     numRows, cost.expectedNodesVisited, graph.size(), limit);
         if (numRows == 0) {
             return RangeIterator.empty();
@@ -481,12 +508,6 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private int getRawExpectedNodes(int topK, int nPermittedOrdinals)
     {
         return VectorMemtableIndex.expectedNodesVisited(topK, nPermittedOrdinals, graph.size());
-    }
-
-    private void logAndTrace(String message, Object... args)
-    {
-        logger.trace(message, args);
-        Tracing.trace(message, args);
     }
 
     @Override
