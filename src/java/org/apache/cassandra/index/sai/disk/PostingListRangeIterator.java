@@ -159,7 +159,6 @@ public class PostingListRangeIterator extends RangeIterator
         return needsSkipping && skipToToken.compareTo(getMaximum()) > 0;
     }
 
-    long segmentRowId = -1;
     @Override
     protected IntersectionResult performIntersect(PrimaryKey nextKey)
     {
@@ -197,20 +196,20 @@ public class PostingListRangeIterator extends RangeIterator
             }
 
             long targetSegmentRowID = targetRowID - searcherContext.segmentRowIdOffset;
-            if (segmentRowId > targetSegmentRowID)
+            if (lastSegmentRowId > targetSegmentRowID)
                 return IntersectionResult.MISS;
-            else if (targetSegmentRowID == segmentRowId)
+            else if (targetSegmentRowID == lastSegmentRowId)
                 return IntersectionResult.MATCH;
 
             // TODO what is the relevative cost of nextPosting vs advance?
-            if (segmentRowId + 1 == targetSegmentRowID)
-                segmentRowId = postingList.nextPosting();
+            if (lastSegmentRowId + 1 == targetSegmentRowID)
+                lastSegmentRowId = postingList.nextPosting();
             else
-                segmentRowId = postingList.advance(targetSegmentRowID);
+                lastSegmentRowId = postingList.advance(targetSegmentRowID);
 
-            if (segmentRowId == PostingList.END_OF_STREAM)
+            if (lastSegmentRowId == PostingList.END_OF_STREAM)
                 return IntersectionResult.EXHAUSTED;
-            else if (segmentRowId == targetSegmentRowID)
+            else if (lastSegmentRowId == targetSegmentRowID)
                 return IntersectionResult.MATCH;
             else
                 return IntersectionResult.MISS;
