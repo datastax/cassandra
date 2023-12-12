@@ -331,8 +331,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             expectedActualNodesVisited.update(rawExpectedNodesVisited, actualNodesVisited);
 
             if (actualNodesVisited >= 1000 && (actualNodesVisited > 2 * expectedNodesVisited || actualNodesVisited < 0.5 * expectedNodesVisited))
-                logger.warn("Predicted visiting {} nodes, but actually visited {} (observed:predicted ratio is {})",
-                            expectedNodesVisited, actualNodesVisited, (double) actualNodesVisited / expectedNodesVisited);
+                Tracing.logAndTrace(logger, "Predicted visiting {} nodes, but actually visited {}",
+                                    expectedNodesVisited, actualNodesVisited);
         }
     }
 
