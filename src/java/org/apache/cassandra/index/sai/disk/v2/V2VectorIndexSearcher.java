@@ -30,8 +30,6 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.codahale.metrics.Histogram;
-import com.codahale.metrics.SlidingWindowReservoir;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.pq.BinaryQuantization;
 import io.github.jbellis.jvector.util.Bits;
@@ -53,12 +51,14 @@ import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
-import org.apache.cassandra.index.sai.utils.AtomicRatio;
 import org.apache.cassandra.index.sai.utils.CollectionRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.metrics.LinearFit;
+import org.apache.cassandra.metrics.PairedSlidingWindowReservoir;
+import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.lang.Math.ceil;
@@ -76,7 +76,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private final JVectorLuceneOnDiskGraph graph;
     private final PrimaryKey.Factory keyFactory;
     private int globalBruteForceRows; // not final so test can inject its own setting
-    private final AtomicRatio actualExpectedRatio = new AtomicRatio();
+    private final PairedSlidingWindowReservoir expectedActualNodesVisited = new PairedSlidingWindowReservoir(20);
     private final ThreadLocal<SparseFixedBitSet> cachedBitSets;
 
     public V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
@@ -134,8 +134,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             return bitsOrPostingList.postingList();
 
         var vectorPostings = graph.search(queryVector, topK, exp.getEuclideanSearchThreshold(), limit, bitsOrPostingList.getBits(), context);
-        if (bitsOrPostingList.rawExpectedNodes >= 0)
-            updateExpectedNodes(vectorPostings.getVisitedCount(), bitsOrPostingList.rawExpectedNodes);
+        bitsOrPostingList.updateStatistics(vectorPostings.getVisitedCount());
         return vectorPostings;
     }
 
@@ -200,15 +199,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             minSSTableRowId = Math.max(minSSTableRowId, metadata.minSSTableRowId);
             maxSSTableRowId = min(maxSSTableRowId, metadata.maxSSTableRowId);
 
-            // If num of matches are not bigger than topK, skip ANN.
-            // (nRows should not include shadowed rows, but context doesn't break those out by segment,
-            // so we will live with the inaccuracy.)
+            // Upper-bound cost based on maximum possible rows included
             int nRows = Math.toIntExact(maxSSTableRowId - minSSTableRowId + 1);
-            int maxBruteForceRows = min(globalBruteForceRows, maxBruteForceRows(topK, nRows));
-            logAndTrace("Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
-                        nRows, maxBruteForceRows, graph.size(), topK);
+            var cost = estimateCost(topK, nRows);
+            Tracing.logAndTrace(logger, "Search range covers {} rows; expected nodes visited is {} for sstable index with {} nodes, LIMIT {}",
+                                nRows, cost.expectedNodesVisited, graph.size(), topK);
             // if we have a small number of results then let TopK processor do exact NN computation
-            if (nRows <= maxBruteForceRows)
+            if (cost.shouldUseBruteForce())
             {
                 var segmentRowIds = new IntArrayList(nRows, 0);
                 for (long i = minSSTableRowId; i <= maxSSTableRowId; i++)
@@ -243,11 +240,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             {
                 throw new RuntimeException(e);
             }
+            // We can make a more accurate cost estimate now
+            cost = estimateCost(topK, bits.cardinality());
 
             if (!hasMatches)
                 return new BitsOrPostingList(PostingList.EMPTY);
 
-            return new BitsOrPostingList(bits, getRawExpectedNodes(topK, nRows));
+            return new BitsOrPostingList(bits, cost);
         }
     }
 
@@ -301,37 +300,60 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         return max;
     }
 
-    private int maxBruteForceRows(int limit, int nPermittedOrdinals)
+    private class CostEstimate
     {
-        int expectedNodes = expectedNodesVisited(limit, nPermittedOrdinals);
-        // ANN index will do a bunch of extra work besides the full comparisons (performing PQ similarity for each edge);
-        // brute force from sstable will also do a bunch of extra work (going through trie index to look up row).
-        // VSTODO I'm not sure which one is more expensive (and it depends on things like sstable chunk cache hit ratio)
-        // so I'm leaving it as a 1:1 ratio for now.
-        return max(limit, expectedNodes);
+        public final int nFilteredRows;
+        public final int rawExpectedNodesVisited;
+        public final int expectedNodesVisited;
+
+        public CostEstimate(int nFilteredRows, int rawExpectedNodesVisited, int expectedNodesVisited)
+        {
+            assert rawExpectedNodesVisited >= 0 : rawExpectedNodesVisited;
+            assert expectedNodesVisited >= 0 : expectedNodesVisited;
+
+            this.nFilteredRows = nFilteredRows;
+            this.rawExpectedNodesVisited = rawExpectedNodesVisited;
+            this.expectedNodesVisited = expectedNodesVisited;
+        }
+
+        public boolean shouldUseBruteForce()
+        {
+            // ANN index will do a bunch of extra work besides the full comparisons (performing PQ similarity for each edge);
+            // brute force from sstable will also do a bunch of extra work (going through trie index to look up row).
+            // VSTODO I'm not sure which one is more expensive (and it depends on things like sstable chunk cache hit ratio)
+            // so I'm leaving it as a 1:1 ratio for now.
+            return nFilteredRows <= min(globalBruteForceRows, expectedNodesVisited);
+        }
+
+        public void updateStatistics(int actualNodesVisited)
+        {
+            assert actualNodesVisited >= 0 : actualNodesVisited;
+            expectedActualNodesVisited.update(rawExpectedNodesVisited, actualNodesVisited);
+
+            if (actualNodesVisited >= 1000 && (actualNodesVisited > 2 * expectedNodesVisited || actualNodesVisited < 0.5 * expectedNodesVisited))
+                Tracing.logAndTrace(logger, "Predicted visiting {} nodes, but actually visited {}",
+                                    expectedNodesVisited, actualNodesVisited);
+        }
     }
 
-    private int expectedNodesVisited(int limit, int nPermittedOrdinals)
+    private CostEstimate estimateCost(int limit, int nFilteredRows)
     {
-        return (int) (getObservedNodesRatio() * getRawExpectedNodes(limit, nPermittedOrdinals));
-    }
+        int rawExpectedNodes = getRawExpectedNodes(limit, nFilteredRows);
+        // update the raw expected value with a linear interpolation based on observed data
+        var observedValues = expectedActualNodesVisited.getSnapshot().values;
+        int expectedNodes;
+        if (observedValues.length >= 10)
+        {
+            var interceptSlope = LinearFit.interceptSlopeFor(observedValues);
+            expectedNodes = (int) (interceptSlope.left + interceptSlope.right * rawExpectedNodes);
+        }
+        else
+        {
+            expectedNodes = rawExpectedNodes;
+        }
 
-    /** the ratio of nodes visited by a graph search, to our estimate */
-    private double getObservedNodesRatio()
-    {
-        return actualExpectedRatio.getUpdateCount() >= 10 ? actualExpectedRatio.get() : 1.0;
-    }
-
-    private void updateExpectedNodes(int actualNodesVisited, int rawExpectedNodes)
-    {
-        assert rawExpectedNodes >= 0 : rawExpectedNodes;
-        assert actualNodesVisited >= 0 : actualNodesVisited;
-        double ratio = getObservedNodesRatio();
-        var expectedNodes = (int) (ratio * rawExpectedNodes);
-        if (actualNodesVisited >= 1000 && (actualNodesVisited > 2 * expectedNodes || actualNodesVisited < 0.5 * expectedNodes))
-            logger.warn("Predicted visiting {} nodes, but actually visited {} (observed:predicted ratio is {})",
-                        expectedNodes, actualNodesVisited, ratio);
-        actualExpectedRatio.updateAndGet(actualNodesVisited, rawExpectedNodes);
+        int sanitizedEstimate = VectorMemtableIndex.ensureSaneEstimate(expectedNodes, limit, graph.size());
+        return new CostEstimate(nFilteredRows, rawExpectedNodes, sanitizedEstimate);
     }
 
     private SparseFixedBitSet bitSetForSearch()
@@ -374,9 +396,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (keysInRange.isEmpty())
             return RangeIterator.empty();
 
-        logAndTrace("SAI predicates produced {} rows out of limit {}", keysInRange.size(), limit);
         if (keysInRange.size() <= limit)
+        {
+            Tracing.logAndTrace(logger, "Only {} keys in sstable range out of limit {}", keysInRange.size(), limit);
             return new CollectionRangeIterator(metadata.minKey, metadata.maxKey, keysInRange);
+        }
 
         int topK = topKFor(limit);
         // if we are brute forcing the similarity search, we want to build a list of segment row ids,
@@ -389,10 +413,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             // track whether we are saving comparisons by using binary search to skip ahead
             // (if most of the keys belong to this sstable, bsearch will actually be slower)
-            var comparisonsSavedByBsearch = new Histogram(new SlidingWindowReservoir(10));
+            var comparisonsSavedByBsearch = new QuickSlidingWindowReservoir(10);
             boolean preferSeqScanToBsearch = false;
 
-            for (int i = 0; i < keysInRange.size(); i++)
+            for (int i = 0; i < keysInRange.size();)
             {
                 // turn the pk back into a row id, with a fast path for the case where the pk is from this sstable
                 var primaryKey = keysInRange.get(i);
@@ -410,24 +434,28 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     long ceilingRowId = - sstableRowId - 1;
                     if (ceilingRowId > metadata.maxSSTableRowId)
                     {
-                        // The next greatest primary key is greater than all the primary keys in this sstable
+                        // The next greatest primary key is greater than all the primary keys in this segment
                         break;
                     }
                     var ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
 
+                    boolean ceilingPrimaryKeyMatchesKeyInRange = false;
                     // adaptively choose either seq scan or bsearch to skip ahead in keysInRange until
                     // we find one at least as large as the ceiling key
                     if (preferSeqScanToBsearch)
                     {
-                        int j = 0;
-                        for ( ; i + j < keysInRange.size(); j++)
+                        int keysToSkip = 1; // We already know that the PK at index i is not equal to the ceiling PK.
+                        int cmp = 1; // Need to initialize. The value is irrelevant.
+                        for ( ; i + keysToSkip < keysInRange.size(); keysToSkip++)
                         {
-                            var nextPrimaryKey = keys.get(i + j);
-                            if (nextPrimaryKey.compareTo(ceilingPrimaryKey) >= 0)
+                            var nextPrimaryKey = keys.get(i + keysToSkip);
+                            cmp = nextPrimaryKey.compareTo(ceilingPrimaryKey);
+                            if (cmp >= 0)
                                 break;
                         }
-                        comparisonsSavedByBsearch.update(j - (int) ceil(logBase2(keysInRange.size() - i)));
-                        i += j - 1; // -1 because loop will increment next
+                        comparisonsSavedByBsearch.update(keysToSkip - (int) ceil(logBase2(keysInRange.size() - i)));
+                        i += keysToSkip;
+                        ceilingPrimaryKeyMatchesKeyInRange = cmp == 0;
                     }
                     else
                     {
@@ -437,16 +465,23 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                         if (nextIndexForCeiling < 0)
                             // We got: -(insertion point) - 1. Invert it so we get the insertion point.
                             nextIndexForCeiling = -nextIndexForCeiling - 1;
+                        else
+                            ceilingPrimaryKeyMatchesKeyInRange = true;
 
                         comparisonsSavedByBsearch.update(nextIndexForCeiling - (int) ceil(logBase2(keysRemaining.size())));
-                        i += nextIndexForCeiling - 1; // -1 because loop will increment next
+                        i += nextIndexForCeiling;
                     }
 
                     // update our estimate
-                    preferSeqScanToBsearch = comparisonsSavedByBsearch.getCount() >= 10
-                                             && comparisonsSavedByBsearch.getSnapshot().getMean() < 0;
-                    continue;
+                    preferSeqScanToBsearch = comparisonsSavedByBsearch.size() >= 10
+                                             && comparisonsSavedByBsearch.getMean() < 0;
+                    if (ceilingPrimaryKeyMatchesKeyInRange)
+                        sstableRowId = ceilingRowId;
+                    else
+                        continue; // without incrementing i further. ceilingPrimaryKey is less than the PK at index i.
                 }
+                // Increment here to simplify the sstableRowId < 0 logic.
+                i++;
 
                 // these should still be true based on our computation of keysInRange
                 assert sstableRowId >= metadata.minSSTableRowId : String.format("sstableRowId %d < minSSTableRowId %d", sstableRowId, metadata.minSSTableRowId);
@@ -464,14 +499,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         }
 
         var numRows = rowIds.size();
-        var maxBruteForceRows = min(globalBruteForceRows, maxBruteForceRows(topK, numRows));
-        logAndTrace("{} rows relevant to current sstable; max brute force rows is {} for index with {} nodes, LIMIT {}",
-                    numRows, maxBruteForceRows, graph.size(), limit);
-        if (numRows == 0) {
+        var cost = estimateCost(topK, numRows);
+        Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; expected nodes visited is {} for index with {} nodes, LIMIT {}",
+                            numRows, keysInRange.size(), cost.expectedNodesVisited, graph.size(), limit);
+        if (numRows == 0)
             return RangeIterator.empty();
-        }
 
-        if (numRows <= maxBruteForceRows)
+        if (cost.shouldUseBruteForce())
         {
             // brute force using the in-memory compressed vectors to cut down the number of results returned
             var queryVector = exp.lower.value.vector;
@@ -481,7 +515,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         // else ask the index to perform a search limited to the bits we created
         float[] queryVector = exp.lower.value.vector;
         var results = graph.search(queryVector, topK, limit, bits, context);
-        updateExpectedNodes(results.getVisitedCount(), getRawExpectedNodes(topK, numRows));
+        cost.updateStatistics(results.getVisitedCount());
+
         return toPrimaryKeyIterator(results, context);
     }
 
@@ -492,12 +527,6 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private int getRawExpectedNodes(int topK, int nPermittedOrdinals)
     {
         return VectorMemtableIndex.expectedNodesVisited(topK, nPermittedOrdinals, graph.size());
-    }
-
-    private void logAndTrace(String message, Object... args)
-    {
-        logger.trace(message, args);
-        Tracing.trace(message, args);
     }
 
     @Override
@@ -516,23 +545,23 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
     private static class BitsOrPostingList
     {
-        public static final BitsOrPostingList ALL_BITS = new BitsOrPostingList(Bits.ALL, -1);
+        public static final BitsOrPostingList ALL_BITS = new BitsOrPostingList(Bits.ALL, null);
         private final Bits bits;
-        private final int rawExpectedNodes;
+        private final CostEstimate cost;
         private final PostingList postingList;
 
-        public BitsOrPostingList(Bits bits, int rawExpectedNodes)
+        public BitsOrPostingList(Bits bits, CostEstimate cost)
         {
             this.bits = bits;
-            this.rawExpectedNodes = rawExpectedNodes;
+            this.cost = cost;
             this.postingList = null;
         }
 
         public BitsOrPostingList(PostingList postingList)
         {
-            this.bits = null;
             this.postingList = Preconditions.checkNotNull(postingList);
-            this.rawExpectedNodes = -1;
+            this.bits = null;
+            this.cost = null;
         }
 
         @Nullable
@@ -551,6 +580,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         public boolean skipANN()
         {
             return postingList != null;
+        }
+
+        public void updateStatistics(int visitedCount)
+        {
+            if (cost != null)
+                cost.updateStatistics(visitedCount);
         }
     }
 }
