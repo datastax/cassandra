@@ -490,7 +490,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         var numRows = rowIds.size();
         var cost = estimateCost(topK, numRows);
         Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; max brute force rows is {} for index with {} nodes, LIMIT {}",
-                    numRows, cost.expectedNodesVisited, graph.size(), limit);
+                            numRows, keysInRange.size(), cost.expectedNodesVisited, graph.size(), limit);
         if (numRows == 0) {
             return RangeIterator.empty();
         }
