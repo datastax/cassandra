@@ -202,7 +202,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             // Upper-bound cost based on maximum possible rows included
             int nRows = Math.toIntExact(maxSSTableRowId - minSSTableRowId + 1);
             var cost = estimateCost(topK, nRows);
-            Tracing.logAndTrace(logger, "Search range covers {} rows; max brute force rows is {} for sstable index with {} nodes, LIMIT {}",
+            Tracing.logAndTrace(logger, "Search range covers {} rows; expected nodes visited is {} for sstable index with {} nodes, LIMIT {}",
                                 nRows, cost.expectedNodesVisited, graph.size(), topK);
             // if we have a small number of results then let TopK processor do exact NN computation
             if (cost.shouldUseBruteForce())
@@ -489,11 +489,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
         var numRows = rowIds.size();
         var cost = estimateCost(topK, numRows);
-        Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; max brute force rows is {} for index with {} nodes, LIMIT {}",
+        Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; expected nodes visited is {} for index with {} nodes, LIMIT {}",
                             numRows, keysInRange.size(), cost.expectedNodesVisited, graph.size(), limit);
-        if (numRows == 0) {
+        if (numRows == 0)
             return RangeIterator.empty();
-        }
 
         if (cost.shouldUseBruteForce())
         {
