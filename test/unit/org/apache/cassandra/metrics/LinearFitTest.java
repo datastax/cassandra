@@ -27,11 +27,12 @@ import static org.junit.Assert.assertEquals;
 public class LinearFitTest
 {
     @Test
-    public void testInterceptSlopeFor()
+    public void testInterceptSlopeForLinearValues()
     {
+        // tests values that are perfectly linear
         var values = new IntIntPair[10];
         for (int i = 0; i < values.length; i++)
-            values[i] = new IntIntPair(i * 2, i);
+            values[i] = new IntIntPair(i, i * 2);
 
         var pair = LinearFit.interceptSlopeFor(values);
         assertEquals(0.0, pair.left, 0.01);
@@ -39,7 +40,7 @@ public class LinearFitTest
 
         values = new IntIntPair[10];
         for (int i = 0; i < values.length; i++)
-            values[i] = new IntIntPair(1 + i * 2, i);
+            values[i] = new IntIntPair(i, 1 + i * 2);
 
         pair = LinearFit.interceptSlopeFor(values);
         assertEquals(1.0, pair.left, 0.01d);
@@ -47,7 +48,7 @@ public class LinearFitTest
 
         values = new IntIntPair[10];
         for (int i = 0; i < values.length; i++)
-            values[i] = new IntIntPair(-1 + i * 2, i);
+            values[i] = new IntIntPair(i, -1 + i * 2);
 
         pair = LinearFit.interceptSlopeFor(values);
         assertEquals(-1.0, pair.left, 0.01d);
@@ -57,16 +58,17 @@ public class LinearFitTest
     @Test
     public void testInterceptSlopeWithNoise()
     {
+        // values are +/- 20 from perfectly linear
         var values = new IntIntPair[] {
-            new IntIntPair(66, 1),
-            new IntIntPair(108, 2),
-            new IntIntPair(70, 3),
-            new IntIntPair(112, 4),
-            new IntIntPair(74, 5),
-            new IntIntPair(116, 6),
-            new IntIntPair(78, 7),
-            new IntIntPair(120, 8),
-            new IntIntPair(82, 9)
+            new IntIntPair(1, 66),
+            new IntIntPair(2, 108),
+            new IntIntPair(3, 70),
+            new IntIntPair(4, 112),
+            new IntIntPair(5, 74),
+            new IntIntPair(6, 116),
+            new IntIntPair(7, 78),
+            new IntIntPair(8, 120),
+            new IntIntPair(9, 82)
         };
         var pair = LinearFit.interceptSlopeFor(values);
         // verified with sklearn
@@ -77,17 +79,18 @@ public class LinearFitTest
     @Test
     public void testInterceptSlopeWithMoreNoise()
     {
+        // values are pseudorandomly distributed
         var values = new IntIntPair[] {
-            new IntIntPair(1366, 931),
-            new IntIntPair(822, 973),
-            new IntIntPair(1308, 200),
-            new IntIntPair(708, 332),
-            new IntIntPair(1186, 677),
-            new IntIntPair(7112, 401),
-            new IntIntPair(166, 111),
-            new IntIntPair(734, 503),
-            new IntIntPair(78, 738),
-            new IntIntPair(8120, 829)
+            new IntIntPair(931, 1366),
+            new IntIntPair(973, 822),
+            new IntIntPair(200, 1308),
+            new IntIntPair(332, 708),
+            new IntIntPair(677, 1186),
+            new IntIntPair(401, 7112),
+            new IntIntPair(111, 166),
+            new IntIntPair(503, 734),
+            new IntIntPair(738, 78),
+            new IntIntPair(829, 8120)
         };
         var pair = LinearFit.interceptSlopeFor(values);
         // verified with sklearn

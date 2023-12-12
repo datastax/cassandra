@@ -55,12 +55,16 @@ public class PairedSlidingWindowReservoir
         return new PairedSnapshot(values);
     }
 
+    /**
+     * A pair of ints.  "y" and "x" are used to imply that the first value is the
+     * dependent one for a LinearFit computation.
+     */
     public static class IntIntPair
     {
-        public final int y;
         public final int x;
+        public final int y;
 
-        IntIntPair(int y, int x)
+        IntIntPair(int x, int y)
         {
             this.y = y;
             this.x = x;

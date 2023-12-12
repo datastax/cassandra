@@ -76,7 +76,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private final JVectorLuceneOnDiskGraph graph;
     private final PrimaryKey.Factory keyFactory;
     private int globalBruteForceRows; // not final so test can inject its own setting
-    private final PairedSlidingWindowReservoir actualExpectedNodesVisited = new PairedSlidingWindowReservoir(20);
+    private final PairedSlidingWindowReservoir expectedActualNodesVisited = new PairedSlidingWindowReservoir(20);
     private final ThreadLocal<SparseFixedBitSet> cachedBitSets;
 
     public V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
@@ -328,7 +328,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         public void updateStatistics(int actualNodesVisited)
         {
             assert actualNodesVisited >= 0 : actualNodesVisited;
-            actualExpectedNodesVisited.update(actualNodesVisited, rawExpectedNodesVisited);
+            expectedActualNodesVisited.update(rawExpectedNodesVisited, actualNodesVisited);
 
             if (actualNodesVisited >= 1000 && (actualNodesVisited > 2 * expectedNodesVisited || actualNodesVisited < 0.5 * expectedNodesVisited))
                 logger.warn("Predicted visiting {} nodes, but actually visited {} (observed:predicted ratio is {})",
@@ -339,7 +339,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private CostEstimate estimateCost(int limit, int nFilteredRows)
     {
         // update the raw expected value with a linear interpolation based on observed data
-        var interceptSlope = LinearFit.interceptSlopeFor(actualExpectedNodesVisited.getSnapshot().values);
+        var interceptSlope = LinearFit.interceptSlopeFor(expectedActualNodesVisited.getSnapshot().values);
         int rawExpectedNodes = getRawExpectedNodes(limit, nFilteredRows);
         int expectedNodes = (int) (interceptSlope.left + interceptSlope.right * rawExpectedNodes);
 

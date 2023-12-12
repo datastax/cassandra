@@ -22,6 +22,9 @@ import org.apache.cassandra.utils.Pair;
 
 public class LinearFit
 {
+    /**
+     * Computes the intercept and slope for the best linear fit to the given values.
+     */
     public static Pair<Double, Double> interceptSlopeFor(PairedSlidingWindowReservoir.IntIntPair[] values)
     {
         double xSum = 0;
