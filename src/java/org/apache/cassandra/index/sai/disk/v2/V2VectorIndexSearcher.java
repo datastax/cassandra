@@ -415,7 +415,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     }
                     var ceilingPrimaryKey = primaryKeyMap.primaryKeyFromRowId(ceilingRowId);
 
-                    boolean ceilingPrimaryKeyMatchedKeyInRange = false;
+                    boolean ceilingPrimaryKeyMatchesKeyInRange = false;
                     // adaptively choose either seq scan or bsearch to skip ahead in keysInRange until
                     // we find one at least as large as the ceiling key
                     if (preferSeqScanToBsearch)
@@ -432,7 +432,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                         comparisonsSavedByBsearch.update(keysToSkip - (int) ceil(logBase2(keysInRange.size() - i)));
                         i += keysToSkip;
                         if (cmp == 0)
-                            ceilingPrimaryKeyMatchedKeyInRange = true;
+                            ceilingPrimaryKeyMatchesKeyInRange = true;
                     }
                     else
                     {
@@ -443,7 +443,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                             // We got: -(insertion point) - 1. Invert it so we get the insertion point.
                             nextIndexForCeiling = -nextIndexForCeiling - 1;
                         else
-                            ceilingPrimaryKeyMatchedKeyInRange = true;
+                            ceilingPrimaryKeyMatchesKeyInRange = true;
 
                         comparisonsSavedByBsearch.update(nextIndexForCeiling - (int) ceil(logBase2(keysRemaining.size())));
                         i += nextIndexForCeiling;
@@ -452,7 +452,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     // update our estimate
                     preferSeqScanToBsearch = comparisonsSavedByBsearch.getCount() >= 10
                                              && comparisonsSavedByBsearch.getSnapshot().getMean() < 0;
-                    if (ceilingPrimaryKeyMatchedKeyInRange)
+                    if (ceilingPrimaryKeyMatchesKeyInRange)
                         sstableRowId = ceilingRowId;
                     else
                         continue;
