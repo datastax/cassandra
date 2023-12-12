@@ -338,10 +338,19 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
     private CostEstimate estimateCost(int limit, int nFilteredRows)
     {
-        // update the raw expected value with a linear interpolation based on observed data
-        var interceptSlope = LinearFit.interceptSlopeFor(expectedActualNodesVisited.getSnapshot().values);
         int rawExpectedNodes = getRawExpectedNodes(limit, nFilteredRows);
-        int expectedNodes = (int) (interceptSlope.left + interceptSlope.right * rawExpectedNodes);
+        // update the raw expected value with a linear interpolation based on observed data
+        var observedValues = expectedActualNodesVisited.getSnapshot().values;
+        int expectedNodes;
+        if (observedValues.length >= 10)
+        {
+            var interceptSlope = LinearFit.interceptSlopeFor(observedValues);
+            expectedNodes = (int) (interceptSlope.left + interceptSlope.right * rawExpectedNodes);
+        }
+        else
+        {
+            expectedNodes = rawExpectedNodes;
+        }
 
         int sanitizedEstimate = VectorMemtableIndex.ensureSaneEstimate(expectedNodes, limit, graph.size());
         return new CostEstimate(nFilteredRows, rawExpectedNodes, sanitizedEstimate);
