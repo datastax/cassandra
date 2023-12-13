@@ -148,8 +148,16 @@ public class MemtableRangeIterator extends RangeIterator
     @Override
     protected IntersectionResult performIntersect(PrimaryKey nextKey)
     {
-        // TODO figure out implementation
-        throw new IllegalArgumentException();
+        // TODO what is a better way to do this? This is a naive implementation to see if I can get tests to pass.
+        skipTo(nextKey);
+        if (hasNext())
+        {
+            return next().compareTo(nextKey) == 0 ? IntersectionResult.MATCH : IntersectionResult.MISS;
+        }
+        else
+        {
+            return IntersectionResult.EXHAUSTED;
+        }
     }
 
     private static boolean hasNextRow(UnfilteredRowIterator rowIterator)

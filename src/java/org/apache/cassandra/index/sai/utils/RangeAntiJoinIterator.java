@@ -57,7 +57,11 @@ public class RangeAntiJoinIterator extends RangeIterator
     @Override
     protected IntersectionResult performIntersect(PrimaryKey nextKey)
     {
-        throw new NotImplementedException("todo");
+        var leftResult = left.intersect(nextKey);
+        // Only do the right intersection if the left iterator matches.
+        if (leftResult == IntersectionResult.MATCH && right.intersect(nextKey) == IntersectionResult.MATCH)
+            return IntersectionResult.MISS;
+        return leftResult;
     }
 
     public void close() throws IOException
