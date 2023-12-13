@@ -20,8 +20,6 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
 
-import org.apache.commons.lang3.NotImplementedException;
-
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
