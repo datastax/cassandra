@@ -791,18 +791,17 @@ public class IndexContext
      */
     public Pair<Set<SSTableIndex>, Set<SSTableContext>> getBuiltIndexes(Collection<SSTableContext> sstableContexts, boolean validate)
     {
-        Set<SSTableIndex> valid = new HashSet<>(sstableContexts.size());
-        Set<SSTableContext> invalid = new HashSet<>();
+        Set<SSTableIndex> valid = ConcurrentHashMap.newKeySet();
+        Set<SSTableContext> invalid = ConcurrentHashMap.newKeySet();
 
-        for (SSTableContext context : sstableContexts)
-        {
+        sstableContexts.stream().parallel().forEach(context -> {
             if (context.sstable.isMarkedCompacted())
-                continue;
+                return;
 
             if (!context.indexDescriptor.isPerIndexBuildComplete(this))
             {
                 logger.debug(logMessage("An on-disk index build for SSTable {} has not completed."), context.descriptor());
-                continue;
+                return;
             }
 
             try
@@ -813,7 +812,7 @@ public class IndexContext
                     {
                         logger.warn(logMessage("Invalid per-column component for SSTable {}"), context.descriptor());
                         invalid.add(context);
-                        continue;
+                        return;
                     }
                 }
 
@@ -824,16 +823,14 @@ public class IndexContext
                 // This covers situation when SSTable collection has the same SSTable multiple
                 // times because we don't know what kind of collection it actually is.
                 if (!valid.add(index))
-                {
                     index.release();
-                }
             }
             catch (Throwable e)
             {
                 logger.error(logMessage("Failed to update per-column components for SSTable {}"), context.descriptor(), e);
                 invalid.add(context);
             }
-        }
+        });
 
         return Pair.create(valid, invalid);
     }
