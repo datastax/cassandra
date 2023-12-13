@@ -122,10 +122,12 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         {
             assert next != null;
             int cmp = nextKey.compareTo(next);
+            // Leave state in place since nextKey is not greater than or equal to next
+            if (cmp < 0) return IntersectionResult.MISS;
+            // Now we know it's either a match or we need to advance, so we can clear the state
             state = State.NOT_READY;
             next = null;
             if (cmp == 0) return IntersectionResult.MATCH;
-            if (cmp < 0) return IntersectionResult.MISS;
         }
 
         var result = performIntersect(nextKey);
