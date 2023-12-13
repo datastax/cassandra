@@ -131,7 +131,7 @@ public interface PostingList extends Closeable
         @Override
         public long advance(long targetRowID) throws IOException
         {
-            if (peeked && next >= targetRowID)// TODO peeked is causing problems in tests
+            if (peeked && next >= targetRowID)
             {
                 peeked = false;
                 return next;
