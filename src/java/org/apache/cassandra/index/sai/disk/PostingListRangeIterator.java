@@ -100,6 +100,12 @@ public class PostingListRangeIterator extends RangeIterator
         needsSkipping = true;
     }
 
+    private PrimaryKeyWithSource createPrimaryKeyWithSource(long rowId)
+    {
+        var primaryKey = primaryKeyMap.primaryKeyFromRowId(rowId);
+        return new PrimaryKeyWithSource(primaryKey, primaryKeyMap.getSSTableId(), rowId);
+    }
+
     @Override
     protected PrimaryKey computeNext()
     {
@@ -115,8 +121,7 @@ public class PostingListRangeIterator extends RangeIterator
             if (rowId == PostingList.END_OF_STREAM)
                 return endOfData();
 
-            var primaryKey = primaryKeyMap.primaryKeyFromRowId(rowId);
-            return new PrimaryKeyWithSource(primaryKey, primaryKeyMap.getSSTableId(), rowId);
+            return createPrimaryKeyWithSource(rowId);
         }
         catch (Throwable t)
         {
@@ -204,8 +209,11 @@ public class PostingListRangeIterator extends RangeIterator
                 return IntersectionResult.EXHAUSTED;
             else if (lastSegmentRowId == targetSegmentRowID)
                 return IntersectionResult.MATCH;
-            else
-                return IntersectionResult.MISS;
+
+            // TODO is it better to go row id to PK or to do a reverse lookup?
+            next = createPrimaryKeyWithSource(targetRowID);
+            state = State.READY;
+            return IntersectionResult.MISS;
         }
         catch (IOException e)
         {
