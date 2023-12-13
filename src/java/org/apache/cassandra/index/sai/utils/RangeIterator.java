@@ -35,7 +35,9 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
 {
     protected enum IntersectionResult
     {
-        MATCH, MISS, EXHAUSTED
+        MATCH, // Returned when the key matches a key in the iterator
+        MISS,  // Returned when the key does not match a key in the iterator
+        EXHAUSTED // Returned when the iterator is exhausted
     }
     private static final Builder.EmptyRangeIterator EMPTY = new Builder.EmptyRangeIterator();
 
