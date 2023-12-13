@@ -118,6 +118,15 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
     {
         if (state == State.DONE)
             return IntersectionResult.EXHAUSTED;
+        if (state == State.READY)
+        {
+            assert next != null;
+            int cmp = nextKey.compareTo(next);
+            state = State.NOT_READY;
+            next = null;
+            if (cmp == 0) return IntersectionResult.MATCH;
+            if (cmp < 0) return IntersectionResult.MISS;
+        }
 
         var result = performIntersect(nextKey);
         if (result == IntersectionResult.EXHAUSTED)

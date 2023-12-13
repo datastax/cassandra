@@ -168,13 +168,6 @@ public class PostingListRangeIterator extends RangeIterator
             return IntersectionResult.EXHAUSTED;
         if (nextKey.compareTo(getMinimum()) < 0)
             return IntersectionResult.MISS;
-        if (next != null)
-        {
-            int cmp = nextKey.compareTo(next);
-            next = null;
-            if (cmp == 0) return IntersectionResult.MATCH;
-            if (cmp < 0) return IntersectionResult.MISS;
-        }
         try
         {
             long targetRowID;
