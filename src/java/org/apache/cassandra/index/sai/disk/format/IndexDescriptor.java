@@ -85,8 +85,36 @@ public class IndexDescriptor
     // per-column components, keyed by index name
     private final Map<String, Set<IndexComponent>> perIndexComponents = Maps.newHashMap();
     private final Map<IndexComponent, File> onDiskPerSSTableFileMap = Maps.newHashMap();
-    // per-column components, keyed by <index component, index name>
-    private final Map<Pair<IndexComponent, String>, File> onDiskPerIndexFileMap = Maps.newHashMap();
+    // per-column components, keyed by index component + index context
+    private final Map<AttachedIndexComponent, File> onDiskPerIndexFileMap = Maps.newHashMap();
+
+    private static class AttachedIndexComponent
+    {
+        public final IndexComponent indexComponent;
+        public final IndexContext indexContext;
+
+        public AttachedIndexComponent(IndexComponent indexComponent, IndexContext indexContext)
+        {
+            this.indexComponent = indexComponent;
+            this.indexContext = indexContext;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hashCode(indexComponent, indexContext);
+        }
+
+        @Override
+        public boolean equals(Object obj)
+        {
+            if (this == obj) return true;
+            if (obj == null || getClass() != obj.getClass()) return false;
+            AttachedIndexComponent other = (AttachedIndexComponent)obj;
+            return indexComponent == other.indexComponent &&
+                   Objects.equal(indexContext, other.indexContext);
+        }
+    }
 
     private IndexDescriptor(Version version, Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
     {
@@ -153,7 +181,7 @@ public class IndexDescriptor
 
     public File fileFor(IndexComponent component, IndexContext indexContext)
     {
-        return onDiskPerIndexFileMap.computeIfAbsent(Pair.create(component, indexContext.getIndexName()),
+        return onDiskPerIndexFileMap.computeIfAbsent(new AttachedIndexComponent(component, indexContext),
                                                      p -> createFile(component, indexContext));
     }
 
@@ -226,7 +254,7 @@ public class IndexDescriptor
         if (perIndexComponents.containsKey(indexContext.getIndexName()))
             return perIndexComponents.get(indexContext.getIndexName())
                                      .stream()
-                                     .map(c -> Pair.create(c, indexContext.getIndexName()))
+                                     .map(c -> new AttachedIndexComponent(c, indexContext))
                                      .map(onDiskPerIndexFileMap::get)
                                      .filter(java.util.Objects::nonNull)
                                      .filter(File::exists)
@@ -242,7 +270,7 @@ public class IndexDescriptor
             return perIndexComponents.get(indexContext.getIndexName())
                                      .stream()
                                      .filter(c -> c == indexComponent)
-                                     .map(c -> Pair.create(c, indexContext.getIndexName()))
+                                     .map(c -> new AttachedIndexComponent(c, indexContext))
                                      .map(onDiskPerIndexFileMap::get)
                                      .filter(java.util.Objects::nonNull)
                                      .filter(File::exists)
@@ -292,7 +320,7 @@ public class IndexDescriptor
         if (perIndexComponents.containsKey(indexContext.getIndexName()))
             perIndexComponents.remove(indexContext.getIndexName())
                               .stream()
-                              .map(c -> Pair.create(c, indexContext.getIndexName()))
+                              .map(c -> new AttachedIndexComponent(c, indexContext))
                               .map(onDiskPerIndexFileMap::remove)
                               .filter(java.util.Objects::nonNull)
                               .forEach(this::deleteComponent);
