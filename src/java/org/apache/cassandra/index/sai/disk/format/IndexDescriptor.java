@@ -61,10 +61,10 @@ import org.apache.lucene.util.IOUtils;
 
 /**
  * The {@link IndexDescriptor} is an analog of the SSTable {@link Descriptor} and provides version
- * specific information about the on-disk state of a {@link StorageAttachedIndex}.
+ * specific information about the on-disk state of {@link StorageAttachedIndex}es.
  *
  * The {@IndexDescriptor} is primarily responsible for maintaining a view of the on-disk state
- * of an index for a specific {@link org.apache.cassandra.io.sstable.SSTable}. It maintains mappings
+ * of the SAI indexes for a specific {@link org.apache.cassandra.io.sstable.SSTable}. It maintains mappings
  * of the current on-disk components and files. It is responsible for opening files for use by
  * writers and readers.
  *
@@ -75,14 +75,18 @@ public class IndexDescriptor
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
+    // per-SSTable components
     public final Version version;
     public final Descriptor descriptor;
     public final IPartitioner partitioner;
     public final ClusteringComparator clusteringComparator;
     public final PrimaryKey.Factory primaryKeyFactory;
     public final Set<IndexComponent> perSSTableComponents = Sets.newHashSet();
+
+    // per-column components, keyed by index name
     public final Map<String, Set<IndexComponent>> perIndexComponents = Maps.newHashMap();
     public final Map<IndexComponent, File> onDiskPerSSTableFileMap = Maps.newHashMap();
+    // per-column components, keyed by <index component, index name>
     public final Map<Pair<IndexComponent, String>, File> onDiskPerIndexFileMap = Maps.newHashMap();
 
     private IndexDescriptor(Version version, Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
