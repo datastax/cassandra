@@ -77,7 +77,7 @@ public class IndexDescriptorTest
 
         IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
 
-        assertEquals(Version.AA, indexDescriptor.perSSTableVersion);
+        assertEquals(Version.AA, indexDescriptor.getIndexVersion(IndexIdentifier.SSTABLE));
         assertTrue(indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER));
     }
 
@@ -92,7 +92,7 @@ public class IndexDescriptorTest
         IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
 
-        assertEquals(Version.AA, indexDescriptor.perSSTableVersion);
+        assertEquals(Version.AA, indexDescriptor.getIndexVersion(IndexIdentifier.SSTABLE));
         assertTrue(indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext));
     }
 
@@ -105,7 +105,7 @@ public class IndexDescriptorTest
 
         IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
 
-        assertEquals(Version.BA, indexDescriptor.perSSTableVersion);
+        assertEquals(Version.BA, indexDescriptor.getIndexVersion(IndexIdentifier.SSTABLE));
         assertTrue(indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER));
     }
 
@@ -119,7 +119,7 @@ public class IndexDescriptorTest
         IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
 
-        assertEquals(Version.BA, indexDescriptor.perSSTableVersion);
+        assertEquals(Version.BA, indexDescriptor.getIndexVersion(IndexIdentifier.SSTABLE));
         assertTrue(indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext));
     }
 

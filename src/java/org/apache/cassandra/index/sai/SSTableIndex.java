@@ -36,6 +36,7 @@ import org.apache.cassandra.index.sai.disk.EmptyIndex;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
+import org.apache.cassandra.index.sai.disk.format.IndexIdentifier;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -182,12 +183,12 @@ public class SSTableIndex implements SegmentOrdering
 
     public Version getVersion()
     {
-        return sstableContext.indexDescriptor.perSSTableVersion;
+        return sstableContext.indexDescriptor.getIndexVersion(IndexIdentifier.SSTABLE);
     }
 
     public IndexFeatureSet indexFeatureSet()
     {
-        return sstableContext.indexDescriptor.perSSTableVersion.onDiskFormat().indexFeatureSet();
+        return getVersion().onDiskFormat().indexFeatureSet();
     }
 
     public SSTableReader getSSTable()

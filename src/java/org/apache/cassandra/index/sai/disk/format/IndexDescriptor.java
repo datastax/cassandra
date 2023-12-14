@@ -83,10 +83,11 @@ public class IndexDescriptor
     public final IPartitioner partitioner;
     public final ClusteringComparator clusteringComparator;
     public final PrimaryKey.Factory primaryKeyFactory;
-    public final Version perSSTableVersion;
 
     // turns an index context or name into a unique identifier that can be identity-compared
     private final IndexIdentifier.Provider indexIdentifierProvider = new IndexIdentifier.Provider();
+    // index -> version
+    private final Map<IndexIdentifier, Version> perIndexVersions = Maps.newHashMap();
     // index -> components
     private final Map<IndexIdentifier, Set<IndexComponent>> perIndexComponents = Maps.newHashMap();
     // component -> file
@@ -129,12 +130,12 @@ public class IndexDescriptor
 
     private IndexDescriptor(Version version, Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
     {
-        this.perSSTableVersion = version;
         this.descriptor = descriptor;
         this.partitioner = partitioner;
         this.clusteringComparator = clusteringComparator;
         this.primaryKeyFactory = PrimaryKey.factory(clusteringComparator, version.onDiskFormat().indexFeatureSet());
 
+        perIndexVersions.put(IndexIdentifier.SSTABLE, version);
         perIndexComponents.put(IndexIdentifier.SSTABLE, Sets.newHashSet());
     }
 
@@ -179,12 +180,24 @@ public class IndexDescriptor
 
     public String componentName(IndexComponent indexComponent)
     {
-        return perSSTableVersion.fileNameFormatter().format(indexComponent, null);
+        return perIndexVersions.get(IndexIdentifier.SSTABLE).fileNameFormatter().format(indexComponent, null);
     }
 
     public String componentName(IndexComponent indexComponent, IndexContext indexContext)
     {
-        return perSSTableVersion.fileNameFormatter().format(indexComponent, indexContext);
+        return getIndexVersion(indexContext).fileNameFormatter().format(indexComponent, indexContext);
+    }
+
+    public Version getIndexVersion(IndexContext indexContext)
+    {
+        // FIXME per-index versions are not wired in yet
+//        return getIndexVersion(indexIdentifierProvider.get(indexContext));
+        return getIndexVersion(IndexIdentifier.SSTABLE);
+    }
+
+    public Version getIndexVersion(IndexIdentifier id)
+    {
+        return perIndexVersions.get(id);
     }
 
     public File fileFor(IndexComponent component)
@@ -220,36 +233,36 @@ public class IndexDescriptor
 
     public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(SSTableReader sstable) throws IOException
     {
-        return perSSTableVersion.onDiskFormat().newPrimaryKeyMapFactory(this, sstable);
+        return perIndexVersions.get(IndexIdentifier.SSTABLE).onDiskFormat().newPrimaryKeyMapFactory(this, sstable);
     }
 
     public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexContext indexContext)
     {
         return isIndexEmpty(indexContext)
                ? new EmptyIndex()
-               : perSSTableVersion.onDiskFormat().newSearchableIndex(sstableContext, indexContext);
+               : getIndexVersion(indexContext).onDiskFormat().newSearchableIndex(sstableContext, indexContext);
     }
 
     public PerSSTableWriter newPerSSTableWriter() throws IOException
     {
-        return perSSTableVersion.onDiskFormat().newPerSSTableWriter(this);
+        return perIndexVersions.get(IndexIdentifier.SSTABLE).onDiskFormat().newPerSSTableWriter(this);
     }
 
     public PerIndexWriter newPerIndexWriter(StorageAttachedIndex index,
                                             LifecycleNewTracker tracker,
                                             RowMapping rowMapping)
     {
-        return perSSTableVersion.onDiskFormat().newPerIndexWriter(index, this, tracker, rowMapping);
+        return Version.LATEST.onDiskFormat().newPerIndexWriter(index, this, tracker, rowMapping);
     }
 
     public boolean isPerSSTableBuildComplete()
     {
-        return perSSTableVersion.onDiskFormat().isPerSSTableBuildComplete(this);
+        return perIndexVersions.get(IndexIdentifier.SSTABLE).onDiskFormat().isPerSSTableBuildComplete(this);
     }
 
     public boolean isPerIndexBuildComplete(IndexContext indexContext)
     {
-        return perSSTableVersion.onDiskFormat().isPerIndexBuildComplete(this, indexContext);
+        return getIndexVersion(indexContext).onDiskFormat().isPerIndexBuildComplete(this, indexContext);
     }
 
     public boolean isSSTableEmpty()
@@ -264,7 +277,7 @@ public class IndexDescriptor
 
     public long sizeOnDiskOfPerSSTableComponents()
     {
-        return perSSTableVersion.onDiskFormat()
+        return perIndexVersions.get(IndexIdentifier.SSTABLE).onDiskFormat()
                                 .perSSTableComponents()
                                 .stream()
                                 .map(this::fileFor)
@@ -310,25 +323,25 @@ public class IndexDescriptor
     {
         logger.debug("validatePerIndexComponents called for " + indexContext.getIndexName());
         registerPerIndexComponents(indexContext);
-        return perSSTableVersion.onDiskFormat().validatePerIndexComponents(this, indexContext, false);
+        return getIndexVersion(indexContext).onDiskFormat().validatePerIndexComponents(this, indexContext, false);
     }
 
     public boolean validatePerIndexComponentsChecksum(IndexContext indexContext)
     {
         registerPerIndexComponents(indexContext);
-        return perSSTableVersion.onDiskFormat().validatePerIndexComponents(this, indexContext, true);
+        return getIndexVersion(indexContext).onDiskFormat().validatePerIndexComponents(this, indexContext, true);
     }
 
     public boolean validatePerSSTableComponents()
     {
         registerPerSSTableComponents();
-        return perSSTableVersion.onDiskFormat().validatePerSSTableComponents(this, false);
+        return perIndexVersions.get(IndexIdentifier.SSTABLE).onDiskFormat().validatePerSSTableComponents(this, false);
     }
 
     public boolean validatePerSSTableComponentsChecksum()
     {
         registerPerSSTableComponents();
-        return perSSTableVersion.onDiskFormat().validatePerSSTableComponents(this, true);
+        return perIndexVersions.get(IndexIdentifier.SSTABLE).onDiskFormat().validatePerSSTableComponents(this, true);
     }
 
     public void deletePerSSTableIndexComponents()
@@ -467,7 +480,7 @@ public class IndexDescriptor
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(descriptor, perSSTableVersion);
+        return Objects.hashCode(descriptor, perIndexVersions.get(IndexIdentifier.SSTABLE));
     }
 
     @Override
@@ -477,7 +490,7 @@ public class IndexDescriptor
         if (o == null || getClass() != o.getClass()) return false;
         IndexDescriptor other = (IndexDescriptor)o;
         return Objects.equal(descriptor, other.descriptor) &&
-               Objects.equal(perSSTableVersion, other.perSSTableVersion);
+               Objects.equal(perIndexVersions.get(IndexIdentifier.SSTABLE), other.perIndexVersions.get(IndexIdentifier.SSTABLE));
     }
 
     @Override
@@ -497,21 +510,19 @@ public class IndexDescriptor
 
     private void registerPerSSTableComponents()
     {
-        perSSTableVersion.onDiskFormat()
-                         .perSSTableComponents()
-                         .stream()
-                         .filter(c -> !perIndexComponents.get(IndexIdentifier.SSTABLE).contains(c) && fileFor(c).exists())
-                         .forEach(perIndexComponents.get(IndexIdentifier.SSTABLE)::add);
+        perIndexVersions.get(IndexIdentifier.SSTABLE).onDiskFormat().perSSTableComponents()
+                        .stream()
+                        .filter(c -> !perIndexComponents.get(IndexIdentifier.SSTABLE).contains(c) && fileFor(c).exists())
+                        .forEach(perIndexComponents.get(IndexIdentifier.SSTABLE)::add);
     }
 
     private void registerPerIndexComponents(IndexContext indexContext)
     {
         Set<IndexComponent> indexComponents = perIndexComponents.computeIfAbsent(indexIdentifierProvider.get(indexContext), k -> Sets.newHashSet());
-        perSSTableVersion.onDiskFormat()
-                         .perIndexComponents(indexContext)
-                         .stream()
-                         .filter(c -> !indexComponents.contains(c) && fileFor(c, indexContext).exists())
-                         .forEach(indexComponents::add);
+        getIndexVersion(indexContext).onDiskFormat().perIndexComponents(indexContext)
+                                     .stream()
+                                     .filter(c -> !indexComponents.contains(c) && fileFor(c, indexContext).exists())
+                                     .forEach(indexComponents::add);
     }
 
     private int numberOfComponents(IndexContext indexContext)

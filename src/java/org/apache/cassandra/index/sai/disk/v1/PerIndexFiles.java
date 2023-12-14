@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexIdentifier;
 import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.io.util.FileHandle;
@@ -57,7 +58,7 @@ public class PerIndexFiles implements Closeable
         }
         else
         {
-            toOpen.addAll(indexDescriptor.perSSTableVersion.onDiskFormat().perIndexComponents(indexContext));
+            toOpen.addAll(indexDescriptor.getIndexVersion(indexContext).onDiskFormat().perIndexComponents(indexContext));
         }
         toOpen.remove(IndexComponent.META);
         toOpen.remove(IndexComponent.COLUMN_COMPLETION_MARKER);

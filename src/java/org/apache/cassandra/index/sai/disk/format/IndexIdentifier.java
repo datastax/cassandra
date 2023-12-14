@@ -30,7 +30,7 @@ import org.apache.cassandra.index.sai.IndexContext;
  * Usage: create a Provider() and then call get() to get an identifier for a column or sstable.
  * The Provider takes care of ensuring instance uniqueness.
  */
-class IndexIdentifier
+public class IndexIdentifier
 {
     public static final IndexIdentifier SSTABLE = new IndexIdentifier();
 

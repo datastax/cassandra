@@ -245,7 +245,7 @@ public class V1OnDiskFormat implements OnDiskFormat
         // starting with v3, vector components include proper headers and checksum; skip for earlier versions
         if (context.isVector()
             && isVectorDataComponent(component)
-            && !descriptor.perSSTableVersion.onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
+            && !descriptor.getIndexVersion(context).onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
         {
             return true;
         }
