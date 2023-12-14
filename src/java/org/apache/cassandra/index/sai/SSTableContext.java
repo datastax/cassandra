@@ -127,13 +127,13 @@ public class SSTableContext extends SharedCloseableImpl
      */
     public long diskUsage()
     {
-        return indexDescriptor.version.onDiskFormat()
-                                      .perSSTableComponents()
-                                      .stream()
-                                      .map(indexDescriptor::fileFor)
-                                      .filter(File::exists)
-                                      .mapToLong(File::length)
-                                      .sum();
+        return indexDescriptor.perSSTableVersion.onDiskFormat()
+                                                .perSSTableComponents()
+                                                .stream()
+                                                .map(indexDescriptor::fileFor)
+                                                .filter(File::exists)
+                                                .mapToLong(File::length)
+                                                .sum();
     }
 
     /**
@@ -141,7 +141,7 @@ public class SSTableContext extends SharedCloseableImpl
      */
     public int openFilesPerSSTable()
     {
-        return indexDescriptor.version.onDiskFormat().openFilesPerSSTable();
+        return indexDescriptor.perSSTableVersion.onDiskFormat().openFilesPerSSTable();
     }
 
     @Override

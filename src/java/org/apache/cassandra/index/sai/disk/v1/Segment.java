@@ -72,7 +72,7 @@ public class Segment implements Closeable, SegmentOrdering
         this.indexFiles = indexFiles;
         this.metadata = metadata;
 
-        var version = sstableContext.indexDescriptor.version;
+        var version = sstableContext.indexDescriptor.perSSTableVersion;
         // FIXME we only have one IndexDescriptor + Version per sstable, so this is a hack
         // to support indexes at different versions.  Vectors are the only types impacted by multiple versions so far.
         IndexSearcher searcher;

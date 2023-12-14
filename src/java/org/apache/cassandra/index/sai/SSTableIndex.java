@@ -174,12 +174,12 @@ public class SSTableIndex implements SegmentOrdering
 
     public Version getVersion()
     {
-        return sstableContext.indexDescriptor.version;
+        return sstableContext.indexDescriptor.perSSTableVersion;
     }
 
     public IndexFeatureSet indexFeatureSet()
     {
-        return sstableContext.indexDescriptor.version.onDiskFormat().indexFeatureSet();
+        return sstableContext.indexDescriptor.perSSTableVersion.onDiskFormat().indexFeatureSet();
     }
 
     public SSTableReader getSSTable()
