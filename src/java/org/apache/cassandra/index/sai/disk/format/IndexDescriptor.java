@@ -21,7 +21,6 @@ package org.apache.cassandra.index.sai.disk.format;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -92,29 +91,6 @@ public class IndexDescriptor
     private final Map<IndexIdentifier, Set<IndexComponent>> perIndexComponents = Maps.newHashMap();
     // component -> file
     private final Map<AttachedIndexComponent, File> onDiskPerIndexFileMap = Maps.newHashMap();
-
-    /**
-     * A unique (within this sstable) identifier for a column OR sstable index.
-     */
-    private static class IndexIdentifier
-    {
-        private static final IndexIdentifier SSTABLE = new IndexIdentifier();
-
-        public static class Provider
-        {
-            private final Map<String, IndexIdentifier> identifiers = new HashMap<>();
-
-            public IndexIdentifier get(String indexName)
-            {
-                return identifiers.computeIfAbsent(indexName, __ -> new IndexIdentifier());
-            }
-
-            public IndexIdentifier get(IndexContext indexContext)
-            {
-                return get(indexContext.getIndexName());
-            }
-        }
-    }
 
     /**
      * A component together with the index it belongs to.
