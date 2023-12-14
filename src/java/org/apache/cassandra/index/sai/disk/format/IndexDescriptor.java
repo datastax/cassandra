@@ -80,13 +80,13 @@ public class IndexDescriptor
     public final ClusteringComparator clusteringComparator;
     public final PrimaryKey.Factory primaryKeyFactory;
     public final Version perSSTableVersion;
-    public final Set<IndexComponent> perSSTableComponents = Sets.newHashSet();
+    private final Set<IndexComponent> perSSTableComponents = Sets.newHashSet();
 
     // per-column components, keyed by index name
-    public final Map<String, Set<IndexComponent>> perIndexComponents = Maps.newHashMap();
-    public final Map<IndexComponent, File> onDiskPerSSTableFileMap = Maps.newHashMap();
+    private final Map<String, Set<IndexComponent>> perIndexComponents = Maps.newHashMap();
+    private final Map<IndexComponent, File> onDiskPerSSTableFileMap = Maps.newHashMap();
     // per-column components, keyed by <index component, index name>
-    public final Map<Pair<IndexComponent, String>, File> onDiskPerIndexFileMap = Maps.newHashMap();
+    private final Map<Pair<IndexComponent, String>, File> onDiskPerIndexFileMap = Maps.newHashMap();
 
     private IndexDescriptor(Version version, Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
     {
