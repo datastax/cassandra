@@ -81,11 +81,11 @@ public class IndexDescriptor
     public final PrimaryKey.Factory primaryKeyFactory;
     public final Version perSSTableVersion;
     private final Set<IndexComponent> perSSTableComponents = Sets.newHashSet();
+    private final Map<IndexComponent, File> onDiskPerSSTableFileMap = Maps.newHashMap();
 
     // per-column components, keyed by index name
     private final Map<String, Set<IndexComponent>> perIndexComponents = Maps.newHashMap();
-    private final Map<IndexComponent, File> onDiskPerSSTableFileMap = Maps.newHashMap();
-    // per-column components, keyed by index component + index context
+    // per-(column,component) files
     private final Map<AttachedIndexComponent, File> onDiskPerIndexFileMap = Maps.newHashMap();
 
     private static class AttachedIndexComponent
