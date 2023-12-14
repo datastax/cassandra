@@ -98,11 +98,19 @@ public class SSTableIndex implements SegmentOrdering
     }
 
     /**
-     * @return total size of per-column index components, in bytes
+     * @return total size of per-column SAI components, in bytes
      */
     public long sizeOfPerColumnComponents()
     {
         return sstableContext.indexDescriptor.sizeOnDiskOfPerIndexComponents(indexContext);
+    }
+
+    /**
+     * @return total size of per-sstable SAI components, in bytes
+     */
+    public long sizeOfPerSSTableComponents()
+    {
+        return sstableContext.indexDescriptor.sizeOnDiskOfPerSSTableComponents();
     }
 
     /**
@@ -269,5 +277,4 @@ public class SSTableIndex implements SegmentOrdering
     {
         return PrimaryKeyMapIterator.create(sstableContext, keyRange);
     }
-
 }

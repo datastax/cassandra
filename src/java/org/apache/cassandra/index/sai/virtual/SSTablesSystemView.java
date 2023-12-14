@@ -124,7 +124,7 @@ public class SSTablesSystemView extends AbstractVirtualTable
                                    .column(MAX_ROW_ID, sstableIndex.maxSSTableRowId())
                                    .column(START_TOKEN, tokenFactory.toString(bounds.left))
                                    .column(END_TOKEN, tokenFactory.toString(bounds.right))
-                                   .column(PER_TABLE_DISK_SIZE, sstableIndex.getSSTableContext().diskUsage())
+                                   .column(PER_TABLE_DISK_SIZE, sstableIndex.sizeOfPerSSTableComponents())
                                    .column(PER_COLUMN_DISK_SIZE, sstableIndex.sizeOfPerColumnComponents());
                         }
                     }

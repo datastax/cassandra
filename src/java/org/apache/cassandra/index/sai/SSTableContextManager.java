@@ -119,7 +119,9 @@ public class SSTableContextManager
      */
     long diskUsage()
     {
-        return sstableContexts.values().stream().mapToLong(SSTableContext::diskUsage).sum();
+        return sstableContexts.values().stream()
+                              .mapToLong(ssTableContext -> ssTableContext.indexDescriptor.sizeOnDiskOfPerSSTableComponents())
+                              .sum();
     }
 
     Set<SSTableReader> sstables()

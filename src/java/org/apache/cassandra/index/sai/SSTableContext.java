@@ -23,7 +23,6 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -120,20 +119,6 @@ public class SSTableContext extends SharedCloseableImpl
     public PrimaryKeyMap.Factory primaryKeyMapFactory()
     {
         return primaryKeyMapFactory;
-    }
-
-    /**
-     * @return disk usage of per-sstable index files
-     */
-    public long diskUsage()
-    {
-        return indexDescriptor.perSSTableVersion.onDiskFormat()
-                                                .perSSTableComponents()
-                                                .stream()
-                                                .map(indexDescriptor::fileFor)
-                                                .filter(File::exists)
-                                                .mapToLong(File::length)
-                                                .sum();
     }
 
     /**
