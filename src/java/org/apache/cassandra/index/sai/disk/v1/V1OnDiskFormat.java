@@ -141,22 +141,6 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public boolean isPerSSTableBuildComplete(IndexDescriptor indexDescriptor)
-    {
-        // TODO this is fragile, it can return true for any descriptor version as long as the
-        // completion marker is there.  Ideally we would check to see if the expected
-        // perIndexComponents are there as well.
-        return indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER);
-    }
-
-    @Override
-    public boolean isPerIndexBuildComplete(IndexDescriptor indexDescriptor, IndexContext indexContext)
-    {
-        return indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER) &&
-               indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext);
-    }
-
-    @Override
     public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable) throws IOException
     {
         return new PartitionAwarePrimaryKeyMap.PartitionAwarePrimaryKeyMapFactory(indexDescriptor, sstable);

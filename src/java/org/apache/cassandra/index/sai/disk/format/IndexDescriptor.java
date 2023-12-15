@@ -152,12 +152,8 @@ public class IndexDescriptor
                                                                   sstable.descriptor,
                                                                   sstable.metadata().partitioner,
                                                                   sstable.metadata().comparator);
-
-            if (version.onDiskFormat().isPerSSTableBuildComplete(indexDescriptor))
-            {
-                indexDescriptor.registerPerSSTableComponents();
+            if (indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER))
                 return indexDescriptor;
-            }
         }
         return new IndexDescriptor(Version.LATEST,
                                    sstable.descriptor,
@@ -255,14 +251,24 @@ public class IndexDescriptor
         return Version.LATEST.onDiskFormat().newPerIndexWriter(index, this, tracker, rowMapping);
     }
 
+    /**
+     * @return true if the per-sstable index components have been built and are complete
+     */
     public boolean isPerSSTableBuildComplete()
     {
-        return perIndexVersions.get(IndexIdentifier.SSTABLE).onDiskFormat().isPerSSTableBuildComplete(this);
+        return hasComponent(IndexComponent.GROUP_COMPLETION_MARKER);
     }
 
+    /**
+     * Returns true if the per-column index components have been built and are valid.
+     *
+     * @param indexContext The {@link IndexContext} for the index
+     * @return true if the per-column index components have been built and are complete
+     */
     public boolean isPerIndexBuildComplete(IndexContext indexContext)
     {
-        return getIndexVersion(indexContext).onDiskFormat().isPerIndexBuildComplete(this, indexContext);
+        return hasComponent(IndexComponent.GROUP_COMPLETION_MARKER) &&
+               hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext);
     }
 
     public boolean isSSTableEmpty()
