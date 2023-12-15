@@ -45,6 +45,8 @@ public class IndexIdentifier
 
         public IndexIdentifier get(IndexContext indexContext)
         {
+            if (indexContext == null)
+                return SSTABLE;
             return get(indexContext.getIndexName());
         }
     }

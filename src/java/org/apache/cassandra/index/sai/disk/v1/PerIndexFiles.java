@@ -48,18 +48,7 @@ public class PerIndexFiles implements Closeable
         this.indexDescriptor = indexDescriptor;
         this.indexContext = indexContext;
 
-        // FIXME we only have one IndexDescriptor + Version per sstable, so this is a hack
-        // to support indexes at different versions.  Vectors are the only types impacted by multiple versions so far.
-        var toOpen = new HashSet<IndexComponent>();
-        if (indexContext.isVector())
-        {
-            toOpen.addAll(V2OnDiskFormat.VECTOR_COMPONENTS_V2);
-            toOpen.addAll(V3OnDiskFormat.VECTOR_COMPONENTS_V3);
-        }
-        else
-        {
-            toOpen.addAll(indexDescriptor.getIndexVersion(indexContext).onDiskFormat().perIndexComponents(indexContext));
-        }
+        var toOpen = new HashSet<>(indexDescriptor.getIndexVersion(indexContext).onDiskFormat().perIndexComponents(indexContext));
         toOpen.remove(IndexComponent.META);
         toOpen.remove(IndexComponent.COLUMN_COMPLETION_MARKER);
 

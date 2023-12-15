@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
@@ -29,7 +31,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import com.google.common.io.Files;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -146,15 +147,16 @@ public class IndexDescriptor
 
     public static IndexDescriptor createFrom(SSTableReader sstable)
     {
+        // see if we have a completion component on disk, and if so use that version
         for (Version version : Version.ALL)
         {
-            IndexDescriptor indexDescriptor = new IndexDescriptor(version,
-                                                                  sstable.descriptor,
-                                                                  sstable.metadata().partitioner,
-                                                                  sstable.metadata().comparator);
-            if (indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER))
-                return indexDescriptor;
+            if (componentExistsOnDisk(version, sstable.descriptor, IndexComponent.GROUP_COMPLETION_MARKER, null))
+                return new IndexDescriptor(version,
+                                           sstable.descriptor,
+                                           sstable.metadata().partitioner,
+                                           sstable.metadata().comparator);
         }
+        // we always want a non-null IndexDescriptor, even if it's empty
         return new IndexDescriptor(Version.LATEST,
                                    sstable.descriptor,
                                    sstable.metadata().partitioner,
@@ -186,9 +188,26 @@ public class IndexDescriptor
 
     public Version getIndexVersion(IndexContext indexContext)
     {
-        // FIXME per-index versions are not wired in yet
-//        return getIndexVersion(indexIdentifierProvider.get(indexContext));
-        return getIndexVersion(IndexIdentifier.SSTABLE);
+        return perIndexVersions.computeIfAbsent(indexIdentifierProvider.get(indexContext), __ ->
+        {
+            for (Version version : Version.ALL)
+            {
+                if (componentExistsOnDisk(version, descriptor, IndexComponent.GROUP_COMPLETION_MARKER, indexContext))
+                    return version;
+            }
+            // this is called by flush while creating new index files, as well as loading files that already exist
+            return Version.LATEST;
+        });
+    }
+
+    /**
+     * Returns true if the given component exists on disk for the given index.
+     * If indexContext is null, the component is assumed to be a per-sstable component.
+     */
+    private static boolean componentExistsOnDisk(Version version, Descriptor descriptor, IndexComponent indexComponent, IndexContext indexContext)
+    {
+        var file = fileFor(descriptor, version, indexComponent, indexContext);
+        return file.exists();
     }
 
     public Version getIndexVersion(IndexIdentifier id)
@@ -377,13 +396,13 @@ public class IndexDescriptor
 
     public void createComponentOnDisk(IndexComponent component) throws IOException
     {
-        Files.touch(fileFor(component).toJavaIOFile());
+        com.google.common.io.Files.touch(fileFor(component).toJavaIOFile());
         registerPerSSTableComponent(component);
     }
 
     public void createComponentOnDisk(IndexComponent component, IndexContext indexContext) throws IOException
     {
-        Files.touch(fileFor(component, indexContext).toJavaIOFile());
+        com.google.common.io.Files.touch(fileFor(component, indexContext).toJavaIOFile());
         registerPerIndexComponent(component, indexContext.getIndexName());
     }
 
@@ -546,6 +565,13 @@ public class IndexDescriptor
     private File createFile(IndexComponent component, IndexContext indexContext)
     {
         Component customComponent = new Component(Component.Type.CUSTOM, componentName(component, indexContext));
+        return descriptor.fileFor(customComponent);
+    }
+
+    public static File fileFor(Descriptor descriptor, Version version, IndexComponent component, IndexContext indexContext)
+    {
+        var componentFileName = version.fileNameFormatter().format(component, indexContext);
+        var customComponent = new Component(Component.Type.CUSTOM, componentFileName);
         return descriptor.fileFor(customComponent);
     }
 
