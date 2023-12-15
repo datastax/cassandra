@@ -20,8 +20,6 @@ package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
@@ -163,36 +161,36 @@ public class IndexDescriptor
                                    sstable.metadata().comparator);
     }
 
-    public boolean hasComponent(IndexComponent indexComponent)
+    public boolean hasComponent(IndexComponent component)
     {
         registerPerSSTableComponents();
-        return perIndexComponents.get(IndexIdentifier.SSTABLE).contains(indexComponent);
+        return perIndexComponents.get(IndexIdentifier.SSTABLE).contains(component);
     }
 
-    public boolean hasComponent(IndexComponent indexComponent, IndexContext indexContext)
+    public boolean hasComponent(IndexComponent component, IndexContext context)
     {
-        registerPerIndexComponents(indexContext);
-        var components = perIndexComponents.get(indexIdentifierProvider.get(indexContext));
-        return components != null && components.contains(indexComponent);
+        registerPerIndexComponents(context);
+        var components = perIndexComponents.get(indexIdentifierProvider.get(context));
+        return components != null && components.contains(component);
     }
 
-    public String componentName(IndexComponent indexComponent)
+    public String componentName(IndexComponent component)
     {
-        return perIndexVersions.get(IndexIdentifier.SSTABLE).fileNameFormatter().format(indexComponent, null);
+        return perIndexVersions.get(IndexIdentifier.SSTABLE).fileNameFormatter().format(component, null);
     }
 
-    public String componentName(IndexComponent indexComponent, IndexContext indexContext)
+    public String componentName(IndexComponent component, IndexContext context)
     {
-        return getIndexVersion(indexContext).fileNameFormatter().format(indexComponent, indexContext);
+        return getIndexVersion(context).fileNameFormatter().format(component, context);
     }
 
-    public Version getIndexVersion(IndexContext indexContext)
+    public Version getIndexVersion(IndexContext context)
     {
-        return perIndexVersions.computeIfAbsent(indexIdentifierProvider.get(indexContext), __ ->
+        return perIndexVersions.computeIfAbsent(indexIdentifierProvider.get(context), __ ->
         {
             for (Version version : Version.ALL)
             {
-                if (componentExistsOnDisk(version, descriptor, IndexComponent.GROUP_COMPLETION_MARKER, indexContext))
+                if (componentExistsOnDisk(version, descriptor, IndexComponent.GROUP_COMPLETION_MARKER, context))
                     return version;
             }
             // this is called by flush while creating new index files, as well as loading files that already exist
@@ -202,11 +200,11 @@ public class IndexDescriptor
 
     /**
      * Returns true if the given component exists on disk for the given index.
-     * If indexContext is null, the component is assumed to be a per-sstable component.
+     * If context is null, the component is assumed to be a per-sstable component.
      */
-    private static boolean componentExistsOnDisk(Version version, Descriptor descriptor, IndexComponent indexComponent, IndexContext indexContext)
+    private static boolean componentExistsOnDisk(Version version, Descriptor descriptor, IndexComponent component, IndexContext context)
     {
-        var file = fileFor(descriptor, version, indexComponent, indexContext);
+        var file = fileFor(descriptor, version, component, context);
         return file.exists();
     }
 
@@ -221,10 +219,10 @@ public class IndexDescriptor
         return onDiskPerIndexFileMap.computeIfAbsent(ac, __ -> createFile(component, null));
     }
 
-    public File fileFor(IndexComponent component, IndexContext indexContext)
+    public File fileFor(IndexComponent component, IndexContext context)
     {
-        return onDiskPerIndexFileMap.computeIfAbsent(new AttachedIndexComponent(component, indexContext),
-                                                     p -> createFile(component, indexContext));
+        return onDiskPerIndexFileMap.computeIfAbsent(new AttachedIndexComponent(component, context),
+                                                     p -> createFile(component, context));
     }
 
     public Set<Component> getLivePerSSTableComponents()
@@ -235,14 +233,14 @@ public class IndexDescriptor
                                  .collect(Collectors.toSet());
     }
 
-    public Set<Component> getLivePerIndexComponents(IndexContext indexContext)
+    public Set<Component> getLivePerIndexComponents(IndexContext context)
     {
-        registerPerIndexComponents(indexContext);
-        var components = perIndexComponents.get(indexIdentifierProvider.get(indexContext));
+        registerPerIndexComponents(context);
+        var components = perIndexComponents.get(indexIdentifierProvider.get(context));
         return components == null
                ? Collections.emptySet()
                : components.stream()
-                 .map(c -> new Component(Component.Type.CUSTOM, componentName(c, indexContext)))
+                 .map(c -> new Component(Component.Type.CUSTOM, componentName(c, context)))
                  .collect(Collectors.toSet());
     }
 
@@ -251,11 +249,11 @@ public class IndexDescriptor
         return perIndexVersions.get(IndexIdentifier.SSTABLE).onDiskFormat().newPrimaryKeyMapFactory(this, sstable);
     }
 
-    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexContext indexContext)
+    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexContext context)
     {
-        return isIndexEmpty(indexContext)
+        return isIndexEmpty(context)
                ? new EmptyIndex()
-               : getIndexVersion(indexContext).onDiskFormat().newSearchableIndex(sstableContext, indexContext);
+               : getIndexVersion(context).onDiskFormat().newSearchableIndex(sstableContext, context);
     }
 
     public PerSSTableWriter newPerSSTableWriter() throws IOException
@@ -281,13 +279,13 @@ public class IndexDescriptor
     /**
      * Returns true if the per-column index components have been built and are valid.
      *
-     * @param indexContext The {@link IndexContext} for the index
+     * @param context The {@link IndexContext} for the index
      * @return true if the per-column index components have been built and are complete
      */
-    public boolean isPerIndexBuildComplete(IndexContext indexContext)
+    public boolean isPerIndexBuildComplete(IndexContext context)
     {
         return hasComponent(IndexComponent.GROUP_COMPLETION_MARKER) &&
-               hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext);
+               hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, context);
     }
 
     public boolean isSSTableEmpty()
@@ -295,9 +293,9 @@ public class IndexDescriptor
         return isPerSSTableBuildComplete() && numberOfComponents() == 1;
     }
 
-    public boolean isIndexEmpty(IndexContext indexContext)
+    public boolean isIndexEmpty(IndexContext context)
     {
-        return isPerIndexBuildComplete(indexContext) && numberOfComponents(indexContext) == 1;
+        return isPerIndexBuildComplete(context) && numberOfComponents(context) == 1;
     }
 
     public long sizeOnDiskOfPerSSTableComponents()
@@ -311,15 +309,15 @@ public class IndexDescriptor
                                 .sum();
     }
 
-    public long sizeOnDiskOfPerIndexComponents(IndexContext indexContext)
+    public long sizeOnDiskOfPerIndexComponents(IndexContext context)
     {
-        registerPerIndexComponents(indexContext);
-        var components = perIndexComponents.get(indexIdentifierProvider.get(indexContext));
+        registerPerIndexComponents(context);
+        var components = perIndexComponents.get(indexIdentifierProvider.get(context));
         if (components == null)
             return 0;
 
         return components.stream()
-                         .map(c -> new AttachedIndexComponent(c, indexContext))
+                         .map(c -> new AttachedIndexComponent(c, context))
                          .map(onDiskPerIndexFileMap::get)
                          .filter(java.util.Objects::nonNull)
                          .filter(File::exists)
@@ -328,15 +326,15 @@ public class IndexDescriptor
     }
 
     @VisibleForTesting
-    public long sizeOnDiskOfPerIndexComponent(IndexComponent indexComponent, IndexContext indexContext)
+    public long sizeOnDiskOfPerIndexComponent(IndexComponent component, IndexContext context)
     {
-        var components = perIndexComponents.get(indexIdentifierProvider.get(indexContext));
+        var components = perIndexComponents.get(indexIdentifierProvider.get(context));
         if (components == null)
             return 0;
 
         return components.stream()
-                         .filter(c -> c == indexComponent)
-                         .map(c -> new AttachedIndexComponent(c, indexContext))
+                         .filter(c -> c == component)
+                         .map(c -> new AttachedIndexComponent(c, context))
                          .map(onDiskPerIndexFileMap::get)
                          .filter(java.util.Objects::nonNull)
                          .filter(File::exists)
@@ -344,17 +342,17 @@ public class IndexDescriptor
                          .sum();
     }
 
-    public boolean validatePerIndexComponents(IndexContext indexContext)
+    public boolean validatePerIndexComponents(IndexContext context)
     {
-        logger.debug("validatePerIndexComponents called for " + indexContext.getIndexName());
-        registerPerIndexComponents(indexContext);
-        return getIndexVersion(indexContext).onDiskFormat().validatePerIndexComponents(this, indexContext, false);
+        logger.debug("validatePerIndexComponents called for " + context.getIndexName());
+        registerPerIndexComponents(context);
+        return getIndexVersion(context).onDiskFormat().validatePerIndexComponents(this, context, false);
     }
 
-    public boolean validatePerIndexComponentsChecksum(IndexContext indexContext)
+    public boolean validatePerIndexComponentsChecksum(IndexContext context)
     {
-        registerPerIndexComponents(indexContext);
-        return getIndexVersion(indexContext).onDiskFormat().validatePerIndexComponents(this, indexContext, true);
+        registerPerIndexComponents(context);
+        return getIndexVersion(context).onDiskFormat().validatePerIndexComponents(this, context, true);
     }
 
     public boolean validatePerSSTableComponents()
@@ -380,15 +378,15 @@ public class IndexDescriptor
         perSSTableComponents.clear();
     }
 
-    public void deleteColumnIndex(IndexContext indexContext)
+    public void deleteColumnIndex(IndexContext context)
     {
-        registerPerIndexComponents(indexContext);
-        var components = perIndexComponents.get(indexIdentifierProvider.get(indexContext));
+        registerPerIndexComponents(context);
+        var components = perIndexComponents.get(indexIdentifierProvider.get(context));
         if (components == null)
             return;
 
         components.stream()
-                  .map(c -> new AttachedIndexComponent(c, indexContext))
+                  .map(c -> new AttachedIndexComponent(c, context))
                   .map(onDiskPerIndexFileMap::remove)
                   .filter(java.util.Objects::nonNull)
                   .forEach(this::deleteComponent);
@@ -400,15 +398,15 @@ public class IndexDescriptor
         registerPerSSTableComponent(component);
     }
 
-    public void createComponentOnDisk(IndexComponent component, IndexContext indexContext) throws IOException
+    public void createComponentOnDisk(IndexComponent component, IndexContext context) throws IOException
     {
-        com.google.common.io.Files.touch(fileFor(component, indexContext).toJavaIOFile());
-        registerPerIndexComponent(component, indexContext.getIndexName());
+        com.google.common.io.Files.touch(fileFor(component, context).toJavaIOFile());
+        registerPerIndexComponent(component, context.getIndexName());
     }
 
-    public IndexInput openPerSSTableInput(IndexComponent indexComponent)
+    public IndexInput openPerSSTableInput(IndexComponent component)
     {
-        final File file = fileFor(indexComponent);
+        final File file = fileFor(component);
         if (logger.isTraceEnabled())
             logger.trace(logMessage("Opening blocking index input for file {} ({})"),
                          file,
@@ -417,9 +415,9 @@ public class IndexDescriptor
         return IndexFileUtils.instance.openBlockingInput(file);
     }
 
-    public IndexInput openPerIndexInput(IndexComponent indexComponent, IndexContext indexContext)
+    public IndexInput openPerIndexInput(IndexComponent component, IndexContext context)
     {
-        final File file = fileFor(indexComponent, indexContext);
+        final File file = fileFor(component, context);
         if (logger.isTraceEnabled())
             logger.trace(logMessage("Opening blocking index input for file {} ({})"),
                          file,
@@ -449,17 +447,17 @@ public class IndexDescriptor
         return writer;
     }
 
-    public IndexOutputWriter openPerIndexOutput(IndexComponent indexComponent, IndexContext indexContext) throws IOException
+    public IndexOutputWriter openPerIndexOutput(IndexComponent component, IndexContext context) throws IOException
     {
-        return openPerIndexOutput(indexComponent, indexContext, false);
+        return openPerIndexOutput(component, context, false);
     }
 
-    public IndexOutputWriter openPerIndexOutput(IndexComponent component, IndexContext indexContext, boolean append) throws IOException
+    public IndexOutputWriter openPerIndexOutput(IndexComponent component, IndexContext context, boolean append) throws IOException
     {
-        final File file = fileFor(component, indexContext);
+        final File file = fileFor(component, context);
 
         if (logger.isTraceEnabled())
-            logger.trace(indexContext.logMessage("Creating sstable attached index output for component {} on file {}..."),
+            logger.trace(context.logMessage("Creating sstable attached index output for component {} on file {}..."),
                          component,
                          file);
 
@@ -470,9 +468,9 @@ public class IndexDescriptor
         return writer;
     }
 
-    public FileHandle createPerSSTableFileHandle(IndexComponent indexComponent)
+    public FileHandle createPerSSTableFileHandle(IndexComponent component)
     {
-        final File file = fileFor(indexComponent);
+        final File file = fileFor(component);
 
         if (logger.isTraceEnabled())
         {
@@ -486,13 +484,13 @@ public class IndexDescriptor
         }
     }
 
-    public FileHandle createPerIndexFileHandle(IndexComponent indexComponent, IndexContext indexContext)
+    public FileHandle createPerIndexFileHandle(IndexComponent component, IndexContext context)
     {
-        final File file = fileFor(indexComponent, indexContext);
+        final File file = fileFor(component, context);
 
         if (logger.isTraceEnabled())
         {
-            logger.trace(indexContext.logMessage("Opening file handle for {} ({})"),
+            logger.trace(context.logMessage("Opening file handle for {} ({})"),
                          file, FBUtilities.prettyPrintMemory(file.length()));
         }
 
@@ -541,19 +539,19 @@ public class IndexDescriptor
                         .forEach(perIndexComponents.get(IndexIdentifier.SSTABLE)::add);
     }
 
-    private void registerPerIndexComponents(IndexContext indexContext)
+    private void registerPerIndexComponents(IndexContext context)
     {
-        Set<IndexComponent> indexComponents = perIndexComponents.computeIfAbsent(indexIdentifierProvider.get(indexContext), k -> Sets.newHashSet());
-        getIndexVersion(indexContext).onDiskFormat().perIndexComponents(indexContext)
+        Set<IndexComponent> components = perIndexComponents.computeIfAbsent(indexIdentifierProvider.get(context), k -> Sets.newHashSet());
+        getIndexVersion(context).onDiskFormat().perIndexComponents(context)
                                      .stream()
-                                     .filter(c -> !indexComponents.contains(c) && fileFor(c, indexContext).exists())
-                                     .forEach(indexComponents::add);
+                                     .filter(c -> !components.contains(c) && fileFor(c, context).exists())
+                                     .forEach(components::add);
     }
 
-    private int numberOfComponents(IndexContext indexContext)
+    private int numberOfComponents(IndexContext context)
     {
-        return perIndexComponents.containsKey(indexIdentifierProvider.get(indexContext))
-               ? perIndexComponents.get(indexIdentifierProvider.get(indexContext)).size()
+        return perIndexComponents.containsKey(indexIdentifierProvider.get(context))
+               ? perIndexComponents.get(indexIdentifierProvider.get(context)).size()
                : 0;
     }
 
@@ -562,15 +560,15 @@ public class IndexDescriptor
         return perIndexComponents.get(IndexIdentifier.SSTABLE).size();
     }
 
-    private File createFile(IndexComponent component, IndexContext indexContext)
+    private File createFile(IndexComponent component, IndexContext context)
     {
-        Component customComponent = new Component(Component.Type.CUSTOM, componentName(component, indexContext));
+        Component customComponent = new Component(Component.Type.CUSTOM, componentName(component, context));
         return descriptor.fileFor(customComponent);
     }
 
-    public static File fileFor(Descriptor descriptor, Version version, IndexComponent component, IndexContext indexContext)
+    public static File fileFor(Descriptor descriptor, Version version, IndexComponent component, IndexContext context)
     {
-        var componentFileName = version.fileNameFormatter().format(component, indexContext);
+        var componentFileName = version.fileNameFormatter().format(component, context);
         var customComponent = new Component(Component.Type.CUSTOM, componentFileName);
         return descriptor.fileFor(customComponent);
     }
@@ -588,13 +586,13 @@ public class IndexDescriptor
         }
     }
 
-    private void registerPerSSTableComponent(IndexComponent indexComponent)
+    private void registerPerSSTableComponent(IndexComponent component)
     {
-        perIndexComponents.get(IndexIdentifier.SSTABLE).add(indexComponent);
+        perIndexComponents.get(IndexIdentifier.SSTABLE).add(component);
     }
 
-    private void registerPerIndexComponent(IndexComponent indexComponent, String index)
+    private void registerPerIndexComponent(IndexComponent component, String index)
     {
-        perIndexComponents.computeIfAbsent(indexIdentifierProvider.get(index), k -> Sets.newHashSet()).add(indexComponent);
+        perIndexComponents.computeIfAbsent(indexIdentifierProvider.get(index), k -> Sets.newHashSet()).add(component);
     }
 }
