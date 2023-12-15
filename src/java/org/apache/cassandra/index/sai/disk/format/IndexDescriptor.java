@@ -174,12 +174,12 @@ public class IndexDescriptor
         return components != null && components.contains(component);
     }
 
-    public String componentName(IndexComponent component)
+    public String componentFileName(IndexComponent component)
     {
         return perIndexVersions.get(IndexIdentifier.SSTABLE).fileNameFormatter().format(component, null);
     }
 
-    public String componentName(IndexComponent component, IndexContext context)
+    public String componentFileName(IndexComponent component, IndexContext context)
     {
         return getIndexVersion(context).fileNameFormatter().format(component, context);
     }
@@ -229,7 +229,7 @@ public class IndexDescriptor
     {
         registerPerSSTableComponents();
         return perIndexComponents.get(IndexIdentifier.SSTABLE).stream()
-                                 .map(c -> new Component(Component.Type.CUSTOM, componentName(c)))
+                                 .map(c -> new Component(Component.Type.CUSTOM, componentFileName(c)))
                                  .collect(Collectors.toSet());
     }
 
@@ -240,7 +240,7 @@ public class IndexDescriptor
         return components == null
                ? Collections.emptySet()
                : components.stream()
-                 .map(c -> new Component(Component.Type.CUSTOM, componentName(c, context)))
+                 .map(c -> new Component(Component.Type.CUSTOM, componentFileName(c, context)))
                  .collect(Collectors.toSet());
     }
 
@@ -562,7 +562,7 @@ public class IndexDescriptor
 
     private File createFile(IndexComponent component, IndexContext context)
     {
-        Component customComponent = new Component(Component.Type.CUSTOM, componentName(component, context));
+        Component customComponent = new Component(Component.Type.CUSTOM, componentFileName(component, context));
         return descriptor.fileFor(customComponent);
     }
 

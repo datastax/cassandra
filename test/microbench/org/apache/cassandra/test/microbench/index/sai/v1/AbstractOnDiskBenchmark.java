@@ -192,7 +192,7 @@ public abstract class AbstractOnDiskBenchmark
     protected final LongArray openRowIdToTokenReader() throws IOException
     {
         MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES)));
+        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES)));
         return new BlockPackedReader(token, tokensMeta).open();
     }
 }
