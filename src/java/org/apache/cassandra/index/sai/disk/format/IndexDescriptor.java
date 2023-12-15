@@ -139,12 +139,12 @@ public class IndexDescriptor
         perIndexComponents.put(IndexIdentifier.SSTABLE, Sets.newHashSet());
     }
 
-    public static IndexDescriptor create(Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
+    public static IndexDescriptor createNew(Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
     {
         return new IndexDescriptor(Version.LATEST, descriptor, partitioner, clusteringComparator);
     }
 
-    public static IndexDescriptor create(SSTableReader sstable)
+    public static IndexDescriptor createFrom(SSTableReader sstable)
     {
         for (Version version : Version.ALL)
         {

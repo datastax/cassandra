@@ -68,7 +68,7 @@ public class SSTableContextManager
                 continue;
             }
 
-            IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
+            IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
 
             if (!indexDescriptor.isPerSSTableBuildComplete())
             {

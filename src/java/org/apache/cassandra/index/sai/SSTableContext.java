@@ -66,7 +66,7 @@ public class SSTableContext extends SharedCloseableImpl
         Ref<? extends SSTableReader> sstableRef = null;
         PrimaryKeyMap.Factory primaryKeyMapFactory = null;
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
+        IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
         try
         {
             sstableRef = sstable.tryRef();
