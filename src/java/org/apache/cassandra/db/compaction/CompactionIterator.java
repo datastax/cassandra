@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -116,8 +117,13 @@ public class CompactionIterator implements UnfilteredPartitionIterator
     private final UnfilteredPartitionIterator compacted;
     private final TableOperation op;
 
+    public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, long nowInSec, TimeUUID compactionId)
+    {
+        this(type, scanners, controller, nowInSec, compactionId, null);
+    }   
+    
     @SuppressWarnings("resource") // We make sure to close mergedIterator in close() and CompactionIterator is itself an AutoCloseable
-    public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, int nowInSec, UUID compactionId)
+    public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, long nowInSec, TimeUUID compactionId, TopPartitionTracker.Collector topPartitionCollector)
     {
         this.controller = controller;
         this.type = type;
@@ -185,7 +191,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         return controller.cfs.metadata();
     }
 
-    long bytesRead()
+    public long bytesRead()
     {
         long[] bytesReadByLevel = this.bytesReadByLevel;
         return Arrays.stream(bytesReadByLevel).reduce(Long::sum).orElse(0L);
@@ -349,11 +355,6 @@ public class CompactionIterator implements UnfilteredPartitionIterator
                 bytesReadByLevel[level] += n;
         }
         this.bytesReadByLevel = bytesReadByLevel;
-    }
-
-    public long getBytesRead()
-    {
-        return bytesRead;
     }
 
     public boolean hasNext()

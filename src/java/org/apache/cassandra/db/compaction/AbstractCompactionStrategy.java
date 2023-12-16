@@ -48,21 +48,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
-import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.index.Index;
-import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.SSTableMultiWriter;
-import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.schema.CompactionParams;
@@ -223,7 +215,7 @@ public abstract class AbstractCompactionStrategy
 
         @Override
         @SuppressWarnings("resource")
-        public AbstractCompactionTask getNextBackgroundTask(int gcBefore)
+        public AbstractCompactionTask getNextBackgroundTask(long gcBefore)
         {
             CompactionPick previous = null;
             while (true)
@@ -261,9 +253,9 @@ public abstract class AbstractCompactionStrategy
         /**
          * Select the next compaction to perform. This method is typically synchronized.
          */
-        protected abstract CompactionAggregate getNextBackgroundAggregate(int gcBefore);
+        protected abstract CompactionAggregate getNextBackgroundAggregate(long gcBefore);
 
-        protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, CompactionAggregate compaction)
+        protected AbstractCompactionTask createCompactionTask(final long gcBefore, LifecycleTransaction txn, CompactionAggregate compaction)
         {
             return CompactionTask.forCompaction(this, txn, gcBefore);
         }
@@ -288,7 +280,7 @@ public abstract class AbstractCompactionStrategy
 
         @Override
         @SuppressWarnings("resource")
-        public AbstractCompactionTask getNextBackgroundTask(int gcBefore)
+        public AbstractCompactionTask getNextBackgroundTask(long gcBefore)
         {
             List<SSTableReader> previousCandidate = null;
             while (true)
@@ -324,7 +316,7 @@ public abstract class AbstractCompactionStrategy
         /**
          * Select the next tables to compact. This method is typically synchronized.
          */
-        protected abstract List<SSTableReader> getNextBackgroundSSTables(final int gcBefore);
+        protected abstract List<SSTableReader> getNextBackgroundSSTables(final long gcBefore);
     }
 
     /**
@@ -336,7 +328,7 @@ public abstract class AbstractCompactionStrategy
      * Is responsible for marking its sstables as compaction-pending.
      */
     @SuppressWarnings("resource")
-    public synchronized Collection<AbstractCompactionTask> getMaximalTask(int gcBefore, boolean splitOutput)
+    public synchronized Collection<AbstractCompactionTask> getMaximalTask(long gcBefore, boolean splitOutput)
     {
         removeDeadSSTables();
 
@@ -359,7 +351,7 @@ public abstract class AbstractCompactionStrategy
      * Is responsible for marking its sstables as compaction-pending.
      */
     @SuppressWarnings("resource")
-    public synchronized AbstractCompactionTask getUserDefinedTask(Collection<SSTableReader> sstables, int gcBefore)
+    public synchronized AbstractCompactionTask getUserDefinedTask(Collection<SSTableReader> sstables, long gcBefore)
     {
         assert !sstables.isEmpty(); // checked for by CM.submitUserDefined
 
@@ -376,7 +368,7 @@ public abstract class AbstractCompactionStrategy
     /**
      * Create a compaction task for a maximal, user defined or background compaction without aggregates (legacy strategies).
      * Background compactions for strategies that extend {@link WithAggregates} will use
-     * {@link WithAggregates#createCompactionTask(int, LifecycleTransaction, boolean, boolean)} instead.
+     * {@link WithAggregates#createCompactionTask(long, LifecycleTransaction, boolean, boolean)} instead.
      *
      * @param gcBefore tombstone threshold, older tombstones can be discarded
      * @param txn the transaction containing the files to be compacted
@@ -386,7 +378,7 @@ public abstract class AbstractCompactionStrategy
      *
      * @return a compaction task, see {@link AbstractCompactionTask} and sub-classes
      */
-    protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
+    protected AbstractCompactionTask createCompactionTask(final long gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
     {
         return CompactionTask.forCompaction(this, txn, gcBefore);
     }
@@ -400,7 +392,7 @@ public abstract class AbstractCompactionStrategy
      *
      * @return a compaction task, see {@link AbstractCompactionTask} and sub-classes
      */
-    public AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, final int gcBefore, long maxSSTableBytes)
+    public AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, final long gcBefore, long maxSSTableBytes)
     {
         return CompactionTask.forCompaction(this, txn, gcBefore);
     }
@@ -648,7 +640,7 @@ public abstract class AbstractCompactionStrategy
      * Select a table for tombstone-removing compaction from the given set. Returns null if no table is suitable.
      */
     @Nullable
-    CompactionAggregate makeTombstoneCompaction(int gcBefore,
+    CompactionAggregate makeTombstoneCompaction(long gcBefore,
                                                 Iterable<SSTableReader> candidates,
                                                 Function<Collection<SSTableReader>, SSTableReader> selector)
     {

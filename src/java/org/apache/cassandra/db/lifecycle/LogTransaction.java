@@ -38,11 +38,9 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Runnables;
 
-import com.codahale.metrics.Counter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.codahale.metrics.Counter;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
@@ -132,7 +130,7 @@ class LogTransaction extends Transactional.AbstractTransactional implements Tran
 
     LogTransaction(OperationType opType)
     {
-        this.txnFile = new LogFile(opType, UUIDGen.getTimeUUID());
+        this.txnFile = new LogFile(opType, nextTimeUUID());
         this.lock = new Object();
         this.selfRef = new Ref<>(this, new TransactionTidier(txnFile, lock));
 

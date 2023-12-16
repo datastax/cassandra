@@ -20,17 +20,22 @@ package org.apache.cassandra.db.compaction;
 
 import java.io.Serializable;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.function.Predicate;
 
+import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableSet;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.TimeUUID;
 
 /**
  * This is a base abstract implementing some default methods of {@link TableOperation}.
@@ -125,18 +130,24 @@ public abstract class AbstractTableOperation implements TableOperation
         /**
          * A unique ID for this operation
          */
-        private final UUID operationId;
+        private final TimeUUID operationId;
         /**
          * A set of SSTables participating in this operation
          */
         private final ImmutableSet<SSTableReader> sstables;
+        private final String targetDirectory;
 
-        public OperationProgress(TableMetadata metadata, OperationType operationType, long bytesComplete, long totalBytes, UUID operationId, Collection<SSTableReader> sstables)
+        public OperationProgress(TableMetadata metadata, OperationType operationType, long bytesComplete, long totalBytes, TimeUUID operationId, Collection<SSTableReader> sstables, String targetDirectory)
         {
-            this(metadata, operationType, bytesComplete, totalBytes, Unit.BYTES, operationId, sstables);
+            this(metadata, operationType, bytesComplete, totalBytes, Unit.BYTES, operationId, sstables, targetDirectory);
         }
 
-        public OperationProgress(TableMetadata metadata, OperationType operationType, long completed, long total, Unit unit, UUID operationId, Collection<? extends SSTableReader> sstables)
+        public OperationProgress(TableMetadata metadata, OperationType operationType, long bytesComplete, long totalBytes, TimeUUID operationId, Collection<? extends SSTableReader> sstables)
+        {
+            this(metadata, operationType, bytesComplete, totalBytes, Unit.BYTES, operationId, sstables, null);
+        }
+
+        public OperationProgress(TableMetadata metadata, OperationType operationType, long completed, long total, Unit unit, TimeUUID operationId, Collection<? extends SSTableReader> sstables, String targetDirectory)
         {
             this.operationType = operationType;
             this.completed = completed;
@@ -145,6 +156,7 @@ public abstract class AbstractTableOperation implements TableOperation
             this.unit = unit;
             this.operationId = operationId;
             this.sstables = ImmutableSet.copyOf(sstables);
+            this.targetDirectory = targetDirectory;
         }
 
         /**
@@ -152,12 +164,25 @@ public abstract class AbstractTableOperation implements TableOperation
          */
         public OperationProgress forProgress(long complete, long total)
         {
-            return new OperationProgress(metadata, operationType, complete, total, unit, operationId, sstables);
+            return new OperationProgress(metadata, operationType, complete, total, unit, operationId, sstables, targetDirectory);
         }
 
-        public static OperationProgress withoutSSTables(TableMetadata metadata, OperationType tasktype, long completed, long total, AbstractTableOperation.Unit unit, UUID compactionId)
+        /**
+         * Special operation progress where we always need to cancel the compaction - for example ViewBuilderTask where we don't know
+         * the sstables at construction
+         */
+        public static OperationProgress withoutSSTables(TableMetadata metadata, OperationType tasktype, long completed, long total, AbstractTableOperation.Unit unit, TimeUUID compactionId)
         {
-            return new OperationProgress(metadata, tasktype, completed, total, unit, compactionId, ImmutableSet.of());
+            return withoutSSTables(metadata, tasktype, completed, total, unit, compactionId, null);
+        }
+
+        /**
+         * Special operation progress where we always need to cancel the compaction - for example AutoSavingCache where we don't know
+         * the sstables at construction
+         */
+        public static OperationProgress withoutSSTables(TableMetadata metadata, OperationType tasktype, long completed, long total, AbstractTableOperation.Unit unit, TimeUUID compactionId, String targetDirectory)
+        {
+            return new OperationProgress(metadata, tasktype, completed, total, unit, compactionId, ImmutableSet.of(), targetDirectory);
         }
 
         @Override
@@ -197,7 +222,7 @@ public abstract class AbstractTableOperation implements TableOperation
         }
 
         @Override
-        public UUID operationId()
+        public TimeUUID operationId()
         {
             return operationId;
         }
@@ -212,6 +237,50 @@ public abstract class AbstractTableOperation implements TableOperation
         public Set<SSTableReader> sstables()
         {
             return sstables;
+        }
+
+        /**
+         * Get the directories this compaction could possibly write to.
+         *
+         * @return the directories that we might write to, or empty list if we don't know the metadata
+         * (like for index summary redistribution), or null if we don't have any disk boundaries
+         */
+        public List<File> getTargetDirectories()
+        {
+            if (metadata != null && !metadata.isIndex())
+            {
+                ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(metadata.id);
+                if (cfs != null)
+                    return cfs.getDirectoriesForFiles(sstables);
+            }
+            return Collections.emptyList();
+        }
+
+        public String targetDirectory()
+        {
+            if (targetDirectory == null)
+                return "";
+
+            try
+            {
+                return new File(targetDirectory).canonicalPath();
+            }
+            catch (Throwable t)
+            {
+                throw new RuntimeException("Unable to resolve canonical path for " + targetDirectory);
+            }
+        }
+
+        /**
+         * Note that this estimate is based on the amount of data we have left to read - it assumes input
+         * size == output size for a compaction, which is not really true, but should most often provide a worst case
+         * remaining write size.
+         */
+        public long estimatedRemainingWriteBytes()
+        {
+            if (unit == Unit.BYTES && operationType.writesData)
+                return total() - completed();
+            return 0;
         }
 
         public String toString()
@@ -236,6 +305,8 @@ public abstract class AbstractTableOperation implements TableOperation
             ret.put(OPERATION_TYPE, operationType.toString());
             ret.put(UNIT, unit.toString());
             ret.put(OPERATION_ID, operationId == null ? "" : operationId.toString());
+            ret.put(SSTABLES, Joiner.on(',').join(sstables));
+            ret.put(TARGET_DIRECTORY, targetDirectory());
             return ret;
         }
     }

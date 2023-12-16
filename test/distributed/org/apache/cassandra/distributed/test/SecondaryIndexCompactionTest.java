@@ -25,7 +25,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.distributed.Cluster;
@@ -33,6 +33,7 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.NonThrowingCloseable;
 
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
@@ -55,15 +56,16 @@ public class SecondaryIndexCompactionTest extends TestBaseImpl
                 i.getIndexCfs().forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
                 Set<SSTableReader> idxSSTables = i.getIndexCfs().getLiveSSTables();
                 // emulate ongoing index compaction:
-                CompactionInfo.Holder h = new MockHolder(i.getIndexCfs().metadata(), idxSSTables);
-                CompactionManager.instance.active.beginCompaction(h);
-                CompactionManager.instance.active.estimatedRemainingWriteBytes();
-                CompactionManager.instance.active.finishCompaction(h);
+                AbstractTableOperation h = new MockHolder(i.getIndexCfs().metadata(), idxSSTables);
+                try (NonThrowingCloseable c = CompactionManager.instance.active.onOperationStart(h))
+                {
+                    CompactionManager.instance.active.estimatedRemainingWriteBytes();
+                }
             });
         }
     }
 
-    static class MockHolder extends CompactionInfo.Holder
+    static class MockHolder extends AbstractTableOperation
     {
         private final Set<SSTableReader> sstables;
         private final TableMetadata metadata;
@@ -74,9 +76,9 @@ public class SecondaryIndexCompactionTest extends TestBaseImpl
             this.sstables = sstables;
         }
         @Override
-        public CompactionInfo getCompactionInfo()
+        public OperationProgress getProgress()
         {
-            return new CompactionInfo(metadata, OperationType.COMPACTION, 0, 1000, nextTimeUUID(), sstables);
+            return new OperationProgress(metadata, OperationType.COMPACTION, 0, 1000, nextTimeUUID(), sstables);
         }
 
         @Override

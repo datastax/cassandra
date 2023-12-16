@@ -21,13 +21,16 @@ package org.apache.cassandra.db.compaction;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.NonThrowingCloseable;
 
 public class ActiveOperations implements TableOperationObserver
@@ -56,6 +59,28 @@ public class ActiveOperations implements TableOperationObserver
                 CompactionManager.instance.getMetrics().bytesCompacted.inc(progress.total());
                 CompactionManager.instance.getMetrics().totalCompactionsCompleted.mark();
             };
+    }
+
+    /**
+     * Get the estimated number of bytes remaining to write per sstable directory
+     */
+    public Map<File, Long> estimatedRemainingWriteBytes()
+    {
+        synchronized (operations)
+        {
+            Map<File, Long> writeBytesPerSSTableDir = new HashMap<>();
+            for (TableOperation holder : operations)
+            {
+                AbstractTableOperation.OperationProgress compactionInfo = holder.getProgress();
+                List<File> directories = compactionInfo.getTargetDirectories();
+                if (directories == null || directories.isEmpty())
+                    continue;
+                long remainingWriteBytesPerDataDir = compactionInfo.estimatedRemainingWriteBytes() / directories.size();
+                for (File directory : directories)
+                    writeBytesPerSSTableDir.merge(directory, remainingWriteBytesPerDataDir, Long::sum);
+            }
+            return writeBytesPerSSTableDir;
+        }
     }
 
     /**

@@ -101,7 +101,7 @@ public class CompactionTaskTest
         try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION))
         {
             id = txn.opId();
-            CompactionTask task = new CompactionTask(cfs, txn, 0);
+            CompactionTask task = new CompactionTask(cfs, txn, 0, false);
             task.execute(CompactionManager.instance.active);
         }
 
@@ -185,7 +185,7 @@ public class CompactionTaskTest
         assertEquals(Transactional.AbstractTransactional.State.ABORTED, txn.state());
     }
 
-    private static void mutateRepaired(SSTableReader sstable, long repairedAt, UUID pendingRepair, boolean isTransient) throws IOException
+    private static void mutateRepaired(SSTableReader sstable, long repairedAt, TimeUUID pendingRepair, boolean isTransient) throws IOException
     {
         sstable.descriptor.getMetadataSerializer().mutateRepairMetadata(sstable.descriptor, repairedAt, pendingRepair, isTransient);
         sstable.reloadSSTableMetadata();

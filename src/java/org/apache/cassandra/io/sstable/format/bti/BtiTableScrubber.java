@@ -109,7 +109,7 @@ public class BtiTableScrubber extends SortedTableScrubber<BtiTableReader> implem
         while (!dataFile.isEOF())
         {
             if (scrubInfo.isStopRequested())
-                throw new CompactionInterruptedException(scrubInfo.getCompactionInfo());
+                throw new CompactionInterruptedException(scrubInfo.getProgress());
 
             // position in a data file where the partition starts
             long dataStart = dataFile.getFilePointer();

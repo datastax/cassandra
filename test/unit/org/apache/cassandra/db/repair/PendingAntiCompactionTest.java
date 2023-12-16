@@ -84,7 +84,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.NonThrowingCloseable;
-import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
@@ -469,7 +468,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         {
             try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.ANTICOMPACTION);
                  CompactionController controller = new CompactionController(cfs, sstables, 0);
-                 CompactionIterator ci = new CompactionIterator(OperationType.ANTICOMPACTION, scanners, controller, 0, UUIDGen.getTimeUUID()))
+                 CompactionIterator ci = new CompactionIterator(OperationType.ANTICOMPACTION, scanners, controller, 0, nextTimeUUID()))
             {
                 TableOperation op = ci.getOperation();
                 try (NonThrowingCloseable cls = CompactionManager.instance.active.onOperationStart(op))
@@ -526,7 +525,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         {
             try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.ANTICOMPACTION);
                  CompactionController controller = new CompactionController(cfs, sstables, 0);
-                 CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, scanners, controller, 0, UUID.randomUUID());)
+                 CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, scanners, controller, 0, nextTimeUUID()))
             {
                 TableOperation op = ci.getOperation();
                 try (NonThrowingCloseable cls = CompactionManager.instance.active.onOperationStart(op))
@@ -620,7 +619,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         {
             public OperationProgress getProgress()
             {
-                return new OperationProgress(cfs.metadata(), OperationType.ANTICOMPACTION, 0, 1000, UUID.randomUUID(), compacting);
+                return new OperationProgress(cfs.metadata(), OperationType.ANTICOMPACTION, 0, 1000, nextTimeUUID(), compacting);
             }
 
             public boolean isGlobal()
@@ -656,7 +655,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         {
             public OperationProgress getProgress()
             {
-                return new OperationProgress(cfs.metadata(), OperationType.ANTICOMPACTION, 0, 0, UUID.randomUUID(), cfs.getLiveSSTables());
+                return new OperationProgress(cfs.metadata(), OperationType.ANTICOMPACTION, 0, 0, nextTimeUUID(), cfs.getLiveSSTables());
             }
 
             public boolean isGlobal()
@@ -674,7 +673,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                     return true;
                 }
             };
-            PendingAntiCompaction.AcquisitionCallable acquisitionCallable = new PendingAntiCompaction.AcquisitionCallable(cfs, UUID.randomUUID(), 10, 1, acp);
+            PendingAntiCompaction.AcquisitionCallable acquisitionCallable = new PendingAntiCompaction.AcquisitionCallable(cfs, nextTimeUUID(), 10, 1, acp);
             Future f = es.submit(acquisitionCallable);
             cdl.await();
             assertNotNull(f.get());
@@ -699,7 +698,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         {
             public OperationProgress getProgress()
             {
-                return new OperationProgress(cfs.metadata(), OperationType.ANTICOMPACTION, 0, 0, UUID.randomUUID(), cfs.getLiveSSTables());
+                return new OperationProgress(cfs.metadata(), OperationType.ANTICOMPACTION, 0, 0, nextTimeUUID(), cfs.getLiveSSTables());
             }
 
             public boolean isGlobal()
@@ -717,7 +716,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                     throw new PendingAntiCompaction.SSTableAcquisitionException("blah");
                 }
             };
-            PendingAntiCompaction.AcquisitionCallable acquisitionCallable = new PendingAntiCompaction.AcquisitionCallable(cfs, UUID.randomUUID(), 2, 1000, acp);
+            PendingAntiCompaction.AcquisitionCallable acquisitionCallable = new PendingAntiCompaction.AcquisitionCallable(cfs, nextTimeUUID(), 2, 1000, acp);
             Future fut = es.submit(acquisitionCallable);
             assertNull(fut.get());
         }

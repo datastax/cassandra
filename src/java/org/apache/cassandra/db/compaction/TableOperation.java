@@ -20,13 +20,13 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.function.Predicate;
 
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.TimeUUID;
 
 /**
  * This is a table operation that must be able to report the operation progress and to
@@ -145,6 +145,8 @@ public interface TableOperation
         String OPERATION_TYPE = "operationType";
         String UNIT = "unit";
         String OPERATION_ID = "operationId";
+        String SSTABLES = "sstables";
+        String TARGET_DIRECTORY = "targetDirectory";
 
         /**
          * @return the keyspace name, if the metadata is not null.
@@ -179,7 +181,7 @@ public interface TableOperation
         /**
          * @return a unique identifier for this operation.
          */
-        UUID operationId();
+        TimeUUID operationId();
 
         /**
          * @return the unit to be used for {@link this#completed()} and {@link this#total()}, see {@link Unit}.

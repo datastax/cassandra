@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -43,6 +42,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
+import org.apache.cassandra.utils.TimeUUID;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
@@ -218,7 +218,7 @@ public class CompactionStrategyStatisticsTest
         List<SSTableReader> sstables = new ArrayList<>(numSSTables);
         for (int i = 0; i < numSSTables; i++)
         {
-            DecoratedKey first = new BufferDecoratedKey(boundaries.get(i).increaseSlightly(), emptyBuffer);
+            DecoratedKey first = new BufferDecoratedKey(boundaries.get(i).nextValidToken(), emptyBuffer);
             DecoratedKey last =  new BufferDecoratedKey(boundaries.get(i+1), emptyBuffer);
             sstables.add(mockSSTable(level, bytesOnDisk, timestamp, 0., first, last));
 
@@ -501,7 +501,7 @@ public class CompactionStrategyStatisticsTest
         ssTablesByLevel.get(1).remove(0); // the first one must have been compacted
         Set<SSTableReader> candidates = Sets.union(Sets.newLinkedHashSet(ssTablesByLevel.get(0)), Sets.newLinkedHashSet(ssTablesByLevel.get(1)));
         long totLength = totUncompressedLength(candidates);
-        UUID id = mockCompaction(strategy, sstables, candidates, Collections.emptySet());
+        TimeUUID id = mockCompaction(strategy, sstables, candidates, Collections.emptySet());
 
         verifyStatistics(strategy,
                          1,
@@ -600,7 +600,7 @@ public class CompactionStrategyStatisticsTest
         double totHotness = totHotness(sstablesForCompaction);
 
         Set<SSTableReader> compacting = new HashSet<>();
-        List<Pair<Set<SSTableReader>, UUID>> submittedCompactions = new ArrayList<>(compactions.size());
+        List<Pair<Set<SSTableReader>, TimeUUID>> submittedCompactions = new ArrayList<>(compactions.size());
 
         long totRead = 0;
         long totWritten = 0;
@@ -614,7 +614,7 @@ public class CompactionStrategyStatisticsTest
             int compactingLevel = compactions.size() - i - 1;
             Set<SSTableReader> candidates = Sets.newHashSet(compactions.get(compactingLevel));
 
-            UUID id = mockCompaction(strategy, sstables, candidates, compacting);
+            TimeUUID id = mockCompaction(strategy, sstables, candidates, compacting);
 
             numCompactionsInProgress++;
             numSSTablesCompacting += candidates.size();
@@ -657,7 +657,7 @@ public class CompactionStrategyStatisticsTest
 
         // Terminate the compactions one by one by closing the AutoCloseable and check
         // that the statistics are updated
-        for (Pair<Set<SSTableReader>, UUID> pair : submittedCompactions)
+        for (Pair<Set<SSTableReader>, TimeUUID> pair : submittedCompactions)
         {
             Set<SSTableReader> compSSTables = pair.left;
             long totSSTablesLen = totUncompressedLength(compSSTables);
@@ -691,9 +691,9 @@ public class CompactionStrategyStatisticsTest
         }
     }
 
-    private UUID mockCompaction(AbstractCompactionStrategy strategy, Set<SSTableReader> live, Set<SSTableReader> candidates, Set<SSTableReader> compacting)
+    private TimeUUID mockCompaction(AbstractCompactionStrategy strategy, Set<SSTableReader> live, Set<SSTableReader> candidates, Set<SSTableReader> compacting)
     {
-        final UUID id = UUID.randomUUID();
+        final TimeUUID id = TimeUUID.Generator.nextTimeUUID();
         final AtomicReference<LifecycleTransaction> txn = new AtomicReference<>();
 
         when(dataTracker.tryModify(anyIterable(), eq(OperationType.COMPACTION))).thenAnswer(invocation -> {
@@ -720,7 +720,7 @@ public class CompactionStrategyStatisticsTest
         return id;
     }
 
-    private CompactionProgress mockCompactionProgress(Set<SSTableReader> compacting, UUID id)
+    private CompactionProgress mockCompactionProgress(Set<SSTableReader> compacting, TimeUUID id)
     {
         CompactionProgress progress = Mockito.mock(CompactionProgress.class);
 

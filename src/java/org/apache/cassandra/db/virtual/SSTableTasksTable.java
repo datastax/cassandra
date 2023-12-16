@@ -76,7 +76,7 @@ final class SSTableTasksTable extends AbstractVirtualTable
                   .column(COMPLETION_RATIO, completionRatio)
                   .column(KIND, task.operationType().toString().toLowerCase())
                   .column(PROGRESS, completed)
-                  .column(SSTABLES, task.getSSTables().size())
+                  .column(SSTABLES, task.sstables().size())
                   .column(TOTAL, total)
                   .column(UNIT, task.unit().toString().toLowerCase())
                   .column(TARGET_DIRECTORY, task.targetDirectory());

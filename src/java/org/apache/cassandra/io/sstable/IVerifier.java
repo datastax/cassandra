@@ -22,7 +22,7 @@ import java.io.Closeable;
 import java.util.Collection;
 import java.util.function.Function;
 
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.StorageService;
@@ -39,7 +39,7 @@ public interface IVerifier extends Closeable
     @Override
     void close();
 
-    CompactionInfo.Holder getVerifyInfo();
+    AbstractTableOperation getVerifyInfo();
 
     class Options
     {

@@ -34,7 +34,7 @@ public class LeveledCompactionTask extends CompactionTask
     private final long maxSSTableBytes;
     private final boolean majorCompaction;
 
-    public LeveledCompactionTask(LeveledCompactionStrategy strategy, LifecycleTransaction txn, int level, int gcBefore, long maxSSTableBytes, boolean majorCompaction)
+    public LeveledCompactionTask(LeveledCompactionStrategy strategy, LifecycleTransaction txn, int level, long gcBefore, long maxSSTableBytes, boolean majorCompaction)
     {
         super(strategy, txn, gcBefore, false);
         this.level = level;
@@ -42,14 +42,14 @@ public class LeveledCompactionTask extends CompactionTask
         this.majorCompaction = majorCompaction;
     }
 
-    public LeveledCompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int level, int gcBefore, long maxSSTableBytes, boolean majorCompaction) {
+    public LeveledCompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int level, long gcBefore, long maxSSTableBytes, boolean majorCompaction) {
         super(cfs, txn, gcBefore, false);
         this.level = level;
         this.maxSSTableBytes = maxSSTableBytes;
         this.majorCompaction = majorCompaction;
     }
 
-    static AbstractCompactionTask forCompaction(LeveledCompactionStrategy strategy, LifecycleTransaction txn, int level, int gcBefore, long maxSSTableBytes, boolean majorCompaction)
+    static AbstractCompactionTask forCompaction(LeveledCompactionStrategy strategy, LifecycleTransaction txn, int level, long gcBefore, long maxSSTableBytes, boolean majorCompaction)
     {
         return new LeveledCompactionTask(strategy, txn, level, gcBefore, maxSSTableBytes, majorCompaction);
     }

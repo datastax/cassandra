@@ -18,7 +18,8 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.util.UUID;
+import org.apache.cassandra.utils.TimeUUID;
+
 
 /**
  * An observer of a compaction operation. It is notified when a compaction operation is started.
@@ -32,13 +33,13 @@ public interface CompactionObserver
     CompactionObserver NO_OP = new CompactionObserver()
     {
         @Override
-        public void setSubmitted(UUID id, CompactionAggregate compaction) { }
+        public void setSubmitted(TimeUUID id, CompactionAggregate compaction) { }
 
         @Override
         public void setInProgress(CompactionProgress progress) { }
 
         @Override
-        public void setCompleted(UUID id) { }
+        public void setCompleted(TimeUUID id) { }
     };
 
     /**
@@ -47,7 +48,7 @@ public interface CompactionObserver
      * @param id the id of the compaction
      * @param compaction the compaction aggregate the compaction is part of
      */
-    void setSubmitted(UUID id, CompactionAggregate compaction);
+    void setSubmitted(TimeUUID id, CompactionAggregate compaction);
 
     /**
      * Indicates that a compaction has started.
@@ -61,5 +62,5 @@ public interface CompactionObserver
      * <p/>
      * @param id  the id of the compaction
      */
-    void setCompleted(UUID id);
+    void setCompleted(TimeUUID id);
 }

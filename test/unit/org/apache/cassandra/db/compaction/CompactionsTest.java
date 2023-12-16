@@ -624,7 +624,7 @@ public class CompactionsTest
             return ret;
         });
 
-        List<Future<?>> compactions = CompactionManager.instance.submitMaximal(store, FBUtilities.nowInSeconds(), false, obs);
+        List<Future<?>> compactions = CompactionManager.instance.submitMaximal(store, FBUtilities.nowInSeconds(), false, obs, OperationType.MAJOR_COMPACTION);
         assertEquals("Expected one compaction to be submitted", 1, compactions.size());
 
         // Wait for compaction to register with its operation observer (the metrics)

@@ -49,7 +49,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
 {
     private static final Logger logger = LoggerFactory.getLogger(LeveledCompactionStrategy.class);
     static final String SSTABLE_SIZE_OPTION = "sstable_size_in_mb";
-    private static final boolean tolerateSstableSize = Boolean.getBoolean(Config.PROPERTY_PREFIX + "tolerate_sstable_size");
+    private static final boolean tolerateSstableSize = TOLERATE_SSTABLE_SIZE.getBoolean();
     static final String LEVEL_FANOUT_SIZE_OPTION = "fanout_size";
     private static final String SINGLE_SSTABLE_UPLEVEL_OPTION = "single_sstable_uplevel";
     public static final int DEFAULT_LEVEL_FANOUT_SIZE = 10;
@@ -124,7 +124,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
     }
 
     @Override
-    protected CompactionAggregate getNextBackgroundAggregate(int gcBefore)
+    protected CompactionAggregate getNextBackgroundAggregate(long gcBefore)
     {
         CompactionAggregate.Leveled candidate = manifest.getCompactionCandidate();
         backgroundCompactions.setPending(manifest.getEstimatedTasks(candidate));
@@ -136,7 +136,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
     }
 
     @Override
-    protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, CompactionAggregate compaction)
+    protected AbstractCompactionTask createCompactionTask(final long gcBefore, LifecycleTransaction txn, CompactionAggregate compaction)
     {
         long maxxSSTableBytes;
         int nextLevel;
@@ -169,7 +169,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
 
 
     @Override
-    protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
+    protected AbstractCompactionTask createCompactionTask(final long gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
     {
         Collection<SSTableReader> sstables = txn.originals();
         int level = sstables.size() > 1 ? 0 : sstables.iterator().next().getSSTableLevel();
@@ -178,7 +178,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
     }
 
     @Override
-    public AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, int gcBefore, long maxSSTableBytes)
+    public AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, long gcBefore, long maxSSTableBytes)
     {
         assert txn.originals().size() > 0;
         int level = -1;
@@ -487,7 +487,7 @@ public class LeveledCompactionStrategy extends AbstractCompactionStrategy.WithAg
         return String.format("LCS@%d(%s)", hashCode(), cfs.name);
     }
 
-    private CompactionAggregate findDroppableSSTable(final int gcBefore)
+    private CompactionAggregate findDroppableSSTable(final long gcBefore)
     {
         Comparator<SSTableReader> comparator = (o1, o2) -> {
             double r1 = o1.getEstimatedDroppableTombstoneRatio(gcBefore);

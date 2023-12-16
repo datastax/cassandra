@@ -89,6 +89,7 @@ import org.apache.cassandra.db.compaction.CompactionLogger;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionStrategyManager;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -422,7 +423,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             CompactionParams compactionParams = CompactionParams.fromMap(options);
             compactionParams.validate();
-            compactionStrategyManager.overrideLocalParams(compactionParams);
+            compactionStrategyManager.setNewLocalCompactionStrategy(compactionParams);
         }
         catch (Throwable t)
         {
@@ -519,7 +520,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         // compaction strategy should be created after the CFS has been prepared
         compactionStrategyManager = new CompactionStrategyManager(this);
-        compactionStrategyManager.reload(metadata().params.compaction);
+        compactionStrategyManager.maybeReloadParamsFromSchema(metadata().params.compaction);
 
         if (maxCompactionThreshold.value() <= 0 || minCompactionThreshold.value() <=0)
         {
@@ -2772,7 +2773,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             }
         };
 
-        runWithCompactionsDisabled(Executors.callable(truncateRunnable), true, true, AbstractTableOperation.StopTrigger.TRUNCATE);
+        runWithCompactionsDisabled(FutureTask.callable(truncateRunnable), OperationType.P0, true, true, AbstractTableOperation.StopTrigger.TRUNCATE);
 
         viewManager.build();
 
@@ -2848,15 +2849,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             try (CompactionManager.CompactionPauser pause = CompactionManager.instance.pauseGlobalCompaction();
                  CompactionManager.CompactionPauser pausedStrategies = pauseCompactionStrategies(toInterruptFor))
             {
-                List<CompactionInfo.Holder> uninterruptibleTasks = CompactionManager.instance.getCompactionsMatching(toInterruptForMetadata,
-                                                                                                                     (info) -> info.getTaskType().priority <= operationType.priority);
+                List<TableOperation> uninterruptibleTasks = CompactionManager.instance.getCompactionsMatching(toInterruptForMetadata,                                                                                                               
+                                                                                                              (progress) -> progress.operationType().priority <= operationType.priority);
                 if (!uninterruptibleTasks.isEmpty())
                 {
                     logger.info("Unable to cancel in-progress compactions, since they're running with higher or same priority: {}. You can abort these operations using `nodetool stop`.",
                                 uninterruptibleTasks.stream().map((compaction) -> String.format("%s@%s (%s)",
-                                                                                                compaction.getCompactionInfo().getTaskType(),
-                                                                                                compaction.getCompactionInfo().getTable(),
-                                                                                                compaction.getCompactionInfo().getTaskId()))
+                                                                                                compaction.getProgress().operationType(),
+                                                                                                compaction.getProgress().metadata().name,
+                                                                                                compaction.getProgress().operationId()))
                                                     .collect(Collectors.joining(",")));
                     return null;
                 }

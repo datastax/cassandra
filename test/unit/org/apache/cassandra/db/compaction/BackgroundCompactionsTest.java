@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.TreeMap;
-import java.util.UUID;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.Before;
@@ -33,6 +32,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.TimeUUID;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
@@ -180,7 +180,7 @@ public class BackgroundCompactionsTest
         assertEquals(pending.size(), backgroundCompactions.getEstimatedRemainingTasks());
         assertEquals(pending.size(), backgroundCompactions.getTotalCompactions());
 
-        UUID uuid = UUID.randomUUID();
+        TimeUUID uuid = TimeUUID.Generator.nextTimeUUID();
         CompactionAggregate aggregate = pending.get(0);
         CompactionPick compaction = Mockito.mock(CompactionPick.class);
         when(aggregate.getSelected()).thenReturn(compaction);
@@ -240,7 +240,7 @@ public class BackgroundCompactionsTest
         assertEquals(pending.size(), backgroundCompactions.getEstimatedRemainingTasks());
         assertEquals(pending.size(), backgroundCompactions.getTotalCompactions());
 
-        UUID uuid = UUID.randomUUID();
+        TimeUUID uuid = TimeUUID.Generator.nextTimeUUID();
         CompactionAggregate aggregate = mockAggregate(0, 1, 0);
         CompactionPick compaction = Mockito.mock(CompactionPick.class);
         when(aggregate.getSelected()).thenReturn(compaction);
@@ -296,7 +296,7 @@ public class BackgroundCompactionsTest
         assertEquals(0, backgroundCompactions.getEstimatedRemainingTasks());
         assertEquals(0, backgroundCompactions.getTotalCompactions());
 
-        UUID uuid = UUID.randomUUID();
+        TimeUUID uuid = TimeUUID.Generator.nextTimeUUID();
         CompactionAggregate aggregate = mockAggregate(-1, 0, 0);
         CompactionPick compaction = Mockito.mock(CompactionPick.class);
         when(aggregate.getSelected()).thenReturn(compaction);
@@ -395,13 +395,13 @@ public class BackgroundCompactionsTest
     public void testSetSubmittedNoAggregate()
     {
         BackgroundCompactions backgroundCompactions = new BackgroundCompactions(strategy, cfs);
-        backgroundCompactions.setSubmitted(UUID.randomUUID(), null);
+        backgroundCompactions.setSubmitted(TimeUUID.Generator.nextTimeUUID(), null);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testSetSubmittedDuplicateId()
     {
-        UUID uuid = UUID.randomUUID();
+        TimeUUID uuid = TimeUUID.Generator.nextTimeUUID();
         CompactionAggregate aggregate = mockAggregate(1, 1, 0);
         when(aggregate.getSelected()).thenReturn(CompactionPick.EMPTY);
 

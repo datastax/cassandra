@@ -72,7 +72,7 @@ public class CompactionMetrics
     /** The compaction strategy information for each table. */
     public final Gauge<List<CompactionStrategyStatistics>> aggregateCompactions;
 
-    public CompactionMetrics(final ThreadPoolExecutor... collectors)
+    public CompactionMetrics(final ExecutorPlus... collectors)
     {
         pendingTasks = Metrics.register(factory.createMetricName("PendingTasks"), () -> {
             int n = 0;

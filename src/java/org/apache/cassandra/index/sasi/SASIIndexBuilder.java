@@ -133,9 +133,10 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
         return new OperationProgress(cfs.metadata(),
                                      OperationType.INDEX_BUILD,
                                      bytesProcessed,
-                                     totalSizeInBytes,
+                                     totalBytesToProcess,
                                      compactionId,
-                                     sstables.keySet());
+                                     sstables.keySet(),
+                                     targetDirectory);
     }
 
     private void completeSSTable(PerSSTableIndexWriter indexWriter, SSTableReader sstable, Collection<ColumnIndex> indexes)

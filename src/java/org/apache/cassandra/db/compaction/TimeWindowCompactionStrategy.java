@@ -31,8 +31,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.*;
@@ -78,7 +76,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
     }
 
     @Override
-    public AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
+    public AbstractCompactionTask createCompactionTask(final long gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
     {
         return CompactionTask.forTimeWindowCompaction(this, txn, gcBefore);
     }
@@ -89,7 +87,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
      * @return
      */
     @Override
-    protected synchronized CompactionAggregate getNextBackgroundAggregate(final int gcBefore)
+    protected synchronized CompactionAggregate getNextBackgroundAggregate(final long gcBefore)
     {
         if (Iterables.isEmpty(cfs.getSSTables(SSTableSet.LIVE)))
             return null;
@@ -133,7 +131,7 @@ public class TimeWindowCompactionStrategy extends AbstractCompactionStrategy.Wit
         return compactionCandidate.withExpired(expired);
     }
 
-    private CompactionAggregate getNextNonExpiredSSTables(Iterable<SSTableReader> nonExpiringSSTables, final int gcBefore)
+    private CompactionAggregate getNextNonExpiredSSTables(Iterable<SSTableReader> nonExpiringSSTables, final long gcBefore)
     {
         List<CompactionAggregate> candidates = getCompactionCandidates(nonExpiringSSTables);
         backgroundCompactions.setPending(candidates);

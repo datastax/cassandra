@@ -41,7 +41,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.utils.Pair;
 
-import static com.google.common.collect.Iterables.filter;
 
 public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.WithAggregates
 {
@@ -68,7 +67,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
     }
 
     @Override
-    protected synchronized CompactionAggregate getNextBackgroundAggregate(final int gcBefore)
+    protected synchronized CompactionAggregate getNextBackgroundAggregate(final long gcBefore)
     {
         // make local copies so they can't be changed out from under us mid-method
         int minThreshold = cfs.getMinimumCompactionThreshold();
@@ -333,7 +332,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
     }
 
     @Override
-    protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
+    protected AbstractCompactionTask createCompactionTask(final long gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
     {
         return isMaximal && splitOutput
                ? SplittingCompactionTask.forSplitting(this, txn, gcBefore)
@@ -409,12 +408,12 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy.Wit
 
     private static class SplittingCompactionTask extends CompactionTask
     {
-        public SplittingCompactionTask(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore)
+        public SplittingCompactionTask(AbstractCompactionStrategy strategy, LifecycleTransaction txn, long gcBefore)
         {
             super(strategy, txn, gcBefore, false);
         }
 
-        static AbstractCompactionTask forSplitting(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore)
+        static AbstractCompactionTask forSplitting(AbstractCompactionStrategy strategy, LifecycleTransaction txn, long gcBefore)
         {
             return new SplittingCompactionTask(strategy, txn, gcBefore);
         }

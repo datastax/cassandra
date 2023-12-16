@@ -486,7 +486,7 @@ public class CompactionStrategyManager implements INotificationConsumer
     /**
      * @param newParams new CompactionParams set in via CQL
      */
-    private void reloadParamsFromSchema(CompactionParams newParams)
+    public void reloadParamsFromSchema(CompactionParams newParams)
     {
         logger.debug("Recreating compaction strategy for {}.{} - compaction parameters changed via CQL",
                      cfs.getKeyspaceName(), cfs.getTableName());
@@ -538,7 +538,7 @@ public class CompactionStrategyManager implements INotificationConsumer
         writeLock.lock();
         try
         {
-            reload(schemaCompactionParams);
+            reloadParamsFromSchema(schemaCompactionParams);
         }
         finally
         {

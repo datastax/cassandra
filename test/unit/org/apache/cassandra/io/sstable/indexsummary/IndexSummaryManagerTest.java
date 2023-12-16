@@ -656,7 +656,7 @@ public class IndexSummaryManagerTest<R extends SSTableReader & IndexSummarySuppo
         {
             public OperationProgress getProgress()
             {
-                return new OperationProgress(cfs.metadata(), OperationType.UNKNOWN, 0, 0, UUID.randomUUID(), compacting);
+                return new OperationProgress(cfs.metadata(), OperationType.UNKNOWN, 0, 0, nextTimeUUID(), compacting);
             }
 
             public boolean isGlobal()

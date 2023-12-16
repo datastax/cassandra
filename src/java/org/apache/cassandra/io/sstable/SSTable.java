@@ -465,14 +465,4 @@ public abstract class SSTable
             return ioOptions;
         }
     }
-
-    public DecoratedKey getFirst()
-    {
-        return first;
-    }
-
-    public DecoratedKey getLast()
-    {
-        return last;
-    }
 }

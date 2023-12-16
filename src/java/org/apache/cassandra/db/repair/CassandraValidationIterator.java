@@ -104,9 +104,9 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
 
     private static class ValidationCompactionIterator extends CompactionIterator
     {
-        public ValidationCompactionIterator(List<ISSTableScanner> scanners, ValidationCompactionController controller, int nowInSec)
+        public ValidationCompactionIterator(List<ISSTableScanner> scanners, ValidationCompactionController controller, long nowInSec, TopPartitionTracker.Collector topPartitionCollector)
         {
-            super(OperationType.VALIDATION, scanners, controller, nowInSec, UUIDGen.getTimeUUID());
+            super(OperationType.VALIDATION, scanners, controller, nowInSec, nextTimeUUID(), topPartitionCollector);
         }
     }
 
@@ -219,7 +219,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
 
         controller = new ValidationCompactionController(cfs, getDefaultGcBefore(cfs, nowInSec));
         scanners = cfs.getCompactionStrategyManager().getScanners(sstables, ranges);
-        ci = new ValidationCompactionIterator(scanners.scanners, controller, nowInSec);
+        ci = new ValidationCompactionIterator(scanners.scanners, controller, nowInSec, topPartitionCollector);
 
         long allPartitions = 0;
         rangePartitionCounts = Maps.newHashMapWithExpectedSize(ranges.size());
@@ -245,7 +245,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
     @Override
     public long getBytesRead()
     {
-        return ci.getBytesRead();
+        return ci.bytesRead();
     }
 
     @Override

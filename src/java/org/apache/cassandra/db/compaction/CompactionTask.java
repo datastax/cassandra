@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.RateLimiter;
@@ -57,14 +58,10 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.ActiveRepairService;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.apache.cassandra.db.compaction.CompactionHistoryTabularData.COMPACTION_TYPE_PROPERTY;
-import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
-import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.utils.FBUtilities.now;
 import static org.apache.cassandra.db.compaction.CompactionManager.compactionRateLimiterAcquire;
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
@@ -86,7 +83,7 @@ public class CompactionTask extends AbstractCompactionTask
      * This constructs a compaction tasks that operations that do not normally have a compaction strategy, such as tombstone
      * collection or table splitting, also tests.
      */
-    protected CompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, boolean keepOriginals)
+    protected CompactionTask(ColumnFamilyStore cfs, LifecycleTransaction txn, long gcBefore, boolean keepOriginals)
     {
         this(cfs, txn, gcBefore, keepOriginals, CompactionObserver.NO_OP, null);
     }
@@ -94,14 +91,14 @@ public class CompactionTask extends AbstractCompactionTask
     /**
      * This constructs a compaction task that has been created by a compaction strategy.
      */
-    protected CompactionTask(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore, boolean keepOriginals)
+    protected CompactionTask(AbstractCompactionStrategy strategy, LifecycleTransaction txn, long gcBefore, boolean keepOriginals)
     {
         this(strategy.cfs, txn, gcBefore, keepOriginals, strategy == null ? CompactionObserver.NO_OP : strategy.getBackgroundCompactions(), strategy);
     }
 
     private CompactionTask(ColumnFamilyStore cfs,
                            LifecycleTransaction txn,
-                           int gcBefore,
+                           long gcBefore,
                            boolean keepOriginals,
                            CompactionObserver compObserver,
                            @Nullable AbstractCompactionStrategy strategy)
@@ -118,7 +115,7 @@ public class CompactionTask extends AbstractCompactionTask
     /**
      * Create a compaction task for a generic compaction strategy.
      */
-    public static AbstractCompactionTask forCompaction(AbstractCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore)
+    public static AbstractCompactionTask forCompaction(AbstractCompactionStrategy strategy, LifecycleTransaction txn, long gcBefore)
     {
         return new CompactionTask(strategy, txn, gcBefore, false);
     }
@@ -126,7 +123,7 @@ public class CompactionTask extends AbstractCompactionTask
     /**
      * Create a compaction task for {@link TimeWindowCompactionStrategy}.
      */
-    static AbstractCompactionTask forTimeWindowCompaction(TimeWindowCompactionStrategy strategy, LifecycleTransaction txn, int gcBefore)
+    static AbstractCompactionTask forTimeWindowCompaction(TimeWindowCompactionStrategy strategy, LifecycleTransaction txn, long gcBefore)
     {
         return new TimeWindowCompactionTask(strategy, txn, gcBefore, strategy.ignoreOverlaps());
     }
@@ -134,7 +131,7 @@ public class CompactionTask extends AbstractCompactionTask
     /**
      * Create a compaction task without a compaction strategy, currently only called by tests.
      */
-    static AbstractCompactionTask forTesting(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore)
+    static AbstractCompactionTask forTesting(ColumnFamilyStore cfs, LifecycleTransaction txn, long gcBefore)
     {
         return new CompactionTask(cfs, txn, gcBefore, false);
     }
@@ -142,7 +139,7 @@ public class CompactionTask extends AbstractCompactionTask
     /**
      * Create a compaction task without a compaction strategy, currently only called by tests.
      */
-    static AbstractCompactionTask forTesting(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, CompactionObserver compObserver)
+    static AbstractCompactionTask forTesting(ColumnFamilyStore cfs, LifecycleTransaction txn, long gcBefore, CompactionObserver compObserver)
     {
         return new CompactionTask(cfs, txn, gcBefore, false, compObserver, null);
     }
@@ -150,7 +147,7 @@ public class CompactionTask extends AbstractCompactionTask
     /**
      * Create a compaction task for deleted data collection.
      */
-    public static AbstractCompactionTask forGarbageCollection(ColumnFamilyStore cfs, LifecycleTransaction txn, int gcBefore, CompactionParams.TombstoneOption tombstoneOption)
+    public static AbstractCompactionTask forGarbageCollection(ColumnFamilyStore cfs, LifecycleTransaction txn, long gcBefore, CompactionParams.TombstoneOption tombstoneOption)
     {
         AbstractCompactionTask task = new CompactionTask(cfs, txn, gcBefore, false)
         {
@@ -242,7 +239,7 @@ public class CompactionTask extends AbstractCompactionTask
         private final CompactionController controller;
         private final CompactionStrategyManager strategyManager;
         private final Set<SSTableReader> fullyExpiredSSTables;
-        private final UUID taskId;
+        private final TimeUUID taskId;
         private final RateLimiter limiter;
         private final long start;
         private final long startTime;
@@ -294,8 +291,8 @@ public class CompactionTask extends AbstractCompactionTask
             assert !Iterables.any(transaction.originals(), sstable -> !sstable.descriptor.cfname.equals(cfs.name));
 
             this.limiter = CompactionManager.instance.getRateLimiter();
-            this.start = System.nanoTime();
-            this.startTime = System.currentTimeMillis();
+            this.start = Clock.Global.nanoTime();
+            this.startTime = Clock.Global.currentTimeMillis();
             this.actuallyCompact = Sets.difference(transaction.originals(), fullyExpiredSSTables);
             this.progress = new Progress();
             this.newSStables = Collections.emptyList();
@@ -373,7 +370,7 @@ public class CompactionTask extends AbstractCompactionTask
                 if (compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio))
                     lastBytesScanned = bytesScanned;
 
-                long now = System.nanoTime();
+                long now = Clock.Global.nanoTime();
                 if (now - lastCheckObsoletion > TimeUnit.MINUTES.toNanos(1L))
                 {
                     controller.maybeRefreshOverlaps();
@@ -422,7 +419,7 @@ public class CompactionTask extends AbstractCompactionTask
 
             if (completed)
             {
-                updateCompactionHistory(taskId, cfs.keyspace.getName(), cfs.getTableName(), progress);
+                updateCompactionHistory(taskId, cfs.keyspace.getName(), cfs.getTableName(), progress, ImmutableMap.of(COMPACTION_TYPE_PROPERTY, compactionType.type));
 
                 if (logger.isDebugEnabled())
                     debugLogCompactionSummaryInfo(taskId, start, totalKeysWritten, newSStables, progress);
@@ -430,7 +427,7 @@ public class CompactionTask extends AbstractCompactionTask
                 if (logger.isTraceEnabled())
                     traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, progress);
 
-                cfs.getCompactionLogger().compaction(startTime, transaction.originals(), System.currentTimeMillis(), newSStables);
+                cfs.getCompactionLogger().compaction(startTime, transaction.originals(), Clock.Global.currentTimeMillis(), newSStables);
 
                 // update the metrics
                 cfs.metric.compactionBytesWritten.inc(progress.outputDiskSize());
@@ -495,7 +492,7 @@ public class CompactionTask extends AbstractCompactionTask
             }
 
             @Override
-            public UUID operationId()
+            public TimeUUID operationId()
             {
                 return taskId;
             }
@@ -588,7 +585,7 @@ public class CompactionTask extends AbstractCompactionTask
             @Override
             public long durationInNanos()
             {
-                return System.nanoTime() - start;
+                return Clock.Global.nanoTime() - start;
             }
 
             @Override
@@ -652,7 +649,7 @@ public class CompactionTask extends AbstractCompactionTask
             mergeSummary.append(String.format("%d:%d, ", rows, count));
             mergedRows.put(rows, count);
         }
-        SystemKeyspace.updateCompactionHistory(taskId, keyspaceName, columnFamilyName, currentTimeMillis(), startSize, endSize, mergedRows, compactionProperties);
+        SystemKeyspace.updateCompactionHistory(taskId, keyspaceName, columnFamilyName, Clock.Global.currentTimeMillis(), startSize, endSize, mergedRows, compactionProperties);
         return mergeSummary.toString();
     }
 
@@ -878,10 +875,11 @@ public class CompactionTask extends AbstractCompactionTask
     }
 
 
-    private static void updateCompactionHistory(UUID id,
+    private static void updateCompactionHistory(TimeUUID id,
                                                 String keyspaceName,
                                                 String columnFamilyName,
-                                                CompactionProgress progress)
+                                                CompactionProgress progress,
+                                                Map<String, String> compactionProperties)
     {
         long[] mergedPartitionsHistogram = progress.partitionsHistogram();
         Map<Integer, Long> mergedPartitions = new HashMap<>(mergedPartitionsHistogram.length);
@@ -897,10 +895,11 @@ public class CompactionTask extends AbstractCompactionTask
         SystemKeyspace.updateCompactionHistory(id,
                                                keyspaceName,
                                                columnFamilyName,
-                                               System.currentTimeMillis(),
+                                               Clock.Global.currentTimeMillis(),
                                                progress.adjustedInputDiskSize(),
                                                progress.outputDiskSize(),
-                                               mergedPartitions);
+                                               mergedPartitions,
+                                               compactionProperties);
     }
 
     private void traceLogCompactionSummaryInfo(long totalKeysWritten,

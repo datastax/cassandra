@@ -61,6 +61,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.NonThrowingCloseable;
 import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
@@ -872,9 +873,8 @@ public class CompactionsCQLTest extends CQLTester
             execute("insert into %s (id, i) values (?,?)", i, i);
             getCurrentColumnFamilyStore().forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
         }
-        CompactionInfo.Holder holder = holder(OperationType.COMPACTION);
-        CompactionManager.instance.active.beginCompaction(holder);
-        try
+        AbstractTableOperation holder = holder(OperationType.COMPACTION);
+        try (NonThrowingCloseable c = CompactionManager.instance.active.onOperationStart(holder))
         {
             getCurrentColumnFamilyStore().forceMajorCompaction();
             fail("Exception expected");
@@ -883,39 +883,30 @@ public class CompactionsCQLTest extends CQLTester
         {
             // expected
         }
-        finally
-        {
-            CompactionManager.instance.active.finishCompaction(holder);
-        }
         // don't block compactions if there is a huge validation
         holder = holder(OperationType.VALIDATION);
-        CompactionManager.instance.active.beginCompaction(holder);
-        try
+        try (NonThrowingCloseable c = CompactionManager.instance.active.onOperationStart(holder))
         {
             getCurrentColumnFamilyStore().forceMajorCompaction();
         }
-        finally
-        {
-            CompactionManager.instance.active.finishCompaction(holder);
-        }
     }
 
-    private CompactionInfo.Holder holder(OperationType opType)
+    private AbstractTableOperation holder(OperationType opType)
     {
-        CompactionInfo.Holder holder = new CompactionInfo.Holder()
+        AbstractTableOperation holder = new AbstractTableOperation()
         {
-            public CompactionInfo getCompactionInfo()
+            public OperationProgress getProgress()
             {
                 long availableSpace = 0;
                 for (File f : getCurrentColumnFamilyStore().getDirectories().getCFDirectories())
                     availableSpace += PathUtils.tryGetSpace(f.toPath(), FileStore::getUsableSpace);
 
-                return new CompactionInfo(getCurrentColumnFamilyStore().metadata(),
-                                          opType,
-                                          +0,
-                                          +availableSpace * 2,
-                                          nextTimeUUID(),
-                                          getCurrentColumnFamilyStore().getLiveSSTables());
+                return new OperationProgress(getCurrentColumnFamilyStore().metadata(), 
+                                             opType,                                               
+                                             +0,                                               
+                                             +availableSpace * 2, 
+                                             nextTimeUUID(),                                                                                                                   
+                                             getCurrentColumnFamilyStore().getLiveSSTables());
             }
 
             public boolean isGlobal()

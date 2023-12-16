@@ -24,7 +24,7 @@ public class CompactionInterruptedException extends RuntimeException
 {
     private static final long serialVersionUID = -8651427062512310398L;
 
-    public CompactionInterruptedException(AbstractTableOperation.OperationProgress info)
+    public CompactionInterruptedException(Object info)
     {
         super("Compaction interrupted: " + info);
     }

@@ -20,7 +20,6 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.Collection;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 import javax.annotation.Nullable;
@@ -28,6 +27,7 @@ import javax.annotation.Nullable;
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.TimeUUID;
 
 /**
  * A set of sstables that were picked for compaction along with some other relevant properties.
@@ -55,7 +55,7 @@ class CompactionPick
 
     /** The unique compaction id, this is only available when a compaction is submitted */
     @Nullable
-    volatile UUID id;
+    volatile TimeUUID id;
 
     /** The compaction progress, this is only available when compaction actually starts and will be null as long as
      * the candidate is still pending execution, also some tasks cannot report a progress at all, e.g. {@link SingleSSTableLCSTask}.
@@ -115,7 +115,7 @@ class CompactionPick
         return avgSizeInBytes;
     }
 
-    void setSubmitted(UUID id)
+    void setSubmitted(TimeUUID id)
     {
         if (id == null)
             throw new IllegalArgumentException("Id cannot be null");

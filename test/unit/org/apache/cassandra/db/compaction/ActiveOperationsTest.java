@@ -194,7 +194,7 @@ public class ActiveOperationsTest extends CQLTester
         try (LifecycleTransaction txn = getCurrentColumnFamilyStore().getTracker().tryModify(sstable, OperationType.SCRUB))
         {
             MockTableOperations mockActiveCompactions = new MockTableOperations();
-            CompactionManager.instance.scrubOne(getCurrentColumnFamilyStore(), txn, true, false, false, mockActiveCompactions);
+            CompactionManager.instance.scrubOne(getCurrentColumnFamilyStore(), txn, IScrubber.options().skipCorrupted().build(), mockActiveCompactions);
 
             assertTrue(mockActiveCompactions.finished);
             assertEquals(mockActiveCompactions.operation.getProgress().sstables(), Sets.newHashSet(sstable));
@@ -217,7 +217,7 @@ public class ActiveOperationsTest extends CQLTester
 
         SSTableReader sstable = Iterables.getFirst(getCurrentColumnFamilyStore().getLiveSSTables(), null);
         MockTableOperations mockActiveCompactions = new MockTableOperations();
-        CompactionManager.instance.verifyOne(getCurrentColumnFamilyStore(), sstable, new Verifier.Options.Builder().build(), mockActiveCompactions);
+        CompactionManager.instance.verifyOne(getCurrentColumnFamilyStore(), sstable, IVerifier.options().build(), mockActiveCompactions);
         assertTrue(mockActiveCompactions.finished);
         assertEquals(mockActiveCompactions.operation.getProgress().sstables(), Sets.newHashSet(sstable));
         assertFalse(mockActiveCompactions.operation.shouldStop((s) -> false));

@@ -33,8 +33,8 @@ import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.bind.annotation.SuperCall;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.compaction.ActiveCompactions;
-import org.apache.cassandra.db.compaction.CompactionInfo;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
+import org.apache.cassandra.db.compaction.ActiveOperations;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
@@ -311,7 +311,7 @@ public class UpgradeSSTablesTest extends TestBaseImpl
 
         public static void install(ClassLoader classLoader, Integer num)
         {
-            new ByteBuddy().rebase(ActiveCompactions.class)
+            new ByteBuddy().rebase(ActiveOperations.class)
                            .method(named("beginCompaction"))
                            .intercept(MethodDelegation.to(BB.class))
                            .make()
@@ -319,12 +319,12 @@ public class UpgradeSSTablesTest extends TestBaseImpl
         }
 
         @SuppressWarnings("unused")
-        public static void beginCompaction(CompactionInfo.Holder ci, @SuperCall Callable<Void> zuperCall)
+        public static void beginCompaction(AbstractTableOperation ci, @SuperCall Callable<Void> zuperCall)
         {
             try
             {
                 zuperCall.call();
-                if (ci.getCompactionInfo().getTaskType() == OperationType.UPGRADE_SSTABLES)
+                if (ci.getProgress().operationType() == OperationType.UPGRADE_SSTABLES)
                 {
                     starting.decrement();
                     Assert.assertTrue(start.awaitUninterruptibly(1, TimeUnit.MINUTES));

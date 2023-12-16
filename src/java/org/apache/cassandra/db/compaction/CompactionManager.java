@@ -62,7 +62,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
-import net.openhft.chronicle.core.util.ThrowingSupplier;
 import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.concurrent.ExecutorFactory;
 import org.apache.cassandra.concurrent.WrappedExecutorPlus;
@@ -113,6 +112,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.NonThrowingCloseable;
+import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.WrappedRunnable;
@@ -288,7 +288,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     @VisibleForTesting
     public boolean hasOngoingOrPendingTasks()
     {
-        if (!active.getCompactions().isEmpty() || !compactingCF.isEmpty())
+        if (!active.getTableOperations().isEmpty() || !compactingCF.isEmpty())
             return true;
 
         int pendingTasks = executor.getPendingTaskCount() +
@@ -993,12 +993,12 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     @SuppressWarnings("resource")
     public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore, final long gcBefore, boolean splitOutput, OperationType operationType)
     {
-        return submitMaximal(cfStore, gcBefore, splitOutput, active);
+        return submitMaximal(cfStore, gcBefore, splitOutput, active, operationType);
     }
 
     @VisibleForTesting
     @SuppressWarnings("resource") // the tasks are executed in parallel on the executor, making sure that they get closed
-    public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore, final int gcBefore, boolean splitOutput, TableOperationObserver obs)
+    public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore, final long gcBefore, boolean splitOutput, TableOperationObserver obs, OperationType operationType)
     {
         // here we compute the task off the compaction executor, so having that present doesn't
         // confuse runWithCompactionsDisabled -- i.e., we don't want to deadlock ourselves, waiting
@@ -1312,20 +1312,20 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     }
 
     @VisibleForTesting
-    void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, IScrubber.Options options, ActiveCompactionsTracker activeCompactions)
+    void scrubOne(ColumnFamilyStore cfs, LifecycleTransaction modifier, IScrubber.Options options, TableOperationObserver activeCompactions)
     {
-        CompactionInfo.Holder scrubInfo = null;
         SSTableFormat format = modifier.onlyOne().descriptor.getFormat();
-        try (IScrubber scrubber = format.getScrubber(cfs, modifier, new OutputHandler.LogOutput(), options))
+        try (IScrubber scrubber = format.getScrubber(cfs, modifier, new OutputHandler.LogOutput(), options);
+             NonThrowingCloseable c = activeCompactions.onOperationStart(scrubber.getScrubInfo()))
         {
             scrubber.scrub();
         }
     }
 
     @VisibleForTesting
-    void verifyOne(ColumnFamilyStore cfs, SSTableReader sstable, IVerifier.Options options, ActiveCompactionsTracker activeCompactions)
+    void verifyOne(ColumnFamilyStore cfs, SSTableReader sstable, IVerifier.Options options, TableOperationObserver activeCompactions)
     {
-        try (Verifier verifier = new Verifier(cfs, sstable, false, options);
+        try (IVerifier verifier = sstable.getVerifier(cfs, new OutputHandler.LogOutput(), false, options);
              NonThrowingCloseable c = activeCompactions.onOperationStart(verifier.getVerifyInfo()))
         {
             verifier.verify();
@@ -1438,7 +1438,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
              ISSTableScanner scanner = cleanupStrategy.getScanner(sstable);
              CompactionController controller = new CompactionController(cfs, txn.originals(), getDefaultGcBefore(cfs, nowInSec));
              Refs<SSTableReader> refs = Refs.ref(Collections.singleton(sstable));
-             CompactionIterator ci = new CompactionIterator(OperationType.CLEANUP, Collections.singletonList(scanner), controller, nowInSec, UUIDGen.getTimeUUID()))
+             CompactionIterator ci = new CompactionIterator(OperationType.CLEANUP, Collections.singletonList(scanner), controller, nowInSec, nextTimeUUID()))
         {
             StatsMetadata metadata = sstable.getSSTableMetadata();
             writer.switchWriter(createWriter(cfs, compactionFileLocation, expectedBloomFilterSize, metadata.repairedAt, metadata.pendingRepair, metadata.isTransient, sstable, txn));
@@ -1793,7 +1793,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
 
              AbstractCompactionStrategy.ScannerList scanners = strategy.getScanners(txn.originals());
              CompactionController controller = new CompactionController(cfs, sstableAsSet, getDefaultGcBefore(cfs, nowInSec));
-             CompactionIterator ci = getAntiCompactionIterator(scanners.scanners, controller, nowInSec, UUIDGen.getTimeUUID(), isCancelled))
+             CompactionIterator ci = getAntiCompactionIterator(scanners.scanners, controller, nowInSec, nextTimeUUID(), isCancelled))
         {
             TableOperation op = ci.getOperation();
             try (NonThrowingCloseable cls = active.onOperationStart(op))
@@ -1886,7 +1886,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     }
 
     @VisibleForTesting
-    public static CompactionIterator getAntiCompactionIterator(List<ISSTableScanner> scanners, CompactionController controller, int nowInSec, UUID timeUUID, BooleanSupplier isCancelled)
+    public static CompactionIterator getAntiCompactionIterator(List<ISSTableScanner> scanners, CompactionController controller, long nowInSec, TimeUUID timeUUID, BooleanSupplier isCancelled)
     {
         return new CompactionIterator(OperationType.ANTICOMPACTION, scanners, controller, nowInSec, timeUUID) {
             @Override
@@ -1923,7 +1923,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     }
 
     @VisibleForTesting
-    ListenableFuture<?> submitIndexBuild(final SecondaryIndexBuilder builder, TableOperationObserver activeCompactions)
+    Future<?> submitIndexBuild(final SecondaryIndexBuilder builder, TableOperationObserver activeCompactions)
     {
         Runnable runnable = new Runnable()
         {
@@ -1980,13 +1980,13 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         return executor.submitIfRunning(runnable, "cache write");
     }
 
-    public <T, E extends Throwable> T runAsActiveCompaction(Holder activeCompactionInfo, ThrowingSupplier<T, E> callable) throws E
+    public <T extends SSTableReader & IndexSummarySupport<T>> List<T> runIndexSummaryRedistribution(IndexSummaryRedistribution redistribution) throws IOException
     {
         return runIndexSummaryRedistribution(redistribution, active);
     }
 
     @VisibleForTesting
-    List<SSTableReader> runIndexSummaryRedistribution(IndexSummaryRedistribution redistribution, TableOperationObserver activeCompactions) throws IOException
+    <T extends SSTableReader & IndexSummarySupport<T>> List<T> runIndexSummaryRedistribution(IndexSummaryRedistribution redistribution, TableOperationObserver activeCompactions) throws IOException
     {
         try(Closeable c = activeCompactions.onOperationStart(redistribution))
         {
@@ -2007,7 +2007,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     }
 
     @VisibleForTesting
-    ListenableFuture<Long> submitViewBuilder(final ViewBuilderTask task, TableOperationObserver activeCompactions)
+    Future<Long> submitViewBuilder(final ViewBuilderTask task, TableOperationObserver activeCompactions)
     {
         return viewBuildExecutor.submitIfRunning(() -> {
             try(Closeable c = activeCompactions.onOperationStart(task))
@@ -2237,8 +2237,8 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     {
         for (TableOperation operationSource : active.getTableOperations())
         {
-            UUID holderId = operationSource.getProgress().operationId();
-            if (holderId != null && holderId.equals(UUID.fromString(compactionId)))
+            TimeUUID holderId = operationSource.getProgress().operationId();
+            if (holderId != null && holderId.equals(TimeUUID.fromString(compactionId)))
                 operationSource.stop();
         }
     }
@@ -2379,18 +2379,18 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         }
     }
 
-    public List<Holder> getCompactionsMatching(Iterable<TableMetadata> columnFamilies, Predicate<CompactionInfo> predicate)
+    public List<TableOperation> getCompactionsMatching(Iterable<TableMetadata> columnFamilies, Predicate<AbstractTableOperation.OperationProgress> predicate)
     {
         Preconditions.checkArgument(columnFamilies != null, "Attempted to getCompactionsMatching in CompactionManager with no columnFamilies specified.");
 
-        List<Holder> matched = new ArrayList<>();
+        List<TableOperation> matched = new ArrayList<>();
         // consider all in-progress compactions
-        for (Holder holder : active.getCompactions())
+        for (TableOperation holder : active.getTableOperations())
         {
-            CompactionInfo info = holder.getCompactionInfo();
-            if (info.getTableMetadata() == null || Iterables.contains(columnFamilies, info.getTableMetadata()))
+            AbstractTableOperation.OperationProgress progress = holder.getProgress();
+            if (progress.metadata() == null || Iterables.contains(columnFamilies, progress.metadata()))
             {
-                if (predicate.test(info))
+                if (predicate.test(progress))
                     matched.add(holder);
             }
         }

@@ -21,10 +21,10 @@ package org.apache.cassandra.db.compaction;
 import java.util.Collection;
 import java.util.List;
 import java.util.TreeMap;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.google.common.collect.ImmutableList;
+import org.apache.cassandra.utils.TimeUUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,7 +51,7 @@ class BackgroundCompactions implements CompactionObserver
     private volatile TreeMap<Long, CompactionAggregate> aggregates = new TreeMap<>();
 
     /**  The ongoing compactions grouped by unique operation ID. */
-    private ConcurrentHashMap<UUID, CompactionPick> compactions = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<TimeUUID, CompactionPick> compactions = new ConcurrentHashMap<>();
 
     BackgroundCompactions(AbstractCompactionStrategy strategy, ColumnFamilyStore cfs)
     {
@@ -145,7 +145,7 @@ class BackgroundCompactions implements CompactionObserver
     }
 
     @Override
-    public void setSubmitted(UUID id, CompactionAggregate aggregate)
+    public void setSubmitted(TimeUUID id, CompactionAggregate aggregate)
     {
         if (id == null || aggregate == null)
             throw new IllegalArgumentException("arguments cannot be null");
@@ -212,7 +212,7 @@ class BackgroundCompactions implements CompactionObserver
     }
 
     @Override
-    public void setCompleted(UUID id)
+    public void setCompleted(TimeUUID id)
     {
         if (id == null)
             throw new IllegalArgumentException("argument cannot be null");
