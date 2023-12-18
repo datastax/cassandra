@@ -250,6 +250,8 @@ public enum CassandraRelevantProperties
     DEFAULT_COMPACTION_LOG_MINUTES("default.compaction.log_minutes"),
     DEFAULT_INDEX_CLASS("cassandra.default_index_implementation_class"),
     DEFAULT_PROVIDE_OVERLAPPING_TOMBSTONES("default.provide.overlapping.tombstones"),
+    // Allow disabling deletions of corrupt index components for troubleshooting
+    DELETE_CORRUPT_SAI_COMPONENTS("cassandra.sai.delete_corrupt_components", "true"),
     /** determinism properties for testing */
     DETERMINISM_SSTABLE_COMPRESSION_DEFAULT("cassandra.sstable_compression_default", "true"),
     DETERMINISM_UNSAFE_UUID_NODE("cassandra.unsafe.deterministicuuidnode"),

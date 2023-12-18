@@ -30,6 +30,7 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -176,7 +177,10 @@ public class SSTableIndexWriter implements PerIndexWriter
                          indexDescriptor.descriptor, FBUtilities.prettyPrintMemory(allocated), FBUtilities.prettyPrintMemory(globalBytesUsed));
         }
 
-        indexDescriptor.deleteColumnIndex(indexContext);
+        if (CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
+            indexDescriptor.deleteColumnIndex(indexContext);
+        else
+            logger.debug("Skipping delete of index components after failure on index build of {}.{}", indexDescriptor, indexContext);
     }
 
     /**
