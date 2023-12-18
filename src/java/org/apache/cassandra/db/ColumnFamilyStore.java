@@ -520,7 +520,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
         // compaction strategy should be created after the CFS has been prepared
         compactionStrategyManager = new CompactionStrategyManager(this);
-        compactionStrategyManager.maybeReloadParamsFromSchema(metadata().params.compaction);
+        compactionStrategyManager.reloadParamsFromSchema(metadata().params.compaction);
 
         if (maxCompactionThreshold.value() <= 0 || minCompactionThreshold.value() <=0)
         {
