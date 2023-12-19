@@ -66,9 +66,6 @@ public class QueryContext
     private final LongAdder triePostingsSkips = new LongAdder();
     private final LongAdder triePostingsDecodes = new LongAdder();
 
-    private final LongAdder tokenSkippingCacheHits = new LongAdder();
-    private final LongAdder tokenSkippingLookups = new LongAdder();
-
     private final LongAdder queryTimeouts = new LongAdder();
 
     private final LongAdder hnswVectorsAccessed = new LongAdder();
@@ -138,14 +135,6 @@ public class QueryContext
     {
         triePostingsDecodes.add(val);
     }
-    public void addTokenSkippingCacheHits(long val)
-    {
-        tokenSkippingCacheHits.add(val);
-    }
-    public void addTokenSkippingLookups(long val)
-    {
-        tokenSkippingLookups.add(val);
-    }
     public void addQueryTimeouts(long val)
     {
         queryTimeouts.add(val);
@@ -208,14 +197,6 @@ public class QueryContext
     public long triePostingsDecodes()
     {
         return triePostingsDecodes.longValue();
-    }
-    public long tokenSkippingCacheHits()
-    {
-        return tokenSkippingCacheHits.longValue();
-    }
-    public long tokenSkippingLookups()
-    {
-        return tokenSkippingLookups.longValue();
     }
     public long queryTimeouts()
     {
