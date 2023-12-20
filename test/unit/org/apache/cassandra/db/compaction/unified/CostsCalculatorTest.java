@@ -191,7 +191,7 @@ public class CostsCalculatorTest
             assertEquals((writeCost + writeCost * 2) * writeMultiplier, cost.getWriteCostForQueries(2), epsilon);
 
             // the RA is 2, the delta partitions read is i + 1
-            assertEquals((((i + 1) * readTimeMicros) / (double) TimeUnit.MILLISECONDS.toMicros(1)) * 2 * readMultiplier, cost.getReadCostForQueries(2), epsilon);
+            assertEquals((((i + 1) * readTimeMicros) / (double) TimeUnit.MILLISECONDS.toMicros(1)) * 2 * readMultiplier, cost.getReadCostForQueries(2, 0), epsilon);
         }
     }
 
@@ -252,7 +252,7 @@ public class CostsCalculatorTest
 
         when(environment.partitionsRead()).thenReturn(0L);
         for (int i = 0; i < 10; i++)
-            assertEquals(0, cost.getReadCostForQueries(i), epsilon);
+            assertEquals(0, cost.getReadCostForQueries(i, 0), epsilon);
     }
 
     private static long random(int blockSize)

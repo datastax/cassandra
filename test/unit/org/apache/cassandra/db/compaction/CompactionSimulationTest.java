@@ -738,7 +738,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
             int RA = strategy.getController().readAmplification(length, W);
             int WA = strategy.getController().writeAmplification(length, W);
 
-            double readIOCost = calculator.getReadCostForQueries(RA);
+            double readIOCost = calculator.getReadCostForQueries(RA, 0);
             double writeIOCost = calculator.getWriteCostForQueries(WA);
 
             if (System.currentTimeMillis() - start >= TimeUnit.SECONDS.toMillis(warmupPeriodSec))

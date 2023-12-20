@@ -59,6 +59,7 @@ public class CompactionStrategyOptions
     public static final String DEFAULT_LOG_PERIOD_MINUTES_OPTION = System.getProperty("default.compaction.log_minutes", "1");
     public static final String DEFAULT_READ_MULTIPLIER_OPTION = System.getProperty("default.compaction.costs_read_multiplier", "1.0");
     public static final String DEFAULT_WRITE_MULTIPLIER_OPTION = System.getProperty("default.compaction.costs_read_multiplier", "1.0");
+    public static final String DEFAULT_LEVEL_READ_MULTIPLIER_OPTION = System.getProperty("default.compaction.level_read_multiplier", "0");
 
     public static final String TOMBSTONE_THRESHOLD_OPTION = "tombstone_threshold";
     public static final String TOMBSTONE_COMPACTION_INTERVAL_OPTION = "tombstone_compaction_interval";
@@ -68,11 +69,10 @@ public class CompactionStrategyOptions
     public static final String LOG_TYPE_OPTION = "log";
     public static final String LOG_PERIOD_MINUTES_OPTION = "log_period_minutes";
 
-    /** The multipliers can be used by users if they wish to adjust the costs. We reduce the read costs because writes are batch processes (flush and compaction)
-     * and therefore the costs tend to be lower that for reads, so by reducing read costs we make the costs more comparable.
-     */
+    /** The multipliers can be used by users if they wish to adjust the costs.*/
     public static final String READ_MULTIPLIER_OPTION = "costs_read_multiplier";
     public static final String WRITE_MULTIPLIER_OPTION = "costs_write_multiplier";
+    public static final String LEVEL_READ_MULTIPLIER_OPTION = "level_read_multiplier";
     public static final String COMPACTION_ENABLED = "enabled";
 
     private final Class<? extends CompactionStrategy> klass;
@@ -89,6 +89,7 @@ public class CompactionStrategyOptions
     private final int logPeriodMinutes;
     private final double readMultiplier;
     private final double writeMultiplier;
+    private final double levelReadMultiplier;
 
     public CompactionStrategyOptions(Class<? extends CompactionStrategy> klass, Map<String, String> options, boolean throwOnInvalidOption)
     {
@@ -130,6 +131,7 @@ public class CompactionStrategyOptions
         logPeriodMinutes = Integer.parseInt(getOption(LOG_PERIOD_MINUTES_OPTION, useDefault, DEFAULT_LOG_PERIOD_MINUTES_OPTION));
         readMultiplier = Double.parseDouble(getOption(READ_MULTIPLIER_OPTION, useDefault, DEFAULT_READ_MULTIPLIER_OPTION));
         writeMultiplier = Double.parseDouble(getOption(WRITE_MULTIPLIER_OPTION, useDefault, DEFAULT_WRITE_MULTIPLIER_OPTION));
+        levelReadMultiplier = Double.parseDouble(getOption(LEVEL_READ_MULTIPLIER_OPTION, useDefault, DEFAULT_LEVEL_READ_MULTIPLIER_OPTION));
     }
 
     private Map<String, String> copyOptions(Class<? extends CompactionStrategy> klass, Map<String, String> options)
@@ -398,6 +400,23 @@ public class CompactionStrategyOptions
             }
         }
 
+        String levelReadMultiplier = options.get(LEVEL_READ_MULTIPLIER_OPTION);
+        if (levelReadMultiplier != null)
+        {
+            try
+            {
+                double multiplier = Double.parseDouble(levelReadMultiplier);
+                if (!(multiplier >= 0 && multiplier <= 1))
+                {
+                    throw new ConfigurationException(String.format("%s must be between 0 and 1 (inclusive), but was %d", LEVEL_READ_MULTIPLIER_OPTION, multiplier));
+                }
+            }
+            catch (NumberFormatException e)
+            {
+                throw new ConfigurationException(String.format("%s is not a parsable double (base10) for %s", readMultiplier, LEVEL_READ_MULTIPLIER_OPTION), e);
+            }
+        }
+
         String compactionEnabled = options.get(COMPACTION_ENABLED);
         if (compactionEnabled != null && !compactionEnabled.equalsIgnoreCase("true") && !compactionEnabled.equalsIgnoreCase("false"))
         {
@@ -413,6 +432,7 @@ public class CompactionStrategyOptions
         uncheckedOptions.remove(LOG_PERIOD_MINUTES_OPTION);
         uncheckedOptions.remove(READ_MULTIPLIER_OPTION);
         uncheckedOptions.remove(WRITE_MULTIPLIER_OPTION);
+        uncheckedOptions.remove(LEVEL_READ_MULTIPLIER_OPTION);
         uncheckedOptions.remove(COMPACTION_ENABLED);
         uncheckedOptions.remove(ONLY_PURGE_REPAIRED_TOMBSTONES);
         uncheckedOptions.remove(CompactionParams.Option.PROVIDE_OVERLAPPING_TOMBSTONES.toString());
@@ -497,5 +517,10 @@ public class CompactionStrategyOptions
     public double getWriteMultiplier()
     {
         return writeMultiplier;
+    }
+
+    public double getLevelReadMultiplier()
+    {
+        return levelReadMultiplier;
     }
 }

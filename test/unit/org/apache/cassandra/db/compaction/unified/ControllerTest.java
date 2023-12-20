@@ -77,6 +77,7 @@ public abstract class ControllerTest
     static final boolean compactionEnabled = true;
     static final double readMultiplier = 0.5;
     static final double writeMultiplier = 1.0;
+    static final double levelReadMultiplier = 0.5;
     static final String tableName = "tbl";
 
     @Mock
@@ -599,6 +600,7 @@ public abstract class ControllerTest
         options.put(CompactionStrategyOptions.COMPACTION_ENABLED, Boolean.toString(compactionEnabled));
         options.put(CompactionStrategyOptions.READ_MULTIPLIER_OPTION, Double.toString(readMultiplier));
         options.put(CompactionStrategyOptions.WRITE_MULTIPLIER_OPTION, Double.toString(writeMultiplier));
+        options.put(CompactionStrategyOptions.LEVEL_READ_MULTIPLIER_OPTION, Double.toString(levelReadMultiplier));
 
         CompactionStrategyOptions compactionStrategyOptions = new CompactionStrategyOptions(UnifiedCompactionStrategy.class, options, true);
         assertNotNull(compactionStrategyOptions);
@@ -620,6 +622,7 @@ public abstract class ControllerTest
         assertEquals(logPeriodMinutesOption, compactionStrategyOptions.getLogPeriodMinutes());
         assertEquals(readMultiplier, compactionStrategyOptions.getReadMultiplier(), epsilon);
         assertEquals(writeMultiplier, compactionStrategyOptions.getWriteMultiplier(), epsilon);
+        assertEquals(levelReadMultiplier, compactionStrategyOptions.getLevelReadMultiplier(), epsilon);
 
         Map<String, String> uncheckedOptions = CompactionStrategyOptions.validateOptions(options);
         assertNotNull(uncheckedOptions);

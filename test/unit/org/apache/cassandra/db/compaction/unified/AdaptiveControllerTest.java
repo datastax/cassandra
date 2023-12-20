@@ -283,8 +283,8 @@ public class AdaptiveControllerTest extends ControllerTest
         controller.startup(strategy, calculator);
 
         // no update, <= min cost
-        when(calculator.getReadCostForQueries(anyInt())).thenReturn((double) minCost);
-        when(calculator.getReadCostForQueries(anyInt())).thenReturn(0.);
+        when(calculator.getReadCostForQueries(anyInt(), anyInt())).thenReturn((double) minCost);
+        when(calculator.getReadCostForQueries(anyInt(), anyInt())).thenReturn(0.);
         when(calculator.spaceUsed()).thenReturn(1.0);
 
         clock.setNowInNanos(clock.now() + TimeUnit.SECONDS.toNanos(interval + 1));
@@ -371,7 +371,7 @@ public class AdaptiveControllerTest extends ControllerTest
             final double readCost = readCosts[i];
             final double writeCost = writeCosts[i];
 
-            when(calculator.getReadCostForQueries(anyInt())).thenAnswer(answ -> (int) answ.getArgument(0) * readCost);
+            when(calculator.getReadCostForQueries(anyInt(), anyInt())).thenAnswer(answ -> (int) answ.getArgument(0) * readCost);
             when(calculator.getWriteCostForQueries(anyInt())).thenAnswer(answ -> (int) answ.getArgument(0) * writeCost);
 
             clock.setNowInNanos(clock.now() + TimeUnit.SECONDS.toNanos(interval + 1));

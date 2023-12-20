@@ -145,13 +145,13 @@ public class CostsCalculator
      *
      * @return the projected read cost for user queries
      */
-    public double getReadCostForQueries(int RA)
+    public double getReadCostForQueries(int RA, int level)
     {
         readLock.lock();
 
         try
         {
-            return getReadCost(partitionsReadPerPeriod.avg.get()) * RA * strategy.getOptions().getReadMultiplier();
+            return getReadCost(partitionsReadPerPeriod.avg.get()) * RA * strategy.getOptions().getReadMultiplier() * (1 + (level * strategy.getOptions().getLevelReadMultiplier()));
         }
         finally
         {

@@ -465,108 +465,91 @@ public class AdaptiveController extends Controller
     private void maybeUpdate(long now)
     {
         final long targetSize = Math.max(getDataSetSizeBytes(), (long) Math.ceil(calculator.spaceUsed()));
+        boolean updated = false;
 
-        final int RA = readAmplification(targetSize, scalingParameters[0]);
-        final int WA = writeAmplification(targetSize, scalingParameters[0]);
-
-        final double readCost = calculator.getReadCostForQueries(RA);
-        final double writeCost = calculator.getWriteCostForQueries(WA);
-        final double cost =  readCost + writeCost;
-
-        if (cost <= minCost)
+        for (int level = 0; level < scalingParameters.length; level++)
         {
-            logger.debug("Adaptive compaction controller not updated, cost for current scaling parameter {} is below minimum cost {}: read cost: {}, write cost: {}\nAverages: {}", scalingParameters[0], minCost, readCost, writeCost, calculator);
-            return;
-        }
+            final int RA = readAmplification(targetSize, scalingParameters[level]);
+            final int WA = writeAmplification(targetSize, scalingParameters[level]);
 
-        final double[] totCosts = new double[maxScalingParameter - minScalingParameter + 1];
-        final double[] readCosts = new double[maxScalingParameter - minScalingParameter + 1];
-        final double[] writeCosts = new double[maxScalingParameter - minScalingParameter + 1];
-        int candScalingParameter = scalingParameters[0];
-        double candCost = cost;
+            final double readCost = calculator.getReadCostForQueries(RA, level);
+            final double writeCost = calculator.getWriteCostForQueries(WA);
+            final double cost =  readCost + writeCost;
 
-        for (int i = minScalingParameter; i <= maxScalingParameter; i++)
-        {
-            final int idx = i - minScalingParameter;
-            if (i == scalingParameters[0])
+            if (cost <= minCost)
             {
-                readCosts[idx] = readCost;
-                writeCosts[idx] = writeCost;
+                logger.debug("Adaptive compaction controller not updated for level {}, cost for current scaling parameter {} is below minimum cost {}: read cost: {}, write cost: {}\nAverages: {}", level, scalingParameters[0], minCost, readCost, writeCost, calculator);
+                continue;
+            }
+
+            final double[] totCosts = new double[maxScalingParameter - minScalingParameter + 1];
+            final double[] readCosts = new double[maxScalingParameter - minScalingParameter + 1];
+            final double[] writeCosts = new double[maxScalingParameter - minScalingParameter + 1];
+            int candScalingParameter = scalingParameters[level];
+            double candCost = cost;
+
+            for (int w = minScalingParameter; w <= maxScalingParameter; w++)
+            {
+                final int idx = w - minScalingParameter;
+                if (w == scalingParameters[level])
+                {
+                    readCosts[idx] = readCost;
+                    writeCosts[idx] = writeCost;
+                }
+                else
+                {
+                    final int ra = readAmplification(targetSize, w);
+                    final int wa = writeAmplification(targetSize, w);
+
+                    readCosts[idx] = calculator.getReadCostForQueries(ra, level);
+                    writeCosts[idx] = calculator.getWriteCostForQueries(wa);
+                }
+                totCosts[idx] = readCosts[idx] + writeCosts[idx];
+                // in case of a tie, for neg.ve scalingParameters we prefer higher scalingParameters (smaller WA), but not for pos.ve scalingParameters we prefer lower scalingParameters (more parallelism)
+                if (totCosts[idx] < candCost || (w < 0 && totCosts[idx] == candCost))
+                {
+                    candScalingParameter = w;
+                    candCost = totCosts[idx];
+                }
+            }
+            logger.debug("Level: {}, Min cost: {}, min scaling parameter: {}, target sstable size: {}\nread costs: {}\nwrite costs: {}\ntot costs: {}\nAverages: {}",
+                         level,
+                         candCost,
+                         candScalingParameter,
+                         FBUtilities.prettyPrintMemory(getTargetSSTableSize()),
+                         Arrays.toString(readCosts),
+                         Arrays.toString(writeCosts),
+                         Arrays.toString(totCosts),
+                         calculator);
+
+            StringBuilder str = new StringBuilder(100);
+            str.append("Adaptive compaction controller ");
+
+            if (scalingParameters[level] != candScalingParameter && (cost - candCost) >= threshold * cost)
+            {
+                //scaling parameter is updated
+                str.append("updated for level ").append(level).append(": ").append(scalingParameters[level]).append(" -> ").append(candScalingParameter);
+                this.previousScalingParameters[level] = scalingParameters[level]; //need to keep track of the previous scaling parameter for isAdaptive check
+                this.scalingParameters[level] = candScalingParameter;
+
+                updated = true;
             }
             else
             {
-                final int ra = readAmplification(targetSize, i);
-                final int wa = writeAmplification(targetSize, i);
-
-                readCosts[idx] = calculator.getReadCostForQueries(ra);
-                writeCosts[idx] = calculator.getWriteCostForQueries(wa);
+                str.append("unchanged for level ").append(level).append(": ").append(scalingParameters[level]);
             }
-            totCosts[idx] = readCosts[idx] + writeCosts[idx];
-            // in case of a tie, for neg.ve scalingParameters we prefer higher scalingParameters (smaller WA), but not for pos.ve scalingParameters we prefer lower scalingParameters (more parallelism)
-            if (totCosts[idx] < candCost || (i < 0 && totCosts[idx] == candCost))
-            {
-                candScalingParameter = i;
-                candCost = totCosts[idx];
-            }
-        }
 
-        logger.debug("Min cost: {}, min scaling parameter: {}, target sstable size: {}\nread costs: {}\nwrite costs: {}\ntot costs: {}\nAverages: {}",
-                     candCost,
-                     candScalingParameter,
-                     FBUtilities.prettyPrintMemory(getTargetSSTableSize()),
-                     Arrays.toString(readCosts),
-                     Arrays.toString(writeCosts),
-                     Arrays.toString(totCosts),
-                     calculator);
+            str.append(", data size: ").append(FBUtilities.prettyPrintMemory(targetSize));
+            str.append(", query cost: ").append(cost);
+            str.append(", new query cost: ").append(candCost);
+            str.append(", took ").append(TimeUnit.NANOSECONDS.toMicros(clock.now() - now)).append(" us");
 
-        StringBuilder str = new StringBuilder(100);
-        str.append("Adaptive compaction controller ");
-
-        if (scalingParameters[0] != candScalingParameter && (cost - candCost) >= threshold * cost)
-        {
-            //scaling parameter is updated
-            str.append("updated ").append(scalingParameters[0]).append(" -> ").append(candScalingParameter);
-            this.previousScalingParameters[0] = scalingParameters[0]; //need to keep track of the previous scaling parameter for isAdaptive check
-            this.scalingParameters[0] = candScalingParameter;
+            logger.debug(str.toString());
 
             //store updated scaling parameters in case a node fails and needs to restart
-            storeControllerConfig();
+            if (updated)
+                storeControllerConfig();
         }
-        else if (scalingParameters[0] == candScalingParameter)
-        {
-            // only update the lowest level that is not equal to candScalingParameter
-            // example: candScalingParameter = 4, scalingParameters = {4, 4, 12, 16} --> scalingParameters = {4, 4, 4, 16}
-            // as a result, higher levels will be less prone to changes
-            for (int i = 1; i < scalingParameters.length; i++)
-            {
-                if (scalingParameters[i] != candScalingParameter)
-                {
-                    str.append("updated for level ").append(i).append(": ").append(scalingParameters[i]).append(" -> ").append(candScalingParameter);
-                    this.previousScalingParameters[i] = scalingParameters[i];
-                    this.scalingParameters[i] = candScalingParameter;
-
-                    //store updated scaling parameters in case a node fails and needs to restart
-                    storeControllerConfig();
-                    break;
-                }
-                else if (i == scalingParameters.length-1)
-                {
-                    str.append("unchanged because all levels have the same scaling parameter");
-                }
-            }
-        }
-        else
-        {
-            //scaling parameter is not updated
-            str.append("unchanged");
-        }
-
-        str.append(", data size: ").append(FBUtilities.prettyPrintMemory(targetSize));
-        str.append(", query cost: ").append(cost);
-        str.append(", new query cost: ").append(candCost);
-        str.append(", took ").append(TimeUnit.NANOSECONDS.toMicros(clock.now() - now)).append(" us");
-
-        logger.debug(str.toString());
     }
 
     @Override

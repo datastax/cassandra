@@ -811,7 +811,7 @@ public abstract class Controller
 
         int scalingParameter = getScalingParameter(0);
         long length = (long) Math.ceil(calculator.spaceUsed());
-        return calculator.getReadCostForQueries(readAmplification(length, scalingParameter));
+        return calculator.getReadCostForQueries(readAmplification(length, scalingParameter), 0);
     }
 
     private double getWriteIOCost()
