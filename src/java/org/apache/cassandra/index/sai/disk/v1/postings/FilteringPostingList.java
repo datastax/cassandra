@@ -19,11 +19,9 @@ package org.apache.cassandra.index.sai.disk.v1.postings;
 
 import java.io.IOException;
 
-import com.google.common.base.Preconditions;
-
-import org.apache.cassandra.index.sai.disk.v1.lucene75.util.FixedBitSet;
+import org.apache.cassandra.index.sai.postings.OrdinalPostingList;
 import org.apache.cassandra.index.sai.postings.PostingList;
-import org.apache.cassandra.io.util.FileUtils;
+import org.apache.lucene.util.FixedBitSet;
 
 /**
  * A wrapper that iterates over a delegate {@link PostingList}, filtering out postings at
@@ -39,9 +37,6 @@ public class FilteringPostingList implements PostingList
     public FilteringPostingList(FixedBitSet filter, OrdinalPostingList delegate)
     {
         cardinality = filter.cardinality();
-
-        Preconditions.checkArgument(cardinality > 0, "Filter must contain at least one match.");
-
         this.filter = filter;
         this.delegate = delegate;
     }
@@ -49,7 +44,7 @@ public class FilteringPostingList implements PostingList
     @Override
     public void close()
     {
-        FileUtils.closeQuietly(delegate);
+        delegate.close();
     }
 
     /**
@@ -91,7 +86,7 @@ public class FilteringPostingList implements PostingList
             return PostingList.END_OF_STREAM;
         }
 
-        // these are always for leaf kdtree postings so the max is 1024
+        // these are always for leaf balanced tree postings so the max is 1024
         position = (int)delegate.getOrdinal();
 
         // If the ordinal of the ID we just read satisfies the filter, just return it...

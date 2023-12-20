@@ -23,9 +23,9 @@ import java.util.HashMap;
 import java.util.Map;
 import javax.annotation.concurrent.NotThreadSafe;
 
-import org.apache.cassandra.index.sai.disk.v1.io.RAMIndexOutput;
-import org.apache.cassandra.index.sai.disk.v1.lucene75.store.IndexOutput;
-import org.apache.cassandra.index.sai.disk.v1.lucene75.util.BytesRef;
+import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
+import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.util.BytesRef;
 
 @NotThreadSafe
 public class MetadataWriter implements Closeable
@@ -43,7 +43,7 @@ public class MetadataWriter implements Closeable
         return new Builder(name);
     }
 
-    public class Builder extends RAMIndexOutput implements Closeable
+    public class Builder extends ResettableByteBuffersIndexOutput implements Closeable
     {
         private Builder(String name)
         {
@@ -53,7 +53,7 @@ public class MetadataWriter implements Closeable
         @Override
         public void close()
         {
-            map.put(getName(), new BytesRef(out.getBytes(), 0, out.getPosition()));
+            map.put(getName(), new BytesRef(toArrayCopy(), 0, intSize()));
         }
     }
 

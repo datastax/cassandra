@@ -26,9 +26,9 @@ import com.google.common.base.Objects;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.disk.v1dse.DSELegacyOnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v2cc.CCLegacyOnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
-import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 
@@ -42,21 +42,21 @@ public class Version implements Comparable<Version>
     public static final String SAI_SEPARATOR = "+";
 
     // 6.8 formats
-    public static final Version AA = new Version("aa", V1OnDiskFormat.instance, Version::aaFileNameFormat);
+    public static final Version DSE_LEGACY = new Version("dse_legacy", DSELegacyOnDiskFormat.instance, Version::aaFileNameFormat);
     // Stargazer
-    public static final Version BA = new Version("ba", V2OnDiskFormat.instance, (c, i) -> defaultFileNameFormat(c, i, "ba"));
+    public static final Version CONVERGED_CASSANDRA_LEGACY = new Version("ba", CCLegacyOnDiskFormat.instance, (c, i) -> defaultFileNameFormat(c, i, "ba"));
     // Current version
-    public static final Version BB = new Version("bb", V3OnDiskFormat.instance, (c, i) -> defaultFileNameFormat(c, i, "bb"));
+    public static final Version AA = new Version("aa", V1OnDiskFormat.instance, (c, i) -> defaultFileNameFormat(c, i, "aa"));
 
     // These should be added in reverse order so that the latest version is used first. Version matching tests
     // are more likely to match the latest version, so we want to test that one first.
-    public static final SortedSet<Version> ALL = new TreeSet<Version>(Comparator.reverseOrder()) {{
+    public static final SortedSet<Version> ALL = new TreeSet<>(Comparator.reverseOrder()) {{
+        add(DSE_LEGACY);
+        add(CONVERGED_CASSANDRA_LEGACY);
         add(AA);
-        add(BA);
-        add(BB);
     }};
 
-    public static final Version EARLIEST = AA;
+    public static final Version EARLIEST = DSE_LEGACY;
     // The latest version can be configured to be an earlier version to support partial upgrades that don't
     // write newer versions of the on-disk formats.
     public static final Version LATEST = Version.parse(CassandraRelevantProperties.SAI_LATEST_VERSION.getString());

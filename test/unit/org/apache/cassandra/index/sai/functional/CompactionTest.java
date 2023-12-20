@@ -42,7 +42,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.v3.SSTableIndexWriter;
+import org.apache.cassandra.index.sai.disk.v1.SSTableIndexWriter;
 import org.apache.cassandra.inject.ActionBuilder;
 import org.apache.cassandra.inject.Expression;
 import org.apache.cassandra.inject.Injection;

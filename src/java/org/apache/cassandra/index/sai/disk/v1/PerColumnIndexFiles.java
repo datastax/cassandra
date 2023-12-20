@@ -25,10 +25,15 @@ import java.util.Map;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 
+/**
+ * Maintains a mapping of {@link IndexComponent}s to associated {@link FileHandle}s for
+ * read operations on the components. Users of this class are returned copies of the
+ * {@link FileHandle}s using {@link FileHandle#sharedCopy()} so returned handles still
+ * need to be closed by the user.
+ */
 public class PerColumnIndexFiles implements Closeable
 {
     private final Map<IndexComponent, FileHandle> files = new EnumMap<>(IndexComponent.class);
@@ -39,15 +44,15 @@ public class PerColumnIndexFiles implements Closeable
     {
         this.indexDescriptor = indexDescriptor;
         this.indexContext = indexContext;
-        if (TypeUtil.isLiteral(indexContext.getValidator()))
+        if (indexContext.isLiteral())
         {
             files.put(IndexComponent.POSTING_LISTS, indexDescriptor.createPerIndexFileHandle(IndexComponent.POSTING_LISTS, indexContext, this::close));
             files.put(IndexComponent.TERMS_DATA, indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext, this::close));
         }
         else
         {
-            files.put(IndexComponent.KD_TREE, indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext, this::close));
-            files.put(IndexComponent.KD_TREE_POSTING_LISTS, indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext, this::close));
+            files.put(IndexComponent.BALANCED_TREE, indexDescriptor.createPerIndexFileHandle(IndexComponent.BALANCED_TREE, indexContext, this::close));
+            files.put(IndexComponent.POSTING_LISTS, indexDescriptor.createPerIndexFileHandle(IndexComponent.POSTING_LISTS, indexContext, this::close));
         }
     }
 
@@ -61,23 +66,18 @@ public class PerColumnIndexFiles implements Closeable
         return getFile(IndexComponent.POSTING_LISTS);
     }
 
-    public FileHandle kdtree()
+    public FileHandle balancedTree()
     {
-        return getFile(IndexComponent.KD_TREE);
+        return getFile(IndexComponent.BALANCED_TREE);
     }
 
-    public FileHandle kdtreePostingLists()
-    {
-        return getFile(IndexComponent.KD_TREE_POSTING_LISTS);
-    }
-
+    @SuppressWarnings({"resource", "RedundantSuppression"})
     private FileHandle getFile(IndexComponent indexComponent)
     {
         FileHandle file = files.get(indexComponent);
         if (file == null)
             throw new IllegalArgumentException(String.format(indexContext.logMessage("Component %s not found for SSTable %s"),
-                                                             indexComponent,
-                                                             indexDescriptor.sstableDescriptor));
+                                                             indexComponent, indexDescriptor.sstableDescriptor));
 
         return file.sharedCopy();
     }

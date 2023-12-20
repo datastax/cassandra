@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 
 import com.google.common.collect.ImmutableList;
@@ -28,6 +29,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
@@ -37,9 +39,25 @@ import org.apache.cassandra.index.sai.disk.v1.segment.SegmentMetadata;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
 
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.CELL_COUNT;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.COLUMN_NAME;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.COMPONENT_METADATA;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.END_TOKEN;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.MAX_SSTABLE_ROW_ID;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.MAX_TERM;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.MIN_SSTABLE_ROW_ID;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.MIN_TERM;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.START_TOKEN;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.TABLE_NAME;
+
+/**
+ * A version specific implementation of the {@link SSTableIndex} where the
+ * index is segmented
+ */
 public class V1SSTableIndex extends SSTableIndex
 {
     private final ImmutableList<Segment> segments;
@@ -98,60 +116,89 @@ public class V1SSTableIndex extends SSTableIndex
     @Override
     public long indexFileCacheSize()
     {
-        return 0;
+        return segments.stream().mapToLong(Segment::indexFileCacheSize).sum();
     }
 
     @Override
     public long getRowCount()
     {
-        return 0;
+        return numRows;
     }
 
     @Override
     public long minSSTableRowId()
     {
-        return 0;
+        return minSSTableRowId;
     }
 
     @Override
     public long maxSSTableRowId()
     {
-        return 0;
+        return maxSSTableRowId;
     }
 
     @Override
     public ByteBuffer minTerm()
     {
-        return null;
+        return minTerm;
     }
 
     @Override
     public ByteBuffer maxTerm()
     {
-        return null;
+        return maxTerm;
     }
 
     @Override
     public AbstractBounds<PartitionPosition> bounds()
     {
-        return null;
+        return bounds;
     }
 
     @Override
-    public List<KeyRangeIterator> search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context) throws IOException
+    public List<KeyRangeIterator> search(Expression expression,
+                                         AbstractBounds<PartitionPosition> keyRange,
+                                         QueryContext context) throws IOException
     {
-        return null;
+        List<KeyRangeIterator> segmentIterators = new ArrayList<>();
+
+        for (Segment segment : segments)
+        {
+            if (segment.intersects(keyRange))
+            {
+                segmentIterators.add(segment.search(expression, context));
+            }
+        }
+
+        return segmentIterators;
     }
 
     @Override
-    public void populateSegmentView(SimpleDataSet dataSet)
+    public void populateSegmentView(SimpleDataSet dataset)
     {
+        SSTableReader sstable = getSSTable();
+        Token.TokenFactory tokenFactory = sstable.metadata().partitioner.getTokenFactory();
 
+        for (SegmentMetadata metadata : metadatas)
+        {
+            dataset.row(sstable.metadata().keyspace, indexContext.getIndexName(), sstable.getFilename(), metadata.rowIdOffset)
+                   .column(TABLE_NAME, sstable.descriptor.cfname)
+                   .column(COLUMN_NAME, indexContext.getColumnName())
+                   .column(CELL_COUNT, metadata.numRows)
+                   .column(MIN_SSTABLE_ROW_ID, metadata.minSSTableRowId)
+                   .column(MAX_SSTABLE_ROW_ID, metadata.maxSSTableRowId)
+                   .column(START_TOKEN, tokenFactory.toString(metadata.minKey.token()))
+                   .column(END_TOKEN, tokenFactory.toString(metadata.maxKey.token()))
+                   .column(MIN_TERM, indexContext.getValidator().getSerializer().deserialize(metadata.minTerm).toString())
+                   .column(MAX_TERM, indexContext.getValidator().getSerializer().deserialize(metadata.maxTerm).toString())
+                   .column(COMPONENT_METADATA, metadata.componentMetadatas.asMap());
+        }
     }
 
     @Override
     protected void internalRelease()
     {
-
+        FileUtils.closeQuietly(indexFiles);
+        FileUtils.closeQuietly(segments);
     }
 }

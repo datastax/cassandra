@@ -19,45 +19,39 @@ package org.apache.cassandra.index.sai.disk.v1.bitpack;
 
 import java.io.IOException;
 
-import org.apache.cassandra.index.sai.disk.v1.io.RAMIndexOutput;
-import org.apache.cassandra.index.sai.disk.v1.lucene75.store.IndexOutput;
-import org.apache.cassandra.index.sai.disk.v1.lucene75.util.packed.DirectWriter;
+import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
+import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.util.packed.DirectWriter;
 
 import static org.apache.cassandra.index.sai.disk.v1.SAICodecUtils.checkBlockSize;
 
 /**
- * Modified copy of {@code org.apache.lucene.util.packed.AbstractBlockPackedWriter} to use {@code DirectWriter} for
+ * Modified copy of {@code org.apache.lucene.util.packed.AbstractBlockPackedWriter} to use {@link DirectWriter} for
  * optimised reads that doesn't require seeking through the whole file to open a thread-exclusive reader.
  */
 public abstract class AbstractBlockPackedWriter
 {
     static final int MIN_BLOCK_SIZE = 64;
     static final int MAX_BLOCK_SIZE = 1 << (30 - 3);
-    static final int MIN_VALUE_EQUALS_0 = 1;
-    static final int BPV_SHIFT = 1;
 
-    protected final IndexOutput out;
-    protected final long[] values;
-    protected int off;
+    protected final IndexOutput indexOutput;
+    protected final long[] blockValues;
+    // This collects metadata specific to the block packed writer being used during the
+    // writing of the block packed data. This cached metadata is then written to the end
+    // of the data file when the block packed writer is finished.
+    protected final ResettableByteBuffersIndexOutput blockMetaWriter;
+
+    protected int blockIndex;
     protected boolean finished;
-    
-    final RAMIndexOutput blockMetaWriter;
 
-    AbstractBlockPackedWriter(IndexOutput out, int blockSize)
+    AbstractBlockPackedWriter(IndexOutput indexOutput, int blockSize)
     {
         checkBlockSize(blockSize, MIN_BLOCK_SIZE, MAX_BLOCK_SIZE);
-        this.out = out;
-        this.blockMetaWriter = new RAMIndexOutput("NumericValuesMeta");
-        values = new long[blockSize];
+        this.indexOutput = indexOutput;
+        this.blockMetaWriter = new ResettableByteBuffersIndexOutput(blockSize, "BlockPackedMeta");
+        blockValues = new long[blockSize];
     }
 
-    private void checkNotFinished()
-    {
-        if (finished)
-        {
-            throw new IllegalStateException(String.format("[%s] Writer already finished!", out.getName()));
-        }
-    }
 
     /**
      * Append a new long.
@@ -65,13 +59,12 @@ public abstract class AbstractBlockPackedWriter
     public void add(long l) throws IOException
     {
         checkNotFinished();
-        if (off == values.length)
+        if (blockIndex == blockValues.length)
         {
             flush();
         }
-        values[off++] = l;
+        blockValues[blockIndex++] = l;
     }
-
 
     /**
      * Flush all buffered data to disk. This instance is not usable anymore
@@ -82,24 +75,24 @@ public abstract class AbstractBlockPackedWriter
     public long finish() throws IOException
     {
         checkNotFinished();
-        if (off > 0)
+        if (blockIndex > 0)
         {
             flush();
         }
-        final long fp = out.getFilePointer();
-        blockMetaWriter.writeTo(out);
+        final long fp = indexOutput.getFilePointer();
+        blockMetaWriter.copyTo(indexOutput);
         finished = true;
         return fp;
     }
 
-    protected abstract void flush() throws IOException;
+    protected abstract void flushBlock() throws IOException;
 
     void writeValues(int numValues, int bitsPerValue) throws IOException
     {
-        final DirectWriter writer = DirectWriter.getInstance(out, numValues, bitsPerValue);
+        final DirectWriter writer = DirectWriter.getInstance(indexOutput, numValues, bitsPerValue);
         for (int i = 0; i < numValues; ++i)
         {
-            writer.add(values[i]);
+            writer.add(blockValues[i]);
         }
         writer.finish();
     }
@@ -113,5 +106,19 @@ public abstract class AbstractBlockPackedWriter
             i >>>= 7;
         }
         out.writeByte((byte) i);
+    }
+
+    private void flush() throws IOException
+    {
+        flushBlock();
+        blockIndex = 0;
+    }
+
+    private void checkNotFinished()
+    {
+        if (finished)
+        {
+            throw new IllegalStateException(String.format("[%s] Writer already finished!", indexOutput.getName()));
+        }
     }
 }

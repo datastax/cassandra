@@ -19,10 +19,10 @@ package org.apache.cassandra.index.sai.disk.v1.bitpack;
 
 import java.io.IOException;
 
-import org.apache.cassandra.index.sai.disk.v1.lucene75.store.IndexOutput;
-import org.apache.cassandra.index.sai.disk.v1.lucene75.util.packed.DirectWriter;
+import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.util.packed.DirectWriter;
 
-import static org.apache.cassandra.index.sai.disk.v1.lucene75.util.BitUtil.zigZagEncode;
+import static org.apache.lucene.util.BitUtil.zigZagEncode;
 
 /**
  * A writer for large sequences of longs.
@@ -32,32 +32,32 @@ import static org.apache.cassandra.index.sai.disk.v1.lucene75.util.BitUtil.zigZa
  */
 public class BlockPackedWriter extends AbstractBlockPackedWriter
 {
+    static final int BPV_SHIFT = 1;
+    static final int MIN_VALUE_EQUALS_0 = 1;
+
     public BlockPackedWriter(IndexOutput out, int blockSize)
     {
         super(out, blockSize);
     }
 
     @Override
-    protected void flush() throws IOException
+    protected void flushBlock() throws IOException
     {
-        assert off > 0;
         long min = Long.MAX_VALUE, max = Long.MIN_VALUE;
-        for (int i = 0; i < off; ++i)
+        for (int i = 0; i < blockIndex; ++i)
         {
-            min = Math.min(values[i], min);
-            max = Math.max(values[i], max);
+            min = Math.min(blockValues[i], min);
+            max = Math.max(blockValues[i], max);
         }
 
-        final long delta = max - min;
+        long delta = max - min;
         int bitsRequired = delta == 0 ? 0 : DirectWriter.unsignedBitsRequired(delta);
 
-        final int token = (bitsRequired << BPV_SHIFT) | (min == 0 ? MIN_VALUE_EQUALS_0 : 0);
-        blockMetaWriter.writeByte((byte) token);
+        int shiftedBitsRequired = (bitsRequired << BPV_SHIFT) | (min == 0 ? MIN_VALUE_EQUALS_0 : 0);
+        blockMetaWriter.writeByte((byte) shiftedBitsRequired);
 
         if (min != 0)
         {
-            // TODO: the min values can be delta encoded since they are read linearly
-            // TODO: buffer the min values so they may be written as a single block
             writeVLong(blockMetaWriter, zigZagEncode(min) - 1);
         }
 
@@ -65,15 +65,13 @@ public class BlockPackedWriter extends AbstractBlockPackedWriter
         {
             if (min != 0)
             {
-                for (int i = 0; i < off; ++i)
+                for (int i = 0; i < blockIndex; ++i)
                 {
-                    values[i] -= min;
+                    blockValues[i] -= min;
                 }
             }
-            blockMetaWriter.writeVLong(out.getFilePointer());
-            writeValues(off, bitsRequired);
+            blockMetaWriter.writeVLong(indexOutput.getFilePointer());
+            writeValues(blockIndex, bitsRequired);
         }
-
-        off = 0;
     }
 }

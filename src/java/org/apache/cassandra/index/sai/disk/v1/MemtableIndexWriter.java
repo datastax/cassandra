@@ -18,7 +18,6 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
-import java.lang.invoke.MethodHandles;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
@@ -28,7 +27,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.carrotsearch.hppc.LongArrayList;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -36,11 +34,11 @@ import org.apache.cassandra.index.sai.disk.PerColumnIndexWriter;
 import org.apache.cassandra.index.sai.disk.RowMapping;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.v1.io.IndexFileUtils;
-import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
+import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
+import org.apache.cassandra.index.sai.disk.v1.bbtree.BlockBalancedTreeIterator;
+import org.apache.cassandra.index.sai.disk.v1.bbtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.segment.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
-import org.apache.cassandra.index.sai.disk.v3.bbtree.BlockBalancedTreeIterator;
+import org.apache.cassandra.index.sai.disk.v1.trie.LiteralIndexWriter;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -54,7 +52,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  */
 public class MemtableIndexWriter implements PerColumnIndexWriter
 {
-    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+    private static final Logger logger = LoggerFactory.getLogger(MemtableIndexWriter.class);
 
     private final IndexDescriptor indexDescriptor;
     private final IndexContext indexContext;
@@ -92,27 +90,26 @@ public class MemtableIndexWriter implements PerColumnIndexWriter
     @Override
     public void complete(Stopwatch stopwatch) throws IOException
     {
+        assert rowMapping.isComplete() : "Cannot complete the memtable index writer because the row mapping is not complete";
+
         long start = stopwatch.elapsed(TimeUnit.MILLISECONDS);
 
         try
         {
-            if (!rowMapping.hasRows() || (memtable == null) || memtable.isEmpty())
+            if (!rowMapping.hasRows() || memtable == null || memtable.isEmpty())
             {
                 logger.debug(indexContext.logMessage("No indexed rows to flush from SSTable {}."), indexDescriptor.sstableDescriptor);
-                // Write a completion marker even though we haven't written anything to the index
+                // Write a completion marker even though we haven't written anything to the index,
                 // so we won't try to build the index again for the SSTable
                 indexDescriptor.createComponentOnDisk(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext);
                 return;
             }
 
-            final DecoratedKey minKey = rowMapping.minKey.partitionKey();
-            final DecoratedKey maxKey = rowMapping.maxKey.partitionKey();
-
             final Iterator<Pair<ByteComparable, LongArrayList>> iterator = rowMapping.merge(memtable);
 
             try (MemtableTermsIterator terms = new MemtableTermsIterator(memtable.getMinTerm(), memtable.getMaxTerm(), iterator))
             {
-                long cellCount = flush(minKey, maxKey, indexContext.getValidator(), terms, rowMapping.maxSSTableRowId);
+                long cellCount = flush(rowMapping.minKey, rowMapping.maxKey, indexContext.getValidator(), terms, rowMapping.maxSSTableRowId);
 
                 indexDescriptor.createComponentOnDisk(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext);
 
@@ -121,10 +118,7 @@ public class MemtableIndexWriter implements PerColumnIndexWriter
                 long elapsed = stopwatch.elapsed(TimeUnit.MILLISECONDS);
 
                 logger.debug(indexContext.logMessage("Completed flushing {} memtable index cells to SSTable {}. Duration: {} ms. Total elapsed: {} ms"),
-                             cellCount,
-                             indexDescriptor.sstableDescriptor,
-                             elapsed - start,
-                             elapsed);
+                             cellCount, indexDescriptor.sstableDescriptor, elapsed - start, elapsed);
 
                 indexContext.getIndexMetrics().memtableFlushCellsPerSecond.update((long) (cellCount * 1000.0 / Math.max(1, elapsed - start)));
             }
@@ -138,32 +132,31 @@ public class MemtableIndexWriter implements PerColumnIndexWriter
         }
     }
 
-    private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, long maxSegmentRowId) throws IOException
+    private long flush(PrimaryKey minKey,
+                       PrimaryKey maxKey,
+                       AbstractType<?> termComparator,
+                       MemtableTermsIterator terms,
+                       long maxSSTableRowId) throws IOException
     {
         long numRows;
         SegmentMetadata.ComponentMetadataMap indexMetas;
 
         if (TypeUtil.isLiteral(termComparator))
         {
-            try (InvertedIndexWriter writer = new InvertedIndexWriter(indexDescriptor, indexContext))
+            try (LiteralIndexWriter writer = new LiteralIndexWriter(indexDescriptor, indexContext))
             {
-                indexMetas = writer.writeAll(terms);
+                indexMetas = writer.writeCompleteSegment(terms);
                 numRows = writer.getPostingsCount();
             }
         }
         else
         {
-            try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                    indexContext,
-                                                                    TypeUtil.fixedSizeOf(termComparator),
-                                                                    maxSegmentRowId,
-                                                                    // Due to stale entries in IndexMemtable, we may have more indexed rows than num of rowIds.
-                                                                    Integer.MAX_VALUE,
-                                                                    indexContext.getIndexWriterConfig()))
-            {
-                indexMetas = writer.writeAll(BlockBalancedTreeIterator.fromTermsIterator(terms, termComparator));
-                numRows = writer.getPointCount();
-            }
+            NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
+                                                               indexContext,
+                                                               TypeUtil.fixedSizeOf(termComparator),
+                                                               maxSSTableRowId);
+            indexMetas = writer.writeCompleteSegment(BlockBalancedTreeIterator.fromTermsIterator(terms, termComparator));
+            numRows = writer.getValueCount();
         }
 
         // If no rows were written we need to delete any created column index components
@@ -179,8 +172,8 @@ public class MemtableIndexWriter implements PerColumnIndexWriter
                                                        numRows,
                                                        terms.getMinSSTableRowId(),
                                                        terms.getMaxSSTableRowId(),
-                                                       indexDescriptor.primaryKeyFactory.create(minKey),
-                                                       indexDescriptor.primaryKeyFactory.create(maxKey),
+                                                       minKey,
+                                                       maxKey,
                                                        terms.getMinTerm(),
                                                        terms.getMaxTerm(),
                                                        indexMetas);

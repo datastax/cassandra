@@ -30,8 +30,8 @@ import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
-import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
-import org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory;
+import org.apache.cassandra.index.sai.disk.v1dse.PartitionAwarePrimaryKeyFactory;
+import org.apache.cassandra.index.sai.disk.v2cc.RowAwarePrimaryKeyFactory;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -149,7 +149,7 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, ByteComparable
 
         /**
          * Create a {@link Clustering} from a {@link ByteSource}. This is a separate method because of its use by
-         * the {@link org.apache.cassandra.index.sai.disk.v3.WidePrimaryKeyMap} to create its clustering keys.
+         * the {@link org.apache.cassandra.index.sai.disk.v1.WidePrimaryKeyMap} to create its clustering keys.
          */
         public Clustering<?> clusteringFromByteComparable(ByteSource byteSource)
         {

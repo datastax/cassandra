@@ -24,8 +24,8 @@ import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.v3.postings.PostingListRangeIterator;
-import org.apache.cassandra.index.sai.disk.v3.segment.LiteralIndexSegmentTermsReader;
+import org.apache.cassandra.index.sai.disk.v1.postings.PostingListRangeIterator;
+import org.apache.cassandra.index.sai.disk.v1.segment.LiteralIndexSegmentTermsReader;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.utils.Throwables;

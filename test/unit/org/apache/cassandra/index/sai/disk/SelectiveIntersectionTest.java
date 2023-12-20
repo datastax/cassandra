@@ -25,7 +25,7 @@ import org.junit.Test;
 import com.datastax.driver.core.Session;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.v3.postings.PostingsReader;
+import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.inject.Injections;
 
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;

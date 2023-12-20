@@ -18,8 +18,8 @@
 
 package org.apache.cassandra.index.sai.disk.format;
 
-import org.apache.cassandra.index.sai.disk.v3.postings.PostingsWriter;
-import org.apache.cassandra.index.sai.disk.v3.trie.TrieTermsDictionaryWriter;
+import org.apache.cassandra.index.sai.disk.v1.postings.PostingsWriter;
+import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryWriter;
 
 
 /**

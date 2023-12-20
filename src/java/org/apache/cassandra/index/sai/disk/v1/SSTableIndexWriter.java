@@ -37,7 +37,7 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.PerColumnIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.v1.io.IndexFileUtils;
+import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
 import org.apache.cassandra.index.sai.disk.v1.segment.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.v1.segment.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
@@ -45,6 +45,9 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_FROZEN_TERM_SIZE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_STRING_TERM_SIZE;
 
 /**
  * Column index writer that accumulates (on-heap) indexed data from a compacted SSTable as it's being flushed to disk.
@@ -55,11 +58,10 @@ public class SSTableIndexWriter implements PerColumnIndexWriter
     private static final Logger logger = LoggerFactory.getLogger(SSTableIndexWriter.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    public static final int MAX_STRING_TERM_SIZE = Integer.getInteger("cassandra.sai.max_string_term_size_kb", 1) * 1024;
-    public static final int MAX_FROZEN_TERM_SIZE = Integer.getInteger("cassandra.sai.max_frozen_term_size_kb", 5) * 1024;
-    public static final String TERM_OVERSIZE_MESSAGE =
-            "Can't add term of column {} to index for key: {}, term size {} " +
-                    "max allowed size {}, use analyzed = true (if not yet set) for that column.";
+    public static final int MAX_STRING_TERM_SIZE = SAI_MAX_STRING_TERM_SIZE.getInt() * 1024;
+    public static final int MAX_FROZEN_TERM_SIZE = SAI_MAX_FROZEN_TERM_SIZE.getInt() * 1024;
+    public static final String TERM_OVERSIZE_MESSAGE = "Can't add term of column {} to index for key: {}, term size {} " +
+                                                       "max allowed size {}, use analyzed = true (if not yet set) for that column.";
 
     private final IndexDescriptor indexDescriptor;
     private final IndexContext indexContext;
@@ -68,13 +70,10 @@ public class SSTableIndexWriter implements PerColumnIndexWriter
     private final NamedMemoryLimiter limiter;
     private final int maxTermSize;
     private final BooleanSupplier isIndexValid;
+    private final List<SegmentMetadata> segments = new ArrayList<>();
 
     private boolean aborted = false;
-
-    // segment writer
     private SegmentBuilder currentBuilder;
-    private final List<SegmentMetadata> segments = new ArrayList<>();
-    private long maxSSTableRowId;
 
     public SSTableIndexWriter(IndexDescriptor indexDescriptor, IndexContext indexContext, NamedMemoryLimiter limiter, BooleanSupplier isIndexValid)
     {
@@ -110,7 +109,6 @@ public class SSTableIndexWriter implements PerColumnIndexWriter
             if (value != null)
                 addTerm(TypeUtil.asIndexBytes(value.duplicate(), indexContext.getValidator()), key, sstableRowId, indexContext.getValidator());
         }
-        maxSSTableRowId = sstableRowId;
     }
 
     @Override
@@ -136,7 +134,6 @@ public class SSTableIndexWriter implements PerColumnIndexWriter
                              indexDescriptor.sstableDescriptor,
                              elapsed - start,
                              elapsed);
-                start = elapsed;
             }
 
             // Even an empty segment may carry some fixed memory, so remove it:
@@ -248,7 +245,7 @@ public class SSTableIndexWriter implements PerColumnIndexWriter
 
     private boolean shouldFlush(long sstableRowId)
     {
-        // If we've hit the minimum flush size and we've breached the global limit, flush a new segment:
+        // If we've hit the minimum flush size and, we've breached the global limit, flush a new segment:
         boolean reachMemoryLimit = limiter.usageExceedsLimit() && currentBuilder.hasReachedMinimumFlushSize();
 
         if (reachMemoryLimit)
@@ -307,9 +304,7 @@ public class SSTableIndexWriter implements PerColumnIndexWriter
         {
             logger.error(indexContext.logMessage("Failed to build index for SSTable {}."), indexDescriptor.sstableDescriptor, t);
             indexDescriptor.deleteColumnIndex(indexContext);
-
             indexContext.getIndexMetrics().segmentFlushErrors.inc();
-
             throw t;
         }
     }
@@ -334,7 +329,7 @@ public class SSTableIndexWriter implements PerColumnIndexWriter
     {
         SegmentBuilder builder = TypeUtil.isLiteral(indexContext.getValidator())
                                  ? new SegmentBuilder.RAMStringSegmentBuilder(indexContext.getValidator(), limiter)
-                                 : new SegmentBuilder.KDTreeSegmentBuilder(indexContext.getValidator(), limiter, indexContext.getIndexWriterConfig());
+                                 : new SegmentBuilder.BlockBalancedTreeSegmentBuilder(indexContext.getValidator(), limiter);
 
         long globalBytesUsed = limiter.increment(builder.totalBytesAllocated());
         logger.debug(indexContext.logMessage("Created new segment builder while flushing SSTable {}. Global segment memory usage now at {}."),

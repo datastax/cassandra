@@ -24,8 +24,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.v1.PerColumnIndexFiles;
-import org.apache.cassandra.index.sai.disk.v3.postings.PostingListRangeIterator;
-import org.apache.cassandra.index.sai.disk.v3.segment.IndexSegmentSearcherContext;
+import org.apache.cassandra.index.sai.disk.v1.postings.PostingListRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.postings.PeekablePostingList;
@@ -88,7 +87,7 @@ public abstract class IndexSegmentSearcher implements Closeable
 
         IndexSegmentSearcherContext searcherContext = new IndexSegmentSearcherContext(metadata.minKey,
                                                                                       metadata.maxKey,
-                                                                                      metadata.segmentRowIdOffset,
+                                                                                      metadata.rowIdOffset,
                                                                                       queryContext,
                                                                                       PeekablePostingList.makePeekable(postingList));
 

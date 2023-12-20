@@ -19,8 +19,8 @@ package org.apache.cassandra.index.sai.disk.v1.bitpack;
 
 import java.io.IOException;
 
-import org.apache.cassandra.index.sai.disk.v1.lucene75.store.IndexInput;
-import org.apache.cassandra.index.sai.disk.v1.lucene75.store.IndexOutput;
+import org.apache.lucene.store.DataInput;
+import org.apache.lucene.store.IndexOutput;
 
 public class NumericValuesMeta
 {
@@ -28,21 +28,14 @@ public class NumericValuesMeta
     public final int blockSize;
     public final long blockMetaOffset;
 
-    public NumericValuesMeta(IndexInput input) throws IOException
+    public NumericValuesMeta(DataInput input) throws IOException
     {
         valueCount = input.readLong();
         blockSize = input.readInt();
         blockMetaOffset = input.readVLong();
     }
 
-    public NumericValuesMeta(long valueCount, int blockSize, long blockMetaOffset)
-    {
-        this.valueCount = valueCount;
-        this.blockSize = blockSize;
-        this.blockMetaOffset = blockMetaOffset;
-    }
-
-    public void write(IndexOutput out) throws IOException
+    public static void write(IndexOutput out, long valueCount, int blockSize, long blockMetaOffset) throws IOException
     {
         out.writeLong(valueCount);
         out.writeInt(blockSize);

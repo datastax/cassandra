@@ -21,10 +21,8 @@ import java.io.Closeable;
 import java.io.IOException;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Objects;
 
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -38,21 +36,17 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
- * Each segment represents an on-disk index structure (kdtree/terms/postings) flushed by memory limit or token boundaries,
- * or max segment rowId limit, because of lucene's limitation on 2B(Integer.MAX_VALUE). It also helps to reduce resource
- * consumption for read requests as only segments that intersect with read request data range need to be loaded.
+ * Each segment represents an on-disk index structure (balanced tree/terms/postings) flushed by memory limit or token boundaries.
+ * It also helps to reduce resource consumption for read requests as only segments that intersect with read request data
+ * range need to be loaded.
  */
 public class Segment implements Closeable
 {
-    private final Token minKey;
     private final Token.KeyBound minKeyBound;
-    private final Token maxKey;
     private final Token.KeyBound maxKeyBound;
 
     // per sstable
     final PrimaryKeyMap.Factory primaryKeyMapFactory;
-    // per-index
-    public final PerColumnIndexFiles indexFiles;
     // per-segment
     public final SegmentMetadata metadata;
 
@@ -60,43 +54,21 @@ public class Segment implements Closeable
 
     public Segment(IndexContext indexContext, SSTableContext sstableContext, PerColumnIndexFiles indexFiles, SegmentMetadata metadata) throws IOException
     {
-        this.minKey = metadata.minKey.token();
-        this.minKeyBound = minKey.minKeyBound();
-        this.maxKey = metadata.maxKey.token();
-        this.maxKeyBound = maxKey.maxKeyBound();
+        this.minKeyBound = metadata.minKey.token().minKeyBound();
+        this.maxKeyBound = metadata.maxKey.token().maxKeyBound();
 
         this.primaryKeyMapFactory = sstableContext.primaryKeyMapFactory;
-        this.indexFiles = indexFiles;
         this.metadata = metadata;
 
         this.index = IndexSegmentSearcher.open(primaryKeyMapFactory, indexFiles, metadata, indexContext);
     }
 
     @VisibleForTesting
-    public Segment(PrimaryKeyMap.Factory primaryKeyMapFactory,
-                   PerColumnIndexFiles indexFiles,
-                   SegmentMetadata metadata,
-                   AbstractType<?> columnType)
-    {
-        this.primaryKeyMapFactory = primaryKeyMapFactory;
-        this.indexFiles = indexFiles;
-        this.metadata = metadata;
-        this.minKey = null;
-        this.minKeyBound = null;
-        this.maxKey = null;
-        this.maxKeyBound = null;
-        this.index = null;
-    }
-
-    @VisibleForTesting
     public Segment(Token minKey, Token maxKey)
     {
         this.primaryKeyMapFactory = null;
-        this.indexFiles = null;
         this.metadata = null;
-        this.minKey = minKey;
         this.minKeyBound = minKey.minKeyBound();
-        this.maxKey = maxKey;
         this.maxKeyBound = maxKey.maxKeyBound();
         this.index = null;
     }
@@ -109,14 +81,15 @@ public class Segment implements Closeable
         if (keyRange instanceof Range && ((Range<?>)keyRange).isWrapAround())
             return keyRange.contains(minKeyBound) || keyRange.contains(maxKeyBound);
 
-        int cmp = keyRange.right.getToken().compareTo(minKey);
+        int cmp = keyRange.right.compareTo(minKeyBound);
         // if right is minimum, it means right is the max token and bigger than maxKey.
-        // if right bound is less than minKey, no intersection
+        // if right bound is less than minKeyBound, no intersection
         if (!keyRange.right.isMinimum() && (!keyRange.inclusiveRight() && cmp == 0 || cmp < 0))
             return false;
 
-        // if left bound is bigger than maxKey, no intersection
-        return keyRange.isStartInclusive() || keyRange.left.getToken().compareTo(maxKey) < 0;
+        cmp = keyRange.left.compareTo(maxKeyBound);
+        // if left bound is bigger than maxKeyBound, no intersection
+        return (keyRange.isStartInclusive() || cmp != 0) && cmp <= 0;
     }
 
     public long indexFileCacheSize()
@@ -129,26 +102,12 @@ public class Segment implements Closeable
      *
      * @param expression to filter on disk index
      * @param context to track per sstable cache and per query metrics
+
      * @return range iterator that matches given expression
      */
     public KeyRangeIterator search(Expression expression, QueryContext context) throws IOException
     {
         return index.search(expression, context);
-    }
-
-    @Override
-    public boolean equals(Object o)
-    {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Segment segment = (Segment) o;
-        return Objects.equal(metadata, segment.metadata);
-    }
-
-    @Override
-    public int hashCode()
-    {
-        return Objects.hashCode(metadata);
     }
 
     @Override
