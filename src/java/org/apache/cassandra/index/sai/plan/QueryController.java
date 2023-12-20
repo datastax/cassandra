@@ -30,6 +30,7 @@ import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -51,6 +52,7 @@ import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
@@ -218,6 +220,50 @@ public class QueryController
         return command.queryMemtableAndDisk(cfs, executionController);
     }
 
+    public RangeIterator buildIterator()
+    {
+        var filterOperation = filterOperation();
+        var orderings = filterOperation.expressions()
+                                       .stream().filter(e -> e.operator() == Operator.ANN).collect(Collectors.toList());
+        assert orderings.size() <= 1;
+        if (filterOperation.expressions().size() == 1 && filterOperation.children().isEmpty() && orderings.size() == 1)
+            // If we only have one expression, we just use the ANN index to order and limit.
+            return getTopKRows(orderings.get(0));
+
+        // We already decided we need to do first sort then filter, so no need to open the index iterator:
+        if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER)
+        {
+            assert queryContext.postFilterSelectivityEstimate() != null;
+            return getTopKRows(orderings.get(0));
+        }
+
+        var nonOrderingExpressions = filterOperation.expressions().stream()
+                                                    .filter(e -> e.operator() != Operator.ANN)
+                                                    .collect(Collectors.toList());
+        var iter = Operation.Node.buildTree(nonOrderingExpressions, filterOperation.children(), filterOperation.isDisjunction()).analyzeTree(this).rangeIterator(this);
+        queryContext.setPostFilterSelectivityEstimate(estimateSelectivity(iter));
+
+        if (orderings.isEmpty())
+            return iter;
+
+        // TODO: compute proper threshold
+        if (queryContext.filterSortOrder() == null && iter.getMaxKeys() >= 0)
+        {
+            // If there are too many keys returned form the index, use postfiltering:
+            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SORT_THEN_FILTER);
+            FileUtils.closeQuietly(iter);
+            return getTopKRows(orderings.get(0));
+        }
+
+        queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.FILTER_THAN_SORT);
+        return getTopKRows(iter, orderings.get(0));
+    }
+
+    public FilterTree buildFilter()
+    {
+        return Operation.Node.buildTree(filterOperation()).buildFilter(this);
+    }
+
     /**
      * Build a {@link RangeIterator.Builder} from the given list of expressions by applying given operation (OR/AND).
      * Building of such builder involves index search, results of which are persisted in the internal resources list
@@ -245,7 +291,7 @@ public class QueryController
             for (Map.Entry<Expression, NavigableSet<SSTableIndex>> e : view)
             {
                 @SuppressWarnings("resource") // RangeIterators are closed by releaseIndexes
-                RangeIterator index = TermIterator.build(e.getKey(), e.getValue(), mergeRange, queryContext, defer, currentSoftLimitEstimate());
+                RangeIterator index = TermIterator.build(e.getKey(), e.getValue(), mergeRange, queryContext, defer, Integer.MAX_VALUE);
 
                 builder.add(index);
             }
@@ -266,7 +312,11 @@ public class QueryController
         assert expression.operator() == Operator.ANN;
         var planExpression = new Expression(getContext(expression))
                              .add(Operator.ANN, expression.getIndexValue().duplicate());
+
         int limit = currentSoftLimitEstimate();
+        queryContext.setSoftLimit(limit);
+        logger.debug("getTopKRows using limit = {}", limit);
+
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
         RangeIterator memtableResults = getContext(expression).searchMemtable(queryContext, planExpression, mergeRange, limit);
 
@@ -308,6 +358,8 @@ public class QueryController
         planExpression.add(Operator.ANN, expression.getIndexValue().duplicate());
 
         int limit = currentSoftLimitEstimate();
+        queryContext.setSoftLimit(limit);
+
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
         RangeIterator memtableResults = this.getContext(expression).limitToTopResults(queryContext, sourceKeys, planExpression, limit);
         var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
@@ -392,24 +444,45 @@ public class QueryController
     }
 
     /**
-     * Estimate suggestion for the limit to search extra rows in case if some rows were shadowed.
-     * @return
+     * Estimate suggestion for the limit to search extra rows in case if some rows were shadowed or post-filtered.
      */
     int currentSoftLimitEstimate()
     {
-        var K = getExactLimit();
-        int M = queryContext.getShadowedPrimaryKeys().size();
-        if (!allowSpeculativeLimits)
-            return K + M;
+        int target = getExactLimit();
+        // shadowedCount includes also the keys filtered out by the post-filter
+        int shadowedCount = queryContext.getShadowedPrimaryKeys().size();
+        int prevSoftLimit = Math.max(target, queryContext.softLimit());
+        float postFilterSelectivity = queryContext.postFilterSelectivityEstimate();
 
-        if (M == 0)
-            return K;
+        boolean firstShadowKeysLoopIteration = queryContext.shadowedKeysLoopCount() == 1;
+        boolean sortBeforeFilter = queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER;
 
-        // K+2*M is enough for larger K (> 20)
-        // and does not create too much overhead for small K
-        int limit = K + 2 * M;
+        // On the first iteration we need to rely on estimates for how many keys we can expect to be accepted.
+        // For any subsequent iterations we can do better by looking how many keys were rejected in the previous run.
+        float keyRejectionProbability = (firstShadowKeysLoopIteration && sortBeforeFilter)
+            ? 1.0f - postFilterSelectivity
+            : (float) shadowedCount / Math.max(prevSoftLimit, 1);
+
+        // We estimated how likely keys are going to be rejected, so we now can pick a soft limit high enough
+        // to get a good probability of getting at least target count of keys accepted.
+        // However, the following calculation is not very accurate;
+        // probably we should use a bit more advanced stats (Bernoulli distribution?) here.
+        // The problem here is that the actual number of keys passing all the filters (and not shadowed) will have
+        // some fluctuations, non-zero variance. So although we know that on average we may expect
+        // to get limit * keyRejectionProbability good keys, we'll be getting fewer than that in 50% of cases.
+        // Therefore, we must really use a higher limit to account for those fluctuations and drive the probability
+        // of getting enough number of good keys to a better value, e.g. 99%
+        // (but on the flip side we can't go too far, as the cost of each search attempt will go up).
+        if (allowSpeculativeLimits)
+            keyRejectionProbability = Math.min(1.0f, keyRejectionProbability * 2);
+
+        float keyAcceptanceProbability = 1.0f - keyRejectionProbability;
+        int limit = (int) Math.min(Math.ceil(target / keyAcceptanceProbability), prevSoftLimit * 10);
+
         if (logger.isDebugEnabled())
-            logger.debug("Soft limit estimate: {} with K={} M={}", limit, K, M);
+            logger.debug("Soft limit estimate: {} with target={} shadowed={}/{} postFilterSelectivity={}",
+                         limit, target, shadowedCount, prevSoftLimit, postFilterSelectivity);
+
         return limit;
     }
 
@@ -636,5 +709,37 @@ public class QueryController
         {
             throw new AssertionError("Unsupported read command type: " + command.getClass().getName());
         }
+    }
+
+    /**
+     * Returns the fraction of the total rows of the table returned by the index
+     *
+     * @param iterator iterator over the keys from the index(es)
+     */
+    float estimateSelectivity(RangeIterator iterator)
+    {
+        float selectivity = (float) iterator.getMaxKeys() / estimateTotalAvailableRows();
+        queryContext.setPostFilterSelectivityEstimate(selectivity);
+        return selectivity;
+    }
+
+    /**
+     * Returns number of rows indexed accross all ssables and memtables
+     */
+    private long estimateTotalAvailableRows()
+    {
+        if (queryContext.totalAvailableRows() != null)
+            return queryContext.totalAvailableRows();
+
+        long memtableRows = StreamSupport.stream(cfs.getAllMemtables().spliterator(), false)
+                                         .mapToLong(Memtable::rowCount)
+                                         .sum();
+        long sstableRows = cfs.getLiveSSTables()
+                              .stream()
+                              .mapToLong(SSTableReader::getTotalRows)
+                              .sum();
+        long totalRows = memtableRows + sstableRows;
+        queryContext.setTotalAvailableRows(totalRows);
+        return totalRows;
     }
 }

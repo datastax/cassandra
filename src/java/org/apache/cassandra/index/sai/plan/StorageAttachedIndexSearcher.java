@@ -128,8 +128,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         {
             queryContext.addShadowedKeysLoopCount(1L);
             long lastShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
-            final var softLimit = controller.currentSoftLimitEstimate();
             ResultRetriever result = queryIndexes.get();
+            final var softLimit = queryContext.softLimit();
             UnfilteredPartitionIterator topK = (UnfilteredPartitionIterator)new VectorTopKProcessor(command).filter(result);
 
             long currentShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
@@ -155,7 +155,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
      */
     private RangeIterator analyze()
     {
-        return Operation.buildIterator(controller);
+        return controller.buildIterator();
     }
 
     /**
@@ -169,7 +169,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
      */
     private FilterTree analyzeFilter()
     {
-        return Operation.buildFilter(controller);
+        return controller.buildFilter();
     }
 
     private static class ResultRetriever extends AbstractIterator<UnfilteredRowIterator>
