@@ -26,7 +26,7 @@ When a query is only limited by ANN, the query execution is very simple. The exe
 3. Merge/deduplicate the result with a `RangeUnionIterator` that maintains PK ordering.
 4. Materialize each row from storage.
 5. Compute the vector similarity score for each row.
-6. Returns the top k rows.
+6. Return the top k rows.
 
 ```mermaid
 ---
@@ -49,7 +49,7 @@ Notes:
 ### Pre-fitered Boolean Predicates Combined with ANN Query
 
 When a query has both boolean predicates and an ANN ordering predicate, the query execution is more complex. The execution
-of query `SELECT * FROM my.table WHERE A = 1 AND B = 'foo' ORDER BY vec ANN OF [...] LIMIT 10` this path:
+of query `SELECT * FROM my.table WHERE A = 1 AND B = 'foo' ORDER BY vec ANN OF [...] LIMIT 10` follows this path:
 1. Query each boolean predicate's index to get the Primary Keys that satisfy the predicate.
 2. Merge the results with a `RangeUnionIterator` that deduplicates results for the predicate and maintains PK ordering.
 3. Intersect the results with a `RangeIntersectionIterator` to get the Primary Keys that satisfy all boolean predicates.
@@ -57,7 +57,7 @@ of query `SELECT * FROM my.table WHERE A = 1 AND B = 'foo' ORDER BY vec ANN OF [
 5. Map those predicates back to each vector index and search for the top k vectors. **This is expensive.**
 6. Materialize each row from storage.
 7. Compute the vector similarity score for each row.
-8. Returns the top k rows.
+8. Return the top k rows.
 
 ```mermaid
 ---
