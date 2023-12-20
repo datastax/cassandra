@@ -60,7 +60,7 @@ public class SortedLocalRanges
         this.realm = realm;
         this.ringVersion = ringVersion;
 
-        if (ranges == null)
+        if (ranges == null || ranges.isEmpty())
         {
             IPartitioner partitioner = realm.getPartitioner();
             this.ranges = new ArrayList<>(1);
