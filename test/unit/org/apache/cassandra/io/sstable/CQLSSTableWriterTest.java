@@ -53,6 +53,7 @@ import org.apache.cassandra.dht.*;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.*;
@@ -69,7 +70,7 @@ import static org.junit.Assert.fail;
  * Please note: most tests here both create sstables and try to load them, so for the last part, we need to make sure
  * we have properly "loaded" the table (which we do with {@link SchemaLoader#load(String, String, String...)}). But
  * a small subtlety is that this <b>must</b> be called before we call {@link CQLSSTableWriter#builder} because
- * otherwise the guardrail validation in {@link CreateTableStatement#validate(QueryState)} ends up breaking because
+ * otherwise the guardrail validation in {@link CreateTableStatement#validate(ClientState)} ends up breaking because
  * the {@link ColumnFamilyStore} is not loaded yet. This would not be a problem in real usage of
  * {@link CQLSSTableWriter} because the later only calls {@link DatabaseDescriptor#clientInitialization}, not
  * {@link DatabaseDescriptor#daemonInitialization}, so said guardrail validation don't execute, but this test does

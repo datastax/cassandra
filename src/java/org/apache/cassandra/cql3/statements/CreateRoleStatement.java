@@ -25,7 +25,6 @@ import org.apache.cassandra.cql3.PasswordObfuscator;
 import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
@@ -59,7 +58,7 @@ public class CreateRoleStatement extends AuthenticationStatement
     }
 
     @Override
-    public void validate(QueryState state) throws RequestValidationException
+    public void validate(ClientState state) throws RequestValidationException
     {
         opts.validate();
 
@@ -77,7 +76,7 @@ public class CreateRoleStatement extends AuthenticationStatement
         }
 
         // validate login here before authorize to avoid leaking role existence to anonymous users.
-        state.getClientState().ensureNotAnonymous();
+        state.ensureNotAnonymous();
 
         if (!ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
             throw new InvalidRequestException(String.format("%s already exists", role.getRoleName()));

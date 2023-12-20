@@ -26,7 +26,6 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.QueryState;
 
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
@@ -45,17 +44,17 @@ public abstract class PermissionsManagementStatement extends AuthorizationStatem
     }
 
     @Override
-    public void validate(QueryState state) throws RequestValidationException
+    public void validate(ClientState state) throws RequestValidationException
     {
         // validate login here before authorize to avoid leaking user existence to anonymous users.
-        state.getClientState().ensureNotAnonymous();
+        state.ensureNotAnonymous();
 
         if (!DatabaseDescriptor.getRoleManager().isExistingRole(grantee))
             throw new InvalidRequestException(String.format("Role %s doesn't exist", grantee.getRoleName()));
 
         // if a keyspace is omitted when GRANT/REVOKE ON TABLE <table>, we need to correct the resource.
         // called both here and in authorize(), as in some cases we do not call the latter.
-        resource = maybeCorrectResource(resource, state.getClientState());
+        resource = maybeCorrectResource(resource, state);
 
         if (!resource.exists())
             throw new InvalidRequestException(String.format("Resource %s doesn't exist", resource));

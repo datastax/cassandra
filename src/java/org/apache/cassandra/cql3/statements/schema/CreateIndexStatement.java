@@ -21,7 +21,6 @@ import java.util.*;
 
 import com.google.common.base.Strings;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 
@@ -42,7 +41,6 @@ import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
@@ -88,7 +86,6 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     private final List<IndexTarget.Raw> rawIndexTargets;
     private final IndexAttributes attrs;
     private final boolean ifNotExists;
-    private QueryState state;
 
     private ClientState state;
     private static final String DSE_INDEX_WARNING = "Index %s was not created. DSE custom index (%s) is not " +
@@ -170,14 +167,6 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             throw new InvalidRequestException(TRANSIENTLY_REPLICATED_KEYSPACE_NOT_SUPPORTED);
 
         // guardrails to limit number of secondary indexes per table.
-        Guardrails.secondaryIndexesPerTable.guard(table.indexes.size() + 1,
-                                                  Strings.isNullOrEmpty(indexName)
-                                                  ? String.format("on table %s", table.name)
-                                                  : String.format("%s on table %s", indexName, table.name),
-                                                  false,
-                                                  state);
-
-        // guardrails to limit number of secondary indexes per table.
         if (!attrs.isCustom)
         {
             long existingSecondaryIndexes = table.indexes.stream().filter(indexMetadata -> !indexMetadata.isCustom()).count();
@@ -185,6 +174,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
                                                       Strings.isNullOrEmpty(indexName)
                                                       ? String.format("on table %s", table.name)
                                                       : String.format("%s on table %s", indexName, table.name),
+                                                      false,
                                                       state);
         }
 

@@ -255,7 +255,7 @@ public class QueryProcessor implements QueryHandler
         logger.trace("Process {} @CL.{}", statement, options.getConsistency());
         ClientState clientState = queryState.getClientState();
         statement.authorize(clientState);
-        statement.validate(queryState);
+        statement.validate(clientState);
 
         ResultMessage result = options.getConsistency() == ConsistencyLevel.NODE_LOCAL
                              ? processNodeLocalStatement(statement, queryState, options)
@@ -437,7 +437,7 @@ public class QueryProcessor implements QueryHandler
 
         // Note: if 2 threads prepare the same query, we'll live so don't bother synchronizing
         CQLStatement statement = raw.prepare(clientState);
-        statement.validate(new QueryState(clientState));
+        statement.validate(clientState);
 
         if (isInternal)
             return new Prepared(statement, "", fullyQualified, keyspace);
@@ -845,7 +845,7 @@ public class QueryProcessor implements QueryHandler
         ClientState clientState = queryState.getClientState().cloneWithKeyspaceIfSet(options.getKeyspace());
         batch.authorize(clientState);
         batch.validate();
-        batch.validate(queryState);
+        batch.validate(clientState);
         return batch.execute(queryState, options, queryStartNanoTime);
     }
 

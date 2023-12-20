@@ -522,7 +522,7 @@ public class CompactionAllocationTest
                         if (!overlap || f == 0)
                         {
                             QueryOptions options = QueryProcessor.makeInternalOptions(select, new Object[]{f});
-                            ReadQuery query = select.getQuery(queryState, options, queryState.getNowInSeconds());
+                            ReadQuery query = select.getQuery(options, queryState.getNowInSeconds());
                             reads.add(() -> runQuery(query, cfs.metadata.get()));
                         }
                     }
@@ -637,7 +637,7 @@ public class CompactionAllocationTest
                         if (!overlap || f == 0)
                         {
                             QueryOptions options = QueryProcessor.makeInternalOptions(select, new Object[]{key});
-                            ReadQuery query = select.getQuery(queryState, options, queryState.getNowInSeconds());
+                            ReadQuery query = select.getQuery(options, queryState.getNowInSeconds());
                             reads.add(() -> runQuery(query, cfs.metadata.get()));
                         }
                     }
@@ -737,7 +737,7 @@ public class CompactionAllocationTest
                         if (!overlap || f == 0)
                         {
                             QueryOptions options = QueryProcessor.makeInternalOptions(select, new Object[]{key});
-                            ReadQuery query = select.getQuery(queryState, options, queryState.getNowInSeconds());
+                            ReadQuery query = select.getQuery(options, queryState.getNowInSeconds());
                             reads.add(() -> runQuery(query, cfs.metadata.get()));
                         }
                     }

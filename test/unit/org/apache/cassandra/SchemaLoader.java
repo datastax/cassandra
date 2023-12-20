@@ -793,7 +793,7 @@ public static TableMetadata.Builder clusteringSASICFMD(String ksName, String cfN
                                                        Tables.none(),
                                                        Views.none(),
                                                        Types.none(),
-                                                       Functions.none());
+                                                       UserFunctions.none());
         Schema.instance.transform(SchemaTransformations.addKeyspace(ksm, true));
 
         for (String typeCQL : typesCQL)

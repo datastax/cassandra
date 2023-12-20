@@ -40,11 +40,9 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
-import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -93,32 +91,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
 
         this.ifNotExists = ifNotExists;
         this.useCompactStorage = useCompactStorage;
-    }
-
-    @Override
-    public void validate(QueryState state)
-    {
-        super.validate(state);
-
-        // Some tools use CreateTableStatement, and the guardrails below both don't make too much sense for tools and
-        // require the server to be initialized, so skipping them if it isn't.
-        if (Guardrails.ready())
-        {
-            // Guardrail on table properties
-            Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties(), state);
-
-            // Guardrail on columns per table
-            Guardrails.columnsPerTable.guard(rawColumns.size(), tableName, state);
-
-            if (Guardrails.tablesLimit.enabled(state))
-            {
-                // guardrails on number of tables
-                int totalUserTables = Schema.instance.getUserKeyspaces().stream().map(ksm -> Keyspace.open(ksm.name))
-                                                     .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
-                                                     .sum();
-                Guardrails.tablesLimit.guard(totalUserTables + 1, tableName, state);
-            }
-        }
     }
 
     public Keyspaces apply(Keyspaces schema)

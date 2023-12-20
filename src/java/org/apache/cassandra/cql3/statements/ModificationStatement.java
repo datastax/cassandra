@@ -57,18 +57,6 @@ import org.apache.cassandra.service.disk.usage.DiskUsageBroadcaster;
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.service.paxos.BallotGenerator;
 import org.apache.cassandra.service.paxos.Commit.Proposal;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.ViewMetadata;
-import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.service.StorageProxy;
-import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.service.disk.usage.DiskUsageBroadcaster;
-import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.FBUtilities;
@@ -269,7 +257,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
     }
 
     @Override
-    public void validate(QueryState state) throws InvalidRequestException
+    public void validate(ClientState state) throws InvalidRequestException
     {
         checkFalse(hasConditions() && attrs.isTimestampSet(), "Cannot provide custom timestamp for conditional updates");
         checkFalse(isCounter() && attrs.isTimestampSet(), "Cannot provide custom timestamp for counter updates");
@@ -394,19 +382,6 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
     private boolean appliesOnlyToStaticColumns()
     {
         return appliesOnlyToStaticColumns(operations, conditions);
-    }
-
-    public void validateDiskUsage(QueryState state, QueryOptions options)
-    {
-        // reject writes if any replica exceeds disk usage failure limit or warn if exceeds warn limit
-        if (Guardrails.replicaDiskUsage.enabled(state) && DiskUsageBroadcaster.instance.hasStuffedOrFullNode())
-        {
-            for (ByteBuffer keyValue : buildPartitionKeyNames(options, state))
-            {
-                for (InetAddressAndPort replica : StorageService.instance.getNaturalReplicasForToken(keyspace(), keyValue).endpointList())
-                    Guardrails.replicaDiskUsage.guard(replica, state);
-            }
-        }
     }
 
     /**

@@ -45,7 +45,6 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.reads.thresholds.CoordinatorWarnings;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -112,7 +111,7 @@ public class Coordinator implements ICoordinator
         for (Object boundValue : boundValues)
             boundBBValues.add(ByteBufferUtil.objectToBytes(boundValue));
 
-        prepared.validate(QueryState.forInternalCalls());
+        prepared.validate(QueryState.forInternalCalls().getClientState());
 
         // Start capturing warnings on this thread. Note that this will implicitly clear out any previous 
         // warnings as it sets a new State instance on the ThreadLocal.
@@ -172,19 +171,20 @@ public class Coordinator implements ICoordinator
             throw new IllegalArgumentException("Page size should be strictly positive but was " + pageSize);
 
         return instance.sync(() -> {
-            QueryState state = new QueryState(makeFakeClientState());
+            ClientState clientState = makeFakeClientState();
             ConsistencyLevel consistencyLevel = ConsistencyLevel.valueOf(consistencyLevelOrigin.name());
-            CQLStatement prepared = QueryProcessor.getStatement(query, state.getClientState());
+            CQLStatement prepared = QueryProcessor.getStatement(query, clientState);
             final List<ByteBuffer> boundBBValues = new ArrayList<>();
             for (Object boundValue : boundValues)
                 boundBBValues.add(ByteBufferUtil.objectToBytes(boundValue));
 
-            prepared.validate(state);
+            prepared.validate(clientState);
             assert prepared instanceof SelectStatement : "Only SELECT statements can be executed with paging";
 
             long nanoTime = nanoTime();
             SelectStatement selectStatement = (SelectStatement) prepared;
 
+            QueryState queryState = new QueryState(clientState);
             QueryOptions initialOptions = QueryOptions.create(toCassandraCL(consistencyLevel),
                                                               boundBBValues,
                                                               false,
@@ -195,9 +195,9 @@ public class Coordinator implements ICoordinator
                                                               selectStatement.keyspace());
 
 
-            ResultMessage.Rows initialRows = selectStatement.execute(state, initialOptions, nanoTime);
+            ResultMessage.Rows initialRows = selectStatement.execute(queryState, initialOptions, nanoTime);
             Iterator<Object[]> iter = new Iterator<Object[]>() {
-                ResultMessage.Rows rows = selectStatement.execute(state, initialOptions, nanoTime);
+                ResultMessage.Rows rows = selectStatement.execute(queryState, initialOptions, nanoTime);
                 Iterator<Object[]> iter = RowUtil.toIter(rows);
 
                 public boolean hasNext()
@@ -217,7 +217,7 @@ public class Coordinator implements ICoordinator
                                                                    ProtocolVersion.CURRENT,
                                                                    selectStatement.keyspace());
 
-                    rows = selectStatement.execute(state, nextOptions, nanoTime);
+                    rows = selectStatement.execute(queryState, nextOptions, nanoTime);
                     iter = Iterators.forArray(RowUtil.toObjects(initialRows.result.metadata.names, rows.result.rows));
 
                     return hasNext();

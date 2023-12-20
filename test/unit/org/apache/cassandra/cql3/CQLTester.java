@@ -104,9 +104,6 @@ import org.apache.cassandra.auth.AuthKeyspace;
 import org.apache.cassandra.auth.AuthSchemaChangeListener;
 import org.apache.cassandra.auth.AuthTestUtils;
 import org.apache.cassandra.auth.IRoleManager;
-import org.apache.cassandra.auth.CassandraAuthorizer;
-import org.apache.cassandra.auth.CassandraRoleManager;
-import org.apache.cassandra.auth.PasswordAuthenticator;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -184,7 +181,6 @@ import org.apache.cassandra.utils.TimeUUID;
 import org.assertj.core.api.Assertions;
 import org.awaitility.Awaitility;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
@@ -283,7 +279,6 @@ public abstract class CQLTester
     private List<String> types = new ArrayList<>();
     private List<String> functions = new ArrayList<>();
     private List<String> aggregates = new ArrayList<>();
-    private User user;
 
     private User user;
 
@@ -1024,13 +1019,6 @@ public abstract class CQLTester
         return createTable(KEYSPACE, query);
     }
 
-    protected String createViewName()
-    {
-        String currentView = "view_" + seqNumber.getAndIncrement();
-        views.add(currentView);
-        return currentView;
-    }
-
     protected String createTable(String keyspace, String query)
     {
         return createTable(keyspace, query, null);
@@ -1510,7 +1498,7 @@ public abstract class CQLTester
             QueryState queryState = new QueryState(state);
 
             CQLStatement statement = QueryProcessor.parseStatement(query, queryState.getClientState());
-            statement.validate(queryState);
+            statement.validate(state);
 
             QueryOptions options = QueryOptions.forInternalCalls(Collections.<ByteBuffer>emptyList());
 
@@ -2963,46 +2951,6 @@ public abstract class CQLTester
         {
             if (random != null)
                 random.printSeedOnFailure();
-        }
-    }
-
-    private static class User
-    {
-        /**
-         * The user name
-         */
-        public final String username;
-
-        /**
-         * The user password
-         */
-        public final String password;
-
-        public User(String username, String password)
-        {
-            this.username = username;
-            this.password = password;
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hashCode(username, password);
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (this == o)
-                return true;
-
-            if (!(o instanceof User))
-                return false;
-
-            User u = (User) o;
-
-            return Objects.equal(username, u.username)
-                   && Objects.equal(password, u.password);
         }
     }
 }

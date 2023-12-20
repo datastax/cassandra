@@ -255,7 +255,7 @@ public class BatchStatement implements CQLStatement
     // The batch itself will be validated in either Parsed#prepare() - for regular CQL3 batches,
     //   or in QueryProcessor.processBatch() - for native protocol batches.
     @Override
-    public void validate(QueryState state) throws InvalidRequestException
+    public void validate(ClientState state) throws InvalidRequestException
     {
         for (ModificationStatement statement : statements)
             statement.validate(state);
@@ -481,7 +481,7 @@ public class BatchStatement implements CQLStatement
                                                    casRequest,
                                                    options.getSerialConsistency(),
                                                    options.getConsistency(),
-                                                   state,
+                                                   state.getClientState(),
                                                    options.getNowInSeconds(state),
                                                    queryStartNanoTime))
         {

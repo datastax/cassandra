@@ -30,7 +30,6 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.TimeUUID;
-import org.apache.cassandra.service.QueryState;
 
 /**
  * Groups the parameters of an update query, and make building updates easier.
@@ -41,7 +40,6 @@ public class UpdateParameters
     public final RegularAndStaticColumns updatedColumns;
     public final ClientState clientState;
     public final QueryOptions options;
-    public final QueryState state;
 
     private final long nowInSec;
     private final long timestamp;
@@ -72,7 +70,6 @@ public class UpdateParameters
         this.updatedColumns = updatedColumns;
         this.clientState = clientState;
         this.options = options;
-        this.state = state;
 
         this.nowInSec = nowInSec;
         this.timestamp = timestamp;

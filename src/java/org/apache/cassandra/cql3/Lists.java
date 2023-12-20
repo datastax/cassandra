@@ -28,7 +28,6 @@ import java.util.stream.StreamSupport;
 
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
-import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.ColumnMetadata;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.cql3.functions.Function;
@@ -592,7 +591,7 @@ public abstract class Lists
             // Guardrails about collection size are only checked for the added elements without considering
             // already existent elements. This is done so to avoid read-before-write, having additional checks
             // during SSTable write.
-            Guardrails.itemsPerCollection.guard(totalCount, column.name.toString(), false, params.state);
+            Guardrails.itemsPerCollection.guard(totalCount, column.name.toString(), false, params.clientState);
 
             // we have to obey MAX_NANOS per batch - in the unlikely event a client has decided to prepend a list with
             // an insane number of entries.
@@ -613,7 +612,7 @@ public abstract class Lists
                 Cell cell = params.addCell(column, CellPath.create(uuid), toAdd.get(i));
                 dataSize += cell.dataSize();
             }
-            Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, params.state);
+            Guardrails.collectionSize.guard(dataSize, column.name.toString(), false, params.clientState);
         }
     }
 
