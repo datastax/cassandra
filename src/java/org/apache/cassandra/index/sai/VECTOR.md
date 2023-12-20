@@ -2,11 +2,12 @@
 
 ## Storage-Attached Index Basics
 
-* We can create indexes to search over our different data types
-* These are on non-primary key columns
-* An index on a column translates to an index for each memtable and sstable segment
+* We can create indexes on columns to support searching them without requiring `ALLOW FILTERING` and without requiring
+that they are part of the primary key
+* A column's index translates to a local index for each memtable and each sstable segment within the table
 * Query execution scatters across each index to get the collection of Primary Keys that satisfy a predicate
-* Each index is immutable
+* Each sstable segment's index is immutable
+* Memtable indexes are mutable and are updated as the memtable is updated
 
 ## Vector Index Basics
 
@@ -21,25 +22,41 @@
 ### Vector Only Query
 
 When a query is only limited by ANN, the query execution is very simple. The execution follows this path:
-1. Read the top k vectors from each sstable's vector index(es).
-2. Reorder the results into ascending Primary Key order.
-3. Merge/deduplicate the result with a `RangeUnionIterator` that maintains PK ordering.
+1. Query each sstable's vector index(es) to get the top k vectors, which are represented as ordinals.
+2. Map ordinals to Primary Keys and sort into ascending Primary Key order to simplify deduplication.
+3. Merge/deduplicate the result with a `RangeUnionIterator` while maintaining PK ordering. Produces up to `3 * k` PKs.
 4. Materialize each row from storage.
-5. Compute the vector similarity score for each row.
-6. Return the top k rows.
+5. Compute the vector similarity score for each row to get the top k rows for the whole table.
 
 ```mermaid
 ---
 title: "SELECT * FROM my.table ORDER BY vec ANN OF [...] LIMIT 10"
 ---
 graph LR
-    subgraph Index on Column vec
-        G[SSTable 1] --top k--> J[Range\nUnion\nIterator]
-        H[SSTable 2] --top k--> J
-        I[Memtable] --top k--> J
+    subgraph 1: Get topK
+      G[SSTable A\nVector Index]
+      H[SSTable B\nVector Index]
+      I[Memtable\nVector Index]
     end
-    J --top 3 * k--> K[Read from storage]
-    K --top k--> L[Result Set]
+    subgraph "2: Map & Sort"
+        X[Ordinal -> PK]
+        Y[Ordinal -> PK]
+        Z[Ordinal -> PK]
+    end
+    subgraph 3: Merge
+        J
+    end
+    G --top k--> X --> J[Range\nUnion\nIterator]
+    H --top k--> Y --> J
+    I --top k--> Z --> J
+    subgraph "4: Materialize"
+        K[Unfiltered\nPartition\nIterator]
+    end
+    subgraph "5: Compute Score & Filter"
+        L[Global top k]
+    end
+    J --top 3 * k--> K
+    K --> L
 ```
 
 Notes:
