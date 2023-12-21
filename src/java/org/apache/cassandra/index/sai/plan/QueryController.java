@@ -71,6 +71,7 @@ import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
+import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -459,29 +460,17 @@ public class QueryController
 
         // On the first iteration we need to rely on estimates for how many keys we can expect to be accepted.
         // For any subsequent iterations we can do better by looking how many keys were rejected in the previous run.
-        float keyRejectionProbability = (firstShadowKeysLoopIteration && sortBeforeFilter)
-            ? 1.0f - postFilterSelectivity
-            : (float) shadowedCount / Math.max(prevSoftLimit, 1);
+        float keyAcceptanceProbability = (firstShadowKeysLoopIteration && sortBeforeFilter)
+            ? postFilterSelectivity
+            : 1.0f - (float) shadowedCount / Math.max(prevSoftLimit, 1);
 
-        // We estimated how likely keys are going to be rejected, so we now can pick a soft limit high enough
-        // to get a good probability of getting at least target count of keys accepted.
-        // However, the following calculation is not very accurate;
-        // probably we should use a bit more advanced stats (Bernoulli distribution?) here.
-        // The problem here is that the actual number of keys passing all the filters (and not shadowed) will have
-        // some fluctuations, non-zero variance. So although we know that on average we may expect
-        // to get limit * keyRejectionProbability good keys, we'll be getting fewer than that in 50% of cases.
-        // Therefore, we must really use a higher limit to account for those fluctuations and drive the probability
-        // of getting enough number of good keys to a better value, e.g. 99%
-        // (but on the flip side we can't go too far, as the cost of each search attempt will go up).
-        if (allowSpeculativeLimits)
-            keyRejectionProbability = Math.min(1.0f, keyRejectionProbability * 2);
-
-        float keyAcceptanceProbability = 1.0f - keyRejectionProbability;
-        int limit = (int) Math.min(Math.ceil(target / keyAcceptanceProbability), prevSoftLimit * 10);
+        // TODO: extract the targetProbability to a constant / param?
+        int uncappedLimit = SoftLimitUtil.softLimit(target, 0.99, keyAcceptanceProbability);
+        int limit = Math.min(uncappedLimit, prevSoftLimit * 10);
 
         if (logger.isDebugEnabled())
-            logger.debug("Soft limit estimate: {} with target={} shadowed={}/{} postFilterSelectivity={}",
-                         limit, target, shadowedCount, prevSoftLimit, postFilterSelectivity);
+            logger.debug("Soft limit estimate: {} with target={} shadowed={}/{} P={}",
+                         limit, target, shadowedCount, prevSoftLimit, keyAcceptanceProbability);
 
         return limit;
     }
