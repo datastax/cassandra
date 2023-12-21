@@ -65,6 +65,8 @@ import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
+import org.apache.cassandra.db.guardrails.UserKeyspaceFilter;
+import org.apache.cassandra.db.guardrails.UserKeyspaceFilterProvider;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -174,9 +176,11 @@ public final class CreateTableStatement extends AlterSchemaStatement
         // Guardrail on number of tables
         if (Guardrails.tables.enabled(state))
         {
+            UserKeyspaceFilter userKeyspaceFilter = UserKeyspaceFilterProvider.instance.get(state);
             int totalUserTables = Schema.instance.getUserKeyspaces()
                                                  .stream()
                                                  .map(Keyspace::open)
+                                                 .filter(userKeyspaceFilter::filter)
                                                  .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
                                                  .sum();
             Guardrails.tables.guard(totalUserTables + 1, tableName, false, state);
