@@ -411,13 +411,6 @@ public class BatchStatement implements CQLStatement
         if (cl == null)
             throw new InvalidRequestException("Invalid empty consistency level");
 
-        for (int i = 0; i < statements.size(); i++ )
-        {
-            ModificationStatement statement = statements.get(i);
-            statement.validateConsistency(cl, queryState);
-            statement.validateDiskUsage(queryState, options.forStatement(i));
-        }
-
         if (options.getSerialConsistency() == null)
             throw new InvalidRequestException("Invalid empty serial consistency level");
 
@@ -426,7 +419,11 @@ public class BatchStatement implements CQLStatement
                                                 clientState);
 
         for (int i = 0; i < statements.size(); i++ )
-            statements.get(i).validateDiskUsage(options.forStatement(i), clientState);
+        {
+            ModificationStatement statement = statements.get(i);
+            statement.validateConsistency(cl);
+            statement.validateDiskUsage(options.forStatement(i), clientState);
+        }
 
         if (hasConditions)
             return executeWithConditions(options, queryState, queryStartNanoTime);

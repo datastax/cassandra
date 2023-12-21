@@ -213,11 +213,8 @@ public enum ConsistencyLevel
         }
     }
 
-    public void validateForWrite(String keyspaceName, QueryState queryState) throws InvalidRequestException
+    public void validateForWrite() throws InvalidRequestException
     {
-        if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
-
         switch (this)
         {
             case SERIAL:
@@ -257,11 +254,8 @@ public enum ConsistencyLevel
         return this == SERIAL || this == LOCAL_SERIAL;
     }
 
-    public void validateCounterForWrite(TableMetadata metadata, QueryState queryState) throws InvalidRequestException
+    public void validateCounterForWrite(TableMetadata metadata) throws InvalidRequestException
     {
-        if (SchemaConstants.isUserKeyspace(metadata.keyspace))
-            Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
-
         if (this == ConsistencyLevel.ANY)
             throw new InvalidRequestException("Consistency level ANY is not yet supported for counter table " + metadata.name);
 

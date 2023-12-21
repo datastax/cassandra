@@ -499,8 +499,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
             return executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
 
         ConsistencyLevel cl = options.getConsistency();
-        validateConsistency(cl, queryState);
-        validateDiskUsage(queryState, options);
+        validateConsistency(cl);
 
         validateDiskUsage(options, queryState.getClientState());
         validateTimestamp(queryState, options);
@@ -523,12 +522,12 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         return null;
     }
 
-    public void validateConsistency(ConsistencyLevel cl, QueryState queryState)
+    public void validateConsistency(ConsistencyLevel cl)
     {
         if (isCounter())
-            cl.validateCounterForWrite(metadata(), queryState);
+            cl.validateCounterForWrite(metadata());
         else
-            cl.validateForWrite(metadata.keyspace, queryState);
+            cl.validateForWrite();
     }
 
     private ResultMessage executeWithCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
@@ -541,7 +540,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                                                    request,
                                                    options.getSerialConsistency(),
                                                    options.getConsistency(),
-                                                   queryState,
+                                                   queryState.getClientState(),
                                                    options.getNowInSeconds(queryState),
                                                    queryStartNanoTime))
         {
