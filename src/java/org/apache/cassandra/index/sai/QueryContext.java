@@ -18,10 +18,7 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.io.IOException;
-import java.util.HashSet;
 import java.util.NavigableSet;
-import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
@@ -32,9 +29,7 @@ import com.google.common.annotations.VisibleForTesting;
 import io.github.jbellis.jvector.util.Bits;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
-import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
@@ -85,8 +80,7 @@ public class QueryContext
     private FilterSortOrder filterSortOrder = null;
 
     // Estimates the probability of a row picked by the index to be accepted by the post filter.
-    // Null means uknown.
-    private Float postFilterSelectivityEstimate = null;
+    private float postFilterSelectivityEstimate = 1.0f;
 
     // Last used soft limit for vector search.
     private int softLimit = -1;
@@ -363,7 +357,7 @@ public class QueryContext
     public enum FilterSortOrder
     {
         /** First get the matching keys from the non-vector indexes, then use vector index to sort them */
-        FILTER_THAN_SORT,
+        FILTER_THEN_SORT,
 
         /** First get the candidates in ANN order from the vector index, then fetch the rows and post-filter them */
         SORT_THEN_FILTER

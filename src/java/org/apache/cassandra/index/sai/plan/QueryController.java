@@ -241,7 +241,6 @@ public class QueryController
                                                     .filter(e -> e.operator() != Operator.ANN)
                                                     .collect(Collectors.toList());
         var iter = Operation.Node.buildTree(nonOrderingExpressions, filterOperation.children(), filterOperation.isDisjunction()).analyzeTree(this).rangeIterator(this);
-        queryContext.setPostFilterSelectivityEstimate(estimateSelectivity(iter));
 
         if (orderings.isEmpty())
             return iter;
@@ -251,11 +250,12 @@ public class QueryController
         {
             // If there are too many keys returned form the index, use postfiltering:
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SORT_THEN_FILTER);
+            queryContext.setPostFilterSelectivityEstimate(estimateSelectivity(iter));
             FileUtils.closeQuietly(iter);
             return getTopKRows(orderings.get(0));
         }
 
-        queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.FILTER_THAN_SORT);
+        queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.FILTER_THEN_SORT);
         return getTopKRows(iter, orderings.get(0));
     }
 
