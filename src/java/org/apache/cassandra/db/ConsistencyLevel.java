@@ -17,16 +17,20 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.EnumSet;
 import java.util.Locale;
 
 import com.carrotsearch.hppc.ObjectIntHashMap;
+import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InOurDc;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolException;
 
 import static org.apache.cassandra.locator.Replicas.addToCountPerDc;
@@ -224,10 +228,10 @@ public enum ConsistencyLevel
     }
 
     // This is the same than validateForWrite really, but we include a slightly different error message for SERIAL/LOCAL_SERIAL
-    public void validateForCasCommit(AbstractReplicationStrategy replicationStrategy, String keyspaceName) throws InvalidRequestException
+    public void validateForCasCommit(AbstractReplicationStrategy replicationStrategy, String keyspaceName, ClientState clientState) throws InvalidRequestException
     {
         if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.disallowedWriteConsistencies.ensureAllowed(this);
+            Guardrails.writeConsistencyLevels.guard(EnumSet.of(this), clientState);
 
         switch (this)
         {
@@ -240,10 +244,10 @@ public enum ConsistencyLevel
         }
     }
 
-    public void validateForCas(String keyspaceName) throws InvalidRequestException
+    public void validateForCas(String keyspaceName, ClientState clientState) throws InvalidRequestException
     {
         if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.disallowedWriteConsistencies.ensureAllowed(this);
+            Guardrails.writeConsistencyLevels.guard(EnumSet.of(this), clientState);
 
         if (!isSerialConsistency())
             throw new InvalidRequestException("Invalid consistency for conditional update. Must be one of SERIAL or LOCAL_SERIAL");
