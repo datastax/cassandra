@@ -25,13 +25,19 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 
+import org.apache.commons.lang3.builder.ToStringBuilder;
+import org.apache.commons.lang3.builder.ToStringStyle;
+
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.cql3.statements.StatementType;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
+import org.apache.cassandra.db.virtual.VirtualTable;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
@@ -336,9 +342,7 @@ public class StatementRestrictions
         }
 
         // At this point, the select statement if fully constructed, but we still have a few things to validate
-        // FIXME compile
-//        processPartitionKeyRestrictions(state, hasQueriableIndex, allowFiltering, forView);
-        processPartitionKeyRestrictions(hasQueriableIndex, allowFiltering, forView);
+        processPartitionKeyRestrictions(state, hasQueriableIndex, allowFiltering, forView);
 
         // Some but not all of the partition key columns have been specified;
         // hence we need turn these restrictions into a row filter.
@@ -388,8 +392,8 @@ public class StatementRestrictions
             }
             if (hasQueriableIndex)
                 usesSecondaryIndexing = true;
-            else if (!allowFiltering)
-                throwRequiresAllowFilteringError(table);
+            else if (!allowFiltering && requiresAllowFilteringIfNotSpecified())
+                throw invalidRequest(allowFilteringMessage(state));
 
             filterRestrictionsBuilder.add(nonPrimaryKeyRestrictions);
         }
@@ -398,6 +402,16 @@ public class StatementRestrictions
 
         if (usesSecondaryIndexing)
             validateSecondaryIndexSelections();
+    }
+
+    public boolean requiresAllowFilteringIfNotSpecified()
+    {
+        if (!table.isVirtual())
+            return true;
+
+        VirtualTable tableNullable = VirtualKeyspaceRegistry.instance.getTableNullable(table.id);
+        assert tableNullable != null;
+        return !tableNullable.allowFilteringImplicitly();
     }
 
     public void throwRequiresAllowFilteringError(TableMetadata table)
@@ -534,8 +548,6 @@ public class StatementRestrictions
         {
             if (hasClusteringColumnsRestrictions())
             {
-                // FIXME compile
-//                for (SingleRestriction restriction : clusteringColumnsRestrictions.getRestrictionSet())
                 for (SingleRestriction restriction : clusteringColumnsRestrictions.restrictions())
                 {
                     if (restriction.isEqualityBased())
@@ -554,8 +566,6 @@ public class StatementRestrictions
         }
         else if (hasNonPrimaryKeyRestrictions())
         {
-            // FIXME compile
-//            for (SingleRestriction restriction : nonPrimaryKeyRestrictions)
             for (SingleRestriction restriction : nonPrimaryKeyRestrictions.restrictions())
                 if (restriction.getFirstColumn().name.equals(column.name) && restriction.isEqualityBased())
                     return true;
@@ -590,7 +600,7 @@ public class StatementRestrictions
         return this.usesSecondaryIndexing;
     }
 
-    protected void processPartitionKeyRestrictions(boolean hasQueriableIndex, boolean allowFiltering, boolean forView)
+    protected void processPartitionKeyRestrictions(ClientState state, boolean hasQueriableIndex, boolean allowFiltering, boolean forView)
     {
         if (!type.allowPartitionKeyRanges())
         {
@@ -626,8 +636,8 @@ public class StatementRestrictions
             // components must have a EQ. Only the last partition key component can be in IN relation.
             if (partitionKeyRestrictions.needFiltering(table))
             {
-                if (!allowFiltering && !forView && !hasQueriableIndex)
-                    throw new InvalidRequestException(REQUIRES_ALLOW_FILTERING_MESSAGE);
+                if (!allowFiltering && !forView && !hasQueriableIndex && requiresAllowFilteringIfNotSpecified())
+                    throw new InvalidRequestException(allowFilteringMessage(state));
 
                 isKeyRange = true;
                 usesSecondaryIndexing = hasQueriableIndex;
@@ -1072,5 +1082,18 @@ public class StatementRestrictions
         // regular columns restrictions), we ignore partitions that are empty outside of static content, but if it's
         // a full partition query, then we include that content.
         return queriesFullPartitions();
+    }
+
+    @Override
+    public String toString()
+    {
+        return ToStringBuilder.reflectionToString(this, ToStringStyle.SHORT_PREFIX_STYLE);
+    }
+
+    private static String allowFilteringMessage(ClientState state)
+    {
+        return Guardrails.allowFilteringEnabled.isEnabled(state)
+               ? REQUIRES_ALLOW_FILTERING_MESSAGE
+               : CANNOT_USE_ALLOW_FILTERING_MESSAGE;
     }
 }
