@@ -202,6 +202,7 @@ public enum CassandraRelevantProperties
     CUSTOM_HINTS_HANDLER("cassandra.custom_hints_handler"),
     CUSTOM_HINTS_RATE_LIMITER_FACTORY("cassandra.custom_hints_rate_limiter_factory"),
     CUSTOM_INDEX_BUILD_DECIDER("cassandra.custom_index_build_decider"),
+    CUSTOM_KEYSPACES_FILTER_PROVIDER("cassandra.custom_keyspaces_filter_provider_class"),
     /**
      * Which class to use for messaging metrics for {@link org.apache.cassandra.net.MessagingService}.
      * The provided class name must point to an implementation of {@link org.apache.cassandra.metrics.MessagingMetrics}.
