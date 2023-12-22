@@ -22,7 +22,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Maps;
@@ -33,12 +32,13 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
-import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.assertj.core.api.Assertions;
 
 
@@ -52,33 +52,33 @@ public class MutlipleSSTableFormatsTest extends CQLTester
     private final long seed = System.nanoTime();
     private Random random;
 
-    private String savedProp;
-
+    private SSTableFormat<?, ?> savedSSTableFormat;
+    
     @Before
-    public void before() {
-        savedProp = System.getProperty(SSTableFormat.FORMAT_DEFAULT_PROP);
+    public void before() 
+    {
+        savedSSTableFormat = DatabaseDescriptor.getSelectedSSTableFormat();
         random = new Random(seed);
         logger.info("Using random seed = {}", seed);
     }
 
     @After
-    public void after() {
-        if (savedProp == null)
-            System.getProperties().remove(SSTableFormat.FORMAT_DEFAULT_PROP);
-        else
-            System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, savedProp);
+    public void after() 
+    {
+        DatabaseDescriptor.setSelectedSSTableFormat(savedSSTableFormat);
     }
 
-    private Map<Integer, Integer> createSSTables() throws Throwable {
+    private Map<Integer, Integer> createSSTables() 
+    {
         Map<Integer, Integer> content = Maps.newHashMap();
 
         createTable("CREATE TABLE %s (id INT, val INT, PRIMARY KEY (id))");
         disableCompaction();
 
         int offset = 0;
-        for (SSTableFormat.Type formatType : SSTableFormat.Type.values())
+        for (SSTableFormat<?, ?> format : DatabaseDescriptor.getSSTableFormats().values())
         {
-            System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, formatType.name);
+            DatabaseDescriptor.setSelectedSSTableFormat(format);
 
             for (int i = 0; i < cnt; i++)
             {
@@ -91,9 +91,9 @@ public class MutlipleSSTableFormatsTest extends CQLTester
             flush();
         }
 
-        for (SSTableFormat.Type formatType : SSTableFormat.Type.values())
+        for (SSTableFormat<?, ?> format : DatabaseDescriptor.getSSTableFormats().values())
         {
-            System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, formatType.name);
+            DatabaseDescriptor.setSelectedSSTableFormat(format);
 
             for (int i = 0; i < deletionCount; i++)
             {
@@ -105,13 +105,14 @@ public class MutlipleSSTableFormatsTest extends CQLTester
             flush();
         }
 
-        List<SSTableFormat.Type> createdFormats = createdFormats();
-        Assertions.assertThat(createdFormats).hasSameElementsAs(Sets.newHashSet(SSTableFormat.Type.values()));
+        List<SSTableFormat<?, ?>> createdFormats = createdFormats();
+        Assertions.assertThat(createdFormats).hasSameElementsAs(Sets.newHashSet(DatabaseDescriptor.getSSTableFormats().values()));
 
         return content;
     }
 
-    private void checkRead(Map<Integer, Integer> content) throws Throwable {
+    private void checkRead(Map<Integer, Integer> content) 
+    {
         for (Map.Entry<Integer, Integer> entry : content.entrySet())
         {
             UntypedResultSet r = execute("SELECT val FROM %s WHERE id = ?", entry.getKey());
@@ -137,34 +138,33 @@ public class MutlipleSSTableFormatsTest extends CQLTester
     @Test
     public void testCompactionToBigFormat() throws Throwable
     {
-        testCompaction(BigFormat.instance);
+        testCompaction(BigFormat.getInstance());
     }
 
     @Test
     public void testCompactionToBtiFormat() throws Throwable
     {
-        testCompaction(TrieIndexFormat.instance);
+        testCompaction(BtiFormat.getInstance());
     }
 
-    private void testCompaction(SSTableFormat format) throws Throwable
+    private void testCompaction(SSTableFormat<?, ?> format) throws Throwable
     {
         Map<Integer, Integer> content = createSSTables();
-        System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, format.getType().name);
+        DatabaseDescriptor.setSelectedSSTableFormat(format);
         enableCompaction();
         compact();
-        List<SSTableFormat.Type> createdFormats = createdFormats();
+        List<SSTableFormat<?, ?>> createdFormats = createdFormats();
         Assertions.assertThat(createdFormats).hasSize(1);
-        Assertions.assertThat(createdFormats.get(0)).isEqualTo(format.getType());
+        Assertions.assertThat(createdFormats.get(0)).isEqualTo(format);
         checkRead(content);
     }
 
-    private List<SSTableFormat.Type> createdFormats()
+    private List<SSTableFormat<?, ?>> createdFormats()
     {
         return ColumnFamilyStore.getIfExists(KEYSPACE, currentTable())
                                 .getLiveSSTables()
                                 .stream()
-                                .map(sstr -> sstr.descriptor.formatType)
+                                .map(sstr -> sstr.descriptor.getFormat())
                                 .collect(Collectors.toList());
     }
-
 }
