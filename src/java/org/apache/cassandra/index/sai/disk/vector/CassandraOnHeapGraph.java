@@ -263,7 +263,8 @@ public class CassandraOnHeapGraph<T>
         NodeSimilarity.ExactScoreFunction scoreFunction = node2 -> {
             return similarityFunction.compare(queryVector, ((RandomAccessVectorValues<float[]>) vectorValues).vectorValue(node2));
         };
-        SearchResult result = searcher.search(scoreFunction, null, limit, threshold, bits);
+        var topK = OverqueryUtils.topKFor(limit, null);
+        var result = searcher.search(scoreFunction, null, topK, threshold, bits);
         Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         SearchResult.NodeScore[] a = result.getNodes();
         PriorityQueue<T> keyQueue = new PriorityQueue<>();
