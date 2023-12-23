@@ -68,16 +68,12 @@ import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Clock;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.github.jamm.Unmetered;
-
-import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_SHARD_COUNT;
 
 /**
  * Trie memtable implementation. Improves memory usage, garbage collection efficiency and lookup performance.
@@ -92,7 +88,6 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_S
 public class TrieMemtable extends AbstractShardedMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtable.class);
-    public static final String TRIE_MEMTABLE_CONFIG_OBJECT_NAME = "org.apache.cassandra.db:type=TrieMemtableConfig";
 
     /** Buffer type to use for memtable tries (on- vs off-heap) */
     public static final BufferType BUFFER_TYPE;
@@ -112,8 +107,6 @@ public class TrieMemtable extends AbstractShardedMemtable
         default:
             throw new AssertionError();
         }
-
-        MBeanWrapper.instance.registerMBean(new TrieMemtableConfig(), TRIE_MEMTABLE_CONFIG_OBJECT_NAME, MBeanWrapper.OnException.LOG);
     }
 
     /** If keys is below this length, we will use a recursive procedure for inserting data in the memtable trie. */
@@ -133,7 +126,6 @@ public class TrieMemtable extends AbstractShardedMemtable
      * (including with any write).
      */
     private final MemtableShard[] shards;
-    private static volatile int SHARD_COUNT = MEMTABLE_SHARD_COUNT.getInt(FBUtilities.getAvailableProcessors());
 
     /**
      * A merged view of the memtable map. Used for partition range queries and flush.
@@ -759,31 +751,6 @@ public class TrieMemtable extends AbstractShardedMemtable
         }
     }
 
-    private static class TrieMemtableConfig implements TrieMemtableConfigMXBean
-    {
-        @Override
-        public void setShardCount(String shardCount)
-        {
-            if ("auto".equalsIgnoreCase(shardCount))
-            {
-                SHARD_COUNT = FBUtilities.getAvailableProcessors();
-            }
-            else
-            {
-                try
-                {
-                    SHARD_COUNT = Integer.valueOf(shardCount);
-                }
-                catch (NumberFormatException ex)
-                {
-                    logger.warn("Unable to parse {} as valid value for shard count", shardCount);
-                    return;
-                }
-            }
-            logger.info("Requested setting shard count to {}; set to: {}", shardCount, SHARD_COUNT);
-        }
-    }
-
     @VisibleForTesting
     public long unusedReservedMemory()
     {
@@ -791,10 +758,5 @@ public class TrieMemtable extends AbstractShardedMemtable
         for (MemtableShard shard : shards)
             size += shard.data.unusedReservedMemory();
         return size;
-    }
-    
-    public static int getShardCount()
-    {
-        return SHARD_COUNT;
     }
 }
