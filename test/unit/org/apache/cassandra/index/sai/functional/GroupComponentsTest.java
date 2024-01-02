@@ -22,7 +22,6 @@ import java.util.Collection;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -41,7 +40,7 @@ public class GroupComponentsTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int primary key, value int)");
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         execute("INSERT INTO %s (pk) VALUES (1)");
         flush();
 
@@ -62,7 +61,7 @@ public class GroupComponentsTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int primary key, value int)");
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         execute("INSERT INTO %s (pk, value) VALUES (1, 1)");
         flush();
 
