@@ -116,6 +116,7 @@ public class SetType<T> extends CollectionType<Set<T>>
         return EmptyType.instance;
     }
 
+    @Override
     public <VL, VR> int compareCustom(VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR)
     {
         return ListType.compareListOrSet(getElementsType(), left, accessorL, right, accessorR);

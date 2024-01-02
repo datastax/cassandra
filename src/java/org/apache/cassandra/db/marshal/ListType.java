@@ -133,6 +133,7 @@ public class ListType<T> extends CollectionType<List<T>>
         return serializer;
     }
 
+    @Override
     public <VL, VR> int compareCustom(VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR)
     {
         return compareListOrSet(getElementsType(), left, accessorL, right, accessorR);

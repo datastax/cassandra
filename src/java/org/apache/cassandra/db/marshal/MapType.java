@@ -139,6 +139,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
         return getValuesType();
     }
 
+    @Override
     public <RL, TR> int compareCustom(RL left, ValueAccessor<RL> accessorL, TR right, ValueAccessor<TR> accessorR)
     {
         return compareMaps(getKeysType(), getValuesType(), left, accessorL, right, accessorR);
@@ -257,6 +258,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
         return values.size() / 2;
     }
 
+    @Override
     public String toString(boolean ignoreFreezing)
     {
         boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
