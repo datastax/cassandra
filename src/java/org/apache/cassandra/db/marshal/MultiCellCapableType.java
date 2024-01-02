@@ -50,7 +50,7 @@ public abstract class MultiCellCapableType<T> extends AbstractType<T>
         super(ComparisonType.CUSTOM, isMultiCell, subTypes);
     }
 
-    // Overriding as abstract to make subclass don't rely on the default implementation, as it's not appropriate.
+    // Overriding as abstract to prevent subclasses from relying on the default implementation, as it's not appropriate.
     @Override
     public abstract AbstractType<?> with(ImmutableList<AbstractType<?>> subTypes, boolean isMultiCell);
 

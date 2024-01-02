@@ -347,7 +347,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      * method goes since it only impacts sorting), this method is final and subclasses should override the
      * {@link #isValueCompatibleWithInternal} method instead.
      */
-    public boolean isValueCompatibleWith(AbstractType<?> otherType)
+    public final boolean isValueCompatibleWith(AbstractType<?> otherType)
     {
         return unwrap().isValueCompatibleWithInternal(otherType.unwrap());
     }
@@ -355,7 +355,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     /**
      * Needed to handle {@link ReversedType} in value-compatibility checks. Subclasses should override this instead of
      * {@link #isValueCompatibleWith}. However, if said override has subtypes on which they need to check value
-     * compatibility recursively, they should call {@link #isValueCompatibleWith} insteas of this method
+     * compatibility recursively, they should call {@link #isValueCompatibleWith} instead of this method
      * so that reversed types are ignored even if nested.
      */
     protected boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
