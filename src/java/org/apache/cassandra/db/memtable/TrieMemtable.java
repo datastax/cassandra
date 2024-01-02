@@ -174,16 +174,6 @@ public class TrieMemtable extends AbstractShardedMemtable
         return true;
     }
 
-    @VisibleForTesting
-    @Override
-    public void switchOut(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
-    {
-        super.switchOut(writeBarrier, commitLogUpperBound);
-
-        for (MemtableShard shard : shards)
-            shard.allocator.setDiscarding();
-    }
-
     @Override
     public void discard()
     {
