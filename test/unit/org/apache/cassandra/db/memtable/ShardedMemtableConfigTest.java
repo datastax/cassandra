@@ -61,8 +61,8 @@ public class ShardedMemtableConfigTest extends CQLTester
     {
         AbstractShardedMemtable.getDefaultShardCount();    // initialize class
         jmxConnection.setAttribute(new ObjectName(SHARDED_MEMTABLE_CONFIG_OBJECT_NAME), new Attribute("DefaultShardCount", "auto"));
-        assertEquals(FBUtilities.getAvailableProcessors(), AbstractShardedMemtable.getDefaultShardCount());
-        assertEquals(Integer.toString(FBUtilities.getAvailableProcessors()),
+        assertEquals(4 * FBUtilities.getAvailableProcessors(), AbstractShardedMemtable.getDefaultShardCount());
+        assertEquals(Integer.toString(4 * FBUtilities.getAvailableProcessors()),
                      jmxConnection.getAttribute(new ObjectName(SHARDED_MEMTABLE_CONFIG_OBJECT_NAME), "DefaultShardCount"));
     }
 }
