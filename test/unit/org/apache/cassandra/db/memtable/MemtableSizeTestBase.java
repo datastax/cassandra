@@ -182,10 +182,11 @@ public abstract class MemtableSizeTestBase extends CQLTester
             long expectedHeap = deepSizeAfter - deepSizeBefore;
             long max_difference = MAX_DIFFERENCE_PERCENT * expectedHeap / 100;
             long trie_overhead = memtable instanceof TrieMemtable ? ((TrieMemtable) memtable).unusedReservedMemory() : 0;
+            int slabCount = memtable instanceof TrieMemtable ? ((TrieMemtable) memtable).getShardCount() : 1;
             switch (DatabaseDescriptor.getMemtableAllocationType())
             {
                 case heap_buffers:
-                    max_difference += SLAB_OVERHEAD;
+                    max_difference += (long) SLAB_OVERHEAD * slabCount;
                     actualHeap += trie_overhead;    // adjust trie memory with unused buffer space if on-heap
                     break;
                 case unslabbed_heap_buffers:

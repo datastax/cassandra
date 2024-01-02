@@ -287,6 +287,11 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         return total;
     }
 
+    public int getShardCount()
+    {
+        return shards.length;
+    }
+
     public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
     {
         int total = 0;
