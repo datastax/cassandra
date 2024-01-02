@@ -43,7 +43,12 @@ public abstract class AbstractShardedMemtable extends AbstractAllocatorMemtable
     }
 
     // default shard count, used when a specific number of shards is not specified in the options
-    private static volatile int defaultShardCount = MEMTABLE_SHARD_COUNT.getInt(FBUtilities.getAvailableProcessors());
+    private static volatile int defaultShardCount = MEMTABLE_SHARD_COUNT.getInt(autoShardCount());
+
+    private static int autoShardCount()
+    {
+        return 4 * FBUtilities.getAvailableProcessors();
+    }
 
     // The boundaries for the keyspace as they were calculated when the memtable is created.
     // The boundaries will be NONE for system keyspaces or if StorageService is not yet initialized.
@@ -69,7 +74,7 @@ public abstract class AbstractShardedMemtable extends AbstractAllocatorMemtable
         {
             if ("auto".equalsIgnoreCase(shardCount))
             {
-                defaultShardCount = FBUtilities.getAvailableProcessors();
+                defaultShardCount = autoShardCount();
             }
             else
             {
