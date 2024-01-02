@@ -21,7 +21,4 @@ package org.apache.cassandra.db.compaction;
 public interface ICompactionManager
 {
     int getPendingTasks();
-    public void setShardCount(String numShards);
-
-    public String getShardCount();
 }
