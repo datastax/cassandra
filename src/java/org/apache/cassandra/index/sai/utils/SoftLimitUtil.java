@@ -18,9 +18,6 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.function.Function;
-
-import com.google.common.base.Preconditions;
 import org.apache.commons.math3.distribution.PascalDistribution;
 
 public class SoftLimitUtil
@@ -39,7 +36,7 @@ public class SoftLimitUtil
      * @param confidenceLevel the desired probability we obtain enough items in range, given in range [0.0, 1.0),
      *                        typically you want to set it close to 1.0.
      * @param perItemSuccessRate the probability of obtaining an item, given in range [0.0, 1.0]
-     * @return the number of items that should be requested from the lower layer of the system; >= 0;
+     * @return the number of items that should be requested from the lower layer of the system; >= targetLimit;
      *    if the true result is greater than Integer.MAX_VALUE it is clamped to Integer.MAX_VALUE
      */
     public static int softLimit(int targetLimit, double confidenceLevel, double perItemSuccessRate)
@@ -50,6 +47,10 @@ public class SoftLimitUtil
             throw new IllegalArgumentException("perItemSuccessRate out of range [0.0, 1.0]: " + perItemSuccessRate);
         if (targetLimit < 0)
             throw new IllegalArgumentException("targetLimit must not be < 0: " + targetLimit);
+
+        // PascalDistribution (see further) cannot handle this case properly
+        if (targetLimit == 0)
+            return 0;
 
         // Consider we perform attempts until we get R successes (=targetLimit), where the probability of success is
         // P (=perItemSuccessRate). In this case the number of failures is described by a negative binomial
