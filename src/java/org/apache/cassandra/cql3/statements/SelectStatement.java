@@ -269,18 +269,16 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     private void validateQueryOptions(QueryState queryState, QueryOptions options)
     {
         if (SchemaConstants.isUserKeyspace(table.keyspace))
-            Guardrails.disallowedWriteConsistencies.ensureAllowed(options.getConsistency(), queryState);
+            Guardrails.readConsistencyLevels.guard(EnumSet.of(options.getConsistency()), queryState.getClientState());
     }
 
-    public ResultMessage.Rows execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
+    public ResultMessage.Rows execute(QueryState state, QueryOptions options, long queryStartNanoTime)
     {
         ConsistencyLevel cl = options.getConsistency();
         checkNotNull(cl, "Invalid empty consistency level");
 
         cl.validateForRead();
-        validateQueryOptions(queryState, options);
-        if (SchemaConstants.isUserKeyspace(table.keyspace))
-            Guardrails.readConsistencyLevels.guard(EnumSet.of(cl), state.getClientState());
+        validateQueryOptions(state, options);
 
         long nowInSec = options.getNowInSeconds(state);
         int userLimit = getLimit(options);
@@ -397,9 +395,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             return new InternalPager(pager, executionController);
         }
 
-        public static Pager forDistributedQuery(QueryPager pager, ConsistencyLevel consistency, QueryState queryState)
+        public static Pager forDistributedQuery(QueryPager pager, ConsistencyLevel consistency, ClientState clientState)
         {
-            return new NormalPager(pager, consistency, queryState);
+            return new NormalPager(pager, consistency, clientState);
         }
 
         public boolean isExhausted()
@@ -417,18 +415,18 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         public static class NormalPager extends Pager
         {
             private final ConsistencyLevel consistency;
-            private final QueryState queryState;
+            private final ClientState clientState;
 
-            private NormalPager(QueryPager pager, ConsistencyLevel consistency, QueryState queryState)
+            private NormalPager(QueryPager pager, ConsistencyLevel consistency, ClientState queryState)
             {
                 super(pager);
                 this.consistency = consistency;
-                this.queryState = queryState;
+                this.clientState = queryState;
             }
 
             public PartitionIterator fetchPage(int pageSize, long queryStartNanoTime)
             {
-                return pager.fetchPage(pageSize, consistency, queryState, queryStartNanoTime);
+                return pager.fetchPage(pageSize, consistency, clientState, queryStartNanoTime);
             }
         }
 

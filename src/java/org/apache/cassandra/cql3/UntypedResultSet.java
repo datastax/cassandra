@@ -44,7 +44,7 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.FBUtilities;
@@ -77,11 +77,11 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
     @VisibleForTesting
     public static UntypedResultSet create(SelectStatement select,
                                           ConsistencyLevel cl,
-                                          QueryState queryState,
+                                          ClientState clientState,
                                           QueryPager pager,
                                           int pageSize)
     {
-        return new FromDistributedPager(select, cl, queryState, pager, pageSize);
+        return new FromDistributedPager(select, cl, clientState, pager, pageSize);
     }
 
     public boolean isEmpty()
@@ -242,19 +242,19 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
     {
         private final SelectStatement select;
         private final ConsistencyLevel cl;
-        private final QueryState queryState;
+        private final ClientState clientState;
         private final QueryPager pager;
         private final int pageSize;
         private final List<ColumnSpecification> metadata;
 
         private FromDistributedPager(SelectStatement select,
                                      ConsistencyLevel cl,
-                                     QueryState queryState,
+                                     ClientState clientState,
                                      QueryPager pager, int pageSize)
         {
             this.select = select;
             this.cl = cl;
-            this.queryState = queryState;
+            this.clientState = clientState;
             this.pager = pager;
             this.pageSize = pageSize;
             this.metadata = select.getResultMetadata().requestNames();
@@ -284,7 +284,7 @@ public abstract class UntypedResultSet implements Iterable<UntypedResultSet.Row>
                         if (pager.isExhausted())
                             return endOfData();
 
-                        try (PartitionIterator iter = pager.fetchPage(pageSize, cl, queryState, System.nanoTime()))
+                        try (PartitionIterator iter = pager.fetchPage(pageSize, cl, clientState, nanoTime()))
                         {
                             currentPage = select.process(iter, nowInSec, true).rows.iterator();
                         }

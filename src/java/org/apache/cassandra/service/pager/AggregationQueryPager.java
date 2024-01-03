@@ -27,7 +27,7 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.ClientState;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
@@ -54,13 +54,13 @@ public final class AggregationQueryPager implements QueryPager
     @Override
     public PartitionIterator fetchPage(int pageSize,
                                        ConsistencyLevel consistency,
-                                       QueryState queryState,
+                                       ClientState clientState,
                                        long queryStartNanoTime)
     {
         if (limits.isGroupByLimit())
-            return new GroupByPartitionIterator(pageSize, consistency, queryState, queryStartNanoTime);
+            return new GroupByPartitionIterator(pageSize, consistency, clientState, queryStartNanoTime);
 
-        return new AggregationPartitionIterator(pageSize, consistency, queryState, queryStartNanoTime);
+        return new AggregationPartitionIterator(pageSize, consistency, clientState, queryStartNanoTime);
     }
 
     @Override
@@ -115,7 +115,7 @@ public final class AggregationQueryPager implements QueryPager
 
         // For "normal" queries
         private final ConsistencyLevel consistency;
-        private final QueryState queryState;
+        private final ClientState clientState;
 
         // For internal queries
         private final ReadExecutionController executionController;
@@ -158,11 +158,11 @@ public final class AggregationQueryPager implements QueryPager
         private long queryStartNanoTime;
 
         public GroupByPartitionIterator(int pageSize,
-                                        ConsistencyLevel consistency,
-                                        QueryState queryState,
+                                         ConsistencyLevel consistency,
+                                         ClientState clientState,
                                         long queryStartNanoTime)
         {
-            this(pageSize, consistency, queryState, null, queryStartNanoTime);
+            this(pageSize, consistency, clientState, null, queryStartNanoTime);
         }
 
         public GroupByPartitionIterator(int pageSize,
@@ -174,13 +174,13 @@ public final class AggregationQueryPager implements QueryPager
 
         private GroupByPartitionIterator(int pageSize,
                                          ConsistencyLevel consistency,
-                                         QueryState queryState,
+                                         ClientState clientState,
                                          ReadExecutionController executionController,
                                          long queryStartNanoTime)
         {
             this.pageSize = handlePagingOff(pageSize);
             this.consistency = consistency;
-            this.queryState = queryState;
+            this.clientState = clientState;
             this.executionController = executionController;
             this.queryStartNanoTime = queryStartNanoTime;
         }
@@ -289,7 +289,7 @@ public final class AggregationQueryPager implements QueryPager
          */
         private final PartitionIterator fetchSubPage(int subPageSize)
         {
-            return consistency != null ? subPager.fetchPage(subPageSize, consistency, queryState, queryStartNanoTime)
+            return consistency != null ? subPager.fetchPage(subPageSize, consistency, clientState, queryStartNanoTime)
                                        : subPager.fetchPageInternal(subPageSize, executionController);
         }
 
@@ -402,10 +402,10 @@ public final class AggregationQueryPager implements QueryPager
     {
         public AggregationPartitionIterator(int pageSize,
                                             ConsistencyLevel consistency,
-                                            QueryState queryState,
+                                            ClientState clientState,
                                             long queryStartNanoTime)
         {
-            super(pageSize, consistency, queryState, queryStartNanoTime);
+            super(pageSize, consistency, clientState, queryStartNanoTime);
         }
 
         public AggregationPartitionIterator(int pageSize,

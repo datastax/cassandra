@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.service.pager;
 
-import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.AbstractIterator;
 
@@ -29,6 +28,7 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.service.ClientState;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
@@ -150,10 +150,10 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
     }
 
     @SuppressWarnings("resource") // iter closed via countingIter
-    public PartitionIterator fetchPage(int pageSize, ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    public PartitionIterator fetchPage(int pageSize, ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
         int toQuery = Math.min(remaining, pageSize);
-        return new PagersIterator(toQuery, consistency, queryState, null, queryStartNanoTime);
+        return new PagersIterator(toQuery, consistency, clientState, null, queryStartNanoTime);
     }
 
     @SuppressWarnings("resource") // iter closed via countingIter
@@ -172,7 +172,7 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
 
         // For "normal" queries
         private final ConsistencyLevel consistency;
-        private final QueryState queryState;
+        private final ClientState clientState;
 
         // For internal queries
         private final ReadExecutionController executionController;
@@ -180,11 +180,11 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
         private int pagerMaxRemaining;
         private int counted;
 
-        public PagersIterator(int pageSize, ConsistencyLevel consistency, QueryState queryState, ReadExecutionController executionController, long queryStartNanoTime)
+        public PagersIterator(int pageSize, ConsistencyLevel consistency, ClientState clientState, ReadExecutionController executionController, long queryStartNanoTime)
         {
             this.pageSize = pageSize;
             this.consistency = consistency;
-            this.queryState = queryState;
+            this.clientState = clientState;
             this.executionController = executionController;
             this.queryStartNanoTime = queryStartNanoTime;
         }
@@ -215,7 +215,7 @@ public class MultiPartitionPager<T extends SinglePartitionReadQuery> implements 
                 int toQuery = pageSize - counted;
                 result = consistency == null
                        ? pagers[current].fetchPageInternal(toQuery, executionController)
-                       : pagers[current].fetchPage(toQuery, consistency, queryState, queryStartNanoTime);
+                       : pagers[current].fetchPage(toQuery, consistency, clientState, queryStartNanoTime);
             }
             return result.next();
         }
