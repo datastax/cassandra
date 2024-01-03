@@ -28,7 +28,6 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.exceptions.*;
-import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
@@ -59,8 +58,6 @@ public class TruncateStatement extends QualifiedStatement implements CQLStatemen
     @Override
     public void validate(ClientState state) throws InvalidRequestException
     {
-        Guardrails.truncateTableEnabled.ensureEnabled(state);
-
         Schema.instance.validateTable(keyspace(), name());
         Guardrails.dropTruncateTableEnabled.ensureEnabled(state);
     }

@@ -22,23 +22,26 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.guardrails;
+package org.apache.cassandra.db.guardrails;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 public class GuardrailTruncateTableTest extends GuardrailTester
 {
     private static boolean truncateTableEnabled;
 
+    public GuardrailTruncateTableTest()
+    {
+        super(Guardrails.dropTruncateTableEnabled);
+    }
     @BeforeClass
     public static void setup()
     {
-        truncateTableEnabled = DatabaseDescriptor.getGuardrailsConfig().truncate_table_enabled;
+        truncateTableEnabled = DatabaseDescriptor.getGuardrailsConfig().getDropTruncateTableEnabled();
     }
 
     @AfterClass
@@ -49,12 +52,11 @@ public class GuardrailTruncateTableTest extends GuardrailTester
 
     private static void setGuardrails(boolean truncate_table_enabled)
     {
-        DatabaseDescriptor.getGuardrailsConfig().truncate_table_enabled = truncate_table_enabled;
+        DatabaseDescriptor.getGuardrailsConfig().setDropTruncateTableEnabled(truncate_table_enabled);
     }
 
-    private void testTruncate(boolean truncateTableEnabled) throws Throwable
+    private void createTestTable()
     {
-        setGuardrails(truncateTableEnabled);
         createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY(a, b))");
 
         execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 0, 0);
@@ -63,21 +65,22 @@ public class GuardrailTruncateTableTest extends GuardrailTester
         execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 1, 1, 3);
 
         assertRows(execute("SELECT * FROM %s"), row(1, 0, 2), row(1, 1, 3), row(0, 0, 0), row(0, 1, 1));
-
-        assertValid("TRUNCATE %s");
-
-        assertEmpty(execute("SELECT * FROM %s"));
     }
 
     @Test
     public void testEnabledTruncateTable() throws Throwable
     {
-        testTruncate(true);
+        createTestTable();
+        setGuardrails(true);
+        assertValid("TRUNCATE %s");
+        assertEmpty(execute("SELECT * FROM %s"));
     }
 
-    @Test(expected = InvalidQueryException.class)
+    @Test
     public void testDisabledTruncateTable() throws Throwable
     {
-        testTruncate(false);
+        createTestTable();
+        setGuardrails(false);
+        assertFails("TRUNCATE %s", "Guardrail drop_truncate_table_enabled violated: DROP and TRUNCATE TABLE functionality is not allowed");
     }
 }
