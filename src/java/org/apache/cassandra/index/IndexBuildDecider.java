@@ -19,6 +19,7 @@
 package org.apache.cassandra.index;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableListChangedNotification;
@@ -32,8 +33,17 @@ public interface IndexBuildDecider
 
     enum Decision
     {
+        /**
+         * index will be built synchronously
+         */
         SYNC,
+        /**
+         * index will be built asynchronously
+         */
         ASYNC,
+        /**
+         * index build will be skipped
+         */
         NONE;
 
         public boolean skipped()
@@ -43,6 +53,8 @@ public interface IndexBuildDecider
     }
 
     /**
+     * CNDB overrides this method to skip building indexes for sstables.
+     *
      * @return decision for index initial build {@link Index#getInitializationTask()}
      */
     default Decision onInitialBuild()
@@ -50,11 +62,31 @@ public interface IndexBuildDecider
         return Decision.SYNC;
     }
 
+    /**
+     * CNDB overrides this method to mark index queryable if there is no sstables on writer.
+     *
+     * @return true if index should be queryable after {@link Index#getInitializationTask()}
+     */
+    default boolean isIndexQueryableAfterInitialBuild(ColumnFamilyStore cfs)
+    {
+        return true;
+    }
+
+    /**
+     * CNDB overrides this method to skip building indexes on writer when sstables are reloaded from remote storage
+     *
+     * @return decision for index initial build when receiving {@link SSTableListChangedNotification}
+     */
     default Decision onSSTableListChanged(SSTableListChangedNotification notification)
     {
         return notification.operationType.equals(OperationType.REMOTE_RELOAD) ? Decision.ASYNC : Decision.NONE;
     }
 
+    /**
+     * CNDB overrides this method to skip building indexes on writer when sstables are reloaded from remote storage
+     *
+     * @return decision for index initial build when receiving {@link SSTableAddedNotification}
+     */
     default Decision onSSTableAdded(SSTableAddedNotification notification)
     {
         // SSTables associated to a memtable come from a flush, so their contents have already been indexed

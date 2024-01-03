@@ -30,6 +30,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
@@ -70,7 +71,9 @@ import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -80,6 +83,12 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 public class IndexContext
 {
     private static final Logger logger = LoggerFactory.getLogger(IndexContext.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
+
+    private static final int MAX_STRING_TERM_SIZE = Integer.getInteger("cassandra.sai.max_string_term_size_kb", 1) * 1024;
+    private static final int MAX_FROZEN_TERM_SIZE = Integer.getInteger("cassandra.sai.max_frozen_term_size_kb", 5) * 1024;
+    private static final String TERM_OVERSIZE_MESSAGE = "Can't add term of column %s to index for key: %s, term size %s " +
+                                                        "max allowed size %s, use analyzed = true (if not yet set) for that column.";
 
     private static final Set<AbstractType<?>> EQ_ONLY_TYPES =
             ImmutableSet.of(UTF8Type.instance, AsciiType.instance, BooleanType.instance, UUIDType.instance);
@@ -109,7 +118,7 @@ public class IndexContext
     private final AbstractAnalyzer.AnalyzerFactory queryAnalyzerFactory;
     private final PrimaryKey.Factory primaryKeyFactory;
 
-    private final boolean segmentCompactionEnabled;
+    private final int maxTermSize;
 
     public IndexContext(@Nonnull String keyspace,
                         @Nonnull String table,
@@ -130,6 +139,7 @@ public class IndexContext
         this.viewManager = new IndexViewManager(this);
         this.indexMetrics = new IndexMetrics(this);
         this.validator = TypeUtil.cellValueType(column, indexType);
+        this.maxTermSize = isFrozen() ? MAX_FROZEN_TERM_SIZE : MAX_STRING_TERM_SIZE;
         this.owner = owner;
 
         this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
@@ -145,14 +155,12 @@ public class IndexContext
             this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(config.options)
                                         ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
                                         : this.analyzerFactory;
-            this.segmentCompactionEnabled = Boolean.parseBoolean(config.options.getOrDefault(ENABLE_SEGMENT_COMPACTION_OPTION_NAME, "true"));
         }
         else
         {
             this.indexWriterConfig = IndexWriterConfig.emptyConfig();
             this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), Collections.EMPTY_MAP);
             this.queryAnalyzerFactory = this.analyzerFactory;
-            this.segmentCompactionEnabled = true;
         }
 
         logger.info(logMessage("Initialized index context with index writer config: {}"), indexWriterConfig);
@@ -230,16 +238,67 @@ public class IndexContext
         indexMetrics.memtableIndexWriteLatency.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
     }
 
+    /**
+     * Validate maximum term size for given row
+     */
+    public void validateMaxTermSizeForRow(DecoratedKey key, Row row, boolean sendClientWarning)
+    {
+        AbstractAnalyzer analyzer = analyzerFactory.create();
+        if (isNonFrozenCollection())
+        {
+            Iterator<ByteBuffer> bufferIterator = getValuesOf(row, FBUtilities.nowInSeconds());
+            while (bufferIterator != null && bufferIterator.hasNext())
+                validateMaxTermSizeForCell(analyzer, key, bufferIterator.next(), sendClientWarning);
+        }
+        else
+        {
+            ByteBuffer value = getValueOf(key, row, FBUtilities.nowInSeconds());
+            validateMaxTermSizeForCell(analyzer, key, value, sendClientWarning);
+        }
+    }
+
+    private void validateMaxTermSizeForCell(AbstractAnalyzer analyzer, DecoratedKey key, @Nullable ByteBuffer cellBuffer, boolean sendClientWarning)
+    {
+        if (cellBuffer == null || cellBuffer.remaining() == 0)
+            return;
+
+        // analyzer should not return terms that are larger than the origin value.
+        if (cellBuffer.remaining() <= maxTermSize)
+            return;
+
+        analyzer.reset(cellBuffer.duplicate());
+        while (analyzer.hasNext())
+            validateMaxTermSize(key, analyzer.next(), sendClientWarning);
+    }
+
+    /**
+     * Validate maximum term size for given term
+     * @return true if given term is valid; otherwise false.
+     */
+    public boolean validateMaxTermSize(DecoratedKey key, ByteBuffer term, boolean sendClientWarning)
+    {
+        if (term.remaining() > maxTermSize)
+        {
+            String message = logMessage(String.format(TERM_OVERSIZE_MESSAGE,
+                                                      getColumnName(),
+                                                      keyValidator().getString(key.getKey()),
+                                                      FBUtilities.prettyPrintMemory(term.remaining()),
+                                                      FBUtilities.prettyPrintMemory(maxTermSize)));
+
+            if (sendClientWarning)
+                ClientWarn.instance.warn(message);
+
+            noSpamLogger.warn(message);
+            return false;
+        }
+
+        return true;
+    }
+
     public void renewMemtable(Memtable renewed)
     {
-        for (Memtable memtable : liveMemtables.keySet())
-        {
-            // remove every index but the one that corresponds to the post-truncate Memtable
-            if (renewed != memtable)
-            {
-                liveMemtables.remove(memtable);
-            }
-        }
+        // remove every index but the one that corresponds to the post-truncate Memtable
+        liveMemtables.keySet().removeIf(m -> m != renewed);
     }
 
     public void discardMemtable(Memtable discarded)
@@ -620,20 +679,5 @@ public class IndexContext
         IndexFeatureSet.Accumulator accumulator = new IndexFeatureSet.Accumulator();
         getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(set -> accumulator.accumulate(set));
         return accumulator.complete();
-    }
-
-    /**
-     * Returns true if index segments should be compacted into one segment after building the index.
-     *
-     * By default, this option is set to true. A user is able to override this by setting
-     * <code>enable_segment_compaction</code> to false in the index options.
-     * This is an expert-only option.
-     * Disabling compaction improves performance of writes at the expense of significantly reducing performance
-     * of read queries. A user should never turn compaction off on a production system
-     * unless diagnosing a performance issue.
-     */
-    public boolean isSegmentCompactionEnabled()
-    {
-        return this.segmentCompactionEnabled;
     }
 }

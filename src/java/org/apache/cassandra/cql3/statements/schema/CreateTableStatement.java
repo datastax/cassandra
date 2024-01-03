@@ -33,13 +33,14 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.guardrails.UserKeyspaceFilter;
+import org.apache.cassandra.guardrails.UserKeyspaceFilterProvider;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
@@ -98,6 +99,11 @@ public final class CreateTableStatement extends AlterSchemaStatement
         this.useCompactStorage = useCompactStorage;
     }
 
+    public boolean isCompactStorage()
+    {
+        return useCompactStorage;
+    }
+
     @Override
     public void validate(QueryState state)
     {
@@ -121,9 +127,12 @@ public final class CreateTableStatement extends AlterSchemaStatement
             if (Guardrails.tablesLimit.enabled(state))
             {
                 // guardrails on number of tables
+                UserKeyspaceFilter userKeyspaceFilter = UserKeyspaceFilterProvider.instance.get(state);
                 int totalUserTables = Schema.instance.getUserKeyspaces().stream().map(ksm -> Keyspace.open(ksm.name))
-                                                     .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
-                                                     .sum();
+                                                            .filter(userKeyspaceFilter::filter)
+                                                            .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
+                                                            .sum();
+
                 Guardrails.tablesLimit.guard(totalUserTables + 1, tableName, false, state);
             }
         }
