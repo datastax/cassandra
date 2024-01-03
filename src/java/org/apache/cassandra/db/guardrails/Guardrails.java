@@ -274,6 +274,15 @@ public final class Guardrails implements GuardrailsMBean
                    "SimpleStrategy");
 
     /**
+     * Guardrail disabling use of Counters
+     */
+    public static final EnableFlag counterEnabled =
+    new EnableFlag("counter",
+                   null,
+                   state -> CONFIG_PROVIDER.getOrCreate(state).getCounterEnabled(),
+                   "Counter");
+
+    /**
      * Guardrail on the number of restrictions created by a cartesian product of a CQL's {@code IN} query.
      */
     public static final MaxThreshold inSelectCartesianProduct =

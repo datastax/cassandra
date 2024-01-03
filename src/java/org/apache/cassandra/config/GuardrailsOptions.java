@@ -463,6 +463,20 @@ public class GuardrailsOptions implements GuardrailsConfig
     }
 
     @Override
+    public boolean getCounterEnabled()
+    {
+        return config.counter_enabled;
+    }
+
+    public void setCounterEnabled(boolean enabled)
+    {
+        updatePropertyWithLogging("counter_enabled",
+                enabled,
+                () -> config.counter_enabled,
+                x -> config.counter_enabled = x);
+    }
+
+    @Override
     public int getInSelectCartesianProductWarnThreshold()
     {
         return config.in_select_cartesian_product_warn_threshold;

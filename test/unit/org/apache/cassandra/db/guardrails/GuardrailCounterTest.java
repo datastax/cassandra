@@ -21,15 +21,15 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.guardrails;
+package org.apache.cassandra.db.guardrails;
 
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.config.DatabaseDescriptor;
+
 
 public class GuardrailCounterTest extends GuardrailTester
 {
@@ -38,38 +38,34 @@ public class GuardrailCounterTest extends GuardrailTester
     @BeforeClass
     public static void setup()
     {
-        counterEnabled = DatabaseDescriptor.getGuardrailsConfig().counter_enabled;
+        counterEnabled = DatabaseDescriptor.getGuardrailsConfig().getCounterEnabled();
     }
 
     @AfterClass
     public static void tearDown()
     {
-        DatabaseDescriptor.getGuardrailsConfig().counter_enabled = counterEnabled;
+        DatabaseDescriptor.getGuardrailsConfig().setCounterEnabled(counterEnabled);
     }
 
     private void setGuardrails(boolean counterEnabled)
     {
-        DatabaseDescriptor.getGuardrailsConfig().counter_enabled = counterEnabled;
-    }
-
-    private void testCounter(boolean counterEnabled) throws Throwable
-    {
-        setGuardrails(counterEnabled);
-
-        executeNet(String.format("CREATE TABLE %s (pk int PRIMARY KEY, c counter)", createTableName()));
-        execute("UPDATE %s SET c = c + 1 WHERE pk = 10");
-        assertRows(execute("SELECT c FROM %s WHERE pk = 10"), row(1L));
+        DatabaseDescriptor.getGuardrailsConfig().setCounterEnabled(counterEnabled);
     }
 
     @Test
     public void testCounterEnabled() throws Throwable
     {
-        testCounter(true);
+        setGuardrails(true);
+        assertValid(String.format("CREATE TABLE %s (pk int PRIMARY KEY, c counter)", createTableName()));
+        execute("UPDATE %s SET c = c + 1 WHERE pk = 10");
+        assertRows(execute("SELECT c FROM %s WHERE pk = 10"), row(1L));
     }
 
-    @Test(expected = InvalidQueryException.class)
+    @Test
     public void testCounterDisabled() throws Throwable
     {
-        testCounter(false);
+        setGuardrails(false);
+        assertFails(String.format("CREATE TABLE %s (pk int PRIMARY KEY, c counter)", createTableName()),
+                "Guardrail counter violated: Counter is not allowed");
     }
 }
