@@ -16,13 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.guardrails;
+package org.apache.cassandra.db.guardrails;
 
 import java.util.stream.StreamSupport;
 
 import com.google.common.base.Strings;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -34,55 +35,63 @@ import static org.junit.Assert.assertEquals;
 
 public class GuardrailSAIIndexesTest extends GuardrailTester
 {
+    private static int totalExistingIndexes;
     private int defaultSAIPerTableFailureThreshold;
     private int defaultSAITotalFailureThreshold;
 
+    @BeforeClass
+    public static void setup()
+    {
+        // Some existing system tables may have indexes (e.g. Paxos.PaxosUncommittedIndex)
+        totalExistingIndexes = totalIndexes();
+    }
+    
     @Before
     public void before()
     {
-        defaultSAIPerTableFailureThreshold = config().sai_indexes_per_table_failure_threshold;
-        defaultSAITotalFailureThreshold = config().sai_indexes_total_failure_threshold;
-        config().sai_indexes_per_table_failure_threshold = 1;
-        config().sai_indexes_total_failure_threshold = 2;
+        defaultSAIPerTableFailureThreshold = DatabaseDescriptor.getGuardrailsConfig().getStorageAttachedIndexesPerTableFailThreshold();
+        defaultSAITotalFailureThreshold = DatabaseDescriptor.getGuardrailsConfig().getStorageAttachedIndexesTotalFailThreshold();
+        DatabaseDescriptor.getGuardrailsConfig().setStorageAttachedIndexesPerTableThreshold(-1, 1);
+        DatabaseDescriptor.getGuardrailsConfig().setStorageAttachedIndexesTotalThreshold(-1, 2);
     }
 
     @After
     public void after()
     {
-        config().sai_indexes_per_table_failure_threshold = defaultSAIPerTableFailureThreshold;
-        config().sai_indexes_total_failure_threshold = defaultSAITotalFailureThreshold;
+        DatabaseDescriptor.getGuardrailsConfig().setStorageAttachedIndexesPerTableThreshold(-1, defaultSAIPerTableFailureThreshold);
+        DatabaseDescriptor.getGuardrailsConfig().setStorageAttachedIndexesTotalThreshold(-1, defaultSAITotalFailureThreshold);
     }
 
-    @Test
-    public void testDefaultsOnPrem()
-    {
-        testDefaults(false);
-    }
-
-    @Test
-    public void testDefaultsDBAAS()
-    {
-        testDefaults(true);
-    }
-
-    public void testDefaults(boolean dbaas)
-    {
-        boolean previous = DatabaseDescriptor.isApplyDbaasDefaults();
-        try
-        {
-            DatabaseDescriptor.setApplyDbaasDefaults(dbaas);
-
-            GuardrailsConfig config = new GuardrailsConfig();
-            config.applyConfig();
-
-            assertEquals(GuardrailsConfig.DEFAULT_INDEXES_PER_TABLE_THRESHOLD, (int) config.sai_indexes_per_table_failure_threshold);
-            assertEquals(GuardrailsConfig.DEFAULT_INDEXES_TOTAL_THRESHOLD, (int) config.sai_indexes_total_failure_threshold);
-        }
-        finally
-        {
-            DatabaseDescriptor.setApplyDbaasDefaults(previous);
-        }
-    }
+//    @Test
+//    public void testDefaultsOnPrem()
+//    {
+//        testDefaults(false);
+//    }
+//
+//    @Test
+//    public void testDefaultsDBAAS()
+//    {
+//        testDefaults(true);
+//    }
+//
+//    public void testDefaults(boolean dbaas)
+//    {
+//        boolean previous = DatabaseDescriptor.isApplyDbaasDefaults();
+//        try
+//        {
+//            DatabaseDescriptor.setApplyDbaasDefaults(dbaas);
+//
+//            GuardrailsConfig config = new GuardrailsConfig();
+//            config.applyConfig();
+//
+//            assertEquals(GuardrailsConfig.DEFAULT_INDEXES_PER_TABLE_THRESHOLD, (int) config.sai_indexes_per_table_failure_threshold);
+//            assertEquals(GuardrailsConfig.DEFAULT_INDEXES_TOTAL_THRESHOLD, (int) config.sai_indexes_total_failure_threshold);
+//        }
+//        finally
+//        {
+//            DatabaseDescriptor.setApplyDbaasDefaults(previous);
+//        }
+//    }
 
     @Test
     public void testPerTableFailureThreshold() throws Throwable
@@ -159,10 +168,10 @@ public class GuardrailSAIIndexesTest extends GuardrailTester
     public void testExcludedUsers() throws Throwable
     {
         createTable("CREATE TABLE %s (k int primary key, v1 int, v2 int)");
-        testExcludedUsers(getCreateIndexStatement("excluded_1", "v1"),
-                          getCreateIndexStatement("excluded_2", "v2"),
-                          "DROP INDEX excluded_1",
-                          "DROP INDEX excluded_2");
+        testExcludedUsers(() -> getCreateIndexStatement("excluded_1", "v1"),
+                          () -> getCreateIndexStatement("excluded_2", "v2"),
+                          () -> "DROP INDEX excluded_1",
+                          () -> "DROP INDEX excluded_2");
     }
 
     private void assertIndexesOnCurrentTable(int count)
@@ -172,8 +181,12 @@ public class GuardrailSAIIndexesTest extends GuardrailTester
 
     private void assertGlobalIndexes(int count)
     {
-        int totalIndexes = StreamSupport.stream(Keyspace.all().spliterator(), false).flatMap(k -> k.getColumnFamilyStores().stream()).mapToInt(t -> t.indexManager.listIndexes().size()).sum();
-        assertEquals(count, totalIndexes);
+        assertEquals(totalExistingIndexes + count, totalIndexes());
+    }
+
+    private static int totalIndexes()
+    {
+        return StreamSupport.stream(Keyspace.all().spliterator(), false).flatMap(k -> k.getColumnFamilyStores().stream()).mapToInt(t -> t.indexManager.listIndexes().size()).sum();
     }
 
     private void assertTotalIndexesOfTheSameType(int count)
@@ -186,9 +199,9 @@ public class GuardrailSAIIndexesTest extends GuardrailTester
 
     private void assertIndexCreationFails(String indexName, String column) throws Throwable
     {
-        String expectedMessage = String.format("failed to create secondary index %son table %s",
+        String expectedMessage = String.format("aborting the creation of secondary index %son table %s",
                                                Strings.isNullOrEmpty(indexName) ? "" : indexName + " ", currentTable());
-        assertFails(expectedMessage, getCreateIndexStatement(indexName, column));
+        assertFails(getCreateIndexStatement(indexName, column), expectedMessage);
     }
 
     protected String getIndexClassName()

@@ -108,6 +108,39 @@ public final class Guardrails implements GuardrailsMBean
                                : format("Tables cannot have more than %s secondary indexes, aborting the creation of secondary index %s",
                                         threshold, what));
 
+    public static final MaxThreshold sasiIndexesPerTable =
+    new MaxThreshold("sasi_indexes_per_table",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getSasiIndexesPerTableWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getSasiIndexesPerTableFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Creating SASI index %s, current number of indexes %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Tables cannot have more than %s SASI indexes, aborting the creation of secondary index %s",
+                                        threshold, what));
+
+    public static final MaxThreshold saiIndexesPerTable =
+    new MaxThreshold("sai_indexes_per_table",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getStorageAttachedIndexesPerTableWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getStorageAttachedIndexesPerTableFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Creating StorageAttachedIndex secondary index %s, current number of StorageAttachedIndex secondary indexes %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Tables cannot have more than %s StorageAttachedIndex secondary indexes, aborting the creation of secondary index %s",
+                                        threshold, what));
+
+    public static final MaxThreshold saiIndexesTotal =
+    new MaxThreshold("sai_indexes_total",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getStorageAttachedIndexesTotalWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getStorageAttachedIndexesTotalFailThreshold(),
+                     (isWarning, what, value, threshold) ->
+                     isWarning ? format("Creating StorageAttachedIndex secondary index %s, current number of StorageAttachedIndex secondary indexes across all keyspaces %s exceeds warning threshold of %s.",
+                                        what, value, threshold)
+                               : format("Cannot have more than %s StorageAttachedIndex secondary indexes across all keyspaces, aborting the creation of secondary index %s",
+                                        threshold, what));
+
     /**
      * Guardrail disabling user's ability to create secondary indexes
      */
@@ -567,6 +600,42 @@ public final class Guardrails implements GuardrailsMBean
     public boolean getSecondaryIndexesEnabled()
     {
         return DEFAULT_CONFIG.getSecondaryIndexesEnabled();
+    }
+
+    @Override
+    public int getStorageAttachedIndexesPerTableWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getStorageAttachedIndexesPerTableWarnThreshold();
+    }
+
+    @Override
+    public int getStorageAttachedIndexesPerTableFailThreshold()
+    {
+        return DEFAULT_CONFIG.getStorageAttachedIndexesPerTableFailThreshold();
+    }
+
+    @Override
+    public void setStorageAttachedIndexesPerTableThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setSecondaryIndexesPerTableThreshold(warn, fail);
+    }
+
+    @Override
+    public int getStorageAttachedIndexesTotalWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getStorageAttachedIndexesPerTableWarnThreshold();
+    }
+
+    @Override
+    public int getStorageAttachedIndexesTotalFailThreshold()
+    {
+        return DEFAULT_CONFIG.getStorageAttachedIndexesPerTableFailThreshold();
+    }
+
+    @Override
+    public void setStorageAttachedIndexesTotalThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setSecondaryIndexesPerTableThreshold(warn, fail);
     }
 
     @Override
