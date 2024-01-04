@@ -49,7 +49,7 @@ public class QueryContext
     private final LongAdder segmentsHit = new LongAdder();
     private final LongAdder partitionsRead = new LongAdder();
     private final LongAdder rowsFiltered = new LongAdder();
-
+    private final LongAdder rowsReturned = new LongAdder();
     private final LongAdder trieSegmentsHit = new LongAdder();
 
     private final LongAdder bkdPostingListsHit = new LongAdder();
@@ -117,6 +117,14 @@ public class QueryContext
     public void addRowsFiltered(long val)
     {
         rowsFiltered.add(val);
+    }
+    public void addRowsReturned(long val)
+    {
+        rowsReturned.add(val);
+    }
+    public void resetRowsReturned()
+    {
+        rowsReturned.reset();
     }
     public void addTrieSegmentsHit(long val)
     {
@@ -208,6 +216,10 @@ public class QueryContext
     public long rowsFiltered()
     {
         return rowsFiltered.longValue();
+    }
+    public long rowsReturned()
+    {
+        return rowsReturned.longValue();
     }
     public long trieSegmentsHit()
     {

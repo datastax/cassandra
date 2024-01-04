@@ -88,6 +88,14 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR
 public class QueryController
 {
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
+    public static final double SOFT_LIMIT_CONFIDENCE = 0.99;
+
+    static class Costs
+    {
+        static final float INDEX_KEY_FETCH_COST = 1.0f;
+        static final float INDEX_INTERSECTION_PENALTY = 5.0f;
+        static final float ROW_MATERIALIZE_COST = 100.0f;
+    }
 
     // for testing
     public static boolean allowSpeculativeLimits = true;
@@ -246,18 +254,49 @@ public class QueryController
         if (orderings.isEmpty())
             return iter;
 
-        // TODO: compute proper threshold
-        if (queryContext.filterSortOrder() == null && iter.getMaxKeys() >= 0)
+        if (queryContext.filterSortOrder() == null)
         {
-            // If there are too many keys returned form the index, use postfiltering:
-            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SORT_THEN_FILTER);
+            QueryContext.FilterSortOrder order = decideFilterSortOrder(nonOrderingExpressions, iter);
+            queryContext.setFilterSortOrder(order);
+        }
+        
+        if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER)
+        {
             queryContext.setPostFilterSelectivityEstimate(estimateSelectivity(iter));
             FileUtils.closeQuietly(iter);
             return getTopKRows(orderings.get(0));
         }
 
-        queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.FILTER_THEN_SORT);
         return getTopKRows(iter, orderings.get(0));
+    }
+
+    private QueryContext.FilterSortOrder decideFilterSortOrder(List<RowFilter.Expression> filterExpressions, RangeIterator iter)
+    {
+        double sortThenFilterCost = estimateSortThenFilterCost(iter);
+        double filterThenSortCost = estimateFilterThenSortCost(filterExpressions, iter);
+        QueryContext.FilterSortOrder order = sortThenFilterCost < filterThenSortCost
+               ? QueryContext.FilterSortOrder.SORT_THEN_FILTER
+               : QueryContext.FilterSortOrder.FILTER_THEN_SORT;
+        logger.debug("Decided filter sort order {} (costs were: sort then filter = {}, filter_then_sort = {})",
+                     order, sortThenFilterCost, filterThenSortCost);
+        return order;
+    }
+
+    private double estimateFilterThenSortCost(List<RowFilter.Expression> filterExpressions, RangeIterator iter)
+    {
+        long primaryKeysFetchedFromIndex = iter.getMaxKeys();
+        float intersectionPenalty = filterExpressions.size() > 1 ? Costs.INDEX_INTERSECTION_PENALTY : 1.0f;
+        // TODO: account for shadowed keys once we collect stats
+        long materializedRows = Math.min(getExactLimit(), primaryKeysFetchedFromIndex);
+        return primaryKeysFetchedFromIndex * Costs.INDEX_KEY_FETCH_COST * intersectionPenalty
+               + materializedRows * Costs.ROW_MATERIALIZE_COST;
+    }
+
+    private double estimateSortThenFilterCost(RangeIterator iter)
+    {
+        float selectivity = estimateSelectivity(iter);
+        int materializedRows = SoftLimitUtil.softLimit(getExactLimit(), SOFT_LIMIT_CONFIDENCE, selectivity);
+        return materializedRows * Costs.ROW_MATERIALIZE_COST;
     }
 
     public FilterTree buildFilter()
@@ -451,7 +490,8 @@ public class QueryController
     {
         int target = getExactLimit();
         // shadowedCount includes also the keys filtered out by the post-filter
-        int shadowedCount = queryContext.getShadowedPrimaryKeys().size();
+        long shadowedCount = queryContext.getShadowedPrimaryKeys().size();
+        long fetchedCount = queryContext.rowsReturned() + shadowedCount;
         int prevSoftLimit = Math.max(target, queryContext.softLimit());
         float postFilterSelectivity = queryContext.postFilterSelectivityEstimate();
 
@@ -462,15 +502,15 @@ public class QueryController
         // For any subsequent iterations we can do better by looking how many keys were rejected in the previous run.
         float keyAcceptanceProbability = (firstShadowKeysLoopIteration && sortBeforeFilter)
             ? postFilterSelectivity
-            : 1.0f - (float) shadowedCount / Math.max(prevSoftLimit, 1);
+            : (float) queryContext.rowsReturned() / Math.max(fetchedCount, 1);
 
         // TODO: extract the targetProbability to a constant / param?
-        int uncappedLimit = SoftLimitUtil.softLimit(target, 0.99, keyAcceptanceProbability);
+        int uncappedLimit = SoftLimitUtil.softLimit(target, SOFT_LIMIT_CONFIDENCE, keyAcceptanceProbability);
         int limit = Math.min(uncappedLimit, prevSoftLimit * 10);
 
         if (logger.isDebugEnabled())
             logger.debug("Soft limit estimate: {} with target={} shadowed={}/{} P={}",
-                         limit, target, shadowedCount, prevSoftLimit, keyAcceptanceProbability);
+                         limit, target, shadowedCount, fetchedCount, keyAcceptanceProbability);
 
         return limit;
     }

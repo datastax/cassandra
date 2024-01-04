@@ -41,8 +41,12 @@ public class SoftLimitUtil
      */
     public static int softLimit(int targetLimit, double confidenceLevel, double perItemSuccessRate)
     {
+        if (Double.isNaN(confidenceLevel))
+            throw new IllegalArgumentException("confidenceLevel must not be NaN");
         if (confidenceLevel < 0.0 || confidenceLevel >= 1.0)
             throw new IllegalArgumentException("confidenceLevel out of range [0.0, 1.0): " + confidenceLevel);
+        if (Double.isNaN(perItemSuccessRate))
+            throw new IllegalArgumentException("perItemSuccessRate must not be NaN");
         if (perItemSuccessRate < 0.0 || perItemSuccessRate > 1.0)
             throw new IllegalArgumentException("perItemSuccessRate out of range [0.0, 1.0]: " + perItemSuccessRate);
         if (targetLimit < 0)
