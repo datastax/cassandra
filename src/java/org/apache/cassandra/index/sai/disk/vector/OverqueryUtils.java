@@ -30,30 +30,31 @@ import static java.lang.Math.pow;
 public class OverqueryUtils
 {
     /**
-     * @return the topK >= `limit` results to ask the index to search for.  This allows
-     * us to compensate for using lossily-compressed vectors during the search, by
-     * searching deeper in the graph.
+     * @return the topK >= `limit` results to ask the index to search for, forcing
+     * the greedy search deeper into the graph.  This serves two purposes:
+     * 1. Smoothes out the relevance difference between small LIMIT and large
+     * 2. Compensates for using lossily-compressed vectors during the search
      */
     public static int topKFor(int limit, CompressedVectors cv)
     {
-        // compute the factor `n` to multiply limit by to increase the number of results from the index.
-        var n = 0.509 + 9.491 * pow(limit, -0.402); // f(1) = 10.0, f(100) = 2.0, f(1000) = 1.1
-        // The function becomes less than 1 at limit ~= 1583.4
-        n = max(1.0, n);
-
-        // uncompressed indexes.
-        // Some overquery will be needed for uncompressed indexes,
-        // but not as much as for compressed indexes.
+        // if the vectors are uncompressed, bump up the limit a bit to start with but decay it rapidly
         if (cv == null)
+        {
+            var n = max(1.0, 0.979 + 4.021 * pow(limit, -0.761)); // f(1) =  5.0, f(100) = 1.1, f(1000) = 1.0
             return (int) (n * limit);
+        }
 
-        // 2x results at limit=100 is enough for all our tested data sets to match uncompressed recall,
-        // except for the ada002 vectors that compress at a 32x ratio.  For ada002, we need 3x results
-        // with PQ, and 4x for BQ.
+        // Most compressed vectors should be queried at ~2x as much as uncompressed vectors.  (Our compression
+        // is tuned so that this should give us approximately the same recall as using uncompressed.)
+        // Again, we do want this to decay as we go to very large limits.
+        var n = max(1.0, 0.509 + 9.491 * pow(limit, -0.402)); // f(1) = 10.0, f(100) = 2.0, f(1000) = 1.1
+
+        // we compress extra-large vectors more aggressively, so we need to bump up the limit
+        // for those.  3x if using PQ and 4x for BQ.
         if (cv instanceof BinaryQuantization)
-            n *= 2;
+            n *= 2; // total of ~4x compared to uncompressed
         else if ((double) cv.getOriginalSize() / cv.getCompressedSize() > 16.0)
-            n *= 1.5;
+            n *= 1.5; // total of ~3x compared to uncompressed
 
         return (int) (n * limit);
     }
