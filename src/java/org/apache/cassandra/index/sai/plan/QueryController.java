@@ -88,13 +88,40 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR
 public class QueryController
 {
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
-    public static final double SOFT_LIMIT_CONFIDENCE = 0.99;
 
+    /**
+     * How likely we want the soft limit to be high enough, so that we get sufficient number of rows
+     * without having to retry. The closer this is to 1.0, the higher the soft limit will be relative to
+     * the exact limit (i.e. we'll ask for more rows speculatively in case we would have to throw some of them out due
+     * to tombstones / updates / expired TTLs / not matching the post-filter).
+     * Setting it too high may cause the queries to be more expensive, because they would be fetching too many rows.
+     * Setting it too low will cause frequent retries.
+     */
+    private static final double SOFT_LIMIT_CONFIDENCE = 0.90;
+
+    /**
+     * Constants used in cost-based query optimization.
+     * Those costs are abstract, they don't represent any physical resource unit.
+     * What matters are ratios between them, not the absolute values.
+     */
     static class Costs
     {
+        /**
+         * The cost to get a single PrimaryKey from the index, *without* looking it up in the sstable.
+         */
         static final float INDEX_KEY_FETCH_COST = 1.0f;
+        /**
+         * How much more effort it costs to get a PrimaryKey from the index if we have to intersect indexes.
+         * Intersections are more costly because of index skipping.
+         */
         static final float INDEX_INTERSECTION_PENALTY = 5.0f;
-        static final float ROW_MATERIALIZE_COST = 100.0f;
+        /**
+         * The cost to fetch a full row from the storage and apply filters to it.
+         * Deserializing rows is costly.
+         * In the future this should be replaced by a better model taking into account the data size
+         * and number of columns.
+         */
+        static final float ROW_MATERIALIZE_COST = 200.0f;
     }
 
     // for testing
@@ -277,7 +304,7 @@ public class QueryController
         QueryContext.FilterSortOrder order = sortThenFilterCost < filterThenSortCost
                ? QueryContext.FilterSortOrder.SORT_THEN_FILTER
                : QueryContext.FilterSortOrder.FILTER_THEN_SORT;
-        logger.debug("Decided filter sort order {} (costs were: sort then filter = {}, filter_then_sort = {})",
+        logger.debug("Decided filter sort order {} (costs: SORT_THEN_FILTER = {}, FILTER_THEN_SORT = {})",
                      order, sortThenFilterCost, filterThenSortCost);
         return order;
     }
@@ -490,7 +517,7 @@ public class QueryController
     {
         int target = getExactLimit();
         // shadowedCount includes also the keys filtered out by the post-filter
-        long shadowedCount = queryContext.getShadowedPrimaryKeys().size();
+        int shadowedCount = queryContext.getShadowedPrimaryKeys().size();
         long fetchedCount = queryContext.rowsMatched() + shadowedCount;
         int prevSoftLimit = Math.max(target, queryContext.softLimit());
         float postFilterSelectivity = queryContext.postFilterSelectivityEstimate();
@@ -499,14 +526,17 @@ public class QueryController
         boolean sortBeforeFilter = queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER;
 
         // On the first iteration we need to rely on estimates for how many keys we can expect to be accepted.
-        // For any subsequent iterations we can do better by looking how many keys were rejected in the previous run.
+        // For any subsequent iterations we can do better by looking how many rows were returned in the previous run.
         float keyAcceptanceProbability = (firstShadowKeysLoopIteration && sortBeforeFilter)
             ? postFilterSelectivity
-            : (float) queryContext.rowsMatched() / Math.max(fetchedCount, 1);
+            : (float) Math.max(queryContext.rowsMatched(), 1) / Math.max(fetchedCount, 1);
 
-        // TODO: extract the targetProbability to a constant / param?
         int uncappedLimit = SoftLimitUtil.softLimit(target, SOFT_LIMIT_CONFIDENCE, keyAcceptanceProbability);
-        int limit = Math.min(uncappedLimit, prevSoftLimit * 10);
+
+        // We don't want to get a too high limit, just in case the stats are off, or we hit some statistical fluctuation,
+        // so let's cap at 10x the previous limit.
+        // We also need to try to have some margin for the keys we already know are shadowed.
+        int limit = Math.max(target + shadowedCount, Math.min(uncappedLimit, prevSoftLimit * 10));
 
         if (logger.isDebugEnabled())
             logger.debug("Soft limit estimate: {} with target={} shadowed={}/{} P={}",

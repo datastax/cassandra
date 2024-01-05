@@ -30,6 +30,9 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterators;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -66,6 +69,8 @@ import org.apache.cassandra.utils.Pair;
 
 public class StorageAttachedIndexSearcher implements Index.Searcher
 {
+    private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexSearcher.class);
+
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
@@ -130,16 +135,24 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             long lastShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
             ResultRetriever result = queryIndexes.get();
             queryContext.resetRowsMatched();
-            UnfilteredPartitionIterator topK = (UnfilteredPartitionIterator)new VectorTopKProcessor(command).filter(result);
+            UnfilteredPartitionIterator topK = (UnfilteredPartitionIterator) new VectorTopKProcessor(command).filter(result);
             long currentShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
             long newShadowedKeysCount = currentShadowedKeysCount - lastShadowedKeysCount;
-            // Stop if no new shadowed keys found
-            // or if we already tried to search beyond the limit for more than the limit + count of new shadowed keys
+            logger.debug("Shadow loop iteration {}: rows matched: {}, keys shadowed: {}",
+                         queryContext.shadowedKeysLoopCount(),
+                         queryContext.rowsMatched(),
+                         currentShadowedKeysCount);
+            // Stop if no new shadowed keys found or if we already got enough rows
             if (newShadowedKeysCount == 0 || exactLimit <= queryContext.rowsMatched())
             {
                 cfs.metric.incShadowedKeys(loopsCount, currentShadowedKeysCount - startShadowedKeysCount);
                 if (loopsCount > 1)
-                    Tracing.trace("No new shadowed keys after query loop {}", loopsCount);
+                {
+                    if (newShadowedKeysCount == 0)
+                        Tracing.trace("No new shadowed keys after query loop {}", loopsCount);
+                    else if (exactLimit <= queryContext.rowsMatched())
+                        Tracing.trace("Got enough rows after query loop {}", loopsCount);
+                }
                 return topK;
             }
             loopsCount++;
