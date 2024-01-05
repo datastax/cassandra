@@ -491,7 +491,7 @@ public class QueryController
         int target = getExactLimit();
         // shadowedCount includes also the keys filtered out by the post-filter
         long shadowedCount = queryContext.getShadowedPrimaryKeys().size();
-        long fetchedCount = queryContext.rowsReturned() + shadowedCount;
+        long fetchedCount = queryContext.rowsMatched() + shadowedCount;
         int prevSoftLimit = Math.max(target, queryContext.softLimit());
         float postFilterSelectivity = queryContext.postFilterSelectivityEstimate();
 
@@ -502,7 +502,7 @@ public class QueryController
         // For any subsequent iterations we can do better by looking how many keys were rejected in the previous run.
         float keyAcceptanceProbability = (firstShadowKeysLoopIteration && sortBeforeFilter)
             ? postFilterSelectivity
-            : (float) queryContext.rowsReturned() / Math.max(fetchedCount, 1);
+            : (float) queryContext.rowsMatched() / Math.max(fetchedCount, 1);
 
         // TODO: extract the targetProbability to a constant / param?
         int uncappedLimit = SoftLimitUtil.softLimit(target, SOFT_LIMIT_CONFIDENCE, keyAcceptanceProbability);
@@ -747,7 +747,7 @@ public class QueryController
      */
     float estimateSelectivity(RangeIterator iterator)
     {
-        float selectivity = (float) iterator.getMaxKeys() / estimateTotalAvailableRows();
+        float selectivity = Math.min((float) iterator.getMaxKeys() / estimateTotalAvailableRows(), 1.0f);
         queryContext.setPostFilterSelectivityEstimate(selectivity);
         return selectivity;
     }

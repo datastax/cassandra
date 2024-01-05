@@ -129,13 +129,13 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             queryContext.addShadowedKeysLoopCount(1L);
             long lastShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
             ResultRetriever result = queryIndexes.get();
-            queryContext.resetRowsReturned();
+            queryContext.resetRowsMatched();
             UnfilteredPartitionIterator topK = (UnfilteredPartitionIterator)new VectorTopKProcessor(command).filter(result);
             long currentShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
             long newShadowedKeysCount = currentShadowedKeysCount - lastShadowedKeysCount;
             // Stop if no new shadowed keys found
             // or if we already tried to search beyond the limit for more than the limit + count of new shadowed keys
-            if (newShadowedKeysCount == 0 || exactLimit <= queryContext.rowsReturned())
+            if (newShadowedKeysCount == 0 || exactLimit <= queryContext.rowsMatched())
             {
                 cfs.metric.incShadowedKeys(loopsCount, currentShadowedKeysCount - startShadowedKeysCount);
                 if (loopsCount > 1)
