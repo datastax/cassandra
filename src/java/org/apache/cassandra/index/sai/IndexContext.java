@@ -94,8 +94,8 @@ public class IndexContext
     private static final Logger logger = LoggerFactory.getLogger(IndexContext.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    public static final int MAX_STRING_TERM_SIZE = Integer.getInteger("cassandra.sai.max_string_term_size_kb", 1) * 1024;
-    public static final int MAX_FROZEN_TERM_SIZE = Integer.getInteger("cassandra.sai.max_frozen_term_size_kb", 5) * 1024;
+    public static final int MAX_STRING_TERM_SIZE = Integer.getInteger("cassandra.sai.max_string_term_size_kb", 8) * 1024;
+    public static final int MAX_FROZEN_TERM_SIZE = Integer.getInteger("cassandra.sai.max_frozen_term_size_kb", 8) * 1024;
     public static final int MAX_VECTOR_TERM_SIZE = Integer.getInteger("cassandra.sai.max_vector_term_size_kb", 16) * 1024;
     public static final int MAX_ANALYZED_SIZE = Integer.getInteger("cassandra.sai.max_analyzed_size_kb", 5) * 1024;
     private static final String TERM_OVERSIZE_LOG_MESSAGE =
