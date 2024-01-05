@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
-import java.util.function.LongConsumer;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -39,11 +38,11 @@ import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.TimeUUID;
 import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Setup;
 
-public abstract class AbstractTrieMemoryIndexBenchmark
+public abstract class AbstractTrieMemoryIndexBench
 {
     private static final String KEYSPACE = "test_keyspace";
     private static final String TABLE = "test_table";
@@ -125,7 +124,7 @@ public abstract class AbstractTrieMemoryIndexBenchmark
 
         for (int i = 0; i < numberOfKeys; i++)
         {
-            partitionKeys[i] = Murmur3Partitioner.instance.decorateKey(UUIDType.instance.decompose(UUIDGen.getTimeUUID()));
+            partitionKeys[i] = Murmur3Partitioner.instance.decorateKey(UUIDType.instance.decompose(TimeUUID.Generator.nextTimeUUID().asUUID()));
         }
     }
 
