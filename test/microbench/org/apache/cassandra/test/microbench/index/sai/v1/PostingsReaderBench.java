@@ -20,8 +20,8 @@ package org.apache.cassandra.test.microbench.index.sai.v1;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.index.sai.disk.v1.PostingsReader;
 import org.apache.cassandra.index.sai.utils.LongArray;
-import org.apache.cassandra.io.util.Rebufferer;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -35,16 +35,12 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
-@Fork(value = 1, jvmArgsAppend = {
-        //        "-XX:+UnlockCommercialFeatures", "-XX:+FlightRecorder","-XX:+UnlockDiagnosticVMOptions", "-XX:+DebugNonSafepoints",
-        //        "-XX:StartFlightRecording=duration=60s,filename=./BlockPackedReaderBenchmark.jfr,name=profile,settings=profile",
-        //                            "-XX:FlightRecorderOptions=settings=/home/jake/workspace/cassandra/profiling-advanced.jfc,samplethreads=true"
-})
+@Fork(1)
 @Warmup(iterations = 3)
-@Measurement(iterations = 5, timeUnit = TimeUnit.NANOSECONDS)
-@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@Measurement(iterations = 5, timeUnit = TimeUnit.MILLISECONDS)
+@OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Thread)
-public class BlockPackedReaderBenchmark extends AbstractOnDiskBenchmark
+public class PostingsReaderBench extends AbstractOnDiskBench
 {
     private static final int NUM_INVOCATIONS = 10_000;
 
@@ -52,8 +48,9 @@ public class BlockPackedReaderBenchmark extends AbstractOnDiskBenchmark
     public int skippingDistance;
 
     protected LongArray rowIdToToken;
+    protected PostingsReader reader;
     private int[] rowIds;
-    private long[] tokenValues;
+    protected long[] tokenValues;
 
     @Override
     public int numRows()
@@ -72,14 +69,14 @@ public class BlockPackedReaderBenchmark extends AbstractOnDiskBenchmark
     {
         // rowIdToToken.findTokenRowID keeps track of last position, so it must be per-benchmark-method-invocation.
         rowIdToToken = openRowIdToTokenReader();
+        reader = openPostingsReader();
 
-        rowIds = new int[NUM_INVOCATIONS];
         tokenValues = new long[NUM_INVOCATIONS];
-
-        for (int i = 0; i < rowIds.length; i++)
+        rowIds = new int[NUM_INVOCATIONS];
+        for (int i = 0; i < tokenValues.length; i++)
         {
             rowIds[i] = toPosting(i * skippingDistance);
-            tokenValues[i] = toToken(rowIds[i]);
+            tokenValues[i] = toToken(i * skippingDistance);
         }
     }
 
@@ -87,16 +84,23 @@ public class BlockPackedReaderBenchmark extends AbstractOnDiskBenchmark
     public void afterInvocation() throws Throwable
     {
         rowIdToToken.close();
+        reader.close();
     }
 
     @Benchmark
     @OperationsPerInvocation(NUM_INVOCATIONS)
     @BenchmarkMode({ Mode.Throughput, Mode.AverageTime })
-    public void get(Blackhole bh)
+    public void skipAndRequestNext(Blackhole bh) throws Throwable
     {
-        for (int i = 0; i < rowIds.length;)
+        int rowId = -1;
+        for (int i = 0; i < tokenValues.length;)
         {
-            bh.consume(rowIdToToken.get(rowIds[i]));
+            long token = tokenValues[i];
+            if (rowId < 0)
+                rowId = (int) rowIdToToken.findTokenRowID(token);
+            bh.consume(reader.advance(rowId));
+            rowId = -1;
+
             i++;
         }
     }
@@ -104,11 +108,13 @@ public class BlockPackedReaderBenchmark extends AbstractOnDiskBenchmark
     @Benchmark
     @OperationsPerInvocation(NUM_INVOCATIONS)
     @BenchmarkMode({ Mode.Throughput, Mode.AverageTime })
-    public void findTokenRowID(Blackhole bh)
+    public void advance(Blackhole bh) throws Throwable
     {
         for (int i = 0; i < tokenValues.length;)
         {
-            bh.consume(rowIdToToken.findTokenRowID(tokenValues[i]));
+            int rowId = rowIds[i];
+            bh.consume(reader.advance(rowId));
+
             i++;
         }
     }
