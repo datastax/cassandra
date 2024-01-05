@@ -50,7 +50,7 @@ import org.openjdk.jmh.infra.Blackhole;
 @Warmup(iterations = 3)
 @Measurement(iterations = 5)
 @State(Scope.Thread)
-public class MergePostingListBenchmark
+public class MergePostingListBench
 {
     List<int[]> splitPostingLists = new ArrayList<>();
     PostingList merge;
