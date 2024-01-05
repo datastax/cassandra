@@ -33,6 +33,7 @@ import webbrowser
 from contextlib import contextmanager
 from glob import glob
 from uuid import UUID
+from tabulate import tabulate
 
 if sys.version_info < (3, 6) and sys.version_info[0:2] != (2, 7):
     sys.exit("\ncqlsh requires Python 3.6+ or Python 2.7 (deprecated)\n")
@@ -1209,31 +1210,32 @@ class Shell(cmd.Cmd):
             self.print_formatted_result(formatted_names, formatted_values, with_header, tty)
 
     def print_formatted_result(self, formatted_names, formatted_values, with_header, tty):
-        # determine column widths
         widths = [n.displaywidth for n in formatted_names]
         if formatted_values is not None:
             for fmtrow in formatted_values:
                 for num, col in enumerate(fmtrow):
                     widths[num] = max(widths[num], col.displaywidth)
 
-        # print header
-        if with_header:
-            header = ' | '.join(hdr.ljust(w, color=self.color) for (hdr, w) in zip(formatted_names, widths))
-            self.writeresult(' ' + header.rstrip())
-            self.writeresult('-%s-' % '-+-'.join('-' * w for w in widths))
+        # get the cumulative width of the columns, then add 3 for each column and 1 for the far right border
+        total_width = sum(widths) + len(widths) * 3 + 1
+        terminal_width, _ = os.get_terminal_size()
+        if total_width > terminal_width:
+            # Calculate the amount to reduce
+            reduce_amount = total_width - terminal_width
 
-        # stop if there are no rows
-        if formatted_values is None:
-            self.writeresult("")
-            return
+            # Shrink the widest columns first since those will likely be the ones that make sense to wrap
+            while reduce_amount > 0:
+                widest_col_index = widths.index(max(widths))
+                widest_col_width = widths[widest_col_index]
 
-        # print row data
-        for row in formatted_values:
-            line = ' | '.join(col.rjust(w, color=self.color) for (col, w) in zip(row, widths))
-            self.writeresult(' ' + line)
+                # Reduce the widest column by 1 but not below length 10
+                if (widest_col_width - 1) > 10:
+                    widths[widest_col_index] -= 1
+                    reduce_amount -= 1
+                else:
+                    break
 
-        if tty:
-            self.writeresult("")
+        print(tabulate(formatted_values, headers=formatted_names, maxcolwidths=widths, tablefmt="presto"))
 
     def print_formatted_result_vertically(self, formatted_names, formatted_values, row_count_offset):
         max_col_width = max([n.displaywidth for n in formatted_names])

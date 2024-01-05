@@ -101,6 +101,8 @@ class FormattedValue(object):
         """
         return self.coloredval + self._pad(width, fill)
 
+    def __str__(self):
+        return self.coloredval
 
 DEFAULT_VALUE_COLORS = dict(
     default=YELLOW,
