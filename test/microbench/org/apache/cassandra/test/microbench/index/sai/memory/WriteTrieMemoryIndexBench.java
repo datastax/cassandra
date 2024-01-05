@@ -43,7 +43,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @BenchmarkMode(Mode.AverageTime)
 @State(Scope.Thread)
-public class WriteTrieMemoryIndexBenchmark extends AbstractTrieMemoryIndexBenchmark
+public class WriteTrieMemoryIndexBench extends AbstractTrieMemoryIndexBench
 {
     @Param({ "1000", "10000", "100000", "1000000" })
     protected int numberOfTerms;
