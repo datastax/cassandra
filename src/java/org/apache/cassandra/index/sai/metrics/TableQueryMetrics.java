@@ -22,8 +22,6 @@ import java.util.concurrent.atomic.LongAdder;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
-import com.codahale.metrics.Meter;
-import com.codahale.metrics.RatioGauge;
 import com.codahale.metrics.Timer;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.schema.TableMetadata;
@@ -44,9 +42,6 @@ public class TableQueryMetrics extends AbstractMetrics
     private final Counter totalRowsFiltered;
     private final Counter totalQueriesCompleted;
 
-    private final Meter tokenSkippingLookups;
-    private final Meter tokenSkippingCacheHits;
-
     public TableQueryMetrics(TableMetadata table)
     {
         super(table.keyspace, table.name, TABLE_QUERY_METRIC_TYPE);
@@ -59,9 +54,6 @@ public class TableQueryMetrics extends AbstractMetrics
         totalRowsFiltered = Metrics.counter(createMetricName("TotalRowsFiltered"));
         totalQueriesCompleted = Metrics.counter(createMetricName("TotalQueriesCompleted"));
         totalQueryTimeouts = Metrics.counter(createMetricName("TotalQueryTimeouts"));
-
-        tokenSkippingLookups = Metrics.meter(createMetricName("Lookups", "TokenSkipping"));
-        tokenSkippingCacheHits = Metrics.meter(createMetricName("CacheHits", "TokenSkipping"));
     }
 
     public void record(QueryContext queryContext)
@@ -72,12 +64,6 @@ public class TableQueryMetrics extends AbstractMetrics
 
             totalQueryTimeouts.inc();
         }
-
-        long skippingLookups = queryContext.tokenSkippingLookups();
-        long skippingCacheHits = queryContext.tokenSkippingCacheHits();
-
-        tokenSkippingLookups.mark(skippingLookups);
-        tokenSkippingCacheHits.mark(skippingCacheHits);
 
         perQueryMetrics.record(queryContext);
     }
@@ -122,12 +108,7 @@ public class TableQueryMetrics extends AbstractMetrics
         private final Histogram postingsSkips;
         private final Histogram postingsDecodes;
 
-        private final LongAdder hnswNodesAccessed = new LongAdder();
-        private final LongAdder hnswNodeCacheHits = new LongAdder();
-        private final LongAdder hnswVectorsAccessed = new LongAdder();
-        private final LongAdder hnswVectorCacheHits = new LongAdder();
-        private final RatioGauge hnswNodeCacheHitRatio;
-        private final RatioGauge hnswVectorCacheHitRatio;
+        private final LongAdder annNodesVisited = new LongAdder();
 
         public PerQueryMetrics(TableMetadata table)
         {
@@ -142,21 +123,6 @@ public class TableQueryMetrics extends AbstractMetrics
 
             kdTreePostingsNumPostings = Metrics.histogram(createMetricName("KDTreePostingsNumPostings"), false);
             kdTreePostingsDecodes = Metrics.histogram(createMetricName("KDTreePostingsDecodes"), false);
-
-            hnswNodeCacheHitRatio = Metrics.register(createMetricName("HnswNodeCacheHitRatio"), new RatioGauge()
-            {
-                protected Ratio getRatio()
-                {
-                    return Ratio.of(hnswNodeCacheHits.sum(), hnswNodesAccessed.sum());
-                }
-            });
-            hnswVectorCacheHitRatio = Metrics.register(createMetricName("HnswVectorCacheHitRatio"), new RatioGauge()
-            {
-                protected Ratio getRatio()
-                {
-                    return Ratio.of(hnswVectorCacheHits.sum(), hnswVectorsAccessed.sum());
-                }
-            });
 
             postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), false);
             postingsDecodes = Metrics.histogram(createMetricName("PostingsDecodes"), false);
@@ -182,10 +148,9 @@ public class TableQueryMetrics extends AbstractMetrics
             kdTreePostingsDecodes.update(events.bkdPostingsDecodes());
         }
 
-        private void recordHnswIndexMetrics(QueryContext queryContext)
+        private void recordAnnIndexMetrics(QueryContext queryContext)
         {
-            hnswVectorsAccessed.add(queryContext.hnswVectorsAccessed());
-            hnswVectorCacheHits.add(queryContext.hnswVectorCacheHits());
+            annNodesVisited.add(queryContext.annNodesVisited());
         }
 
         public void record(QueryContext queryContext)
@@ -220,8 +185,8 @@ public class TableQueryMetrics extends AbstractMetrics
                 recordStringIndexCacheMetrics(queryContext);
             if (queryContext.bkdSegmentsHit() > 0)
                 recordNumericIndexCacheMetrics(queryContext);
-            if (queryContext.hnswVectorsAccessed() > 0)
-                recordHnswIndexMetrics(queryContext);
+            if (queryContext.annNodesVisited() > 0)
+                recordAnnIndexMetrics(queryContext);
 
             shadowedKeysLoopsHistogram.update(queryContext.shadowedKeysLoopCount());
             shadowedKeysScannedHistogram.update(queryContext.getShadowedPrimaryKeys().size());
