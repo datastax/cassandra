@@ -51,9 +51,9 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.IOUtils;
@@ -308,24 +308,12 @@ public class IndexDescriptor
 
     public IndexInput openPerSSTableInput(IndexComponent indexComponent)
     {
-        final File file = fileFor(indexComponent);
-        if (logger.isTraceEnabled())
-            logger.trace(logMessage("Opening blocking index input for file {} ({})"),
-                         file,
-                         FBUtilities.prettyPrintMemory(file.length()));
-
-        return IndexFileUtils.instance().openBlockingInput(file);
+        return IndexFileUtils.instance.openBlockingInput(createPerSSTableFileHandle(indexComponent));
     }
 
     public IndexInput openPerIndexInput(IndexComponent indexComponent, IndexContext indexContext)
     {
-        final File file = fileFor(indexComponent, indexContext);
-        if (logger.isTraceEnabled())
-            logger.trace(logMessage("Opening blocking index input for file {} ({})"),
-                         file,
-                         FBUtilities.prettyPrintMemory(file.length()));
-
-        return IndexFileUtils.instance().openBlockingInput(file);
+        return IndexFileUtils.instance.openBlockingInput(createPerIndexFileHandle(indexComponent, indexContext));
     }
 
     public IndexOutputWriter openPerSSTableOutput(IndexComponent component) throws IOException
@@ -372,28 +360,14 @@ public class IndexDescriptor
 
     public FileHandle createPerSSTableFileHandle(IndexComponent indexComponent)
     {
-        final File file = fileFor(indexComponent);
-
-        if (logger.isTraceEnabled())
-        {
-            logger.trace(logMessage("Opening {} file handle for {} ({})"),
-                         file, FBUtilities.prettyPrintMemory(file.length()));
-        }
-
-        return new FileHandle.Builder(file).mmapped(true).complete();
+        final FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this, indexComponent);
+        return builder.complete();
     }
 
     public FileHandle createPerIndexFileHandle(IndexComponent indexComponent, IndexContext indexContext)
     {
-        final File file = fileFor(indexComponent, indexContext);
-
-        if (logger.isTraceEnabled())
-        {
-            logger.trace(indexContext.logMessage("Opening file handle for {} ({})"),
-                         file, FBUtilities.prettyPrintMemory(file.length()));
-        }
-
-        return new FileHandle.Builder(file).mmapped(true).complete();
+        final FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this, indexComponent, indexContext);
+        return builder.complete();
     }
 
     @Override
