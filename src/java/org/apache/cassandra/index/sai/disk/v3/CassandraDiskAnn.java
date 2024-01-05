@@ -152,11 +152,12 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, similarityFunction);
             reRanker = (i, map) -> similarityFunction.compare(queryVector, map.get(i));
         }
-        SearchResult result = searcher.search(scoreFunction,
-                                              reRanker,
-                                              topK,
-                                              threshold,
-                                              ordinalsMap.ignoringDeleted(acceptBits));
+        var result = searcher.search(scoreFunction,
+                                     reRanker,
+                                     topK,
+                                     threshold,
+                                     ordinalsMap.ignoringDeleted(acceptBits));
+        context.addAnnNodesVisited(result.getVisitedCount());
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         return annRowIdsToPostings(result, limit);
     }
