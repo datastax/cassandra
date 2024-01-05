@@ -49,7 +49,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @BenchmarkMode(Mode.AverageTime)
 @State(Scope.Thread)
-public class ReadTrieMemoryIndexBenchmark extends AbstractTrieMemoryIndexBenchmark
+public class ReadTrieMemoryIndexBench extends AbstractTrieMemoryIndexBench
 {
     private static final int NUMBER_OF_SEARCHES = 1000;
     private static final AbstractBounds<PartitionPosition> ALL_DATA_RANGE = DataRange.allData(Murmur3Partitioner.instance).keyRange();
