@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -43,7 +44,6 @@ import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Attributes;
 import org.apache.cassandra.cql3.BatchQueryOptions;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -64,13 +64,10 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.metrics.BatchMetrics;
 import org.apache.cassandra.metrics.ClientRequestSizeMetrics;
 import org.apache.cassandra.service.*;
-import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 
@@ -351,7 +348,7 @@ public class BatchStatement implements CQLStatement
      *
      * @param mutations - the batch mutations.
      */
-    private static void verifyBatchSize(Collection<? extends IMutation> mutations, QueryState queryState) throws InvalidRequestException
+    private static void verifyBatchSize(Collection<? extends IMutation> mutations, ClientState clientState) throws InvalidRequestException
     {
         // We only warn for batch spanning multiple mutations (#10876)
         if (mutations.size() <= 1)
@@ -359,7 +356,7 @@ public class BatchStatement implements CQLStatement
 
         long size = IMutation.dataSize(mutations);
 
-        if (Guardrails.batchSize.triggersOn(size, queryState))
+        if (Guardrails.batchSize.triggersOn(size, clientState))
         {
             Set<String> tableNames = new HashSet<>();
             for (IMutation mutation : mutations)
@@ -368,28 +365,11 @@ public class BatchStatement implements CQLStatement
                     tableNames.add(update.metadata().toString());
             }
 
-            long failThreshold = DatabaseDescriptor.getBatchSizeFailThreshold();
-
-            String format = "Batch for {} is of size {}, exceeding specified threshold of {} by {}.{}";
-            if (size > failThreshold)
-            {
-                Tracing.trace(format, tableNames, FBUtilities.prettyPrintMemory(size), FBUtilities.prettyPrintMemory(failThreshold),
-                              FBUtilities.prettyPrintMemory(size - failThreshold), " (see batch_size_fail_threshold)");
-                logger.error(format, tableNames, FBUtilities.prettyPrintMemory(size), FBUtilities.prettyPrintMemory(failThreshold),
-                             FBUtilities.prettyPrintMemory(size - failThreshold), " (see batch_size_fail_threshold)");
-                throw new InvalidRequestException("Batch too large");
-            }
-            else if (logger.isWarnEnabled())
-            {
-                logger.warn(format, tableNames, FBUtilities.prettyPrintMemory(size), FBUtilities.prettyPrintMemory(warnThreshold),
-                            FBUtilities.prettyPrintMemory(size - warnThreshold), "");
-            }
-            ClientWarn.instance.warn(MessageFormatter.arrayFormat(format, new Object[] {tableNames, size, warnThreshold, size - warnThreshold, ""}).getMessage());
-            Guardrails.batchSize.guard(size, tableNames.toString(), false, queryState);
+            Guardrails.batchSize.guard(size, tableNames.toString(), false, clientState);
         }
     }
 
-    private void verifyBatchType(Collection<? extends IMutation> mutations, QueryState queryState)
+    private void verifyBatchType(Collection<? extends IMutation> mutations, ClientState clientState)
     {
         if (!isLogged() && mutations.size() > 1)
         {
@@ -408,9 +388,9 @@ public class BatchStatement implements CQLStatement
 
             // CASSANDRA-11529: log only if we have more than a threshold of keys, this was also suggested in the
             // original ticket that introduced this warning, CASSANDRA-9282
-            if (Guardrails.unloggedBatchAcrossPartitions.triggersOn(keySet.size(), queryState))
+            if (Guardrails.unloggedBatchAcrossPartitions.triggersOn(keySet.size(), clientState))
             {
-                Guardrails.unloggedBatchAcrossPartitions.guard(keySet.size(), tableNames.toString(), false, queryState);
+                Guardrails.unloggedBatchAcrossPartitions.guard(keySet.size(), tableNames.toString(), false, clientState);
             }
         }
     }
@@ -430,17 +410,17 @@ public class BatchStatement implements CQLStatement
         if (cl == null)
             throw new InvalidRequestException("Invalid empty consistency level");
 
-        if (options.getSerialConsistency() == null)
+        if (options.getSerialConsistency(queryState) == null)
             throw new InvalidRequestException("Invalid empty serial consistency level");
 
         ClientState clientState = queryState.getClientState();
-        Guardrails.writeConsistencyLevels.guard(EnumSet.of(options.getConsistency(), options.getSerialConsistency()),
+        Guardrails.writeConsistencyLevels.guard(EnumSet.of(options.getConsistency(), options.getSerialConsistency(queryState)),
                                                 clientState);
 
         for (int i = 0; i < statements.size(); i++ )
         {
             ModificationStatement statement = statements.get(i);
-            statement.validateConsistency(cl);
+            statement.validateConsistency(cl, clientState);
             statement.validateDiskUsage(options.forStatement(i), clientState);
         }
 
@@ -451,21 +431,21 @@ public class BatchStatement implements CQLStatement
             executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
         else    
             executeWithoutConditions(getMutations(clientState, options, false, timestamp, nowInSeconds, queryStartNanoTime),
-                                     queryState, cl, queryStartNanoTime);
+                                     clientState, cl, queryStartNanoTime);
 
         return new ResultMessage.Void();
     }
 
     private void executeWithoutConditions(List<? extends IMutation> mutations,
-                                          QueryState queryState,
+                                          ClientState clientState,
                                           ConsistencyLevel cl,
                                           long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
     {
         if (mutations.isEmpty())
             return;
 
-        verifyBatchSize(mutations, queryState);
-        verifyBatchType(mutations, queryState);
+        verifyBatchSize(mutations, clientState);
+        verifyBatchType(mutations, clientState);
 
         updatePartitionsPerBatchMetrics(mutations.size());
 

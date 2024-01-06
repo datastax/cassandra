@@ -458,24 +458,24 @@ public class SerDeserTest
         {
             defaultSerialCLGuardrailsTest(version, new LinkedHashSet<>(), ConsistencyLevel.SERIAL);
             defaultSerialCLGuardrailsTest(version,
-                                          new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.LOCAL_SERIAL.toString())),
+                                          new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.LOCAL_SERIAL)),
                                           ConsistencyLevel.SERIAL);
             defaultSerialCLGuardrailsTest(version,
-                                          new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.SERIAL.toString())),
+                                          new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.SERIAL)),
                                           ConsistencyLevel.LOCAL_SERIAL);
             defaultSerialCLGuardrailsTest(version,
-                                          new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.SERIAL.toString(),
-                                                                   ConsistencyLevel.LOCAL_SERIAL.toString())),
+                                          new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.SERIAL,
+                                                                   ConsistencyLevel.LOCAL_SERIAL)),
                                           null);
         }
     }
 
     private void defaultSerialCLGuardrailsTest(ProtocolVersion version,
-                                               Set<String> writeConsistencyLevelsDisallowed,
+                                               Set<ConsistencyLevel> writeConsistencyLevelsDisallowed,
                                                ConsistencyLevel expectedDecodedSerialConsistency)
     {
-        Set<String> previousConsistencyLevels =  DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed;
-        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = ImmutableSet.copyOf(writeConsistencyLevelsDisallowed);
+        Set<ConsistencyLevel> previousConsistencyLevels =  DatabaseDescriptor.getGuardrailsConfig().getWriteConsistencyLevelsDisallowed();
+        DatabaseDescriptor.getGuardrailsConfig().setWriteConsistencyLevelsDisallowed(ImmutableSet.copyOf(writeConsistencyLevelsDisallowed));
 
         QueryOptions queryOptions = QueryOptions.create(ConsistencyLevel.ALL,
                                                         Collections.singletonList(ByteBuffer.wrap(new byte[] { 0x00, 0x01, 0x02 })),
@@ -506,7 +506,7 @@ public class SerDeserTest
             }
         }
 
-        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = ImmutableSet.copyOf(previousConsistencyLevels);
+        DatabaseDescriptor.getGuardrailsConfig().setWriteConsistencyLevelsDisallowed(ImmutableSet.copyOf(previousConsistencyLevels));
     }
 
     @Test
@@ -516,7 +516,7 @@ public class SerDeserTest
         // QueryOptions has explicitly set serial consistency, the same consistency level remains after encoding/decoding
         // even if that level is forbidden by the guardrail.
 
-        Set<String> serialCLs = new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.LOCAL_SERIAL.toString(), ConsistencyLevel.SERIAL.toString()));
+        Set<ConsistencyLevel> serialCLs = new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.LOCAL_SERIAL, ConsistencyLevel.SERIAL));
         for(ProtocolVersion version : ProtocolVersion.SUPPORTED)
         {
             specifiedSerialCLGuardrailsTest(version, ConsistencyLevel.SERIAL, new LinkedHashSet<>(), ConsistencyLevel.SERIAL);
@@ -528,11 +528,11 @@ public class SerDeserTest
 
     private void specifiedSerialCLGuardrailsTest(ProtocolVersion version,
                                                  ConsistencyLevel specifiedSerialConsistency,
-                                                 Set<String> writeConsistencyLevelsDisallowed,
+                                                 Set<ConsistencyLevel> writeConsistencyLevelsDisallowed,
                                                  ConsistencyLevel expectedDecodedSerialConsistency)
     {
-        Set<String> previousConsistencyLevels =  DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed;
-        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = ImmutableSet.copyOf(writeConsistencyLevelsDisallowed);
+        Set<ConsistencyLevel> previousConsistencyLevels =  DatabaseDescriptor.getGuardrailsConfig().getWriteConsistencyLevelsDisallowed();
+        DatabaseDescriptor.getGuardrailsConfig().setWriteConsistencyLevelsDisallowed(ImmutableSet.copyOf(writeConsistencyLevelsDisallowed));
 
         QueryOptions queryOptions = QueryOptions.create(ConsistencyLevel.ALL,
                                                         Collections.singletonList(ByteBuffer.wrap(new byte[] { 0x00, 0x01, 0x02 })),
@@ -547,7 +547,7 @@ public class SerDeserTest
         QueryOptions decodedOptions = QueryOptions.codec.decode(buf, version);
         assertEquals(expectedDecodedSerialConsistency, decodedOptions.getSerialConsistency(null));
 
-        DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed = ImmutableSet.copyOf(previousConsistencyLevels);
+        DatabaseDescriptor.getGuardrailsConfig().setWriteConsistencyLevelsDisallowed(ImmutableSet.copyOf(previousConsistencyLevels));
     }
 
     // return utf8 string that contains no ascii chars

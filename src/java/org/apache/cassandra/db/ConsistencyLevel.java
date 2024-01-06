@@ -33,8 +33,10 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.ProtocolException;
 
+import static org.apache.cassandra.db.guardrails.Guardrails.CONFIG_PROVIDER;
 import static org.apache.cassandra.locator.Replicas.addToCountPerDc;
 
 public enum ConsistencyLevel
@@ -219,9 +221,10 @@ public enum ConsistencyLevel
         }
     }
 
-    public void validateForWrite() throws InvalidRequestException
+    public void validateForWrite(String keyspaceName, ClientState clientState) throws InvalidRequestException
     {
-        Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
+        if (SchemaConstants.isUserKeyspace(keyspaceName))
+            Guardrails.writeConsistencyLevels.guard(EnumSet.of(this), clientState);
 
         switch (this)
         {
@@ -262,9 +265,10 @@ public enum ConsistencyLevel
         return this == SERIAL || this == LOCAL_SERIAL;
     }
 
-    public void validateCounterForWrite(TableMetadata metadata) throws InvalidRequestException
+    public void validateCounterForWrite(TableMetadata metadata, ClientState clientState) throws InvalidRequestException
     {
-        Guardrails.disallowedWriteConsistencies.ensureAllowed(this, queryState);
+        if (SchemaConstants.isUserKeyspace(metadata.keyspace))
+            Guardrails.writeConsistencyLevels.guard(EnumSet.of(this), clientState);
 
         if (this == ConsistencyLevel.ANY)
             throw new InvalidRequestException("Consistency level ANY is not yet supported for counter table " + metadata.name);
@@ -283,15 +287,16 @@ public enum ConsistencyLevel
     /**
      * Returns the strictest consistency level allowed by Guardrails.
      *
-     * @param state the query state, used to skip the guardrails check if the query is internal or is done by a superuser.
+     * @param clientState the client state, used to skip the guardrails check if the query is internal or is done by a superuser.
      * @return the strictest allowed serial consistency level
      * @throws InvalidRequestException if all serial consistency level are disallowed
      */
     public static ConsistencyLevel defaultSerialConsistency(@Nullable QueryState state) throws InvalidRequestException
     {
-        if (DatabaseDescriptor.getRawConfig() == null || !Guardrails.disallowedWriteConsistencies.triggersOn(ConsistencyLevel.SERIAL, state))
+        ClientState clientState = state == null ? null : state.getClientState();
+        if (DatabaseDescriptor.getRawConfig() == null || !CONFIG_PROVIDER.getOrCreate(clientState).getWriteConsistencyLevelsDisallowed().contains(ConsistencyLevel.SERIAL))
             return ConsistencyLevel.SERIAL;
-        else if (!Guardrails.disallowedWriteConsistencies.triggersOn(ConsistencyLevel.LOCAL_SERIAL, state))
+        else if (!CONFIG_PROVIDER.getOrCreate(clientState).getWriteConsistencyLevelsDisallowed().contains(ConsistencyLevel.LOCAL_SERIAL))
             return ConsistencyLevel.LOCAL_SERIAL;
 
         throw new InvalidRequestException("Serial consistency levels are disallowed by disallowedWriteConsistencies Guardrail");

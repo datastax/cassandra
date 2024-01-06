@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.guardrails;
+package org.apache.cassandra.db.guardrails;
 
 
 import org.junit.AfterClass;
@@ -36,13 +36,13 @@ public class GuardrailLoggedBatchTest extends GuardrailTester
     @BeforeClass
     public static void setup()
     {
-        loggedBatchEnabled = DatabaseDescriptor.getGuardrailsConfig().logged_batch_enabled;
+        loggedBatchEnabled = DatabaseDescriptor.getGuardrailsConfig().getLoggedBatchEnabled();
     }
 
     @AfterClass
     public static void tearDown()
     {
-        DatabaseDescriptor.getGuardrailsConfig().logged_batch_enabled = loggedBatchEnabled;
+        DatabaseDescriptor.getGuardrailsConfig().setLoggedBatchEnabled(loggedBatchEnabled);
     }
 
     @Before
@@ -53,7 +53,7 @@ public class GuardrailLoggedBatchTest extends GuardrailTester
 
     private void setGuardrails(boolean logged_batch_enabled)
     {
-        DatabaseDescriptor.getGuardrailsConfig().logged_batch_enabled = logged_batch_enabled;
+        DatabaseDescriptor.getGuardrailsConfig().setLoggedBatchEnabled(logged_batch_enabled);
     }
 
     private void insertBatchAndAssertValid(boolean loggedBatchEnabled, boolean logged) throws Throwable
@@ -64,7 +64,7 @@ public class GuardrailLoggedBatchTest extends GuardrailTester
         batch.add(new SimpleStatement(String.format("INSERT INTO %s.%s (k, c, v) VALUES (1, 2, 'val')", keyspace(), currentTable())));
         batch.add(new SimpleStatement(String.format("INSERT INTO %s.%s (k, c, v) VALUES (3, 4, 'val')", keyspace(), currentTable())));
 
-        assertValid(batch);
+        assertValid(() -> executeNet(getDefaultVersion(), batch));
     }
 
     @Test

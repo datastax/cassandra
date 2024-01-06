@@ -38,10 +38,10 @@ import org.slf4j.LoggerFactory;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.filter.*;
+import org.apache.cassandra.db.guardrails.Threshold;
 import org.apache.cassandra.exceptions.QueryCancelledException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.guardrails.Guardrail;
-import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParamType;
@@ -555,17 +555,16 @@ public abstract class ReadCommand extends AbstractReadQuery
 
             private int liveRows = 0;
             private int lastReportedLiveRows = 0;
-            private int tombstones = 0;
-            private int lastReportedTombstones = 0;
-            private final Guardrail.Threshold.GuardedCounter tombstones = createTombstoneCounter();
+            private final Threshold.GuardedCounter tombstones = createTombstoneCounter();
+            private long lastReportedTombstones = 0;
 
             private DecoratedKey currentKey;
 
-            private Guardrail.Threshold.GuardedCounter createTombstoneCounter()
+            private Threshold.GuardedCounter createTombstoneCounter()
             {
-                Guardrail.Threshold guardrail = shouldRespectTombstoneThresholds()
+                Threshold guardrail = shouldRespectTombstoneThresholds()
                                                 ? Guardrails.scannedTombstones
-                                                : Guardrail.Threshold.NEVER_TRIGGERED;
+                                                : Threshold.NEVER_TRIGGERED;
                 return guardrail.newCounter(ReadCommand.this::toCQLString, true, null);
             }
 
@@ -641,7 +640,7 @@ public abstract class ReadCommand extends AbstractReadQuery
             protected void onPartitionClose()
             {
                 int lr = liveRows - lastReportedLiveRows;
-                int ts = tombstones - lastReportedTombstones;
+                long ts = tombstones.get() - lastReportedTombstones;
 
                 if (lr > 0)
                     metric.topReadPartitionRowCount.addSample(currentKey.getKey(), lr);
@@ -650,7 +649,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                     metric.topReadPartitionTombstoneCount.addSample(currentKey.getKey(), ts);
 
                 lastReportedLiveRows = liveRows;
-                lastReportedTombstones = tombstones;
+                lastReportedTombstones = tombstones.get();
             }
 
             @Override
@@ -661,22 +660,12 @@ public abstract class ReadCommand extends AbstractReadQuery
                 metric.tombstoneScannedHistogram.update(tombstones.get());
                 metric.liveScannedHistogram.update(liveRows);
 
-                boolean warnTombstones = tombstones > warningThreshold && respectTombstoneThresholds;
-                if (warnTombstones)
+                if (tombstones.checkAndTriggerWarning())
                 {
-                    String msg = String.format(
-                            "Read %d live rows and %d tombstone cells for query %1.512s; token %s (see tombstone_warn_threshold)",
-                            liveRows, tombstones, ReadCommand.this.toCQLString(), currentKey.getToken());
                     if (trackWarnings)
                         MessageParams.add(ParamType.TOMBSTONE_WARNING, tombstones);
-                    else
-                        ClientWarn.instance.warn(msg);
-                    if (tombstones < failureThreshold)
-                    {
-                        metric.tombstoneWarnings.inc();
-                    }
-                if (tombstones.checkAndTriggerWarning())
                     metric.tombstoneWarnings.inc();
+                }
 
                 Tracing.trace("Read {} live rows and {} tombstone ones", liveRows, tombstones.get());
             }

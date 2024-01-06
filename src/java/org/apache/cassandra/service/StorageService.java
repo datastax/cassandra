@@ -111,6 +111,7 @@ import org.apache.cassandra.config.Converters;
 import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.DurationSpec;
+import org.apache.cassandra.config.GuardrailsOptions;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -6553,23 +6554,25 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int getTombstoneWarnThreshold()
     {
-        return DatabaseDescriptor.getGuardrailsConfig().tombstone_warn_threshold;
+        return DatabaseDescriptor.getGuardrailsConfig().getTombstoneWarnThreshold();
     }
 
     public void setTombstoneWarnThreshold(int threshold)
     {
-        DatabaseDescriptor.getGuardrailsConfig().setTombstoneWarnThreshold(threshold);
+        GuardrailsOptions guardrailsConfig = DatabaseDescriptor.getGuardrailsConfig();
+        guardrailsConfig.setTombstonesThreshold(threshold, guardrailsConfig.getTombstoneFailThreshold());
         logger.info("updated tombstone_warn_threshold to {}", threshold);
     }
 
     public int getTombstoneFailureThreshold()
     {
-        return DatabaseDescriptor.getGuardrailsConfig().tombstone_failure_threshold;
+        return DatabaseDescriptor.getGuardrailsConfig().getTombstoneFailThreshold();
     }
 
     public void setTombstoneFailureThreshold(int threshold)
     {
-        DatabaseDescriptor.getGuardrailsConfig().setTombstoneFailureThreshold(threshold);
+        GuardrailsOptions guardrailsConfig = DatabaseDescriptor.getGuardrailsConfig();
+        guardrailsConfig.setTombstonesThreshold(guardrailsConfig.getTombstoneWarnThreshold(), threshold);
         logger.info("updated tombstone_failure_threshold to {}", threshold);
     }
 
