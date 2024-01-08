@@ -206,8 +206,12 @@ public class VectorTopKProcessor
 
         // reorder rows in partition/clustering order
         assert topK.size() == limit : "topK size must be equal to limit";
-        for (int i = 0; i < topK.size(); i++) {
-            var triple = topK.poll();
+        // Use an iterator to prevent unnecessary ordering of the final elements. We know we have the topK. The next
+        // step puts the in PrimaryKey order, anyway.
+        var results = topK.iterator();
+        while (results.hasNext())
+        {
+            var triple = results.next();
             addUnfiltered(unfilteredByPartition, triple.getLeft(), triple.getMiddle());
         }
 
