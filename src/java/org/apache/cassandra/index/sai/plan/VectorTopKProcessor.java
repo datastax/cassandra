@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.SortedMap;
@@ -205,7 +206,7 @@ public class VectorTopKProcessor
         partitions.close();
 
         // reorder rows in partition/clustering order
-        assert topK.size() == limit : "topK size must be equal to limit";
+        assert topK.size() <= limit : "topK size " + topK.size() + "  must be <= " + limit;
         // Use an iterator to prevent unnecessary ordering of the final elements. We know we have the topK. The next
         // step puts the in PrimaryKey order, anyway.
         var results = topK.iterator();
@@ -230,10 +231,9 @@ public class VectorTopKProcessor
     {
         for (var triple: pr.rows)
         {
-            // Only add a row if the score is greater than the lowest score in the queue.
-            // This should save unnecessary sifting within the PriorityQueue.
-            var minRow = topK.peek();
-            if (minRow == null || triple.getRight() > minRow.getRight())
+            // We add the row if we haven't reached the limit or if the score is greater than the lowest score in the
+            // queue to prevent unnecessary sifting within the PriorityQueue.
+            if (topK.size() < limit || triple.getRight() > Objects.requireNonNull(topK.peek()).getRight())
             {
                 topK.add(triple);
                 if (topK.size() > limit)
