@@ -69,15 +69,12 @@ import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Clock;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.github.jamm.Unmetered;
-
-import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_SHARD_COUNT;
 
 /**
  * Trie memtable implementation. Improves memory usage, garbage collection efficiency and lookup performance.
@@ -243,6 +240,14 @@ public class TrieMemtable extends AbstractShardedMemtable
     public int getShardCount()
     {
         return shards.length;
+    }
+
+    @Override
+    public long rowCount()
+    {
+        DataRange range = DataRange.allData(metadata().partitioner);
+        ColumnFilter columnFilter = ColumnFilter.allRegularColumnsBuilder(metadata(), true).build();
+        return rowCount(columnFilter, range);
     }
 
     public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
