@@ -219,6 +219,9 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource, CellSo
     /** Number of partitions stored in the memtable */
     long partitionCount();
 
+    /** Number of rows stored in the memtable */
+    long rowCount();
+
     /** Size of the data not accounting for any metadata / mapping overheads */
     long getLiveDataSize();
 
