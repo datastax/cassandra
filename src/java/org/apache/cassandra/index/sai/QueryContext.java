@@ -52,7 +52,7 @@ public class QueryContext
     private final LongAdder segmentsHit = new LongAdder();
     private final LongAdder partitionsRead = new LongAdder();
     private final LongAdder rowsFiltered = new LongAdder();
-
+    private final LongAdder rowsMatched = new LongAdder();
     private final LongAdder trieSegmentsHit = new LongAdder();
 
     private final LongAdder bkdPostingListsHit = new LongAdder();
@@ -70,6 +70,19 @@ public class QueryContext
 
     private final LongAdder shadowedKeysLoopCount = new LongAdder();
     private final NavigableSet<PrimaryKey> shadowedPrimaryKeys = new ConcurrentSkipListSet<>();
+
+    // Total count of rows in all sstables and memtables.
+    private Long totalAvailableRows = null;
+
+    // Determines the order of using indexes for filtering and sorting.
+    // Null means the query execution order hasn't been decided yet.
+    private FilterSortOrder filterSortOrder = null;
+
+    // Estimates the probability of a row picked by the index to be accepted by the post filter.
+    private float postFilterSelectivityEstimate = 1.0f;
+
+    // Last used soft limit for vector search.
+    private int softLimit = -1;
 
     @VisibleForTesting
     public QueryContext()
@@ -103,6 +116,14 @@ public class QueryContext
     public void addRowsFiltered(long val)
     {
         rowsFiltered.add(val);
+    }
+    public void addRowsMatched(long val)
+    {
+        rowsMatched.add(val);
+    }
+    public void resetRowsMatched()
+    {
+        rowsMatched.reset();
     }
     public void addTrieSegmentsHit(long val)
     {
@@ -146,6 +167,26 @@ public class QueryContext
         shadowedKeysLoopCount.add(val);
     }
 
+    public void setTotalAvailableRows(long totalAvailableRows)
+    {
+        this.totalAvailableRows = totalAvailableRows;
+    }
+
+    public void setPostFilterSelectivityEstimate(float postFilterSelectivityEstimate)
+    {
+        this.postFilterSelectivityEstimate = postFilterSelectivityEstimate;
+    }
+
+    public void setFilterSortOrder(FilterSortOrder filterSortOrder)
+    {
+        this.filterSortOrder = filterSortOrder;
+    }
+
+    public void setSoftLimit(int softLimit)
+    {
+        this.softLimit = softLimit;
+    }
+
     // getters
 
     public long sstablesHit()
@@ -162,6 +203,10 @@ public class QueryContext
     public long rowsFiltered()
     {
         return rowsFiltered.longValue();
+    }
+    public long rowsMatched()
+    {
+        return rowsMatched.longValue();
     }
     public long trieSegmentsHit()
     {
@@ -198,6 +243,26 @@ public class QueryContext
     public long annNodesVisited()
     {
         return annNodesVisited.longValue();
+    }
+
+    public Long totalAvailableRows()
+    {
+        return totalAvailableRows;
+    }
+
+    public FilterSortOrder filterSortOrder()
+    {
+        return filterSortOrder;
+    }
+
+    public Float postFilterSelectivityEstimate()
+    {
+        return postFilterSelectivityEstimate;
+    }
+
+    public int softLimit()
+    {
+        return softLimit;
     }
 
     public void checkpoint()
@@ -270,5 +335,18 @@ public class QueryContext
         {
             return graph.size();
         }
+    }
+
+    /**
+     * Determines the order of filtering and sorting operations.
+     * Currently used only by vector search.
+     */
+    public enum FilterSortOrder
+    {
+        /** First get the matching keys from the non-vector indexes, then use vector index to sort them */
+        FILTER_THEN_SORT,
+
+        /** First get the candidates in ANN order from the vector index, then fetch the rows and post-filter them */
+        SORT_THEN_FILTER
     }
 }
