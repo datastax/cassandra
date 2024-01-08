@@ -97,7 +97,7 @@ public class IndexContext
     public static final int MAX_STRING_TERM_SIZE = Integer.getInteger("cassandra.sai.max_string_term_size_kb", 8) * 1024;
     public static final int MAX_FROZEN_TERM_SIZE = Integer.getInteger("cassandra.sai.max_frozen_term_size_kb", 8) * 1024;
     public static final int MAX_VECTOR_TERM_SIZE = Integer.getInteger("cassandra.sai.max_vector_term_size_kb", 16) * 1024;
-    public static final int MAX_ANALYZED_SIZE = Integer.getInteger("cassandra.sai.max_analyzed_size_kb", 5) * 1024;
+    public static final int MAX_ANALYZED_SIZE = Integer.getInteger("cassandra.sai.max_analyzed_size_kb", 8) * 1024;
     private static final String TERM_OVERSIZE_LOG_MESSAGE =
     "Can't add term of column {} to index for key: {}, term size {} max allowed size {}.";
     private static final String TERM_OVERSIZE_ERROR_MESSAGE =
@@ -361,7 +361,7 @@ public class IndexContext
         {
             final ByteBuffer token = analyzer.next();
             bytesCount += token.remaining();
-            if (bytesCount >= maxTermSize)
+            if (bytesCount > maxTermSize)
             {
                 noSpamLogger.warn(logMessage(ANALYZED_TERM_OVERSIZE_LOG_MESSAGE),
                                   getColumnName(),

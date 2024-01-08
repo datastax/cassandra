@@ -70,6 +70,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
@@ -102,6 +103,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
@@ -327,6 +329,22 @@ public class StorageAttachedIndex implements Index
         {
             if (type.valueLengthIfFixed() == 4 && config.getSimilarityFunction() == VectorSimilarityFunction.COSINE)
                 throw new InvalidRequestException("Cosine similarity is not supported for single-dimension vectors");
+
+            // vectors of fixed length types are fixed length too, so we can reject the index creation
+            // if that fixed length is over the max term size for vectors
+            if (type.isValueLengthFixed() && IndexContext.MAX_VECTOR_TERM_SIZE < type.valueLengthIfFixed())
+            {
+                AbstractType<?> elementType = ((VectorType<?>) type).elementType;
+                var error = String.format("An index of %s will produce terms of %s, " +
+                                          "exceeding the max vector term size of %s. " +
+                                          "That sets an implicit limit of %d dimensions for %s vectors.",
+                                          type.asCQL3Type(),
+                                          FBUtilities.prettyPrintMemory(type.valueLengthIfFixed()),
+                                          FBUtilities.prettyPrintMemory(IndexContext.MAX_VECTOR_TERM_SIZE),
+                                          IndexContext.MAX_VECTOR_TERM_SIZE / elementType.valueLengthIfFixed(),
+                                          elementType.asCQL3Type());
+                throw new InvalidRequestException(error);
+            }
         }
         else if (!SUPPORTED_TYPES.contains(type.asCQL3Type()) && !TypeUtil.isFrozen(type))
         {

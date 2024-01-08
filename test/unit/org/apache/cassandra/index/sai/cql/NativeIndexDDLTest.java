@@ -1448,6 +1448,25 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
+    public void shouldRejectLargeAnalyzedTerms()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'" +
+                    " WITH OPTIONS = {'index_analyzer': 'whitespace'}");
+        String insert = "INSERT INTO %s (k, v) VALUES (0, ?)";
+
+
+        // insert an analyzed column with terms of cumulating up to the max possible size
+        String term = UTF8Type.instance.compose(ByteBuffer.allocate(IndexContext.MAX_ANALYZED_SIZE / 2));
+        execute(insert, term + ' ' + term);
+
+        // insert a frozen term over the max possible size
+        assertThatThrownBy(() -> execute(insert, term + ' ' + term + ' ' + term))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Term's analyzed size for column v exceeds the cumulative limit for index");
+    }
+
+    @Test
     public void shouldRejectLargeVector()
     {
         String table = "CREATE TABLE %%s (k int PRIMARY KEY, v vector<float, %d>)";
@@ -1460,11 +1479,12 @@ public class NativeIndexDDLTest extends SAITester
         createIndex(index);
         execute(insert, vector(new float[dimensions]));
 
-        // insert a vector term over the max possible size
+        // create a vector index producing terms over the max possible size
         createTable(String.format(table, dimensions + 1));
-        createIndex(index);
-        assertThatThrownBy(() -> execute(insert, vector(new float[dimensions + 1])))
+        assertThatThrownBy(() -> execute(index))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining("Term of column v exceeds the byte limit for index");
+        .hasMessageContaining("An index of vector<float, 4097> will produce terms of 16.004KiB, " +
+                              "exceeding the max vector term size of 16.000KiB. " +
+                              "That sets an implicit limit of 4096 dimensions for float vectors.");
     }
 }
