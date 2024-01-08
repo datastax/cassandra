@@ -142,7 +142,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                          queryContext.shadowedKeysLoopCount(),
                          queryContext.rowsMatched(),
                          currentShadowedKeysCount);
-            // Stop if no new shadowed keys found or if we already got enough rows
+            // Stop if no new shadowed keys found or if we already got enough rows (In this case, we're basically
+            // checking that if all the shadowed keys came from one index, we still got enough non-shadowed rows to
+            // guarantee we have a valid result.)
             if (newShadowedKeysCount == 0 || exactLimit <= queryContext.softLimit() - currentShadowedKeysCount)
             {
                 cfs.metric.incShadowedKeys(loopsCount, currentShadowedKeysCount - startShadowedKeysCount);
