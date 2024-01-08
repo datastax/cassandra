@@ -111,10 +111,10 @@ public class QueryController
          */
         static final float INDEX_KEY_FETCH_COST = 1.0f;
         /**
-         * How much more effort it costs to get a PrimaryKey from the index if we have to intersect indexes.
+         * How much additional effort it costs to get a PrimaryKey from the index if we have to intersect indexes.
          * Intersections are more costly because of index skipping.
          */
-        static final float INDEX_INTERSECTION_PENALTY = 5.0f;
+        static final float INDEX_INTERSECTION_PENALTY = 4.0f;
         /**
          * The cost to fetch a full row from the storage and apply filters to it.
          * Deserializing rows is costly.
@@ -283,7 +283,7 @@ public class QueryController
 
         if (queryContext.filterSortOrder() == null)
         {
-            QueryContext.FilterSortOrder order = decideFilterSortOrder(nonOrderingExpressions, iter);
+            QueryContext.FilterSortOrder order = decideFilterSortOrder(filterOperation, iter);
             queryContext.setFilterSortOrder(order);
         }
         
@@ -297,10 +297,10 @@ public class QueryController
         return getTopKRows(iter, orderings.get(0));
     }
 
-    private QueryContext.FilterSortOrder decideFilterSortOrder(List<RowFilter.Expression> filterExpressions, RangeIterator iter)
+    private QueryContext.FilterSortOrder decideFilterSortOrder(RowFilter.FilterElement filter, RangeIterator iter)
     {
         double sortThenFilterCost = estimateSortThenFilterCost(iter);
-        double filterThenSortCost = estimateFilterThenSortCost(filterExpressions, iter);
+        double filterThenSortCost = estimateFilterThenSortCost(filter, iter);
         QueryContext.FilterSortOrder order = sortThenFilterCost < filterThenSortCost
                ? QueryContext.FilterSortOrder.SORT_THEN_FILTER
                : QueryContext.FilterSortOrder.FILTER_THEN_SORT;
@@ -309,13 +309,15 @@ public class QueryController
         return order;
     }
 
-    private double estimateFilterThenSortCost(List<RowFilter.Expression> filterExpressions, RangeIterator iter)
+    private double estimateFilterThenSortCost(RowFilter.FilterElement filter, RangeIterator iter)
     {
-        long primaryKeysFetchedFromIndex = iter.getMaxKeys();
-        float intersectionPenalty = filterExpressions.size() > 1 ? Costs.INDEX_INTERSECTION_PENALTY : 1.0f;
+        // Unions are cheap but intersections have higher costs because of skipping on the iterators,
+        // so we add a penalty for each intersection used in the filter.
+        float intersectionPenalty = intersectionPenalty(filter);
         // TODO: account for shadowed keys once we collect stats
+        long primaryKeysFetchedFromIndex = iter.getMaxKeys();
         long materializedRows = Math.min(getExactLimit(), primaryKeysFetchedFromIndex);
-        return primaryKeysFetchedFromIndex * Costs.INDEX_KEY_FETCH_COST * intersectionPenalty
+        return primaryKeysFetchedFromIndex * Costs.INDEX_KEY_FETCH_COST * (1.0f + intersectionPenalty)
                + materializedRows * Costs.ROW_MATERIALIZE_COST;
     }
 
@@ -324,6 +326,43 @@ public class QueryController
         float selectivity = estimateSelectivity(iter);
         int materializedRows = SoftLimitUtil.softLimit(getExactLimit(), SOFT_LIMIT_CONFIDENCE, selectivity);
         return materializedRows * Costs.ROW_MATERIALIZE_COST;
+    }
+
+    /**
+     * Estimates additional cost of performing index intersections (AND operator).
+     * If there are no intersections in the filter tree, returns 0.0.
+     */
+    private static float intersectionPenalty(RowFilter.FilterElement elem)
+    {
+        // TODO: This is very crude cost estimation. Ideally we should take into account the selectivity of each
+        // individual filter expression. The worst case can be when there are multiple intersected predicates, where
+        // each has low selectivity (selects many keys), but only very few keys match all of them. Then many posting
+        // list entries must be traversed before we get a key and the cost is high. This code does not take it into
+        // account.
+       return intersectionsCount(elem) * Costs.INDEX_INTERSECTION_PENALTY;
+    }
+
+    /**
+     * Returns the number of intersections in the filter expression tree (includes children).
+     * <p>
+     * Examples:
+     * <ul>
+     *     <li>A OR B is counted as 0</li>
+     *     <li>A AND B is counted as 1</li>
+     *     <li>A AND B AND C is counted as 2</li>
+     *     <li>A OR B AND C is counted as 1</li>
+     * </ul>
+     */
+    private static int intersectionsCount(RowFilter.FilterElement elem)
+    {
+        int nonOrderingExpressionsCount = (int) elem.expressions().stream().filter(e -> e.operator() != Operator.ANN).count();
+        int intersectedExpressionsCount = elem.isDisjunction() ? 0 : nonOrderingExpressionsCount;
+        int intersectionsCount = Math.max(0, intersectedExpressionsCount - 1);
+
+        for (RowFilter.FilterElement child : elem.children())
+            intersectionsCount += intersectionsCount(child);
+
+        return intersectionsCount;
     }
 
     public FilterTree buildFilter()
