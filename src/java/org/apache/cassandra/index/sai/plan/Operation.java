@@ -24,7 +24,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
@@ -242,28 +241,6 @@ public class Operation
             default:
                 return 0;
         }
-    }
-
-    static RangeIterator buildIterator(QueryController controller)
-    {
-        RowFilter.FilterElement filterOperation = controller.filterOperation();
-        List<RowFilter.Expression> orderings = filterOperation.expressions()
-                                                              .stream().filter(e -> e.operator() == Operator.ANN).collect(Collectors.toList());
-        assert orderings.size() <= 1;
-        if (filterOperation.expressions().size() == 1 && filterOperation.children().isEmpty() && orderings.size() == 1)
-            // If we only have one expression, we just use the ANN index to order and limit.
-            return controller.getTopKRows(orderings.get(0));
-        List<RowFilter.Expression> nonOrderingExpressions = filterOperation.expressions().stream()
-                                                                           .filter(e -> e.operator() != Operator.ANN).collect(Collectors.toList());
-        RangeIterator iter = Node.buildTree(nonOrderingExpressions, filterOperation.children(), filterOperation.isDisjunction()).analyzeTree(controller).rangeIterator(controller);
-        if (orderings.isEmpty())
-            return iter;
-        return controller.getTopKRows(iter, orderings.get(0));
-    }
-
-    static FilterTree buildFilter(QueryController controller)
-    {
-        return Node.buildTree(controller.filterOperation()).buildFilter(controller);
     }
 
     public static abstract class Node
