@@ -118,7 +118,7 @@ public class QueryContext
     {
         rowsFiltered.add(val);
     }
-    public void addRowsReturned(long val)
+    public void addRowsMatched(long val)
     {
         rowsMatched.add(val);
     }
