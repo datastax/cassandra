@@ -623,11 +623,6 @@ public abstract class ReadCommand extends AbstractReadQuery
                 catch (InvalidRequestException e)
                 {
                     metric.tombstoneFailures.inc();
-                    if (trackWarnings)
-                    {
-                        MessageParams.remove(ParamType.TOMBSTONE_WARNING);
-                        MessageParams.add(ParamType.TOMBSTONE_FAIL, tombstones);
-                    }
                     throw new TombstoneOverwhelmingException(tombstones.get(),
                                                              ReadCommand.this.toCQLString(),
                                                              ReadCommand.this.metadata(),
@@ -662,8 +657,6 @@ public abstract class ReadCommand extends AbstractReadQuery
 
                 if (tombstones.checkAndTriggerWarning())
                 {
-                    if (trackWarnings)
-                        MessageParams.add(ParamType.TOMBSTONE_WARNING, tombstones);
                     metric.tombstoneWarnings.inc();
                 }
 
