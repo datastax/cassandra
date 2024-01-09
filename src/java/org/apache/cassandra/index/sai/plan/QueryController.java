@@ -557,7 +557,9 @@ public class QueryController
         int target = getExactLimit();
         // shadowedCount includes also the keys filtered out by the post-filter
         int shadowedCount = queryContext.getShadowedPrimaryKeys().size();
-        long fetchedCount = queryContext.rowsMatched() + shadowedCount;
+        // The worst case situation is when all shadowed rows came from one index - in this case we'd get only
+        // (softLimit - shadowedCount) good rows. But if shadow rows came from multiple indexes, this could underestimate.
+        int matchedCountLowerBound = Math.max(0, queryContext.softLimit() - shadowedCount);
         int prevSoftLimit = Math.max(target, queryContext.softLimit());
         float postFilterSelectivity = queryContext.postFilterSelectivityEstimate();
 
@@ -566,20 +568,22 @@ public class QueryController
 
         // On the first iteration we need to rely on estimates for how many keys we can expect to be accepted.
         // For any subsequent iterations we can do better by looking how many rows were returned in the previous run.
+        // A special situation arises when we didn't receive any good rows. In this case, we should not assume the
+        // probability is simply 0 because the sample is finite. Assuming P = 0 would cause a maximum soft limit
+        // in the next round. So in that case we assume the probability of success = 0.5 / N.
+        // This naturally limits the soft limit increase in the next attempt.
         float keyAcceptanceProbability = (firstShadowKeysLoopIteration && sortBeforeFilter)
             ? postFilterSelectivity
-            : (float) Math.max(queryContext.rowsMatched(), 1) / Math.max(fetchedCount, 1);
+            : Math.max((float) matchedCountLowerBound, 0.5f) / Math.max((float) prevSoftLimit, 0.5f); // assume 0/0 = 1
 
         int uncappedLimit = SoftLimitUtil.softLimit(target, SOFT_LIMIT_CONFIDENCE, keyAcceptanceProbability);
 
-        // We don't want to get a too high limit, just in case the stats are off, or we hit some statistical fluctuation,
-        // so let's cap at 10x the previous limit.
-        // We also need to try to have some margin for the keys we already know are shadowed.
-        int limit = Math.max(target + shadowedCount, Math.min(uncappedLimit, prevSoftLimit * 10));
+        // Restrict the minimum value of the limit, so we have some margin for the keys we already know are shadowed.
+        int limit = Math.max(target + shadowedCount, uncappedLimit);
 
         if (logger.isDebugEnabled())
             logger.debug("Soft limit estimate: {} with target={} shadowed={}/{} P={}",
-                         limit, target, shadowedCount, fetchedCount, keyAcceptanceProbability);
+                         limit, target, shadowedCount, queryContext.softLimit(), keyAcceptanceProbability);
 
         return limit;
     }
