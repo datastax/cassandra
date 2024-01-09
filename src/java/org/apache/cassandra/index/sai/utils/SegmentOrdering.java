@@ -50,7 +50,7 @@ public interface SegmentOrdering
     /**
      * Order and limit a list of primary keys to the top results.
      */
-    default RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    default ScoreOrderedIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         throw new UnsupportedOperationException();
     }

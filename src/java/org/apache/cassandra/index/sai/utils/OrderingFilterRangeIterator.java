@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.function.Function;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -31,64 +32,38 @@ import org.apache.cassandra.io.util.FileUtils;
  * The PKs are currently returned in {@link PrimaryKey} order, but that contract may change.
  */
 @NotThreadSafe
-public class OrderingFilterRangeIterator extends RangeIterator
+public class OrderingFilterRangeIterator implements Iterator<List<ScoreOrderedIterator>>, AutoCloseable
 {
     private final RangeIterator input;
     private final int chunkSize;
-    private final Function<List<PrimaryKey>, RangeIterator> nextRangeFunction;
-    private RangeIterator nextIterator;
-    private ArrayList<PrimaryKey> nextKeys;
+    private final Function<List<PrimaryKey>, List<ScoreOrderedIterator>> nextRangeFunction;
 
-    public OrderingFilterRangeIterator(RangeIterator input, int chunkSize, Function<List<PrimaryKey>, RangeIterator> nextRangeFunction)
+    public OrderingFilterRangeIterator(RangeIterator input, int chunkSize, Function<List<PrimaryKey>, List<ScoreOrderedIterator>> nextRangeFunction)
     {
-        super(input);
         this.input = input;
         this.chunkSize = chunkSize;
         this.nextRangeFunction = nextRangeFunction;
-        this.nextKeys = new ArrayList<>(chunkSize);
     }
 
     @Override
-    public PrimaryKey computeNext()
+    public boolean hasNext()
     {
-        if (nextIterator == null || !nextIterator.hasNext())
+        return input.hasNext();
+    }
+
+    @Override
+    public List<ScoreOrderedIterator> next()
+    {
+        List<PrimaryKey> nextKeys = new ArrayList<>(chunkSize);
+        do
         {
-            do
-            {
-                if (!input.hasNext())
-                    return endOfData();
-                nextKeys.clear();
-                do
-                {
-                    nextKeys.add(input.next());
-                }
-                while (nextKeys.size() < chunkSize && input.hasNext());
-                // Get the next iterator before closing this one to prevent releasing the resource.
-                var previousIterator = nextIterator;
-                // If this results in an exception, previousIterator is closed in close() method.
-                nextIterator = nextRangeFunction.apply(nextKeys);
-                if (previousIterator != null)
-                    FileUtils.closeQuietly(previousIterator);
-                // nextIterator might not have any rows due to shadowed primary keys
-            } while (!nextIterator.hasNext());
+            nextKeys.add(input.next());
         }
-        return nextIterator.next();
-    }
-
-    @Override
-    protected void performSkipTo(PrimaryKey nextToken)
-    {
-        input.skipTo(nextToken);
-        // VSTODO is it valid to skipTo() on this iterator after nextIterator has been initialized? It seems like it
-        // could result in missing a relevant local maxima within nextIterator because the iterator becomes
-        // top k minus n where n is the number of skipped PKs. I'm not sure that this method is called when
-        // nextIterator != null.
-        if (nextIterator != null)
-            nextIterator.skipTo(nextToken);
+        while (nextKeys.size() < chunkSize && input.hasNext());
+        return nextRangeFunction.apply(nextKeys);
     }
 
     public void close() {
         FileUtils.closeQuietly(input);
-        FileUtils.closeQuietly(nextIterator);
     }
 }

@@ -16,27 +16,34 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.disk;
 
-import java.io.IOException;
+import java.util.Iterator;
 import java.util.List;
 
-import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.ScoredRowId;
+import org.apache.cassandra.index.sai.utils.ScoredRowIdIterator;
 
-/***
- * Analogue of SegmentOrdering, but for memtables.
- */
-public interface MemtableOrdering
+public class BruteForceScoredRowIdIterator implements ScoredRowIdIterator
 {
-    /**
-     * Filter the given list of {@link PrimaryKey} results to the top `limit` results corresponding to the given expression,
-     * Returns an iterator over the results that is put back in token order.
-     *
-     * Assumes that the given  spans the same rows as the implementing index's segment.
-     */
-    default ScoreOrderedIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
+    private final Iterator<ScoredRowId> scoredRowIdIterator;
+    public BruteForceScoredRowIdIterator(List<ScoredRowId> scoredRowIds)
     {
-        throw new UnsupportedOperationException();
+        scoredRowIdIterator = scoredRowIds.iterator();
+    }
+
+    @Override
+    public void close() throws Exception {}
+
+    @Override
+    public boolean hasNext()
+    {
+        return scoredRowIdIterator.hasNext();
+    }
+
+    @Override
+    public ScoredRowId next()
+    {
+        return scoredRowIdIterator.next();
     }
 }

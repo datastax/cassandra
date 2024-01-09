@@ -18,25 +18,34 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.io.IOException;
-import java.util.List;
+import java.util.Iterator;
 
-import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.utils.Pair;
 
-/***
- * Analogue of SegmentOrdering, but for memtables.
- */
-public interface MemtableOrdering
+// TODO can probably find a better way to encapsulate
+public interface ScoredRowIdIterator extends Iterator<ScoredRowId>, AutoCloseable
 {
-    /**
-     * Filter the given list of {@link PrimaryKey} results to the top `limit` results corresponding to the given expression,
-     * Returns an iterator over the results that is put back in token order.
-     *
-     * Assumes that the given  spans the same rows as the implementing index's segment.
-     */
-    default ScoreOrderedIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
+    static ScoredRowIdIterator empty()
     {
-        throw new UnsupportedOperationException();
+        // todo find right way to do this
+        return new ScoredRowIdIterator()
+        {
+            @Override
+            public boolean hasNext()
+            {
+                return false;
+            }
+
+            @Override
+            public ScoredRowId next()
+            {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void close()
+            {
+            }
+        };
     }
 }

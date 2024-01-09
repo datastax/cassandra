@@ -225,6 +225,11 @@ public class CassandraOnHeapGraph<T>
         return postingsByOrdinal.get(node).getPostings();
     }
 
+    public float[] vectorFromOrdinal(int node)
+    {
+        return vectorValues.vectorValue(node);
+    }
+
     public void remove(ByteBuffer term, T key)
     {
         assert term != null && term.remaining() != 0;

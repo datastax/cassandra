@@ -46,6 +46,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
@@ -175,6 +176,14 @@ public class TrieMemtableIndex implements MemtableIndex
 
         return builder.build();
     }
+
+    @Override
+    public ScoreOrderedIterator searchTopK(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
+    {
+        // not implemented
+        throw new UnsupportedOperationException();
+    }
+
 
     /**
      * NOTE: returned data may contain partition key not within the provided min and max which are only used to find

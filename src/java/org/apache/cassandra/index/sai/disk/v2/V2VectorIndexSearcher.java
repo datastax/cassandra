@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
@@ -38,6 +40,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.disk.BruteForceScoredRowIdIterator;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
@@ -55,6 +58,10 @@ import org.apache.cassandra.index.sai.utils.CollectionRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
+import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPriorityQueue;
+import org.apache.cassandra.index.sai.utils.ScoredRowId;
+import org.apache.cassandra.index.sai.utils.ScoredRowIdIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.metrics.LinearFit;
 import org.apache.cassandra.metrics.PairedSlidingWindowReservoir;
@@ -127,12 +134,53 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
         float[] queryVector = exp.lower.value.vector;
 
-        BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, queryVector, topK);
+        BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, queryVector, topK, false);
         if (bitsOrPostingList.skipANN())
             return bitsOrPostingList.postingList();
 
         var vectorPostings = graph.search(queryVector, topK, exp.getEuclideanSearchThreshold(), limit, bitsOrPostingList.getBits(), context);
         bitsOrPostingList.updateStatistics(vectorPostings.getVisitedCount());
+        return vectorPostings;
+    }
+
+    @Override
+    public ScoreOrderedIterator searchTopK(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    {
+//        Function<Integer, PostingList> results = (iterations) -> {
+//            try
+//            {
+//                return getTopK(context, exp, keyRange, limit);
+//            }
+//            catch (IOException e)
+//            {
+//                throw new RuntimeException(e);
+//            }
+//        };
+        return toScoreOrderedIterator(getTopK(context, exp, keyRange, limit), context);
+    }
+
+
+    private ScoredRowIdIterator getTopK(QueryContext context, Expression exp, AbstractBounds<PartitionPosition> keyRange, int limit) throws IOException
+    {
+        if (logger.isTraceEnabled())
+            logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
+
+        if (exp.getOp() != Expression.Op.ANN && exp.getOp() != Expression.Op.BOUNDED_ANN)
+            throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + exp));
+
+        if (exp.getEuclideanSearchThreshold() > 0)
+            limit = 100000;
+        int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
+        float[] queryVector = exp.lower.value.vector;
+
+        BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, queryVector, topK, true);
+        // TODO need to fix this...
+        if (bitsOrPostingList.skipANN())
+            return bitsOrPostingList.scores;
+
+        var vectorPostings = graph.searchWithScores(queryVector, topK, limit, bitsOrPostingList.bits, context);
+        // todo add in
+        // bitsOrPostingList.updateStatistics(vectorPostings.getVisitedCount());
         return vectorPostings;
     }
 
@@ -142,7 +190,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private BitsOrPostingList bitsOrPostingListForKeyRange(QueryContext context,
                                                            AbstractBounds<PartitionPosition> keyRange,
                                                            float[] queryVector,
-                                                           int topK) throws IOException
+                                                           int topK,
+                                                           boolean giveMeScores) throws IOException
     {
         try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
         {
@@ -183,6 +232,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     if (context.shouldInclude(i, primaryKeyMap))
                         segmentRowIds.add(metadata.toSegmentRowId(i));
                 }
+                if (giveMeScores)
+                {
+                    return new BitsOrPostingList(rankme(queryVector, segmentRowIds, topK));
+                }
                 var postings = findTopApproximatePostings(queryVector, segmentRowIds, topK);
                 return new BitsOrPostingList(new ArrayPostingList(postings));
             }
@@ -214,7 +267,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             cost = estimateCost(topK, bits.cardinality());
 
             if (!hasMatches)
-                return new BitsOrPostingList(PostingList.EMPTY);
+                return giveMeScores ? new BitsOrPostingList(ScoredRowIdIterator.empty()) : new BitsOrPostingList(PostingList.EMPTY);
 
             return new BitsOrPostingList(bits, cost);
         }
@@ -254,6 +307,34 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         // RangeUnionIterator, where we merge the results from all sstables.
         Arrays.sort(postings);
         return postings;
+    }
+
+    private ScoredRowIdIterator rankme(float[] queryVector, IntArrayList segmentRowIds, int topK) throws IOException
+    {
+        var cv = graph.getCompressedVectors();
+        if (cv == null || segmentRowIds.size() <= topK)
+            return null;
+
+        var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
+        var scoreFunction = cv.approximateScoreFunctionFor(queryVector, similarityFunction);
+
+        ArrayList<ScoredRowId> pairs = new ArrayList<>(segmentRowIds.size());
+        try (var ordinalsView = graph.getOrdinalsView())
+        {
+            for (int i = 0; i < segmentRowIds.size(); i++)
+            {
+                int segmentRowId = segmentRowIds.getInt(i);
+                int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
+                if (ordinal < 0)
+                    continue;
+
+                var score = scoreFunction.similarityTo(ordinal);
+                pairs.add(new ScoredRowId(segmentRowId, score));
+            }
+        }
+        // sort descending
+        pairs.sort((a, b) -> Float.compare(b.getScore(), a.getScore()));
+        return new BruteForceScoredRowIdIterator(pairs);
     }
 
     private long getMaxSSTableRowId(PrimaryKeyMap primaryKeyMap, PartitionPosition right)
@@ -357,20 +438,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public ScoreOrderedIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         // create a sublist of the keys within this segment's bounds
         int minIndex = findBoundaryIndex(keys, true);
         int maxIndex = findBoundaryIndex(keys, false);
         List<PrimaryKey> keysInRange = keys.subList(minIndex, maxIndex);
         if (keysInRange.isEmpty())
-            return RangeIterator.empty();
-
-        if (keysInRange.size() <= limit)
-        {
-            Tracing.logAndTrace(logger, "Only {} keys in sstable range out of limit {}", keysInRange.size(), limit);
-            return new CollectionRangeIterator(metadata.minKey, metadata.maxKey, keysInRange);
-        }
+            return ScoreOrderedIterator.EMPTY;
 
         int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
         // if we are brute forcing the similarity search, we want to build a list of segment row ids,
@@ -473,21 +548,20 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; expected nodes visited is {} for index with {} nodes, LIMIT {}",
                             numRows, keysInRange.size(), cost.expectedNodesVisited, graph.size(), limit);
         if (numRows == 0)
-            return RangeIterator.empty();
+            return ScoreOrderedIterator.EMPTY;
 
         if (cost.shouldUseBruteForce())
         {
             // brute force using the in-memory compressed vectors to cut down the number of results returned
             var queryVector = exp.lower.value.vector;
-            var postings = findTopApproximatePostings(queryVector, rowIds, topK);
-            return toPrimaryKeyIterator(new ArrayPostingList(postings), context);
+            return toScoreOrderedIterator(rankme(queryVector, rowIds, topK), context);
         }
         // else ask the index to perform a search limited to the bits we created
         float[] queryVector = exp.lower.value.vector;
-        var results = graph.search(queryVector, topK, limit, bits, context);
-        cost.updateStatistics(results.getVisitedCount());
+        var results = graph.searchWithScores(queryVector, topK, limit, bits, context);
+//        cost.updateStatistics(results.getVisitedCount());
 
-        return toPrimaryKeyIterator(results, context);
+        return toScoreOrderedIterator(results, context);
     }
 
     public static double logBase2(double number) {
@@ -519,12 +593,21 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         private final Bits bits;
         private final CostEstimate cost;
         private final PostingList postingList;
+        public ScoredRowIdIterator scores = null;
 
         public BitsOrPostingList(Bits bits, CostEstimate cost)
         {
             this.bits = bits;
             this.cost = cost;
             this.postingList = null;
+        }
+
+        public BitsOrPostingList(ScoredRowIdIterator scores)
+        {
+            this.bits = null;
+            this.cost = null;
+            this.postingList = null;
+            this.scores = scores;
         }
 
         public BitsOrPostingList(PostingList postingList)

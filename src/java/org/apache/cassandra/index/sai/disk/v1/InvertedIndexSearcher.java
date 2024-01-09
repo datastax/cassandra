@@ -39,6 +39,7 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
@@ -87,6 +88,12 @@ public class InvertedIndexSearcher extends IndexSearcher
     {
         PostingList postingList = searchPosting(exp, context);
         return toPrimaryKeyIterator(postingList, context);
+    }
+
+    @Override
+    public ScoreOrderedIterator searchTopK(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
+    {
+        throw new UnsupportedOperationException();
     }
 
     private PostingList searchPosting(Expression exp, QueryContext context)

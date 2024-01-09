@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 
 import com.google.common.collect.ImmutableList;
@@ -37,6 +38,8 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPriorityQueue;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -179,13 +182,31 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<ScoreOrderedIterator> searchTopK(Expression expression,
+                                                 AbstractBounds<PartitionPosition> keyRange,
+                                                 QueryContext context,
+                                                 int limit) throws IOException
     {
-        RangeConcatIterator.Builder concatIteratorBuilder = RangeConcatIterator.builder(segments.size());
+        var iterators = new ArrayList<ScoreOrderedIterator>(segments.size());
         for (Segment segment : segments)
-            concatIteratorBuilder.add(segment.limitToTopResults(context, keys, exp, limit));
+        {
+            if (segment.intersects(keyRange))
+            {
+                iterators.add(segment.searchTopK(expression, keyRange, context, limit));
+            }
+        }
 
-        return concatIteratorBuilder.build();
+        return iterators;
+    }
+
+    @Override
+    public List<ScoreOrderedIterator> limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    {
+        List<ScoreOrderedIterator> results = new ArrayList<>(segments.size());
+        for (Segment segment : segments)
+            results.add(segment.limitToTopResults(context, keys, exp, limit));
+
+        return results;
     }
 
     @Override

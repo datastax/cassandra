@@ -71,6 +71,8 @@ import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
+import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPriorityQueue;
 import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
@@ -258,10 +260,23 @@ public class QueryController
 
     public RangeIterator buildIterator()
     {
+        // TODO we can clean this up when we break ordering out
+        var nonOrderingExpressions = filterOperation.expressions().stream()
+                                                    .filter(e -> e.operator() != Operator.ANN)
+                                                    .collect(Collectors.toList());
+        if (nonOrderingExpressions.isEmpty() && filterOperation.children().isEmpty())
+            return RangeIterator.empty();
+        return Operation.Node.buildTree(nonOrderingExpressions, filterOperation.children(), filterOperation.isDisjunction())
+                             .analyzeTree(this)
+                             .rangeIterator(this);
+    }
+
+    public ScoredPriorityQueue buildScoredPriorityQueue()
+    {
         var filterOperation = filterOperation();
         var orderings = filterOperation.expressions()
                                        .stream().filter(e -> e.operator() == Operator.ANN).collect(Collectors.toList());
-        assert orderings.size() <= 1;
+        assert orderings.size() == 1;
         if (filterOperation.expressions().size() == 1 && filterOperation.children().isEmpty() && orderings.size() == 1)
             // If we only have one expression, we just use the ANN index to order and limit.
             return getTopKRows(orderings.get(0));
@@ -273,28 +288,22 @@ public class QueryController
             return getTopKRows(orderings.get(0));
         }
 
-        var nonOrderingExpressions = filterOperation.expressions().stream()
-                                                    .filter(e -> e.operator() != Operator.ANN)
-                                                    .collect(Collectors.toList());
-        var iter = Operation.Node.buildTree(nonOrderingExpressions, filterOperation.children(), filterOperation.isDisjunction()).analyzeTree(this).rangeIterator(this);
-
-        if (orderings.isEmpty())
-            return iter;
+        var whereClauseIter = buildIterator();
 
         if (queryContext.filterSortOrder() == null)
         {
-            QueryContext.FilterSortOrder order = decideFilterSortOrder(filterOperation, iter);
+            QueryContext.FilterSortOrder order = decideFilterSortOrder(filterOperation, whereClauseIter);
             queryContext.setFilterSortOrder(order);
         }
         
         if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER)
         {
-            queryContext.setPostFilterSelectivityEstimate(estimateSelectivity(iter));
-            FileUtils.closeQuietly(iter);
+            queryContext.setPostFilterSelectivityEstimate(estimateSelectivity(whereClauseIter));
+            FileUtils.closeQuietly(whereClauseIter);
             return getTopKRows(orderings.get(0));
         }
 
-        return getTopKRows(iter, orderings.get(0));
+        return getTopKRows(whereClauseIter, orderings.get(0));
     }
 
     private QueryContext.FilterSortOrder decideFilterSortOrder(RowFilter.FilterElement filter, RangeIterator iter)
@@ -413,7 +422,7 @@ public class QueryController
     }
 
     // This is an ANN only query
-    public RangeIterator getTopKRows(RowFilter.Expression expression)
+    public ScoredPriorityQueue getTopKRows(RowFilter.Expression expression)
     {
         assert expression.operator() == Operator.ANN;
         var planExpression = new Expression(getContext(expression))
@@ -424,18 +433,19 @@ public class QueryController
         logger.debug("getTopKRows using limit = {}", limit);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        RangeIterator memtableResults = getContext(expression).searchMemtable(queryContext, planExpression, mergeRange, limit);
+        // todo fix me (we need to search memtables,
+        List<ScoreOrderedIterator> memtableResults = getContext(expression).searchTopKMemtable(queryContext, planExpression, mergeRange, limit);
 
         var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
 
         try
         {
-            List<RangeIterator> sstableIntersections = queryView.view.values()
-                                                                                 .stream()
-                                                                                 .map(e -> createRowIdIterator(e, true, limit))
-                                                                                 .collect(Collectors.toList());
-            var result = TermIterator.build(sstableIntersections, memtableResults, queryView.referencedIndexes, queryContext);
-            return filterShadowedPrimaryKeys(result);
+            List<ScoreOrderedIterator> sstableIntersections = queryView.view.values()
+                                                                            .stream()
+                                                                            .flatMap(e -> createRowIdIterator(e, limit).stream())
+                                                                            .collect(Collectors.toList());
+            sstableIntersections.addAll(memtableResults);
+            return new ScoredPriorityQueue(sstableIntersections);
         }
         catch (Throwable t)
         {
@@ -446,13 +456,18 @@ public class QueryController
     }
 
     // This is a hybrid query. We apply all other predicates before ordering and limiting.
-    public RangeIterator getTopKRows(RangeIterator source, RowFilter.Expression expression)
+    public ScoredPriorityQueue getTopKRows(RangeIterator source, RowFilter.Expression expression)
     {
-        var result = new OrderingFilterRangeIterator(source, ORDER_CHUNK_SIZE, list -> this.getTopKRows(list, expression));
-        return filterShadowedPrimaryKeys(result);
+        List<ScoreOrderedIterator> pqs = new ArrayList<>();
+        try (var iter = new OrderingFilterRangeIterator(source, ORDER_CHUNK_SIZE, list -> this.getTopKRows(list, expression)))
+        {
+            while (iter.hasNext())
+                pqs.addAll(iter.next());
+        }
+        return new ScoredPriorityQueue(pqs);
     }
 
-    private RangeIterator getTopKRows(List<PrimaryKey> rawSourceKeys, RowFilter.Expression expression)
+    private List<ScoreOrderedIterator> getTopKRows(List<PrimaryKey> rawSourceKeys, RowFilter.Expression expression)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", rawSourceKeys.size());
 
@@ -467,19 +482,19 @@ public class QueryController
         queryContext.setSoftLimit(limit);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        RangeIterator memtableResults = this.getContext(expression).limitToTopResults(queryContext, sourceKeys, planExpression, limit);
+//        RangeIterator memtableResults = this.getContext(expression).limitToTopResults(queryContext, sourceKeys, planExpression, limit);
         var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
 
         try
         {
-            List<RangeIterator> sstableIntersections = queryView.view.values()
+            List<ScoreOrderedIterator> sstableIntersections = queryView.view.values()
                                                                      .stream()
-                                                                     .map(e -> {
-                                                                         return reorderAndLimitBySSTableRowIds(sourceKeys, e, limit);
+                                                                     .flatMap(e -> {
+                                                                         return reorderAndLimitBySSTableRowIds(sourceKeys, e, limit).stream();
                                                                      })
                                                                      .collect(Collectors.toList());
-
-            return TermIterator.build(sstableIntersections, memtableResults, queryView.referencedIndexes, queryContext);
+//            sstableIntersections.addAll(memtableResults);
+            return sstableIntersections;
         }
         catch (Throwable t)
         {
@@ -490,7 +505,7 @@ public class QueryController
 
     }
 
-    private RangeIterator reorderAndLimitBySSTableRowIds(List<PrimaryKey> keys, List<QueryViewBuilder.IndexExpression> annIndexExpressions, int limit)
+    private List<ScoreOrderedIterator> reorderAndLimitBySSTableRowIds(List<PrimaryKey> keys, List<QueryViewBuilder.IndexExpression> annIndexExpressions, int limit)
     {
         assert annIndexExpressions.size() == 1 : "only one index is expected in ANN expression, found " + annIndexExpressions.size() + " in " + annIndexExpressions;
         QueryViewBuilder.IndexExpression annIndexExpression = annIndexExpressions.get(0);
@@ -508,40 +523,25 @@ public class QueryController
     /**
      * Create row id iterator from different indexes' on-disk searcher of the same sstable
      */
-    private RangeIterator createRowIdIterator(List<QueryViewBuilder.IndexExpression> indexExpressions, boolean defer, int limit)
+    private List<ScoreOrderedIterator> createRowIdIterator(List<QueryViewBuilder.IndexExpression> indexExpressions, int limit)
     {
-        var subIterators = indexExpressions
-                           .stream()
-                           .map(ie ->
-                                    {
-                                        try
-                                        {
-                                            return ie.index.search(ie.expression, mergeRange, queryContext, defer, limit);
-                                        }
-                                        catch (Throwable ex)
-                                        {
-                                            if (!(ex instanceof AbortedOperationException))
-                                                logger.debug(ie.index.getIndexContext().logMessage(String.format("Failed search on index %s, aborting query.", ie.index.getSSTable())), ex);
-                                            throw Throwables.cleaned(ex);
-                                        }
-                                    }).collect(Collectors.toList());
-
-        return RangeUnionIterator.builder(subIterators.size()).add(subIterators).build();
-    }
-
-    /**
-     * Filter out shadowed {@link PrimaryKey} from the source iterator. This is only necessary when a query is ordering
-     * and limiting results.
-     * @param source the source iterator
-     * @return a filtered iterator
-     */
-    private RangeIterator filterShadowedPrimaryKeys(RangeIterator source)
-    {
-        if (queryContext.getShadowedPrimaryKeys().isEmpty())
-            return source;
-        // This logic used to be managed at the vector index level. However, that led to a lot of complexity,
-        // especially when multiple rows shared the same value. For now, we just filter the results here.
-        return RangeAntiJoinIterator.create(source, new CollectionRangeIterator(queryContext.getShadowedPrimaryKeys()));
+        return indexExpressions
+               .stream()
+               .map(ie ->
+                    {
+                        try
+                        {
+                            return ie.index.searchTopK(ie.expression, mergeRange, queryContext, limit);
+                        }
+                        catch (Throwable ex)
+                        {
+                            if (!(ex instanceof AbortedOperationException))
+                                logger.debug(ie.index.getIndexContext().logMessage(String.format("Failed search on index %s, aborting query.", ie.index.getSSTable())), ex);
+                            throw Throwables.cleaned(ex);
+                        }
+                    })
+               .flatMap(List::stream)
+               .collect(Collectors.toList());
     }
 
     public int getExactLimit()

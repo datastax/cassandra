@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
@@ -65,6 +66,8 @@ import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.InMemoryPartitionIterator;
 import org.apache.cassandra.index.sai.utils.InMemoryUnfilteredPartitionIterator;
 import org.apache.cassandra.index.sai.utils.PartitionInfo;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.FBUtilities;
@@ -187,6 +190,24 @@ public class VectorTopKProcessor
                 for (var uf: pr.tombstones)
                     addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
             }
+        } else if (partitions instanceof StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) {
+            var retriever = (StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) partitions;
+            // FilteredPartitions does not implement ParallelizablePartitionIterator.
+            // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
+            while (retriever.hasNext() && topK.size() < limit)
+            {
+                // have to close to move to the next partition, otherwise hasNext() fails
+                try (var partitionRowIterator = retriever.next())
+                {
+                    var iter = (StorageAttachedIndexSearcher.ScoreOrderedResultRetriever.PrimaryKeyIterator) partitionRowIterator;
+                    PartitionResults pr = processPartition(iter, iter.scoredPrimaryKey, retriever.updatedKeys);
+                    if (pr == null)
+                        continue;
+                    topK.addAll(pr.rows);
+                    for (var uf : pr.tombstones)
+                        addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
+                }
+            }
         } else {
             // FilteredPartitions does not implement ParallelizablePartitionIterator.
             // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
@@ -260,6 +281,41 @@ public class VectorTopKProcessor
 
             Row row = (Row) unfiltered;
             float rowScore = getScoreForRow(null, row);
+            pr.addRow(Triple.of(partitionInfo, row, keyAndStaticScore + rowScore));
+        }
+
+        return pr;
+    }
+
+    /**
+     * Processes a single partition, calculating scores for rows and extracting tombstones.
+     */
+    private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator, ScoredPrimaryKey key, HashSet<PrimaryKey> updatedKeys) {
+        Row staticRow = partitionRowIterator.staticRow();
+        PartitionInfo partitionInfo = PartitionInfo.create(partitionRowIterator);
+        // todo do we do this because a vector can be static??
+        float keyAndStaticScore = getScoreForRow(key.partitionKey(), staticRow);
+        var pr = new PartitionResults(partitionInfo);
+
+        if (partitionRowIterator.hasNext())
+        {
+            Unfiltered unfiltered = partitionRowIterator.next();
+            // Always include tombstones for coordinator. It relies on ReadCommand#withMetricsRecording to throw
+            // TombstoneOverwhelmingException to prevent OOM.
+            if (unfiltered.isRangeTombstoneMarker())
+            {
+                pr.addTombstone(unfiltered);
+                return pr;
+            }
+
+            Row row = (Row) unfiltered;
+            float rowScore = getScoreForRow(null, row);
+            // todo what precision tolerance do we want?
+            if (key.score > rowScore + 0.0001f)
+            {
+                updatedKeys.add(key);
+                return null;
+            }
             pr.addRow(Triple.of(partitionInfo, row, keyAndStaticScore + rowScore));
         }
 

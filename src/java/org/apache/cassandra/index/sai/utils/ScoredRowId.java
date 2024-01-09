@@ -18,25 +18,24 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.io.IOException;
-import java.util.List;
-
-import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.plan.Expression;
-
-/***
- * Analogue of SegmentOrdering, but for memtables.
- */
-public interface MemtableOrdering
+public class ScoredRowId
 {
-    /**
-     * Filter the given list of {@link PrimaryKey} results to the top `limit` results corresponding to the given expression,
-     * Returns an iterator over the results that is put back in token order.
-     *
-     * Assumes that the given  spans the same rows as the implementing index's segment.
-     */
-    default ScoreOrderedIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
+    final int segmentRowId;
+    final float score;
+
+    public ScoredRowId(int segmentRowId, float score)
     {
-        throw new UnsupportedOperationException();
+        this.segmentRowId = segmentRowId;
+        this.score = score;
+    }
+
+    public float getScore()
+    {
+        return score;
+    }
+
+    public int getSegmentRowId()
+    {
+        return segmentRowId;
     }
 }

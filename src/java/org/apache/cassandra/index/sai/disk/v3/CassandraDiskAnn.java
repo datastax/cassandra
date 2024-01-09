@@ -50,8 +50,11 @@ import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
+import org.apache.cassandra.index.sai.utils.ScoredRowId;
+import org.apache.cassandra.index.sai.utils.ScoredRowIdIterator;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.Pair;
 
 public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 {
@@ -161,6 +164,36 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     }
 
     @Override
+    public ScoredRowIdIterator searchWithScores(float[] queryVector, int topK, int limit, Bits bits, QueryContext context)
+    {
+        CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
+
+        var view = graph.getView();
+        var searcher = new GraphSearcher.Builder<>(view).build();
+        NodeSimilarity.ScoreFunction scoreFunction;
+        NodeSimilarity.ReRanker<float[]> reRanker;
+        if (compressedVectors == null)
+        {
+            scoreFunction = (NodeSimilarity.ExactScoreFunction)
+                            i -> similarityFunction.compare(queryVector, view.getVector(i));
+            reRanker = null;
+        }
+        else
+        {
+            scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, similarityFunction);
+            reRanker = (i, map) -> similarityFunction.compare(queryVector, map.get(i));
+        }
+        var result = searcher.search(scoreFunction,
+                                     reRanker,
+                                     topK,
+                                     0,
+                                     ordinalsMap.ignoringDeleted(bits));
+        context.addAnnNodesVisited(result.getVisitedCount());
+        Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
+        return new ScoredRowIdIteratorDiskAnn(result.getNodes());
+    }
+
+    @Override
     public CompressedVectors getCompressedVectors()
     {
         return compressedVectors;
@@ -201,6 +234,52 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             if (!hasNext())
                 throw new NoSuchElementException();
             return segmentRowIdIterator.nextInt();
+        }
+
+        @Override
+        public void close()
+        {
+            rowIdsView.close();
+        }
+    }
+
+    private class ScoredRowIdIteratorDiskAnn implements ScoredRowIdIterator
+    {
+        private final Iterator<NodeScore> it;
+        private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
+
+        private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
+        private Float currentScore = -1f;
+
+        public ScoredRowIdIteratorDiskAnn(NodeScore[] results)
+        {
+            this.it = Arrays.stream(results).iterator();
+        }
+
+        @Override
+        public boolean hasNext() {
+            while (!segmentRowIdIterator.hasNext() && it.hasNext()) {
+                try
+                {
+                    NodeScore result = it.next();
+                    currentScore = result.score;
+                    var ordinal = result.node;
+                    int[] rowIds = rowIdsView.getSegmentRowIdsMatching(ordinal);
+                    segmentRowIdIterator = Arrays.stream(rowIds).iterator();
+                }
+                catch (IOException e)
+                {
+                    throw new RuntimeException(e);
+                }
+            }
+            return segmentRowIdIterator.hasNext();
+        }
+
+        @Override
+        public ScoredRowId next() {
+            if (!hasNext())
+                throw new NoSuchElementException();
+            return new ScoredRowId(segmentRowIdIterator.nextInt(), currentScore);
         }
 
         @Override

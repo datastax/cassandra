@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -73,6 +74,8 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
+import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
@@ -435,6 +438,21 @@ public class IndexContext
         return builder.build();
     }
 
+    public List<ScoreOrderedIterator> searchTopKMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
+    {
+        Collection<MemtableIndex> memtables = liveMemtables.values();
+
+        if (memtables.isEmpty())
+            return List.of();
+
+        var result = new ArrayList<ScoreOrderedIterator>(memtables.size());
+
+        for (MemtableIndex index : memtables)
+            result.add(index.searchTopK(context, e, keyRange, limit));
+
+        return result;
+    }
+
     private RangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
     {
         Collection<Memtable> memtables = liveMemtables.keySet();
@@ -454,23 +472,18 @@ public class IndexContext
     }
 
     // Search all memtables for all PrimaryKeys in list.
-    public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> source, Expression e, int limit)
+    public List<ScoreOrderedIterator> limitToTopResults(QueryContext context, List<PrimaryKey> source, Expression e, int limit)
     {
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
         if (memtables.isEmpty())
-        {
-            return RangeIterator.empty();
-        }
+            return List.of();
 
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
-
+        List<ScoreOrderedIterator> result = new ArrayList<>(memtables.size());
         for (MemtableIndex index : memtables)
-        {
-            builder.add(index.limitToTopResults(context, source, e, limit));
-        }
+            result.add(index.limitToTopResults(context, source, e, limit));
 
-        return builder.build();
+        return result;
     }
 
     public long liveMemtableWriteCount()

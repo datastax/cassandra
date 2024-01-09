@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v2.hnsw;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
 import java.util.function.Function;
@@ -45,8 +46,12 @@ import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
+import org.apache.cassandra.index.sai.utils.ScoredRowId;
+import org.apache.cassandra.index.sai.utils.ScoredRowIdIterator;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.Pair;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.util.hnsw.HnswGraphSearcher;
 import org.apache.lucene.util.hnsw.NeighborQueue;
@@ -137,6 +142,32 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         return search(queryVector, topK, limit, bits, context);
     }
 
+    @Override
+    public ScoredRowIdIterator searchWithScores(float[] queryVector, int topK, int limit, Bits acceptBits, QueryContext context)
+    {
+        CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
+
+        NeighborQueue queue;
+        try (var vectors = vectorsSupplier.apply(context); var view = hnsw.getView(context))
+        {
+            queue = HnswGraphSearcher.search(queryVector,
+                                             topK,
+                                             vectors,
+                                             VectorEncoding.FLOAT32,
+                                             LuceneCompat.vsf(similarityFunction),
+                                             view,
+                                             LuceneCompat.bits(ordinalsMap.ignoringDeleted(acceptBits)),
+                                             Integer.MAX_VALUE);
+            context.addAnnNodesVisited(queue.visitedCount());
+            Tracing.trace("HNSW search visited {} nodes to return {} results", queue.visitedCount(), queue.size());
+            return new ScoredRowIdIteratorHNSW(queue);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
     private class RowIdIterator implements PrimitiveIterator.OfInt, AutoCloseable
     {
         private final NeighborQueue queue;
@@ -170,6 +201,50 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
             if (!hasNext())
                 throw new NoSuchElementException();
             return segmentRowIdIterator.nextInt();
+        }
+
+        @Override
+        public void close()
+        {
+            rowIdsView.close();
+        }
+    }
+
+    private class ScoredRowIdIteratorHNSW implements ScoredRowIdIterator
+    {
+        private final NeighborQueue queue;
+        private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
+
+        private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
+        private Float currentScore = -1f;
+
+        public ScoredRowIdIteratorHNSW(NeighborQueue queue)
+        {
+            this.queue = queue;
+        }
+
+        @Override
+        public boolean hasNext() {
+            while (!segmentRowIdIterator.hasNext() && queue.size() > 0) {
+                try
+                {
+                    currentScore = queue.topScore();
+                    var ordinal = queue.pop();
+                    segmentRowIdIterator = Arrays.stream(rowIdsView.getSegmentRowIdsMatching(ordinal)).iterator();
+                }
+                catch (IOException e)
+                {
+                    throw new RuntimeException(e);
+                }
+            }
+            return segmentRowIdIterator.hasNext();
+        }
+
+        @Override
+        public ScoredRowId next() {
+            if (!hasNext())
+                throw new NoSuchElementException();
+            return new ScoredRowId(segmentRowIdIterator.nextInt(), currentScore);
         }
 
         @Override
