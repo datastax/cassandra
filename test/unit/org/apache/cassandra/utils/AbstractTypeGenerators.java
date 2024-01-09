@@ -36,14 +36,12 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
-
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-
 import org.apache.commons.lang3.ArrayUtils;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -58,6 +56,7 @@ import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.CounterColumnType;
+import org.apache.cassandra.db.marshal.DateRangeType;
 import org.apache.cassandra.db.marshal.DateType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.DoubleType;
@@ -71,10 +70,13 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.LegacyTimeUUIDType;
 import org.apache.cassandra.db.marshal.LexicalUUIDType;
+import org.apache.cassandra.db.marshal.LineStringType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
+import org.apache.cassandra.db.marshal.PointType;
+import org.apache.cassandra.db.marshal.PolygonType;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.ShortType;
@@ -173,6 +175,10 @@ public final class AbstractTypeGenerators
                                                                                               .add(CompositeType.class)
                                                                                               .add(DynamicCompositeType.class)
                                                                                               .add(CounterColumnType.class)
+                                                                                              .add(DateRangeType.class)
+                                                                                              .add(LineStringType.class)
+                                                                                              .add(PolygonType.class)
+                                                                                              .add(PointType.class)
                                                                                               .build();
 
     private AbstractTypeGenerators()
@@ -250,6 +256,7 @@ public final class AbstractTypeGenerators
         private Function<Integer, Gen<AbstractType<?>>> defaultSetKeyFunc;
         private Predicate<AbstractType<?>> typeFilter = null;
         private Gen<String> udtName = null;
+        private Gen<Boolean> multiCellGen = BOOLEAN_GEN;
 
         public TypeGenBuilder()
         {
@@ -271,6 +278,7 @@ public final class AbstractTypeGenerators
             compositeElementGen = other.compositeElementGen;
             compositeSizeGen = other.compositeSizeGen;
             typeFilter = other.typeFilter;
+            multiCellGen = other.multiCellGen;
         }
 
         public TypeGenBuilder withTypeFilter(Predicate<AbstractType<?>> fn)
@@ -408,6 +416,18 @@ public final class AbstractTypeGenerators
             return this;
         }
 
+        public TypeGenBuilder withMultiCellGen(Gen<Boolean> multiCellGen)
+        {
+            this.multiCellGen = multiCellGen;
+            return this;
+        }
+
+        public TypeGenBuilder frozen()
+        {
+            this.multiCellGen = SourceDSL.arbitrary().constant(false);
+            return this;
+        }
+
         public Gen<AbstractType<?>> build()
         {
             if (udtName == null)
@@ -432,7 +452,7 @@ public final class AbstractTypeGenerators
             }
             else
                 kindGen = SourceDSL.arbitrary().enumValues(TypeKind.class);
-            return buildRecursive(maxDepth, maxDepth, kindGen, BOOLEAN_GEN);
+            return buildRecursive(maxDepth, maxDepth, kindGen, multiCellGen);
         }
 
         private Gen<AbstractType<?>> buildRecursive(int maxDepth, int level, Gen<TypeKind> typeKindGen, Gen<Boolean> multiCellGen)
@@ -442,8 +462,9 @@ public final class AbstractTypeGenerators
             assert level >= 0 : "max depth must be positive or zero; given " + level;
             boolean atBottom = level == 0;
             boolean atTop = maxDepth == level;
+            Gen<Boolean> multiCellGenOverride = atTop ? multiCellGen : SourceDSL.arbitrary().pick(false);
             Gen<AbstractType<?>> gen = rnd -> {
-                Supplier<Gen<AbstractType<?>>> next = () -> atBottom ? primitiveGen : buildRecursive(maxDepth, level - 1, typeKindGen, multiCellGen);
+                Supplier<Gen<AbstractType<?>>> next = () -> atBottom ? primitiveGen : buildRecursive(maxDepth, level - 1, typeKindGen, SourceDSL.arbitrary().constant(false));
 
                 // figure out type to get
                 TypeKind kind = typeKindGen.generate(rnd);
@@ -456,18 +477,18 @@ public final class AbstractTypeGenerators
                         return primitiveGen.generate(rnd);
                     case SET:
                         if (defaultSetKeyFunc != null)
-                            return setTypeGen(defaultSetKeyFunc.apply(level - 1), multiCellGen).generate(rnd);
-                        return setTypeGen(next.get(), multiCellGen).generate(rnd);
+                            return setTypeGen(defaultSetKeyFunc.apply(level - 1), multiCellGenOverride).generate(rnd);
+                        return setTypeGen(next.get(), multiCellGenOverride).generate(rnd);
                     case LIST:
-                        return listTypeGen(next.get(), multiCellGen).generate(rnd);
+                        return listTypeGen(next.get(), multiCellGenOverride).generate(rnd);
                     case MAP:
                         if (defaultSetKeyFunc != null)
-                            return mapTypeGen(defaultSetKeyFunc.apply(level - 1), next.get(), multiCellGen).generate(rnd);
-                        return mapTypeGen(next.get(), next.get(), multiCellGen).generate(rnd);
+                            return mapTypeGen(defaultSetKeyFunc.apply(level - 1), next.get(), multiCellGenOverride).generate(rnd);
+                        return mapTypeGen(next.get(), next.get(), multiCellGenOverride).generate(rnd);
                     case TUPLE:
                         return tupleTypeGen(atBottom ? primitiveGen : buildRecursive(maxDepth, level - 1, typeKindGen, SourceDSL.arbitrary().constant(false)), tupleSizeGen != null ? tupleSizeGen : defaultSizeGen).generate(rnd);
                     case UDT:
-                        return userTypeGen(next.get(), udtSizeGen != null ? udtSizeGen : defaultSizeGen, userTypeKeyspaceGen, udtName, multiCellGen).generate(rnd);
+                        return userTypeGen(next.get(), udtSizeGen != null ? udtSizeGen : defaultSizeGen, userTypeKeyspaceGen, udtName, multiCellGenOverride).generate(rnd);
                     case VECTOR:
                     {
                         Gen<Integer> sizeGen = vectorSizeGen != null ? vectorSizeGen : defaultSizeGen;
@@ -707,7 +728,7 @@ public final class AbstractTypeGenerators
                 fieldNames.add(fieldName);
 
                 AbstractType<?> element = elementGen.generate(rnd);
-                element = multiCell ? element.freeze() : element.unfreeze();
+                element = multiCell ? element.unfreeze() : element.freeze();
                 // a UDT cannot contain a non-frozen UDT; as defined by CreateType
                 if (element.isUDT())
                     element = element.freeze();
@@ -857,7 +878,7 @@ public final class AbstractTypeGenerators
         {
             // T is ByteBuffer
             TupleType tupleType = (TupleType) type;
-            List<Comparator<Object>> columns = (List<Comparator<Object>>) (List<?>) tupleType.allTypes().stream().map(AbstractTypeGenerators::comparator).collect(Collectors.toList());
+            List<Comparator<Object>> columns = (List<Comparator<Object>>) (List<?>) tupleType.subTypes.stream().map(AbstractTypeGenerators::comparator).collect(Collectors.toList());
             Comparator<List<Object>> listCompar = listComparator((i, a, b) -> columns.get(i).compare(a, b));
             Comparator<ByteBuffer> comparator = (ByteBuffer a, ByteBuffer b) -> {
                 ByteBuffer[] abb = tupleType.split(ByteBufferAccessor.instance, a);
@@ -888,7 +909,7 @@ public final class AbstractTypeGenerators
         else if (type instanceof CompositeType)
         {
             CompositeType ct = (CompositeType) type;
-            List<TypeSupport<Object>> elementSupport = (List<TypeSupport<Object>>) (List<?>) ct.types.stream().map(AbstractTypeGenerators::getTypeSupport).collect(Collectors.toList());
+            List<TypeSupport<Object>> elementSupport = (List<TypeSupport<Object>>) (List<?>) ct.subTypes.stream().map(AbstractTypeGenerators::getTypeSupport).collect(Collectors.toList());
             Serde<ByteBuffer, List<Object>> serde = new Serde<ByteBuffer, List<Object>>()
             {
                 @Override
@@ -908,8 +929,8 @@ public final class AbstractTypeGenerators
                 }
             };
             support = (TypeSupport<T>) TypeSupport.of(ct, serde, rnd -> {
-                List<Object> values = new ArrayList<>(ct.types.size());
-                for (int i = 0, size = ct.types.size(); i < size; i++)
+                List<Object> values = new ArrayList<>(ct.subTypes.size());
+                for (int i = 0, size = ct.subTypes.size(); i < size; i++)
                     values.add(elementSupport.get(i).valueGen.generate(rnd));
                 return values;
             }, listComparator((index, a, b) -> elementSupport.get(index).valueComparator.compare(a, b)));
@@ -1024,7 +1045,7 @@ public final class AbstractTypeGenerators
         if (type instanceof TupleType || type instanceof CompositeType || type instanceof DynamicCompositeType)
         {
             int product = 1;
-            for (AbstractType<?> f : type.subTypes())
+            for (AbstractType<?> f : type.subTypes)
             {
                 int uniq = uniqueElementsForDomain(f);
                 if (uniq == -1)
@@ -1057,7 +1078,7 @@ public final class AbstractTypeGenerators
             type = ((ReversedType) type).baseType;
         if (type instanceof UserType)
             matches.add((UserType) type);
-        for (AbstractType<?> t : type.subTypes())
+        for (AbstractType<?> t : type.subTypes)
             extractUDTs(t, matches);
     }
 
@@ -1177,7 +1198,7 @@ public final class AbstractTypeGenerators
             sb.append("CompositeType:");
             indent += 2;
             int idx = 0;
-            for (AbstractType<?> subtype : ct.subTypes())
+            for (AbstractType<?> subtype : ct.subTypes)
             {
                 newline(sb, indent);
                 sb.append(idx++).append(": ");
@@ -1204,7 +1225,7 @@ public final class AbstractTypeGenerators
         @SuppressWarnings("unchecked")
         private TupleGen(TupleType tupleType, Gen<Integer> sizeGen, @Nullable Gen<ValueDomain> valueDomainGen)
         {
-            this.elementsSupport = tupleType.allTypes().stream().map(t -> getTypeSupport((AbstractType<Object>) t, sizeGen, valueDomainGen)).collect(Collectors.toList());
+            this.elementsSupport = tupleType.subTypes.stream().map(t -> getTypeSupport((AbstractType<Object>) t, sizeGen, valueDomainGen)).collect(Collectors.toList());
         }
 
         public ByteBuffer generate(RandomnessSource rnd)

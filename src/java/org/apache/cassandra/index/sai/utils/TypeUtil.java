@@ -473,7 +473,7 @@ public class TypeUtil
     public static boolean isFrozen(AbstractType<?> type)
     {
         type = baseType(type);
-        return !type.subTypes().isEmpty() && !type.isMultiCell();
+        return !type.subTypes.isEmpty() && !type.isMultiCell();
     }
 
     /**

@@ -22,12 +22,13 @@ import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
@@ -86,10 +87,47 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public final boolean isByteOrderComparable;
     public final ValueComparators comparatorSet;
 
+    /**
+     * Whether the type is multi-cell, that is whether its value is encoded using multiple cells internally.
+     * <p>
+     * Only "complex" types, whose values are somewhat composite, can be multi-cell (and so multi-cell types will
+     * have non-empty {@link #subTypes}, corresponding to the type(s) of the decomposed values). Further, all
+     * multi-cell types have a so-called <b>frozen</b> counterpart: a non-multi-cell version that fundamentally
+     * represents the same type but where the decomposed values are all packed into a single cell value (rather than
+     * split into multiple cells).
+     * <p>
+     * Note that by definition, if a type is frozen (non-multi-cell) and "complex" (has non-empty {@link #subTypes}),
+     * then all its subtypes must also be frozen.
+     */
+    public final boolean isMultiCell;
+
+    /**
+     * If the type has "complex" values that depend on subtypes, return those (direct) subtypes (in undefined order),
+     * and an empty list otherwise.
+     * <p>
+     * Note that most "complex" types (type for which this return a non-empty iterable) are subclasses of
+     * {@link MultiCellCapableType} and thus can be multi-cell or frozen. However, a few legacy types (namely
+     * {@link CompositeType} and {@link DynamicCompositeType}) are "complex" (have subtypes) but are only even supported
+     * as "frozen" (and so don't extend {@link MultiCellCapableType}).
+     */
+    public final List<AbstractType<?>> subTypes;
+
     protected AbstractType(ComparisonType comparisonType)
+    {
+        this(comparisonType, false, List.of());
+    }
+
+    protected AbstractType(ComparisonType comparisonType, boolean isMultiCell, List<AbstractType<?>> subTypes)
     {
         this.comparisonType = comparisonType;
         this.isByteOrderComparable = comparisonType == ComparisonType.BYTE_ORDER;
+        this.isMultiCell = isMultiCell;
+
+        // A frozen type can only have frozen subtypes, basically by definition. So make sure we don't mess it up
+        // when constructing types by forgetting to set some multi-cell flag.
+        assert isMultiCell || subTypes.stream().noneMatch(AbstractType::isMultiCell) : String.format("Detected corrupted type: creating a frozen %s but with some non-frozen subtypes", getClass());
+        this.subTypes = List.copyOf(subTypes);
+
         reverseComparator = (o1, o2) -> AbstractType.this.compare(o2, o1);
         try
         {
@@ -339,12 +377,12 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     }
 
     /**
-     * Returns true if values of the other AbstractType can be read and "reasonably" interpreted by the this
+     * Returns true if values of the other AbstractType can be read and "reasonably" interpreted by this
      * AbstractType. Note that this is a weaker version of isCompatibleWith, as it does not require that both type
      * compare values the same way.
      *
      * The restriction on the other type being "reasonably" interpreted is to prevent, for example, IntegerType from
-     * being compatible with all other types.  Even though any byte string is a valid IntegerType value, it doesn't
+     * being compatible with all other types. Even though any byte string is a valid IntegerType value, it doesn't
      * necessarily make sense to interpret a UUID or a UTF8 string as an integer.
      *
      * Note that a type should be compatible with at least itself.
@@ -415,9 +453,10 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return false;
     }
 
-    public boolean isMultiCell()
+    // TODO inline this method in a separate commit
+    public final boolean isMultiCell()
     {
-        return false;
+        return isMultiCell;
     }
 
     public boolean isFreezable()
@@ -425,19 +464,72 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return false;
     }
 
+    /**
+     * If the type is a multi-cell one ({@link #isMultiCell()} is true), returns a frozen copy of this type (one
+     * for which {@link #isMultiCell()} returns false).
+     * <p>
+     * Note that as mentioned on {@link #isMultiCell()}, a frozen type necessarily has all its subtypes frozen, so
+     * this method also ensures that no subtypes (recursively) are marked as multi-cell.
+     *
+     * @return a frozen version of this type. If this type is not multi-cell (whether because it is not a "complex"
+     * type, or because it is already a frozen one), this should return {@code this}.
+     */
     public AbstractType<?> freeze()
     {
+        if (!isMultiCell())
+            return this;
+
+        return with(freeze(subTypes), false);
+    }
+
+    /**
+     * Utility method that freezes a list of types.
+     *
+     * @param types the list of types to freeze.
+     * @return a new (unmodifiable) list containing the result of applying {@link #freeze()} on every type of
+     * {@code types}.
+     */
+    public static List<AbstractType<?>> freeze(List<AbstractType<?>> types)
+    {
+        return types.stream().map(AbstractType::freeze).collect(Collectors.toUnmodifiableList());
+    }
+
+    /**
+     * Creates an instance of this type (the concrete type extending this class) with the provided updated multi-cell
+     * flag and subtypes.
+     * <p>
+     * Any other information (other than multi-cellness and subtypes) the type may have is expected to be left unchanged
+     * in the created type.
+     *
+     * @param isMultiCell whether the returned type must be a multi-cell one or not.
+     * @param subTypes the subtypes to use for the returned type as a list. The list will have subtypes in the exact
+     * same order as returned by {@link #subTypes}, and exactly as many as the concrete class expects.
+     * @return the created type, which can be {@code this} if the provided subTypes and multi-cell flag are the same
+     * as that of this type.
+     */
+    public AbstractType<?> with(List<AbstractType<?>> subTypes, boolean isMultiCell)
+    {
+        // Default implementation for types that can neither be multi-cell, nor have subtypes (and thus where this
+        // is basically a no-op). Any other type must override this.
+
+        assert this.subTypes.isEmpty() && subTypes.isEmpty() :
+        String.format("Invalid call to copyWith on %s with subTypes %s (provided subTypes: %s)",
+                      this, this.subTypes, subTypes);
+
+        assert !this.isMultiCell() && !isMultiCell:
+        String.format("Invalid call to copyWith on %s with isMultiCell %b (provided isMultiCell: %b)",
+                      this, this.isMultiCell(), isMultiCell);
+
         return this;
     }
 
+    /**
+     * Returns a copy of this type with unfrozen top level type of it.
+     * Note that unforzen subtypes are considered invalid and thus the method does not unfreeze them.
+     */
     public AbstractType<?> unfreeze()
     {
         return this;
-    }
-
-    public List<AbstractType<?>> subTypes()
-    {
-        return Collections.emptyList();
     }
 
     /**
@@ -477,14 +569,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return this;
     }
 
-    /**
-     * Return a list of the "subcomponents" this type has.
-     * This always return a singleton list with the type itself except for CompositeType.
-     */
-    public List<AbstractType<?>> getComponents()
-    {
-        return Collections.<AbstractType<?>>singletonList(this);
-    }
+    // TODO inline this method in a separate commit
 
     /**
      * The length of values for this type if all values are of fixed length, -1 otherwise. This has an impact on
@@ -625,7 +710,8 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
 
     public <V> boolean referencesUserType(V name, ValueAccessor<V> accessor)
     {
-        return false;
+        assert !isUDT() : "UDT must override this method";
+        return subTypes.stream().anyMatch(t -> t.referencesUserType(name, accessor));
     }
 
     /**
@@ -633,7 +719,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      */
     public final boolean referencesUserTypes()
     {
-        return isUDT() || subTypes().stream().anyMatch(AbstractType::referencesUserTypes);
+        return isUDT() || subTypes.stream().anyMatch(AbstractType::referencesUserTypes);
     }
 
     /**
@@ -642,7 +728,11 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      */
     public AbstractType<?> withUpdatedUserType(UserType udt)
     {
-        return this;
+        // Note that the UDT must override this method.
+        if (!referencesUserType(udt.name))
+            return this;
+
+        return with(subTypes.stream().map(t -> t.withUpdatedUserType(udt)).collect(Collectors.toUnmodifiableList()), isMultiCell());
     }
 
     /**
@@ -669,12 +759,16 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      */
     public AbstractType<?> expandUserTypes()
     {
-        return this;
+        // Note that UDT type must override this method.
+        return referencesUserTypes()
+               ? with(subTypes.stream().map(AbstractType::expandUserTypes).collect(Collectors.toUnmodifiableList()), isMultiCell)
+               : this;
     }
 
     public boolean referencesDuration()
     {
-        return false;
+        // Note that the duration type must override this method.
+        return subTypes.stream().anyMatch(AbstractType::referencesDuration);
     }
 
     /**
@@ -802,6 +896,18 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public ByteBuffer getMaskedValue()
     {
         throw new UnsupportedOperationException("There isn't a defined masked value for type " + asCQL3Type());
+    }
+
+    protected static <K, V extends AbstractType<?>> V getInstance(Map<K, V> instances, K key, Supplier<V> value)
+    {
+        V cached = instances.get(key);
+        if (cached != null)
+            return cached;
+
+        // We avoid constructor calls in Map#computeIfAbsent to avoid recursive update exceptions because the automatic
+        // fixing of subtypes done by the top-level constructor might attempt a recursive update to the instances map.
+        V instance = value.get();
+        return instances.computeIfAbsent(key, k -> instance);
     }
 
     /**

@@ -141,7 +141,7 @@ public final class Types implements Iterable<UserType>
 
     private void recordNestedTypes(AbstractType<?> userType, Set<UserType> userTypes)
     {
-        for (AbstractType<?> subType : userType.subTypes())
+        for (AbstractType<?> subType : userType.subTypes)
         {
             recordNestedTypes(subType, userTypes);
         }
@@ -289,7 +289,7 @@ public final class Types implements Iterable<UserType>
     private static void addUserTypes(AbstractType<?> type, Set<ByteBuffer> types)
     {
         // Reach into subtypes first, so that if the type is a UDT, it's dependencies are recreated first.
-        type.subTypes().forEach(t -> addUserTypes(t, types));
+        type.subTypes.forEach(t -> addUserTypes(t, types));
 
         if (type.isUDT())
             types.add(((UserType) type).name);
@@ -479,12 +479,12 @@ public final class Types implements Iterable<UserType>
         }
     }
 
-    static TypesDiff diff(Types before, Types after)
+    public static TypesDiff diff(Types before, Types after)
     {
         return TypesDiff.diff(before, after);
     }
 
-    static final class TypesDiff extends Diff<Types, UserType>
+    public static final class TypesDiff extends Diff<Types, UserType>
     {
         private static final TypesDiff NONE = new TypesDiff(Types.none(), Types.none(), ImmutableList.of());
 

@@ -30,7 +30,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -65,6 +64,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CASSANDRA_CONFIG;
@@ -663,7 +663,7 @@ public class OperationTest extends IndexingSchemaLoader
         ByteBuffer decomposed;
         if(type instanceof CompositeType)
         {
-            Preconditions.checkArgument(key.length == type.subTypes().size());
+            Preconditions.checkArgument(key.length == type.subTypes.size());
             decomposed = ((CompositeType) type).decompose(key);
         }
         else

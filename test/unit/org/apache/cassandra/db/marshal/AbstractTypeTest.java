@@ -72,7 +72,11 @@ import org.reflections.Reflections;
 import org.reflections.scanners.Scanners;
 import org.reflections.util.ConfigurationBuilder;
 
-import static org.apache.cassandra.utils.AbstractTypeGenerators.TypeKind.*;
+import static org.apache.cassandra.utils.AbstractTypeGenerators.TypeKind.COMPOSITE;
+import static org.apache.cassandra.utils.AbstractTypeGenerators.TypeKind.COUNTER;
+import static org.apache.cassandra.utils.AbstractTypeGenerators.TypeKind.DYNAMIC_COMPOSITE;
+import static org.apache.cassandra.utils.AbstractTypeGenerators.TypeKind.PRIMITIVE;
+import static org.apache.cassandra.utils.AbstractTypeGenerators.TypeKind.UDT;
 import static org.apache.cassandra.utils.AbstractTypeGenerators.TypeSupport.of;
 import static org.apache.cassandra.utils.AbstractTypeGenerators.extractUDTs;
 import static org.apache.cassandra.utils.AbstractTypeGenerators.overridePrimitiveTypeSupport;
@@ -260,8 +264,8 @@ public class AbstractTypeTest
                                               .withoutTypeKinds(COUNTER);
         // composite requires all elements fit into Short.MAX_VALUE bytes
         // so try to limit the possible expansion of types
-        Gen<AbstractType<?>> gen = baseline.withCompositeElementGen(new TypeGenBuilder(baseline).withDefaultSizeGen(1).withMaxDepth(1).build())
-                                   .build();
+        Gen<AbstractType<?>> compositeElementGen = new TypeGenBuilder(baseline).withDefaultSizeGen(1).withMaxDepth(1).frozen().build();
+        Gen<AbstractType<?>> gen = baseline.withCompositeElementGen(compositeElementGen).build();
         qt().withShrinkCycles(0).forAll(examples(1, gen)).checkAssert(example -> {
             AbstractType type = example.type;
             for (Object value : example.samples)
@@ -356,11 +360,11 @@ public class AbstractTypeTest
         Map<Class<? extends AbstractType>, Function<? super AbstractType<?>, Integer>> complexTypes = ImmutableMap.of(MapType.class, ignore -> 2,
                                                                                                                       TupleType.class, t -> ((TupleType) t).size(),
                                                                                                                       UserType.class, t -> ((UserType) t).size(),
-                                                                                                                      CompositeType.class, t -> ((CompositeType) t).types.size(),
+                                                                                                                      CompositeType.class, t -> ((CompositeType) t).subTypes.size(),
                                                                                                                       DynamicCompositeType.class, t -> ((DynamicCompositeType) t).size());
         qt().withShrinkCycles(0).forAll(AbstractTypeGenerators.builder().withoutTypeKinds(PRIMITIVE, COUNTER).build()).checkAssert(type -> {
             int expectedSize = complexTypes.containsKey(type.getClass()) ? complexTypes.get(type.getClass()).apply(type) : 1;
-            assertThat(type.subTypes()).hasSize(expectedSize);
+            assertThat(type.subTypes).hasSize(expectedSize);
         });
     }
 
@@ -373,7 +377,7 @@ public class AbstractTypeTest
         if (type instanceof TupleType)
         {
             TupleType tt = (TupleType) type;
-            for (AbstractType<?> e : tt.subTypes())
+            for (AbstractType<?> e : tt.subTypes)
             {
                 AbstractType<?> unwrap = e.unwrap();
                 if (unwrap instanceof StringType || unwrap instanceof TupleType)
@@ -382,14 +386,14 @@ public class AbstractTypeTest
         }
         else if (type instanceof DynamicCompositeType || type instanceof CompositeType)
         {
-            for (AbstractType<?> e : type.subTypes())
+            for (AbstractType<?> e : type.subTypes)
             {
                 AbstractType<?> unwrap = e.unwrap();
                 if (unwrap instanceof StringType)
                     return true;
             }
         }
-        for (AbstractType<?> e : type.subTypes())
+        for (AbstractType<?> e : type.subTypes)
         {
             if (containsUnsafeGetString(e))
                 return true;
@@ -403,7 +407,7 @@ public class AbstractTypeTest
         if (type instanceof DecimalType)
             // toCQLLiteral is loss
             return true;
-        for (AbstractType<?> e : type.subTypes())
+        for (AbstractType<?> e : type.subTypes)
         {
             if (containsUnsafeToLiteral(e))
                 return true;
@@ -474,7 +478,7 @@ public class AbstractTypeTest
                                            .withDefaultSetKey(AbstractTypeGenerators.withoutUnsafeEquality().withTypeFilter(type -> !containsUnsafeGetString(type)))
                                            // composite requires all elements fit into Short.MAX_VALUE bytes
                                            // so try to limit the possible expansion of types
-                                           .withCompositeElementGen(genBuilder().withoutPrimitive(DurationType.instance).withDefaultSizeGen(1).withMaxDepth(1).withTypeFilter(type -> !containsUnsafeGetString(type)).build())
+                                           .withCompositeElementGen(genBuilder().withoutPrimitive(DurationType.instance).withDefaultSizeGen(1).withMaxDepth(1).withTypeFilter(type -> !containsUnsafeGetString(type)).frozen().build())
                                            .build();
             qt().withShrinkCycles(0).forAll(examples(1, typeGen)).checkAssert(example -> {
                 AbstractType type = example.type;
@@ -499,7 +503,7 @@ public class AbstractTypeTest
                                        .withDefaultSetKey(AbstractTypeGenerators.withoutUnsafeEquality())
                                        // composite requires all elements fit into Short.MAX_VALUE bytes
                                        // so try to limit the possible expansion of types
-                                       .withCompositeElementGen(genBuilder().withoutPrimitive(DurationType.instance).withDefaultSizeGen(1).withMaxDepth(1).build())
+                                       .withCompositeElementGen(genBuilder().withoutPrimitive(DurationType.instance).withDefaultSizeGen(1).withMaxDepth(1).frozen().build())
                                        .build();
         qt().withShrinkCycles(0).forAll(examples(1, typeGen)).checkAssert(example -> {
             AbstractType type = example.type;
@@ -523,7 +527,7 @@ public class AbstractTypeTest
                                        .withDefaultSetKey(AbstractTypeGenerators.withoutUnsafeEquality())
                                        // composite requires all elements fit into Short.MAX_VALUE bytes
                                        // so try to limit the possible expansion of types
-                                       .withCompositeElementGen(genBuilder().withDefaultSizeGen(1).withMaxDepth(1).build())
+                                       .withCompositeElementGen(genBuilder().withDefaultSizeGen(1).withMaxDepth(1).frozen().build())
                                        .build();
         qt().withShrinkCycles(0).forAll(examples(1, typeGen)).checkAssert(example -> {
             AbstractType type = example.type;
@@ -583,7 +587,7 @@ public class AbstractTypeTest
             return Types.none();
         Types.Builder builder = Types.builder();
         for (UserType udt : udts)
-            builder.add(udt.unfreeze());
+            builder.add((UserType) udt.unfreeze());
         return builder.build();
     }
 
@@ -601,8 +605,8 @@ public class AbstractTypeTest
                                   .withoutTypeKinds(COUNTER); // counters don't allow ordering
         // composite requires all elements fit into Short.MAX_VALUE bytes
         // so try to limit the possible expansion of types
-        Gen<AbstractType<?>> types = baseline.withCompositeElementGen(new TypeGenBuilder(baseline).withDefaultSizeGen(1).withMaxDepth(1).build())
-                                             .build();
+        Gen<AbstractType<?>> compositeElementGen = new TypeGenBuilder(baseline).withDefaultSizeGen(1).withMaxDepth(1).frozen().build();
+        Gen<AbstractType<?>> types = baseline.withCompositeElementGen(compositeElementGen).build();
         qt().withShrinkCycles(0).forAll(examples(10, types)).checkAssert(example -> {
             AbstractType type = example.type;
             List<ByteBuffer> actual = decompose(type, example.samples);

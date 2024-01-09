@@ -297,7 +297,7 @@ public class StorageAttachedIndex implements Index
         // If we are indexing map entries we need to validate the sub-types
         if (TypeUtil.isComposite(type))
         {
-            for (AbstractType<?> subType : type.subTypes())
+            for (AbstractType<?> subType : type.subTypes)
             {
                 if (!SUPPORTED_TYPES.contains(subType.asCQL3Type()) && !TypeUtil.isFrozen(subType))
                     throw new InvalidRequestException("Unsupported type: " + subType.asCQL3Type());

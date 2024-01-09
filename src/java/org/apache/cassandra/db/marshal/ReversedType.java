@@ -18,11 +18,12 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
+import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,8 +95,16 @@ public class ReversedType<T> extends AbstractType<T>
 
     private ReversedType(AbstractType<T> baseType)
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.CUSTOM, baseType.isMultiCell(), List.of(baseType)); // TODO is it correct? that is - does it make sense to take isMultiCell from baseType and not the subTypes list?
         this.baseType = baseType;
+    }
+
+    @Override
+    public AbstractType<?> with(List<AbstractType<?>> subTypes, boolean isMultiCell)
+    {
+        Preconditions.checkArgument(subTypes.size() == 1,
+                                    "Invalid number of subTypes for ReversedType (got %s)", subTypes.size());
+        return getInstance(subTypes.get(0));
     }
 
     public boolean isEmptyValueMeaningless()

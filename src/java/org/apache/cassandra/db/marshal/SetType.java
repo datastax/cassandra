@@ -18,10 +18,16 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
-import java.util.function.Function;
+
+import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.cql3.Sets;
 import org.apache.cassandra.cql3.Term;
@@ -41,15 +47,13 @@ public class SetType<T> extends CollectionType<Set<T>>
     private static final ConcurrentHashMap<AbstractType<?>, SetType> instances = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<AbstractType<?>, SetType> frozenInstances = new ConcurrentHashMap<>();
 
-    private final AbstractType<T> elements;
     private final SetSerializer<T> serializer;
-    private final boolean isMultiCell;
 
     public static SetType<?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
         List<AbstractType<?>> l = parser.getTypeParameters();
         if (l.size() != 1)
-            throw new ConfigurationException("SetType takes exactly 1 type parameter");
+            throw new ConfigurationException("SetType takes exactly 1 type parameter, got: " + l);
 
         return getInstance(l.get(0).freeze(), true);
     }
@@ -57,61 +61,31 @@ public class SetType<T> extends CollectionType<Set<T>>
     public static <T> SetType<T> getInstance(AbstractType<T> elements, boolean isMultiCell)
     {
         ConcurrentHashMap<AbstractType<?>, SetType> internMap = isMultiCell ? instances : frozenInstances;
-        SetType<T> t = internMap.get(elements);
-        return null == t
-             ? internMap.computeIfAbsent(elements, k -> new SetType<>(k, isMultiCell))
-             : t;
-    }
-
-    @Override
-    public SetType<T> overrideKeyspace(Function<String, String> overrideKeyspace)
-    {
-        AbstractType<T> newType = elements.overrideKeyspace(overrideKeyspace);
-        if (newType == elements)
-            return this;
-
-        return getInstance(newType, isMultiCell());
+        return getInstance(internMap, elements, () -> new SetType<>(elements, isMultiCell));
     }
 
     public SetType(AbstractType<T> elements, boolean isMultiCell)
     {
-        super(ComparisonType.CUSTOM, Kind.SET);
-        this.elements = elements;
+        super(Kind.SET, isMultiCell, List.of(elements));
         this.serializer = SetSerializer.getInstance(elements.getSerializer(), elements.comparatorSet);
-        this.isMultiCell = isMultiCell;
     }
 
     @Override
-    public <V> boolean referencesUserType(V name, ValueAccessor<V> accessor)
+    public AbstractType<?> with(List<AbstractType<?>> subTypes, boolean isMultiCell)
     {
-        return elements.referencesUserType(name, accessor);
-    }
-
-    @Override
-    public SetType<?> withUpdatedUserType(UserType udt)
-    {
-        if (!referencesUserType(udt.name))
-            return this;
-
-        (isMultiCell ? instances : frozenInstances).remove(elements);
-
-        return getInstance(elements.withUpdatedUserType(udt), isMultiCell);
-    }
-
-    @Override
-    public AbstractType<?> expandUserTypes()
-    {
-        return getInstance(elements.expandUserTypes(), isMultiCell);
+        Preconditions.checkArgument(subTypes.size() == 1, "SetType should have exactly one parameter, got %s", subTypes);
+        return getInstance(subTypes.get(0), isMultiCell);
     }
 
     public AbstractType<T> getElementsType()
     {
-        return elements;
+        //noinspection unchecked
+        return (AbstractType<T>) subTypes.get(0);
     }
 
     public AbstractType<T> nameComparator()
     {
-        return elements;
+        return getElementsType();
     }
 
     public AbstractType<?> valueComparator()
@@ -120,47 +94,10 @@ public class SetType<T> extends CollectionType<Set<T>>
     }
 
     @Override
-    public boolean isMultiCell()
-    {
-        return isMultiCell;
-    }
-
-    @Override
-    public AbstractType<?> freeze()
-    {
-        // freeze elements to match org.apache.cassandra.cql3.CQL3Type.Raw.RawCollection.freeze
-        return isMultiCell ? getInstance(this.elements.freeze(), false) : this;
-    }
-
-    @Override
-    public AbstractType<?> unfreeze()
-    {
-        return isMultiCell ? this : getInstance(this.elements, true);
-    }
-
-    @Override
-    public List<AbstractType<?>> subTypes()
-    {
-        return Collections.singletonList(elements);
-    }
-
-    @Override
-    public AbstractType<?> freezeNestedMulticellTypes()
-    {
-        if (!isMultiCell())
-            return this;
-
-        if (elements.isFreezable() && elements.isMultiCell())
-            return getInstance(elements.freeze(), isMultiCell);
-
-        return getInstance(elements.freezeNestedMulticellTypes(), isMultiCell);
-    }
-
-    @Override
     public boolean isCompatibleWithFrozen(CollectionType<?> previous)
     {
-        assert !isMultiCell;
-        return this.elements.isCompatibleWith(((SetType<?>) previous).elements);
+        assert !isMultiCell();
+        return this.getElementsType().isCompatibleWith(((SetType<?>) previous).getElementsType());
     }
 
     @Override
@@ -172,7 +109,7 @@ public class SetType<T> extends CollectionType<Set<T>>
 
     public <VL, VR> int compareCustom(VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR)
     {
-        return compareListOrSet(elements, left, accessorL, right, accessorR);
+        return compareListOrSet(getElementsType(), left, accessorL, right, accessorR);
     }
 
     @Override
@@ -201,7 +138,7 @@ public class SetType<T> extends CollectionType<Set<T>>
         if (includeFrozenType)
             sb.append(FrozenType.class.getName()).append("(");
         sb.append(getClass().getName());
-        sb.append(TypeParser.stringifyTypeParameters(Collections.<AbstractType<?>>singletonList(elements), ignoreFreezing || !isMultiCell));
+        sb.append(TypeParser.stringifyTypeParameters(Collections.<AbstractType<?>>singletonList(getElementsType()), ignoreFreezing || !isMultiCell()));
         if (includeFrozenType)
             sb.append(")");
         return sb.toString();
@@ -231,16 +168,16 @@ public class SetType<T> extends CollectionType<Set<T>>
         {
             if (element == null)
                 throw new MarshalException("Invalid null element in set");
-            terms.add(elements.fromJSONObject(element));
+            terms.add(getElementsType().fromJSONObject(element));
         }
 
-        return new Sets.DelayedValue(elements, terms);
+        return new Sets.DelayedValue(getElementsType(), terms);
     }
 
     @Override
     public String toJSONString(ByteBuffer buffer, ProtocolVersion protocolVersion)
     {
-        return setOrListToJsonString(buffer, elements, protocolVersion);
+        return setOrListToJsonString(buffer, getElementsType(), protocolVersion);
     }
 
     @Override

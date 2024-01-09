@@ -17,11 +17,11 @@
  */
 package org.apache.cassandra.db.marshal;
 
-import java.nio.ByteBuffer;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -49,7 +49,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
  * Please note that this comparator shouldn't be used "manually" (as a custom
  * type for instance).
  */
-public abstract class CollectionType<T> extends AbstractType<T>
+public abstract class CollectionType<T> extends MultiCellCapableType<T>
 {
     public static CellPath.Serializer cellPathSerializer = new CollectionPathSerializer();
 
@@ -82,12 +82,13 @@ public abstract class CollectionType<T> extends AbstractType<T>
 
     public final Kind kind;
 
-    protected CollectionType(ComparisonType comparisonType, Kind kind)
+    protected CollectionType(Kind kind, boolean multiCell, List<AbstractType<?>> components)
     {
-        super(comparisonType);
+        super(multiCell, components);
         this.kind = kind;
     }
 
+    @Override
     public abstract AbstractType<?> nameComparator();
     public abstract AbstractType<?> valueComparator();
 
@@ -124,6 +125,7 @@ public abstract class CollectionType<T> extends AbstractType<T>
         }
     }
 
+    @Override
     public boolean isCollection()
     {
         return true;
@@ -235,6 +237,7 @@ public abstract class CollectionType<T> extends AbstractType<T>
     /** A version of isValueCompatibleWith() to deal with non-multicell (frozen) collections */
     protected abstract boolean isValueCompatibleWithFrozen(CollectionType<?> previous);
 
+    @Override
     public CQL3Type asCQL3Type()
     {
         return new CQL3Type.Collection(this);

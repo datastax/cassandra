@@ -30,7 +30,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
-import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,7 +52,6 @@ import org.apache.cassandra.utils.JsonUtils;
 import org.apache.cassandra.utils.Pair;
 
 import static com.google.common.collect.Iterables.any;
-import static com.google.common.collect.Iterables.transform;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TYPE_UDT_CONFLICT_BEHAVIOR;
 import static org.apache.cassandra.cql3.ColumnIdentifier.maybeQuote;
 
@@ -77,7 +75,7 @@ public class UserType extends TupleType implements SchemaElement
 
     public UserType(String keyspace, ByteBuffer name, List<FieldIdentifier> fieldNames, List<AbstractType<?>> fieldTypes, boolean isMultiCell)
     {
-        super(fieldTypes, false);
+        super(fieldTypes, isMultiCell);
         assert fieldNames.size() == fieldTypes.size();
         this.keyspace = keyspace;
         this.name = name;
@@ -97,14 +95,20 @@ public class UserType extends TupleType implements SchemaElement
         this.serializer = new UserTypeSerializer(fieldSerializers);
     }
 
+    @Override
+    public UserType with(List<AbstractType<?>> subTypes, boolean isMultiCell)
+    {
+        return new UserType(keyspace, name, fieldNames, subTypes, isMultiCell);
+    }
+
     public static UserType getInstance(TypeParser parser)
     {
-        Pair<Pair<String, ByteBuffer>, List<Pair<ByteBuffer, AbstractType>>> params = parser.getUserTypeParameters();
+        Pair<Pair<String, ByteBuffer>, List<Pair<ByteBuffer, AbstractType<?>>>> params = parser.getUserTypeParameters();
         String keyspace = params.left.left;
         ByteBuffer name = params.left.right;
         List<FieldIdentifier> columnNames = new ArrayList<>(params.right.size());
         List<AbstractType<?>> columnTypes = new ArrayList<>(params.right.size());
-        for (Pair<ByteBuffer, AbstractType> p : params.right)
+        for (Pair<ByteBuffer, AbstractType<?>> p : params.right)
         {
             columnNames.add(new FieldIdentifier(p.left));
             columnTypes.add(p.right);
@@ -120,7 +124,7 @@ public class UserType extends TupleType implements SchemaElement
         if (newKeyspace.equals(keyspace))
             return this;
 
-        return new UserType(newKeyspace, name, fieldNames, types.stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(Collectors.toList()), isMultiCell());
+        return new UserType(newKeyspace, name, fieldNames, subTypes.stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(Collectors.toList()), isMultiCell());
     }
 
     @Override
@@ -129,15 +133,10 @@ public class UserType extends TupleType implements SchemaElement
         return true;
     }
 
+    @Override
     public boolean isTuple()
     {
         return false;
-    }
-
-    @Override
-    public boolean isMultiCell()
-    {
-        return isMultiCell;
     }
 
     @Override
@@ -146,26 +145,31 @@ public class UserType extends TupleType implements SchemaElement
         return true;
     }
 
+    // TODO inline in a separate commit
     public AbstractType<?> fieldType(int i)
     {
         return type(i);
     }
 
+    // TODO inline in a separate commit
     public List<AbstractType<?>> fieldTypes()
     {
-        return types;
+        return subTypes;
     }
 
+    // TODO inline in a separate commit
     public FieldIdentifier fieldName(int i)
     {
         return fieldNames.get(i);
     }
 
+    // TODO inline in a separate commit
     public String fieldNameAsString(int i)
     {
         return stringFieldNames.get(i);
     }
 
+    // TODO inline in a separate commit
     public List<FieldIdentifier> fieldNames()
     {
         return fieldNames;
@@ -176,6 +180,7 @@ public class UserType extends TupleType implements SchemaElement
         return UTF8Type.instance.compose(name);
     }
 
+    // TODO inline in a separate commit
     public int fieldPosition(FieldIdentifier fieldName)
     {
         return fieldNames.indexOf(fieldName);
@@ -185,11 +190,6 @@ public class UserType extends TupleType implements SchemaElement
     {
         // we use the field position instead of the field name to allow for field renaming in ALTER TYPE statements
         return CellPath.create(ByteBufferUtil.bytes((short)fieldPosition(fieldName)));
-    }
-
-    public ShortType nameComparator()
-    {
-        return ShortType.instance;
     }
 
     public ByteBuffer serializeForNativeProtocol(Iterator<Cell<?>> cells, ProtocolVersion protocolVersion)
@@ -246,13 +246,13 @@ public class UserType extends TupleType implements SchemaElement
 
         JsonUtils.handleCaseSensitivity(map);
 
-        List<Term> terms = new ArrayList<>(types.size());
+        List<Term> terms = new ArrayList<>(subTypes.size());
 
-        Set keys = map.keySet();
-        assert keys.isEmpty() || keys.iterator().next() instanceof String;
+        Set<String> keys = map.keySet();
+        assert keys.isEmpty() || keys.iterator().next() != null;
 
         int foundValues = 0;
-        for (int i = 0; i < types.size(); i++)
+        for (int i = 0; i < subTypes.size(); i++)
         {
             Object value = map.get(stringFieldNames.get(i));
             if (value == null)
@@ -261,7 +261,7 @@ public class UserType extends TupleType implements SchemaElement
             }
             else
             {
-                terms.add(types.get(i).fromJSONObject(value));
+                terms.add(subTypes.get(i).fromJSONObject(value));
                 foundValues += 1;
             }
         }
@@ -269,7 +269,7 @@ public class UserType extends TupleType implements SchemaElement
         // check for extra, unrecognized fields
         if (foundValues != map.size())
         {
-            for (Object fieldName : keys)
+            for (String fieldName : keys)
             {
                 if (!stringFieldNames.contains(fieldName))
                     throw new MarshalException(String.format(
@@ -285,7 +285,7 @@ public class UserType extends TupleType implements SchemaElement
     {
         ByteBuffer[] buffers = split(ByteBufferAccessor.instance, buffer);
         StringBuilder sb = new StringBuilder("{");
-        for (int i = 0; i < types.size(); i++)
+        for (int i = 0; i < subTypes.size(); i++)
         {
             if (i > 0)
                 sb.append(", ");
@@ -302,7 +302,7 @@ public class UserType extends TupleType implements SchemaElement
             if (valueBuffer == null)
                 sb.append("null");
             else
-                sb.append(types.get(i).toJSONString(valueBuffer, protocolVersion));
+                sb.append(subTypes.get(i).toJSONString(valueBuffer, protocolVersion));
         }
         return sb.append("}").toString();
     }
@@ -310,33 +310,13 @@ public class UserType extends TupleType implements SchemaElement
     @Override
     public UserType freeze()
     {
-        return isMultiCell ? new UserType(keyspace, name, fieldNames, fieldTypes(), false) : this;
-    }
-
-    @Override
-    public UserType unfreeze()
-    {
-        return isMultiCell ? this : new UserType(keyspace, name, fieldNames, fieldTypes(), true);
-    }
-
-    @Override
-    public AbstractType<?> freezeNestedMulticellTypes()
-    {
-        if (!isMultiCell())
-            return this;
-
-        // the behavior here doesn't exactly match the method name: we want to freeze everything inside of UDTs
-        List<AbstractType<?>> newTypes = fieldTypes().stream()
-                .map(subtype -> (subtype.isFreezable() && subtype.isMultiCell() ? subtype.freeze() : subtype))
-                .collect(Collectors.toList());
-
-        return new UserType(keyspace, name, fieldNames, newTypes, isMultiCell);
+        return (UserType) super.freeze();
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(keyspace, name, fieldNames, types, isMultiCell);
+        return Objects.hashCode(keyspace, name, fieldNames, subTypes, isMultiCell);
     }
 
     @Override
@@ -355,8 +335,8 @@ public class UserType extends TupleType implements SchemaElement
         if (!keyspace.equals(other.keyspace))
             return false;
 
-        Iterator<AbstractType<?>> thisTypeIter = types.iterator();
-        Iterator<AbstractType<?>> previousTypeIter = other.types.iterator();
+        Iterator<AbstractType<?>> thisTypeIter = subTypes.iterator();
+        Iterator<AbstractType<?>> previousTypeIter = other.subTypes.iterator();
         while (thisTypeIter.hasNext() && previousTypeIter.hasNext())
         {
             if (!thisTypeIter.next().isCompatibleWith(previousTypeIter.next()))
@@ -375,7 +355,7 @@ public class UserType extends TupleType implements SchemaElement
 
         UserType that = (UserType)o;
 
-        return equalsWithoutTypes(that) && types.equals(that.types);
+        return equalsWithoutTypes(that) && subTypes.equals(that.subTypes);
     }
 
     private boolean equalsWithoutTypes(UserType other)
@@ -425,28 +405,15 @@ public class UserType extends TupleType implements SchemaElement
     @Override
     public UserType withUpdatedUserType(UserType udt)
     {
-        if (!referencesUserType(udt.name))
-            return this;
+        // If we're not the UDT to update, we can rely on the default implementation
+        if (!name.equals(udt.name))
+            return (UserType) super.withUpdatedUserType(udt);
 
-        // preserve frozen/non-frozen status of the updated UDT
-        if (name.equals(udt.name))
-        {
-            return isMultiCell == udt.isMultiCell
-                 ? udt
-                 : new UserType(udt.keyspace, name, udt.fieldNames(), udt.fieldTypes(), isMultiCell);
-        }
-
-        return new UserType(udt.keyspace,
-                            name,
-                            fieldNames,
-                            Lists.newArrayList(transform(fieldTypes(), t -> t.withUpdatedUserType(udt))),
-                            isMultiCell());
-    }
-
-    @Override
-    public boolean referencesDuration()
-    {
-        return fieldTypes().stream().anyMatch(f -> f.referencesDuration());
+        // TODO reinvestiate this method
+        assert udt.isMultiCell();
+        // The type we're updating may be frozen, while the updated user type will never be (a UDT is never frozen in
+        // its definition, only in its use). So if we are frozen, we should freeze the UDT we switch to.
+        return isMultiCell() ? udt : udt.freeze();
     }
 
     @Override
@@ -464,7 +431,7 @@ public class UserType extends TupleType implements SchemaElement
         if (includeFrozenType)
             sb.append(FrozenType.class.getName()).append("(");
         sb.append(getClass().getName());
-        sb.append(TypeParser.stringifyUserTypeParameters(keyspace, name, fieldNames, types, ignoreFreezing || !isMultiCell));
+        sb.append(TypeParser.stringifyUserTypeParameters(keyspace, name, fieldNames, subTypes, ignoreFreezing || !isMultiCell));
         if (includeFrozenType)
             sb.append(")");
         return sb.toString();
