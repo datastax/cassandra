@@ -167,15 +167,6 @@ public abstract class Threshold extends Guardrail
             triggerWarn(value, warnValue, what, containsUserData);
     }
 
-    // FIXME STAR-543: this method is a hack for GuardedCounter to avoid having to pass a ClientState
-    // because when GuardedCounter is used in ReadCommand, we don't have a ClientState. Without a 
-    // ClientState, e.g. using 'null', the guardrail will be considered disabled.
-    // Also this only works because the #fail method below only checks that state != null.
-    // Having this method varient makes tests in TombstonesTest pass.
-    private void triggerFail(long value, long failValue, String what, boolean containsUserData)
-    {
-        triggerFail(value, failValue, what, containsUserData, ClientState.forInternalCalls());
-    }
     private void triggerFail(long value, long failValue, String what, boolean containsUserData, ClientState state)
     {
         String fullMessage = errMsg(false, what, value, failValue);
@@ -268,7 +259,11 @@ public abstract class Threshold extends Guardrail
         {
             accumulated += increment;
             if (accumulated > failValue)
-                triggerFail(accumulated, failValue, what.get(), containsUserData);
+            {
+                // Pass any ClientState so GuardrailViolatedException will be thrown by Guardrail#fail
+                ClientState dummyClientState = ClientState.forInternalCalls();
+                triggerFail(accumulated, failValue, what.get(), containsUserData, dummyClientState);
+            }
         }
 
         /**
