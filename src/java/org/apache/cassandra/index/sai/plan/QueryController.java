@@ -484,7 +484,7 @@ public class QueryController
         queryContext.setSoftLimit(limit);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-//        RangeIterator memtableResults = this.getContext(expression).limitToTopResults(queryContext, sourceKeys, planExpression, limit);
+        List<OrderIterator> memtableResults = this.getContext(expression).limitToTopResults(queryContext, sourceKeys, planExpression, limit);
         var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
 
         try
@@ -495,7 +495,9 @@ public class QueryController
                                                                          return reorderAndLimitBySSTableRowIds(sourceKeys, e, limit).stream();
                                                                      })
                                                                                        .collect(Collectors.toList());
-//            sstableIntersections.addAll(memtableResults);
+            sstableIntersections.addAll(memtableResults);
+            if (sstableIntersections.isEmpty())
+                return Collections.emptyList();
             return sstableIntersections;
         }
         catch (Throwable t)
