@@ -604,6 +604,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         graph.close();
     }
 
+    // TODO fix name or find better model.
     private static class BitsOrPostingList
     {
         public static final BitsOrPostingList ALL_BITS = new BitsOrPostingList(Bits.ALL, null);
@@ -649,7 +650,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
         public boolean skipANN()
         {
-            return postingList != null;
+            return postingList != null || scores != null;
         }
 
         public void updateStatistics(int visitedCount)
