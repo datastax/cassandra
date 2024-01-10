@@ -315,6 +315,8 @@ public class VectorMemtableIndex implements MemtableIndex
         for (var key : keys)
         {
             float[] vector = graph.vectorForKey(key);
+            if (vector == null)
+                continue;
             var score = similarityFunction.compare(queryVector, vector);
             pairs.add(new ScoredPrimaryKey(key, score));
         }
