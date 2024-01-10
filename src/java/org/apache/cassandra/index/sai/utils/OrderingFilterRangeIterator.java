@@ -21,10 +21,13 @@ package org.apache.cassandra.index.sai.utils;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Function;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * An iterator that consumes a chunk of {@link PrimaryKey}s from the {@link RangeIterator}, passes them to the
@@ -32,13 +35,13 @@ import org.apache.cassandra.io.util.FileUtils;
  * The PKs are currently returned in {@link PrimaryKey} order, but that contract may change.
  */
 @NotThreadSafe
-public class OrderingFilterRangeIterator implements Iterator<List<OrderIterator>>, AutoCloseable
+public class OrderingFilterRangeIterator implements Iterator<Pair<List<OrderIterator>, Set<SSTableIndex>>>, AutoCloseable
 {
     private final RangeIterator input;
     private final int chunkSize;
-    private final Function<List<PrimaryKey>, List<OrderIterator>> nextRangeFunction;
+    private final Function<List<PrimaryKey>, Pair<List<OrderIterator>, Set<SSTableIndex>>> nextRangeFunction;
 
-    public OrderingFilterRangeIterator(RangeIterator input, int chunkSize, Function<List<PrimaryKey>, List<OrderIterator>> nextRangeFunction)
+    public OrderingFilterRangeIterator(RangeIterator input, int chunkSize, Function<List<PrimaryKey>, Pair<List<OrderIterator>, Set<SSTableIndex>>> nextRangeFunction)
     {
         this.input = input;
         this.chunkSize = chunkSize;
@@ -52,7 +55,7 @@ public class OrderingFilterRangeIterator implements Iterator<List<OrderIterator>
     }
 
     @Override
-    public List<OrderIterator> next()
+    public Pair<List<OrderIterator>, Set<SSTableIndex>> next()
     {
         List<PrimaryKey> nextKeys = new ArrayList<>(chunkSize);
         do

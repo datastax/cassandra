@@ -309,8 +309,30 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private ScoredRowIdIterator bruteForceOrdering(float[] queryVector, IntArrayList segmentRowIds, int topK) throws IOException
     {
         var cv = graph.getCompressedVectors();
-        if (cv == null || segmentRowIds.size() <= topK)
-            return null;
+        if (cv == null)
+        {
+            // TODO this seems potentially expensive. Does this change the cost estimate?
+            var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
+
+            PriorityQueue<ScoredRowId> pairs = new PriorityQueue<>(segmentRowIds.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
+            try (var ordinalsView = graph.getOrdinalsView())
+            {
+                for (int i = 0; i < segmentRowIds.size(); i++)
+                {
+                    int segmentRowId = segmentRowIds.getInt(i);
+                    int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
+                    if (ordinal < 0)
+                        continue;
+
+                    float[] vector = graph.getVectorForOrdinal(ordinal);
+                    if (vector == null)
+                        continue;
+                    var score = similarityFunction.compare(queryVector, vector);
+                    pairs.add(new ScoredRowId(segmentRowId, score));
+                }
+            }
+            return new PriorityQueueScoredRowIdIterator(pairs);
+        }
 
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         var scoreFunction = cv.approximateScoreFunctionFor(queryVector, similarityFunction);

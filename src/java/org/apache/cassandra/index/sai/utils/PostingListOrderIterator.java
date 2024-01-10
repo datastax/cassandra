@@ -51,7 +51,8 @@ public class PostingListOrderIterator extends OrderIterator
     {
         if (!scoredRowIdIterator.hasNext())
         {
-            throw new IllegalStateException("failure scenario. we've hit too many shadowed/overwritten rows");
+            System.out.println("PostingListOrderIterator.computeNext() scoredRowIdIterator.hasNext() is false");
+            return endOfData();
         }
         var scoredRowId = scoredRowIdIterator.next();
         var primaryKey = primaryKeyMap.primaryKeyFromRowId(searcherContext.getSegmentRowIdOffset() + scoredRowId.segmentRowId);

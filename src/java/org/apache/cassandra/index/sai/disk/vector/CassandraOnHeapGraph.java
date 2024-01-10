@@ -159,6 +159,17 @@ public class CassandraOnHeapGraph<T>
         }
 
         var bytesUsed = 0L;
+
+        // Store a cached reference to the vector for brute force computations later.
+        // TODO is the race condition here reasonable? Two writes might result in inconsistent views in the
+        // different maps.
+        if (cacheVectors)
+        {
+            vectorCache.put(key, vector);
+            // TODO is this correct?
+            bytesUsed += RamUsageEstimator.NUM_BYTES_OBJECT_REF * 2L;
+        }
+
         VectorPostings<T> postings = postingsMap.get(vector);
         // if the vector is already in the graph, all that happens is that the postings list is updated
         // otherwise, we add the vector in this order:
@@ -192,13 +203,6 @@ public class CassandraOnHeapGraph<T>
         if (postings.add(key))
         {
             bytesUsed += VectorPostings.bytesPerPosting();
-        }
-
-        if (cacheVectors)
-        {
-            vectorCache.put(key, vector);
-            // TODO is this correct?
-            bytesUsed += RamUsageEstimator.NUM_BYTES_OBJECT_REF * 2L;
         }
 
         return bytesUsed;
@@ -269,6 +273,8 @@ public class CassandraOnHeapGraph<T>
 
         hasDeletions = true;
         postings.remove(key);
+        if (cacheVectors)
+            vectorCache.remove(key);
     }
 
     /**

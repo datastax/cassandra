@@ -18,9 +18,12 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.PriorityQueue;
+import java.util.Set;
 
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.io.util.FileUtils;
 
 public class MergeOrderIterator extends OrderIterator
@@ -28,9 +31,10 @@ public class MergeOrderIterator extends OrderIterator
     private final PriorityQueue<OrderIterator> pq;
     // Defer closing the iterators because the PKs might be materialized after this.
     // todo should we just force load here to close earlier?
-    private final List<OrderIterator> toBeClosed;
+    private final List<OrderIterator> iteratorsToBeClosed;
+    private final Collection<SSTableIndex> indexesToBeClosed;
 
-    public MergeOrderIterator(List<OrderIterator> iterators)
+    public MergeOrderIterator(List<OrderIterator> iterators, Collection<SSTableIndex> referencedIndexes)
     {
         // todo we need a "better" priority queue??
         assert !iterators.isEmpty();
@@ -38,7 +42,8 @@ public class MergeOrderIterator extends OrderIterator
         for (OrderIterator iterator : iterators)
             if (iterator.hasNext())
                 pq.add(iterator);
-        toBeClosed = iterators;
+        iteratorsToBeClosed = iterators;
+        indexesToBeClosed = referencedIndexes;
     }
     @Override
     protected ScoredPrimaryKey computeNext()
@@ -55,7 +60,9 @@ public class MergeOrderIterator extends OrderIterator
     @Override
     public void close()
     {
-        for (OrderIterator iterator : toBeClosed)
+        for (OrderIterator iterator : iteratorsToBeClosed)
             FileUtils.closeQuietly(iterator);
+        for (SSTableIndex index : indexesToBeClosed)
+            index.release();
     }
 }

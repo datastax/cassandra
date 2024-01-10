@@ -29,6 +29,7 @@ import javax.annotation.Nullable;
 
 import io.github.jbellis.jvector.disk.CachingGraphIndex;
 import io.github.jbellis.jvector.disk.OnDiskGraphIndex;
+import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.NodeSimilarity;
 import io.github.jbellis.jvector.graph.SearchResult;
@@ -63,6 +64,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final CachingGraphIndex graph;
+    private final GraphIndex.View<float[]> view;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
@@ -76,6 +78,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         SegmentMetadata.ComponentMetadata termsMetadata = getComponentMetadata(IndexComponent.TERMS_DATA);
         graphHandle = indexFiles.termsData();
         graph = new CachingGraphIndex(new OnDiskGraphIndex<>(graphHandle::createReader, termsMetadata.offset));
+        view = graph.getView();
 
         long pqSegmentOffset = getComponentMetadata(IndexComponent.PQ).offset;
         try (var pqFile = indexFiles.pq();
@@ -309,5 +312,11 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     public OrdinalsView getOrdinalsView()
     {
         return ordinalsMap.getOrdinalsView();
+    }
+
+    @Override
+    public float[] getVectorForOrdinal(int ordinal)
+    {
+        return view.getVector(ordinal);
     }
 }

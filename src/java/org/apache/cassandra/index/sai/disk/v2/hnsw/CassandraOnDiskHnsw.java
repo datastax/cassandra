@@ -280,6 +280,12 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     }
 
     @Override
+    public float[] getVectorForOrdinal(int ordinal) throws IOException
+    {
+        return vectorCache.get(ordinal);
+    }
+
+    @Override
     public CompressedVectors getCompressedVectors()
     {
         return null;

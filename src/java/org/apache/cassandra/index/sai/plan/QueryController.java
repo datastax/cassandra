@@ -445,7 +445,7 @@ public class QueryController
             sstableIntersections.addAll(memtableResults);
             if (sstableIntersections.isEmpty())
                 return OrderIterator.empty();
-            return new MergeOrderIterator(sstableIntersections);
+            return new MergeOrderIterator(sstableIntersections, queryView.referencedIndexes);
         }
         catch (Throwable t)
         {
@@ -458,25 +458,30 @@ public class QueryController
     // This is a hybrid query. We apply all other predicates before ordering and limiting.
     public OrderIterator getTopKRows(RangeIterator source, RowFilter.Expression expression)
     {
-        List<OrderIterator> pqs = new ArrayList<>();
+        List<OrderIterator> orderIterators = new ArrayList<>();
+        List<SSTableIndex> indexesToRelease = new ArrayList<>();
         try (var iter = new OrderingFilterRangeIterator(source, ORDER_CHUNK_SIZE, list -> this.getTopKRows(list, expression)))
         {
             while (iter.hasNext())
-                pqs.addAll(iter.next());
+            {
+                var next = iter.next();
+                orderIterators.addAll(next.left());
+                indexesToRelease.addAll(next.right());
+            }
         }
-        if (pqs.isEmpty())
+        if (orderIterators.isEmpty())
             return OrderIterator.empty();
-        return new MergeOrderIterator(pqs);
+        return new MergeOrderIterator(orderIterators, indexesToRelease);
     }
 
-    private List<OrderIterator> getTopKRows(List<PrimaryKey> rawSourceKeys, RowFilter.Expression expression)
+    // TODO figure out better way to encapsulate
+    private Pair<List<OrderIterator>, Set<SSTableIndex>> getTopKRows(List<PrimaryKey> sourceKeys, RowFilter.Expression expression)
     {
-        Tracing.logAndTrace(logger, "SAI predicates produced {} keys", rawSourceKeys.size());
+        Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
 
         // Filter out PKs now. Each PK is passed to every segment of the ANN index, so filtering shadowed keys
         // eagerly can save some work when going from PK to row id for on disk segments.
         // Since the result is shared with multiple streams, we use an unmodifiable list.
-        var sourceKeys = rawSourceKeys.stream().filter(queryContext::shouldInclude).collect(Collectors.toList());
         var planExpression = new Expression(this.getContext(expression));
         planExpression.add(Operator.ANN, expression.getIndexValue().duplicate());
 
@@ -490,15 +495,13 @@ public class QueryController
         try
         {
             List<OrderIterator> sstableIntersections = queryView.view.values()
-                                                                                       .stream()
-                                                                                       .flatMap(e -> {
-                                                                         return reorderAndLimitBySSTableRowIds(sourceKeys, e, limit).stream();
-                                                                     })
-                                                                                       .collect(Collectors.toList());
+                                                                     .stream()
+                                                                     .flatMap(e -> reorderAndLimitBySSTableRowIds(sourceKeys, e, limit).stream())
+                                                                     .collect(Collectors.toList());
             sstableIntersections.addAll(memtableResults);
             if (sstableIntersections.isEmpty())
-                return Collections.emptyList();
-            return sstableIntersections;
+                return Pair.create(Collections.emptyList(), Collections.emptySet());
+            return Pair.create(sstableIntersections, queryView.referencedIndexes);
         }
         catch (Throwable t)
         {
