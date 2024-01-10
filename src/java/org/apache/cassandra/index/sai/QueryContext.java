@@ -66,6 +66,7 @@ public class QueryContext
     private final LongAdder annNodesVisited = new LongAdder();
 
     private final LongAdder shadowedKeysLoopCount = new LongAdder();
+    // TODO do we need to track these any more?
     private final NavigableSet<PrimaryKey> shadowedPrimaryKeys = new ConcurrentSkipListSet<>();
 
     // Total count of rows in all sstables and memtables.

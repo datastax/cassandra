@@ -203,6 +203,8 @@ public class VectorTopKProcessor
                     PartitionResults pr = processPartition(iter, iter.scoredPrimaryKey, retriever.updatedKeys);
                     if (pr == null)
                         continue;
+                    if (!retriever.updatedKeys.isEmpty())
+                        retriever.updatedKeys.remove(iter.scoredPrimaryKey);
                     topK.addAll(pr.rows);
                     for (var uf : pr.tombstones)
                         addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);

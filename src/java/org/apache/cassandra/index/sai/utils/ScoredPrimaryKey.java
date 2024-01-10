@@ -96,6 +96,9 @@ public class ScoredPrimaryKey implements PrimaryKey
     @Override
     public int hashCode()
     {
+        // We do not want the score to affect the hash code because
+        // the same Primary Key could have different scores depending
+        // on the source sstable/index.
         return primaryKey.hashCode();
     }
 

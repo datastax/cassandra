@@ -63,6 +63,7 @@ import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.OrderIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.MergeOrderIterator;
 import org.apache.cassandra.io.util.FileUtils;
@@ -584,10 +585,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     public static class ScoreOrderedResultRetriever extends AbstractIterator<UnfilteredRowIterator>
     implements UnfilteredPartitionIterator//, ParallelCommandProcessor
     {
-        private final PrimaryKey firstPrimaryKey;
-        private final Iterator<DataRange> keyRanges;
-        private AbstractBounds<PartitionPosition> currentKeyRange;
-
+        private final List<AbstractBounds<PartitionPosition>> keyRanges;
+        private final boolean coversFullRing;
         private final OrderIterator orderIterator;
         private final FilterTree filterTree;
         private final QueryController controller;
@@ -605,9 +604,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                             ReadExecutionController executionController,
                                             QueryContext queryContext, boolean topK)
         {
-            // todo handle key ranges better
-            this.keyRanges = controller.dataRanges().iterator();
-            this.currentKeyRange = keyRanges.next().keyRange();
+            this.keyRanges = controller.dataRanges().stream().map(DataRange::keyRange).collect(Collectors.toList());
+            this.coversFullRing = keyRanges.size() == 1 && RangeUtil.coversFullRing(keyRanges.get(0));
 
             this.orderIterator = orderIterator;
             this.filterTree = filterTree;
@@ -617,7 +615,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.keyFactory = controller.primaryKeyFactory();
             this.topK = topK;
 
-            this.firstPrimaryKey = controller.firstPrimaryKey();
             this.keysSeen = new HashSet<>();
             this.updatedKeys = new HashSet<>();
         }
@@ -711,25 +708,20 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 //        }
 
         /**
-         * Returns the next available key contained by one of the keyRanges.
-         * If the next key falls out of the current key range, it skips to the next key range, and so on.
-         * If no more keys or no more ranges are available, returns null.
+         * Determine if the key is in one of the queried key ranges. We do not iterate through results in
+         * {@link PrimaryKey} order, so we have to check each range.
+         * @param key
+         * @return true if the key is in one of the queried key ranges
          */
-        private @Nullable ScoredPrimaryKey nextKeyInRange()
+        private boolean isInRange(DecoratedKey key)
         {
-            ScoredPrimaryKey key;
+            if (coversFullRing)
+                return true;
 
-            while ((key = nextKey()) != null && !(currentKeyRange.contains(key.partitionKey())))
-            {
-                if (!currentKeyRange.right.isMinimum() && currentKeyRange.right.compareTo(key.partitionKey()) <= 0)
-                {
-                    // currentKeyRange before the currentKey so need to move currentKeyRange forward
-                    currentKeyRange = nextKeyRange();
-                    if (currentKeyRange == null)
-                        return null;
-                }
-            }
-            return key;
+            for (AbstractBounds<PartitionPosition> range : keyRanges)
+                if (range.contains(key))
+                    return true;
+            return false;
         }
 
         /**
@@ -739,101 +731,14 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
          */
         private @Nullable ScoredPrimaryKey nextSelectedKeyInRange()
         {
-            ScoredPrimaryKey key;
-            do
+            while (orderIterator.hasNext())
             {
-                key = nextKeyInRange();
+                ScoredPrimaryKey key = orderIterator.next();
+                if (isInRange(key.partitionKey()) && controller.selects(key))
+                    return key;
             }
-            while (key != null && !controller.selects(key));
-            return key;
+            return null;
         }
-
-        /**
-         * Retrieves the next primary key that belongs to the given partition and is selected by the query controller.
-         * The underlying key iterator is advanced only if the key belongs to the same partition.
-         * <p>
-         * Returns null if:
-         * <ul>
-         *   <li>there are no more keys</li>
-         *   <li>the next key is beyond the upper bound</li>
-         *   <li>the next key belongs to a different partition</li>
-         * </ul>
-         * </p>
-         */
-        private @Nullable PrimaryKey nextSelectedKeyInPartition()
-        {
-            PrimaryKey key;
-            while ((key = nextKey()) != null)
-                if (controller.selects(key))
-                    break;
-            return key;
-        }
-
-        /**
-         * Gets the next key from the underlying operation.
-         * Returns null if there are no more keys <= lastPrimaryKey.
-         */
-        private @Nullable ScoredPrimaryKey nextKey()
-        {
-            return orderIterator.hasNext() ? orderIterator.next() : null;
-        }
-
-        /**
-         * Gets the next key range from the underlying range iterator.
-         */
-        private @Nullable AbstractBounds<PartitionPosition> nextKeyRange()
-        {
-            return keyRanges.hasNext() ? keyRanges.next().keyRange() : null;
-        }
-
-
-//        /**
-//         * Returns an iterator over the rows in the partition associated with the given iterator.
-//         * Initially, it retrieves the rows from the given iterator until it runs out of data.
-//         * Then it iterates the primary keys obtained from the index until the end of the partition
-//         * and lazily constructs new row itertors for each of the key. At a given time, only one row iterator is open.
-//         *
-//         * The rows are retrieved in the order of primary keys provided by the underlying index.
-//         * The iterator is complete when the next key to be fetched belongs to different partition
-//         * (but the iterator does not consume that key).
-//         *
-//         * @param startIter an iterator positioned at the first row in the partition that we want to return
-//         */
-//        private @Nonnull UnfilteredRowIterator iteratePartition(@Nonnull UnfilteredRowIterator startIter)
-//        {
-//            return new AbstractUnfilteredRowIterator(
-//            startIter.metadata(),
-//            startIter.partitionKey(),
-//            startIter.partitionLevelDeletion(),
-//            startIter.columns(),
-//            startIter.staticRow(),
-//            startIter.isReverseOrder(),
-//            startIter.stats())
-//            {
-//                private UnfilteredRowIterator currentIter = startIter;
-//                private final DecoratedKey partitionKey = startIter.partitionKey();
-//
-//                @Override
-//                protected Unfiltered computeNext()
-//                {
-//                    while (!currentIter.hasNext())
-//                    {
-//                        currentIter.close();
-//                        currentIter = nextRowIterator(() -> nextSelectedKeyInPartition(partitionKey));
-//                        if (currentIter == null)
-//                            return endOfData();
-//                    }
-//                    return currentIter.next();
-//                }
-//
-//                @Override
-//                public void close()
-//                {
-//                    FileUtils.closeQuietly(currentIter);
-//                    super.close();
-//                }
-//            };
-//        }
 
         public UnfilteredRowIterator apply(ScoredPrimaryKey key)
         {
