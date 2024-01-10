@@ -18,18 +18,17 @@
 
 package org.apache.cassandra.index.sai.disk;
 
-import java.util.Iterator;
-import java.util.List;
+import java.util.PriorityQueue;
 
 import org.apache.cassandra.index.sai.utils.ScoredRowId;
 import org.apache.cassandra.index.sai.utils.ScoredRowIdIterator;
 
-public class BruteForceScoredRowIdIterator implements ScoredRowIdIterator
+public class PriorityQueueScoredRowIdIterator implements ScoredRowIdIterator
 {
-    private final Iterator<ScoredRowId> scoredRowIdIterator;
-    public BruteForceScoredRowIdIterator(List<ScoredRowId> scoredRowIds)
+    private final PriorityQueue<ScoredRowId> scoredRowIdIterator;
+    public PriorityQueueScoredRowIdIterator(PriorityQueue<ScoredRowId> scoredRowIds)
     {
-        scoredRowIdIterator = scoredRowIds.iterator();
+        scoredRowIdIterator = scoredRowIds;
     }
 
     @Override
@@ -38,12 +37,12 @@ public class BruteForceScoredRowIdIterator implements ScoredRowIdIterator
     @Override
     public boolean hasNext()
     {
-        return scoredRowIdIterator.hasNext();
+        return scoredRowIdIterator.peek() != null;
     }
 
     @Override
     public ScoredRowId next()
     {
-        return scoredRowIdIterator.next();
+        return scoredRowIdIterator.poll();
     }
 }

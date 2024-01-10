@@ -269,7 +269,7 @@ public class QueryController
                              .rangeIterator(this);
     }
 
-    public MergeOrderIterator buildScoredPriorityQueue()
+    public OrderIterator buildScoredPriorityQueue()
     {
         var filterOperation = filterOperation();
         var orderings = filterOperation.expressions()
@@ -420,7 +420,7 @@ public class QueryController
     }
 
     // This is an ANN only query
-    public MergeOrderIterator getTopKRows(RowFilter.Expression expression)
+    public OrderIterator getTopKRows(RowFilter.Expression expression)
     {
         assert expression.operator() == Operator.ANN;
         var planExpression = new Expression(getContext(expression))
@@ -443,6 +443,8 @@ public class QueryController
                                                                      .flatMap(e -> createRowIdIterator(e, limit).stream())
                                                                      .collect(Collectors.toList());
             sstableIntersections.addAll(memtableResults);
+            if (sstableIntersections.isEmpty())
+                return OrderIterator.empty();
             return new MergeOrderIterator(sstableIntersections);
         }
         catch (Throwable t)
@@ -454,7 +456,7 @@ public class QueryController
     }
 
     // This is a hybrid query. We apply all other predicates before ordering and limiting.
-    public MergeOrderIterator getTopKRows(RangeIterator source, RowFilter.Expression expression)
+    public OrderIterator getTopKRows(RangeIterator source, RowFilter.Expression expression)
     {
         List<OrderIterator> pqs = new ArrayList<>();
         try (var iter = new OrderingFilterRangeIterator(source, ORDER_CHUNK_SIZE, list -> this.getTopKRows(list, expression)))
@@ -462,6 +464,8 @@ public class QueryController
             while (iter.hasNext())
                 pqs.addAll(iter.next());
         }
+        if (pqs.isEmpty())
+            return OrderIterator.empty();
         return new MergeOrderIterator(pqs);
     }
 

@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.PriorityQueue;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
@@ -38,7 +39,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.disk.BruteForceScoredRowIdIterator;
+import org.apache.cassandra.index.sai.disk.PriorityQueueScoredRowIdIterator;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
@@ -230,7 +231,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 }
                 if (giveMeScores)
                 {
-                    return new BitsOrPostingList(rankme(queryVector, segmentRowIds, topK));
+                    return new BitsOrPostingList(bruteForceOrdering(queryVector, segmentRowIds, topK));
                 }
                 var postings = findTopApproximatePostings(queryVector, segmentRowIds, topK);
                 return new BitsOrPostingList(new ArrayPostingList(postings));
@@ -305,7 +306,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         return postings;
     }
 
-    private ScoredRowIdIterator rankme(float[] queryVector, IntArrayList segmentRowIds, int topK) throws IOException
+    private ScoredRowIdIterator bruteForceOrdering(float[] queryVector, IntArrayList segmentRowIds, int topK) throws IOException
     {
         var cv = graph.getCompressedVectors();
         if (cv == null || segmentRowIds.size() <= topK)
@@ -314,7 +315,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         var scoreFunction = cv.approximateScoreFunctionFor(queryVector, similarityFunction);
 
-        ArrayList<ScoredRowId> pairs = new ArrayList<>(segmentRowIds.size());
+        PriorityQueue<ScoredRowId> pairs = new PriorityQueue<>(segmentRowIds.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
         try (var ordinalsView = graph.getOrdinalsView())
         {
             for (int i = 0; i < segmentRowIds.size(); i++)
@@ -328,9 +329,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 pairs.add(new ScoredRowId(segmentRowId, score));
             }
         }
-        // sort descending
-        pairs.sort((a, b) -> Float.compare(b.getScore(), a.getScore()));
-        return new BruteForceScoredRowIdIterator(pairs);
+        return new PriorityQueueScoredRowIdIterator(pairs);
     }
 
     private long getMaxSSTableRowId(PrimaryKeyMap primaryKeyMap, PartitionPosition right)
@@ -550,7 +549,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             // brute force using the in-memory compressed vectors to cut down the number of results returned
             var queryVector = exp.lower.value.vector;
-            return toScoreOrderedIterator(rankme(queryVector, rowIds, topK), context);
+            return toScoreOrderedIterator(bruteForceOrdering(queryVector, rowIds, topK), context);
         }
         // else ask the index to perform a search limited to the bits we created
         float[] queryVector = exp.lower.value.vector;

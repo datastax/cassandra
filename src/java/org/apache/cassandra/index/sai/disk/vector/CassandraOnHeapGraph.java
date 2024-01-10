@@ -20,11 +20,14 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -34,6 +37,7 @@ import java.util.stream.IntStream;
 
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
+import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.cliffc.high_scale_lib.NonBlockingHashMapLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +48,7 @@ import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.NodeSimilarity;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
+import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.pq.BQVectors;
 import io.github.jbellis.jvector.pq.BinaryQuantization;
 import io.github.jbellis.jvector.pq.CompressedVectors;
@@ -51,6 +56,7 @@ import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.pq.ProductQuantization;
 import io.github.jbellis.jvector.pq.VectorCompressor;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.VectorEncoding;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -63,7 +69,11 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
+import org.apache.cassandra.index.sai.utils.ListOrderIterator;
+import org.apache.cassandra.index.sai.utils.OrderIterator;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -80,6 +90,8 @@ public class CassandraOnHeapGraph<T>
     private final VectorSimilarityFunction similarityFunction;
     private final ConcurrentMap<float[], VectorPostings<T>> postingsMap;
     private final NonBlockingHashMapLong<VectorPostings<T>> postingsByOrdinal;
+    private final NonBlockingHashMap<T, float[]> vectorCache;
+    private final boolean cacheVectors;
     private final AtomicInteger nextOrdinal = new AtomicInteger();
     private volatile boolean hasDeletions;
 
@@ -87,7 +99,7 @@ public class CassandraOnHeapGraph<T>
      * @param termComparator the vector type -- passed as AbstractType for caller's convenience
      * @param indexWriterConfig
      */
-    public CassandraOnHeapGraph(AbstractType<?> termComparator, IndexWriterConfig indexWriterConfig)
+    public CassandraOnHeapGraph(AbstractType<?> termComparator, IndexWriterConfig indexWriterConfig, boolean shouldCacheVectors)
     {
         serializer = (VectorType.VectorSerializer)termComparator.getSerializer();
         vectorValues = new ConcurrentVectorValues(((VectorType<?>) termComparator).dimension);
@@ -98,6 +110,8 @@ public class CassandraOnHeapGraph<T>
         // is thus a better option than hash-based (which has to look at all elements to compute the hash).
         postingsMap = new ConcurrentSkipListMap<>(Arrays::compare);
         postingsByOrdinal = new NonBlockingHashMapLong<>();
+        cacheVectors = shouldCacheVectors;
+        vectorCache = cacheVectors ? new NonBlockingHashMap<>() : null;
 
         builder = new GraphIndexBuilder<>(vectorValues,
                                           VectorEncoding.FLOAT32,
@@ -180,6 +194,13 @@ public class CassandraOnHeapGraph<T>
             bytesUsed += VectorPostings.bytesPerPosting();
         }
 
+        if (cacheVectors)
+        {
+            vectorCache.put(key, vector);
+            // TODO is this correct?
+            bytesUsed += RamUsageEstimator.NUM_BYTES_OBJECT_REF * 2L;
+        }
+
         return bytesUsed;
     }
 
@@ -225,9 +246,11 @@ public class CassandraOnHeapGraph<T>
         return postingsByOrdinal.get(node).getPostings();
     }
 
-    public float[] vectorFromOrdinal(int node)
+    public float[] vectorForKey(T node)
     {
-        return vectorValues.vectorValue(node);
+        if (!cacheVectors)
+            throw new UnsupportedOperationException("Cannot retrieve vectors when cacheVectors is false");
+        return vectorCache.get(node);
     }
 
     public void remove(ByteBuffer term, T key)
@@ -278,6 +301,30 @@ public class CassandraOnHeapGraph<T>
             keyQueue.addAll(keys);
         }
         return keyQueue;
+    }
+
+    /**
+     * @return keys (PrimaryKey or segment row id) associated with the topK vectors near the query
+     */
+    public SearchResult searchTopK(float[] queryVector, int limit, Bits toAccept)
+    {
+        validateIndexable(queryVector, similarityFunction);
+
+        // search() errors out when an empty graph is passed to it
+        if (vectorValues.size() == 0)
+            return null;
+
+        Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
+        // VSTODO re-use searcher objects
+        GraphIndex<float[]> graph = builder.getGraph();
+        var searcher = new GraphSearcher.Builder<>(graph.getView()).withConcurrentUpdates().build();
+        NodeSimilarity.ExactScoreFunction scoreFunction = node2 -> {
+            return similarityFunction.compare(queryVector, ((RandomAccessVectorValues<float[]>) vectorValues).vectorValue(node2));
+        };
+        var topK = OverqueryUtils.topKFor(limit, null);
+        var result = searcher.search(scoreFunction, null, topK, 0, bits);
+        Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
+        return result;
     }
 
     public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Function<T, Integer> postingTransformer) throws IOException

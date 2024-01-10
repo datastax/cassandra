@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -36,6 +38,7 @@ import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.util.Bits;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
@@ -48,10 +51,13 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.ListOrderIterator;
 import org.apache.cassandra.index.sai.utils.OrderIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PriorityQueueOrderIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -78,7 +84,7 @@ public class VectorMemtableIndex implements MemtableIndex
     public VectorMemtableIndex(IndexContext indexContext)
     {
         this.indexContext = indexContext;
-        this.graph = new CassandraOnHeapGraph<>(indexContext.getValidator(), indexContext.getIndexWriterConfig());
+        this.graph = new CassandraOnHeapGraph<>(indexContext.getValidator(), indexContext.getIndexWriterConfig(), true);
     }
 
     @Override
@@ -207,84 +213,113 @@ public class VectorMemtableIndex implements MemtableIndex
     @Override
     public OrderIterator searchTopK(QueryContext queryContext, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
-        return null;
-//        assert expr.getOp() == Expression.Op.ANN : "Only ANN is supported for vector search, received " + expr.getOp();
-//
-//        Bits bits;
-//        if (RangeUtil.coversFullRing(keyRange))
-//        {
-//            // partition/range deletion won't trigger index update, so we have to filter shadow primary keys in memtable index
-//            bits = queryContext.bitsetForShadowedPrimaryKeys(graph);
-//        }
-//        else
-//        {
-//            // if left bound is MIN_BOUND or KEY_BOUND, we need to include all token-only PrimaryKeys with same token
-//            boolean leftInclusive = keyRange.left.kind() != PartitionPosition.Kind.MAX_BOUND;
-//            // if right bound is MAX_BOUND or KEY_BOUND, we need to include all token-only PrimaryKeys with same token
-//            boolean rightInclusive = keyRange.right.kind() != PartitionPosition.Kind.MIN_BOUND;
-//            // if right token is MAX (Long.MIN_VALUE), there is no upper bound
-//            boolean isMaxToken = keyRange.right.getToken().isMinimum(); // max token
-//
-//            PrimaryKey left = indexContext.keyFactory().createTokenOnly(keyRange.left.getToken()); // lower bound
-//            PrimaryKey right = isMaxToken ? null : indexContext.keyFactory().createTokenOnly(keyRange.right.getToken()); // upper bound
-//
-//            Set<PrimaryKey> resultKeys = isMaxToken ? primaryKeys.tailSet(left, leftInclusive) : primaryKeys.subSet(left, leftInclusive, right, rightInclusive);
-//            if (!queryContext.getShadowedPrimaryKeys().isEmpty())
-//                resultKeys = resultKeys.stream().filter(queryContext::shouldInclude).collect(Collectors.toSet());
-//
-//            if (resultKeys.isEmpty())
-//                return ScoreOrderedIterator.EMPTY;
-//
-//            int bruteForceRows = maxBruteForceRows(limit, resultKeys.size(), graph.size());
-//            logger.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-//                         resultKeys.size(), bruteForceRows, graph.size(), limit);
-//            Tracing.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-//                          resultKeys.size(), bruteForceRows, graph.size(), limit);
-//            // do brute force for vectorFromOrdinal
-//            if (resultKeys.size() <= bruteForceRows)
-//                return new ReorderingRangeIterator(new PriorityQueue<>(resultKeys));
-//            else
-//                bits = new KeyRangeFilteringBits(keyRange, queryContext.bitsetForShadowedPrimaryKeys(graph));
-//        }
-//
-//        var keyQueue = graph.search(expr.lower.value.vector, limit, expr.getEuclideanSearchThreshold(), bits);
-//        if (keyQueue.isEmpty())
-//            return RangeIterator.empty();
-//        return new ReorderingRangeIterator(keyQueue);
+        assert expr.getOp() == Expression.Op.ANN : "Only ANN is supported for vector search, received " + expr.getOp();
+
+        Bits bits;
+        if (RangeUtil.coversFullRing(keyRange))
+        {
+            // We don't have shadowed keys yet.
+            bits = Bits.ALL;
+        }
+        else
+        {
+            // if left bound is MIN_BOUND or KEY_BOUND, we need to include all token-only PrimaryKeys with same token
+            boolean leftInclusive = keyRange.left.kind() != PartitionPosition.Kind.MAX_BOUND;
+            // if right bound is MAX_BOUND or KEY_BOUND, we need to include all token-only PrimaryKeys with same token
+            boolean rightInclusive = keyRange.right.kind() != PartitionPosition.Kind.MIN_BOUND;
+            // if right token is MAX (Long.MIN_VALUE), there is no upper bound
+            boolean isMaxToken = keyRange.right.getToken().isMinimum(); // max token
+
+            PrimaryKey left = indexContext.keyFactory().createTokenOnly(keyRange.left.getToken()); // lower bound
+            PrimaryKey right = isMaxToken ? null : indexContext.keyFactory().createTokenOnly(keyRange.right.getToken()); // upper bound
+
+            Set<PrimaryKey> resultKeys = isMaxToken ? primaryKeys.tailSet(left, leftInclusive) : primaryKeys.subSet(left, leftInclusive, right, rightInclusive);
+            if (!queryContext.getShadowedPrimaryKeys().isEmpty())
+                resultKeys = resultKeys.stream().filter(queryContext::shouldInclude).collect(Collectors.toSet());
+
+            if (resultKeys.isEmpty())
+                return OrderIterator.empty();
+
+            int bruteForceRows = maxBruteForceRows(limit, resultKeys.size(), graph.size());
+            logger.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
+                         resultKeys.size(), bruteForceRows, graph.size(), limit);
+            Tracing.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
+                          resultKeys.size(), bruteForceRows, graph.size(), limit);
+            // do brute force for vectorFromOrdinal
+            if (resultKeys.size() <= bruteForceRows)
+                return orderPrimaryKeys(expr.lower.value.vector, resultKeys);
+            else
+                bits = new KeyRangeFilteringBits(keyRange, queryContext.bitsetForShadowedPrimaryKeys(graph));
+        }
+
+        var result = graph.searchTopK(expr.lower.value.vector, limit, bits);
+        return processSearchResult(result);
     }
 
 
     @Override
     public OrderIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
     {
-        return OrderIterator.empty();
-//        if (minimumKey == null)
-//            // This case implies maximumKey is empty too.
-//            return ScoreOrderedIterator.EMPTY;
-//
-//        List<PrimaryKey> results = keys.stream()
-//                                      .dropWhile(k -> k.compareTo(minimumKey) < 0)
-//                                      .takeWhile(k -> k.compareTo(maximumKey) <= 0)
-//                                      .collect(Collectors.toList());
-//
-//        int maxBruteForceRows = maxBruteForceRows(limit, results.size(), graph.size());
-//        logger.trace("SAI materialized {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-//                     results.size(), maxBruteForceRows, graph.size(), limit);
-//        Tracing.trace("SAI materialized {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-//                      results.size(), maxBruteForceRows, graph.size(), limit);
-//        if (results.size() <= maxBruteForceRows)
-//        {
-//            if (results.isEmpty())
-//                return ScoreOrderedIterator.EMPTY
-//            return new CollectionRangeIterator(minimumKey, maximumKey, results);
-//        }
-//
-//        float[] qv = exp.lower.value.vector;
-//        var bits = new KeyFilteringBits(results);
-//        var keyQueue = graph.search(qv, limit, 0.0f, bits);
-//        if (keyQueue.isEmpty())
-//            return RangeIterator.empty();
-//        return new ReorderingRangeIterator(keyQueue);
+        if (minimumKey == null)
+            // This case implies maximumKey is empty too.
+            return OrderIterator.empty();
+
+        float[] qv = exp.lower.value.vector;
+        List<PrimaryKey> keysInRange = keys.stream()
+                                           .dropWhile(k -> k.compareTo(minimumKey) < 0)
+                                           .takeWhile(k -> k.compareTo(maximumKey) <= 0)
+                                           .collect(Collectors.toList());
+
+        int maxBruteForceRows = maxBruteForceRows(limit, keysInRange.size(), graph.size());
+        logger.trace("SAI materialized {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
+                     keysInRange.size(), maxBruteForceRows, graph.size(), limit);
+        Tracing.trace("SAI materialized {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
+                      keysInRange.size(), maxBruteForceRows, graph.size(), limit);
+        if (keysInRange.size() <= maxBruteForceRows)
+        {
+            if (keysInRange.isEmpty())
+                return OrderIterator.empty();
+            return orderPrimaryKeys(qv, keysInRange);
+        }
+
+        var bits = new KeyFilteringBits(keysInRange);
+        var result = graph.searchTopK(qv, limit, bits);
+        return processSearchResult(result);
+    }
+
+    private OrderIterator processSearchResult(SearchResult searchResult)
+    {
+        if (searchResult == null)
+            return OrderIterator.empty();
+        var a = searchResult.getNodes();
+        List<ScoredPrimaryKey> keys = new ArrayList<>(a.length);
+        for (int i = 0; i < a.length; i++)
+        {
+            int node = a[i].node;
+            for (var key : graph.keysFromOrdinal(node))
+                keys.add(new ScoredPrimaryKey(key, a[i].score));
+        }
+        return new ListOrderIterator(keys);
+    }
+
+    private OrderIterator orderPrimaryKeys(float[] queryVector, Collection<PrimaryKey> keys)
+    {
+        // search() errors out when an empty graph is passed to it
+        if (keys.isEmpty())
+            return OrderIterator.empty();
+
+        var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
+
+        // Use a priority queue because we don't need to consume the entire iterator
+        var pairs = new PriorityQueue<ScoredPrimaryKey>(keys.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
+        for (var key : keys)
+        {
+            float[] vector = graph.vectorForKey(key);
+            var score = similarityFunction.compare(queryVector, vector);
+            pairs.add(new ScoredPrimaryKey(key, score));
+        }
+
+        return new PriorityQueueOrderIterator(pairs);
     }
 
     private int maxBruteForceRows(int limit, int nPermittedOrdinals, int graphSize)

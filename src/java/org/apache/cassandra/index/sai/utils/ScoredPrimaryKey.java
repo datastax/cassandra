@@ -35,6 +35,11 @@ public class ScoredPrimaryKey implements PrimaryKey
         this.score = score;
     }
 
+    public float getScore()
+    {
+        return score;
+    }
+
     public static ScoredPrimaryKey create(PrimaryKey key, float score)
     {
         return new ScoredPrimaryKey(key, score);

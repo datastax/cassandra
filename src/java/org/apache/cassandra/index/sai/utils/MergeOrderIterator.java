@@ -23,7 +23,7 @@ import java.util.PriorityQueue;
 
 import org.apache.cassandra.io.util.FileUtils;
 
-public class MergeOrderIterator extends AbstractIterator<ScoredPrimaryKey> implements AutoCloseable
+public class MergeOrderIterator extends OrderIterator
 {
     private final PriorityQueue<OrderIterator> pq;
     // Defer closing the iterators because the PKs might be materialized after this.
