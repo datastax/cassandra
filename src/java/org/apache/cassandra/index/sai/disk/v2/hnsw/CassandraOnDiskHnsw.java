@@ -213,6 +213,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     private class ScoredRowIdIteratorHNSW implements ScoredRowIdIterator
     {
         private final NeighborQueue queue;
+        private final int visitedCount;
         private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
 
         private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
@@ -221,6 +222,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         public ScoredRowIdIteratorHNSW(NeighborQueue queue)
         {
             this.queue = queue;
+            this.visitedCount = queue.visitedCount();
         }
 
         @Override
@@ -245,6 +247,12 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
             if (!hasNext())
                 throw new NoSuchElementException();
             return new ScoredRowId(segmentRowIdIterator.nextInt(), currentScore);
+        }
+
+        @Override
+        public int getVisitedCount()
+        {
+            return visitedCount;
         }
 
         @Override

@@ -45,4 +45,10 @@ public class PriorityQueueScoredRowIdIterator implements ScoredRowIdIterator
     {
         return scoredRowIdIterator.poll();
     }
+
+    @Override
+    public int getVisitedCount()
+    {
+        return scoredRowIdIterator.size();
+    }
 }

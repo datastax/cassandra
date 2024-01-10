@@ -174,8 +174,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             return bitsOrPostingList.scores;
 
         var vectorPostings = graph.searchWithScores(queryVector, topK, limit, bitsOrPostingList.bits, context);
-        // todo add in
-        // bitsOrPostingList.updateStatistics(vectorPostings.getVisitedCount());
+         bitsOrPostingList.updateStatistics(vectorPostings.getVisitedCount());
         return vectorPostings;
     }
 
@@ -574,7 +573,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         // else ask the index to perform a search limited to the bits we created
         float[] queryVector = exp.lower.value.vector;
         var results = graph.searchWithScores(queryVector, topK, limit, bits, context);
-//        cost.updateStatistics(results.getVisitedCount());
+        cost.updateStatistics(results.getVisitedCount());
 
         return toScoreOrderedIterator(results, context);
     }

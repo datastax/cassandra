@@ -46,6 +46,14 @@ public interface ScoredRowIdIterator extends Iterator<ScoredRowId>, AutoCloseabl
             public void close()
             {
             }
+
+            @Override
+            public int getVisitedCount()
+            {
+                return 0;
+            }
         };
     }
+
+    int getVisitedCount();
 }

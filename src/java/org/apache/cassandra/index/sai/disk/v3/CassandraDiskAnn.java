@@ -189,11 +189,10 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         var result = searcher.search(scoreFunction,
                                      reRanker,
                                      topK,
-                                     0,
                                      ordinalsMap.ignoringDeleted(bits));
         context.addAnnNodesVisited(result.getVisitedCount());
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-        return new ScoredRowIdIteratorDiskAnn(result.getNodes());
+        return new ScoredRowIdIteratorDiskAnn(result);
     }
 
     @Override
@@ -249,14 +248,16 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private class ScoredRowIdIteratorDiskAnn implements ScoredRowIdIterator
     {
         private final Iterator<NodeScore> it;
+        private final int visitedCount;
         private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
 
         private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
         private Float currentScore = -1f;
 
-        public ScoredRowIdIteratorDiskAnn(NodeScore[] results)
+        public ScoredRowIdIteratorDiskAnn(SearchResult result)
         {
-            this.it = Arrays.stream(results).iterator();
+            this.it = Arrays.stream(result.getNodes()).iterator();
+            this.visitedCount = result.getVisitedCount();
         }
 
         @Override
@@ -283,6 +284,12 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             if (!hasNext())
                 throw new NoSuchElementException();
             return new ScoredRowId(segmentRowIdIterator.nextInt(), currentScore);
+        }
+
+        @Override
+        public int getVisitedCount()
+        {
+            return visitedCount;
         }
 
         @Override
