@@ -753,7 +753,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 queryContext.addRowsFiltered(1);
                 if (tree.isSatisfiedBy(key.partitionKey(), row, staticRow))
                 {
-                    queryContext.addRowsMatched(1);
                     clusters.add(row);
                 }
             }
@@ -763,7 +762,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 queryContext.addRowsFiltered(1);
                 if (tree.isSatisfiedBy(key.partitionKey(), staticRow, staticRow))
                 {
-                    queryContext.addRowsMatched(1);
                     clusters.add(staticRow);
                 }
             }
