@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -38,14 +37,11 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
-import org.apache.cassandra.index.sai.utils.ScoredPriorityQueue;
-import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.index.sai.utils.OrderIterator;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -171,10 +167,10 @@ public class SSTableIndex
         return searchableIndex.search(expression, keyRange, context, defer, limit);
     }
 
-    public List<ScoreOrderedIterator> searchTopK(Expression expression,
-                                                 AbstractBounds<PartitionPosition> keyRange,
-                                                 QueryContext context,
-                                                 int limit) throws IOException
+    public List<OrderIterator> searchTopK(Expression expression,
+                                          AbstractBounds<PartitionPosition> keyRange,
+                                          QueryContext context,
+                                          int limit) throws IOException
     {
         return searchableIndex.searchTopK(expression, keyRange, context, limit);
     }
@@ -262,7 +258,7 @@ public class SSTableIndex
         return Objects.hashCode(sstableContext, indexContext);
     }
 
-    public List<ScoreOrderedIterator> limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<OrderIterator> limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         return searchableIndex.limitToTopResults(context, keys, exp, limit);
     }

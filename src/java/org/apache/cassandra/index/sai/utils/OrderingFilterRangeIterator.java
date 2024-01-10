@@ -32,13 +32,13 @@ import org.apache.cassandra.io.util.FileUtils;
  * The PKs are currently returned in {@link PrimaryKey} order, but that contract may change.
  */
 @NotThreadSafe
-public class OrderingFilterRangeIterator implements Iterator<List<ScoreOrderedIterator>>, AutoCloseable
+public class OrderingFilterRangeIterator implements Iterator<List<OrderIterator>>, AutoCloseable
 {
     private final RangeIterator input;
     private final int chunkSize;
-    private final Function<List<PrimaryKey>, List<ScoreOrderedIterator>> nextRangeFunction;
+    private final Function<List<PrimaryKey>, List<OrderIterator>> nextRangeFunction;
 
-    public OrderingFilterRangeIterator(RangeIterator input, int chunkSize, Function<List<PrimaryKey>, List<ScoreOrderedIterator>> nextRangeFunction)
+    public OrderingFilterRangeIterator(RangeIterator input, int chunkSize, Function<List<PrimaryKey>, List<OrderIterator>> nextRangeFunction)
     {
         this.input = input;
         this.chunkSize = chunkSize;
@@ -52,7 +52,7 @@ public class OrderingFilterRangeIterator implements Iterator<List<ScoreOrderedIt
     }
 
     @Override
-    public List<ScoreOrderedIterator> next()
+    public List<OrderIterator> next()
     {
         List<PrimaryKey> nextKeys = new ArrayList<>(chunkSize);
         do

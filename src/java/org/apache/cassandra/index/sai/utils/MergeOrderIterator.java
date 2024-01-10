@@ -23,19 +23,19 @@ import java.util.PriorityQueue;
 
 import org.apache.cassandra.io.util.FileUtils;
 
-public class ScoredPriorityQueue extends AbstractIterator<ScoredPrimaryKey> implements AutoCloseable
+public class MergeOrderIterator extends AbstractIterator<ScoredPrimaryKey> implements AutoCloseable
 {
-    private final PriorityQueue<ScoreOrderedIterator> pq;
+    private final PriorityQueue<OrderIterator> pq;
     // Defer closing the iterators because the PKs might be materialized after this.
     // todo should we just force load here to close earlier?
-    private final List<ScoreOrderedIterator> toBeClosed;
+    private final List<OrderIterator> toBeClosed;
 
-    public ScoredPriorityQueue(List<ScoreOrderedIterator> iterators)
+    public MergeOrderIterator(List<OrderIterator> iterators)
     {
         // todo we need a "better" priority queue??
         assert !iterators.isEmpty();
         this.pq = new PriorityQueue<>(iterators.size(), (o1, o2) -> Float.compare(o2.peek().score, o1.peek().score));
-        for (ScoreOrderedIterator iterator : iterators)
+        for (OrderIterator iterator : iterators)
             if (iterator.hasNext())
                 pq.add(iterator);
         toBeClosed = iterators;
@@ -55,7 +55,7 @@ public class ScoredPriorityQueue extends AbstractIterator<ScoredPrimaryKey> impl
     @Override
     public void close()
     {
-        for (ScoreOrderedIterator iterator : toBeClosed)
+        for (OrderIterator iterator : toBeClosed)
             FileUtils.closeQuietly(iterator);
     }
 }

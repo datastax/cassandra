@@ -63,7 +63,7 @@ import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
-import org.apache.cassandra.index.sai.utils.ScoredPriorityQueue;
+import org.apache.cassandra.index.sai.utils.MergeOrderIterator;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -139,7 +139,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         return controller.buildIterator();
     }
 
-    private ScoredPriorityQueue analyzeOrderedQuery()
+    private MergeOrderIterator analyzeOrderedQuery()
     {
         return controller.buildScoredPriorityQueue();
     }
@@ -587,7 +587,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final Iterator<DataRange> keyRanges;
         private AbstractBounds<PartitionPosition> currentKeyRange;
 
-        private final ScoredPriorityQueue scoredPriorityQueue;
+        private final MergeOrderIterator mergeOrderIterator;
         private final FilterTree filterTree;
         private final QueryController controller;
         private final ReadExecutionController executionController;
@@ -598,7 +598,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private HashSet<PrimaryKey> keysSeen;
         public HashSet<PrimaryKey> updatedKeys;
 
-        private ScoreOrderedResultRetriever(ScoredPriorityQueue scoredPriorityQueue,
+        private ScoreOrderedResultRetriever(MergeOrderIterator mergeOrderIterator,
                                             FilterTree filterTree,
                                             QueryController controller,
                                             ReadExecutionController executionController,
@@ -608,7 +608,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.keyRanges = controller.dataRanges().iterator();
             this.currentKeyRange = keyRanges.next().keyRange();
 
-            this.scoredPriorityQueue = scoredPriorityQueue;
+            this.mergeOrderIterator = mergeOrderIterator;
             this.filterTree = filterTree;
             this.controller = controller;
             this.executionController = executionController;
@@ -774,7 +774,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
          */
         private @Nullable ScoredPrimaryKey nextKey()
         {
-            return scoredPriorityQueue.hasNext() ? scoredPriorityQueue.next() : null;
+            return mergeOrderIterator.hasNext() ? mergeOrderIterator.next() : null;
         }
 
         /**
@@ -931,7 +931,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         @Override
         public void close()
         {
-            FileUtils.closeQuietly(scoredPriorityQueue);
+            FileUtils.closeQuietly(mergeOrderIterator);
             controller.finish();
         }
     }

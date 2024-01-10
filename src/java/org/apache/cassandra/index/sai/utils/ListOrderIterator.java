@@ -18,24 +18,32 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import java.util.Iterator;
 import java.util.List;
+import java.util.SortedSet;
 
-import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.plan.Expression;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.PeekingIterator;
 
-/***
- * Analogue of SegmentOrdering, but for memtables.
+/**
+ * A {@link ListOrderIterator} that iterates over a collection of {@link ScoredPrimaryKey}s without modifying the underlying list.
  */
-public interface MemtableOrdering
+public class ListOrderIterator extends OrderIterator
 {
+    private final PeekingIterator<ScoredPrimaryKey> keyQueue;
+
     /**
-     * Filter the given list of {@link PrimaryKey} results to the top `limit` results corresponding to the given expression,
-     * Returns an iterator over the results that is put back in token order.
-     *
-     * Assumes that the given  spans the same rows as the implementing index's segment.
+     * Create a new {@link ListOrderIterator} that iterates over the provided list of keys.
+     * @param keys the list of keys to iterate over
      */
-    default OrderIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
+    public ListOrderIterator(List<ScoredPrimaryKey> keys)
     {
-        throw new UnsupportedOperationException();
+        this.keyQueue = Iterators.peekingIterator(keys.iterator());
+    }
+
+    @Override
+    protected ScoredPrimaryKey computeNext()
+    {
+        return keyQueue.hasNext() ? keyQueue.next() : endOfData();
     }
 }

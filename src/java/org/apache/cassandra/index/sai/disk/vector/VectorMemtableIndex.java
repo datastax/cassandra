@@ -48,11 +48,10 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.CollectionRangeIterator;
+import org.apache.cassandra.index.sai.utils.OrderIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -206,7 +205,7 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public ScoreOrderedIterator searchTopK(QueryContext queryContext, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public OrderIterator searchTopK(QueryContext queryContext, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         return null;
 //        assert expr.getOp() == Expression.Op.ANN : "Only ANN is supported for vector search, received " + expr.getOp();
@@ -256,9 +255,9 @@ public class VectorMemtableIndex implements MemtableIndex
 
 
     @Override
-    public ScoreOrderedIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
+    public OrderIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
     {
-        return ScoreOrderedIterator.EMPTY;
+        return OrderIterator.empty();
 //        if (minimumKey == null)
 //            // This case implies maximumKey is empty too.
 //            return ScoreOrderedIterator.EMPTY;

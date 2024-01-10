@@ -46,15 +46,12 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
-
-import static java.util.function.Function.identity;
 
 public class TrieMemtableIndex implements MemtableIndex
 {
@@ -175,13 +172,6 @@ public class TrieMemtableIndex implements MemtableIndex
         }
 
         return builder.build();
-    }
-
-    @Override
-    public ScoreOrderedIterator searchTopK(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
-    {
-        // not implemented
-        throw new UnsupportedOperationException();
     }
 
 

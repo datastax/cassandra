@@ -23,8 +23,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.function.Function;
-import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
@@ -54,12 +52,10 @@ import org.apache.cassandra.index.sai.disk.vector.OverqueryUtils;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
-import org.apache.cassandra.index.sai.utils.CollectionRangeIterator;
+import org.apache.cassandra.index.sai.utils.OrderIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
-import org.apache.cassandra.index.sai.utils.ScoredPriorityQueue;
 import org.apache.cassandra.index.sai.utils.ScoredRowId;
 import org.apache.cassandra.index.sai.utils.ScoredRowIdIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
@@ -144,7 +140,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public ScoreOrderedIterator searchTopK(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public OrderIterator searchTopK(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
 //        Function<Integer, PostingList> results = (iterations) -> {
 //            try
@@ -438,14 +434,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public ScoreOrderedIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public OrderIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         // create a sublist of the keys within this segment's bounds
         int minIndex = findBoundaryIndex(keys, true);
         int maxIndex = findBoundaryIndex(keys, false);
         List<PrimaryKey> keysInRange = keys.subList(minIndex, maxIndex);
         if (keysInRange.isEmpty())
-            return ScoreOrderedIterator.EMPTY;
+            return OrderIterator.empty();
 
         int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
         // if we are brute forcing the similarity search, we want to build a list of segment row ids,
@@ -548,7 +544,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; expected nodes visited is {} for index with {} nodes, LIMIT {}",
                             numRows, keysInRange.size(), cost.expectedNodesVisited, graph.size(), limit);
         if (numRows == 0)
-            return ScoreOrderedIterator.EMPTY;
+            return OrderIterator.empty();
 
         if (cost.shouldUseBruteForce())
         {

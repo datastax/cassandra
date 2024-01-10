@@ -39,8 +39,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
-import org.apache.cassandra.index.sai.utils.ScoredPriorityQueue;
+import org.apache.cassandra.index.sai.utils.OrderIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -172,7 +171,7 @@ public class Segment implements Closeable, SegmentOrdering
      * @param limit      the num of rows to returned, used by ANN index
      * @return range iterator of {@link PrimaryKey} that matches given expression
      */
-    public ScoreOrderedIterator searchTopK(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public OrderIterator searchTopK(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
         return index.searchTopK(expression, keyRange, context, limit);
     }
@@ -194,7 +193,7 @@ public class Segment implements Closeable, SegmentOrdering
     }
 
     @Override
-    public ScoreOrderedIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public OrderIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         return index.limitToTopResults(context, keys, exp, limit);
     }

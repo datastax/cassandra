@@ -18,9 +18,6 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.io.Closeable;
-import java.io.IOException;
-
 import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.io.util.FileUtils;
@@ -29,16 +26,13 @@ import org.apache.cassandra.io.util.FileUtils;
  * An iterator over scored primary keys ordered by the score descending (maybe that could change?)
  * Not skippable.
  */
-public class ScoreOrderedIterator extends AbstractIterator<ScoredPrimaryKey> implements Closeable
+public class PostingListOrderIterator extends OrderIterator
 {
-    // todo fix me
-    public static final ScoreOrderedIterator EMPTY = new ScoreOrderedIterator(ScoredRowIdIterator.empty(), null, null);
-
     private final PrimaryKeyMap primaryKeyMap;
     private final ScoredRowIdIterator scoredRowIdIterator;
     private final IndexSearcherContext searcherContext;
 
-    public ScoreOrderedIterator(ScoredRowIdIterator scoredRowIdIterator, PrimaryKeyMap primaryKeyMap, IndexSearcherContext context)
+    public PostingListOrderIterator(ScoredRowIdIterator scoredRowIdIterator, PrimaryKeyMap primaryKeyMap, IndexSearcherContext context)
     {
         this.scoredRowIdIterator = scoredRowIdIterator;
         this.primaryKeyMap = primaryKeyMap;
@@ -46,7 +40,7 @@ public class ScoreOrderedIterator extends AbstractIterator<ScoredPrimaryKey> imp
     }
 
     @Override
-    public void close() throws IOException
+    public void close()
     {
         FileUtils.closeQuietly(primaryKeyMap);
         FileUtils.closeQuietly(scoredRowIdIterator);
@@ -57,8 +51,7 @@ public class ScoreOrderedIterator extends AbstractIterator<ScoredPrimaryKey> imp
     {
         if (!scoredRowIdIterator.hasNext())
         {
-            System.out.println("warning, exhuasted search without re-query");
-            return endOfData();
+            throw new IllegalStateException("failure scenario. we've hit too many shadowed/overwritten rows");
         }
         var scoredRowId = scoredRowIdIterator.next();
         var primaryKey = primaryKeyMap.primaryKeyFromRowId(searcherContext.getSegmentRowIdOffset() + scoredRowId.segmentRowId);

@@ -19,7 +19,6 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.function.Function;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -31,8 +30,9 @@ import org.apache.cassandra.index.sai.disk.PostingListRangeIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.OrderIterator;
+import org.apache.cassandra.index.sai.utils.PostingListOrderIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
 import org.apache.cassandra.index.sai.utils.ScoredRowIdIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 
@@ -89,7 +89,10 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
      * @param limit        the num of rows to returned, used by ANN index
      * @return {@link RangeIterator} that matches given expression
      */
-    public abstract ScoreOrderedIterator searchTopK(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException;
+    public OrderIterator searchTopK(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
+    {
+        throw new UnsupportedOperationException();
+    }
 
     protected RangeIterator toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext) throws IOException
     {
@@ -106,11 +109,10 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
         return new PostingListRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
     }
 
-    protected ScoreOrderedIterator toScoreOrderedIterator(ScoredRowIdIterator scoredRowIdIterator, QueryContext queryContext) throws IOException
+    protected OrderIterator toScoreOrderedIterator(ScoredRowIdIterator scoredRowIdIterator, QueryContext queryContext) throws IOException
     {
-        // todo add support for empty.
-//        if (postingList == null || postingList.size() == 0)
-//            return RangeIterator.empty();
+        if (scoredRowIdIterator == null || !scoredRowIdIterator.hasNext())
+            return OrderIterator.empty();
 
         IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
                                                                         metadata.maxKey,
@@ -119,6 +121,6 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
                                                                         metadata.segmentRowIdOffset,
                                                                         queryContext,
                                                                         null);
-        return new ScoreOrderedIterator(scoredRowIdIterator, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
+        return new PostingListOrderIterator(scoredRowIdIterator, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
     }
 }

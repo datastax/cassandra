@@ -18,24 +18,30 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.List;
+import java.io.Closeable;
 
-import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.plan.Expression;
-
-/***
- * Analogue of SegmentOrdering, but for memtables.
+/**
+ * An iterator over {@link ScoredPrimaryKey} ordered by score in either ascending or descending order.
  */
-public interface MemtableOrdering
+public abstract class OrderIterator extends AbstractIterator<ScoredPrimaryKey> implements Closeable
 {
-    /**
-     * Filter the given list of {@link PrimaryKey} results to the top `limit` results corresponding to the given expression,
-     * Returns an iterator over the results that is put back in token order.
-     *
-     * Assumes that the given  spans the same rows as the implementing index's segment.
-     */
-    default OrderIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
+    private static final OrderIterator EMPTY = new OrderIterator()
     {
-        throw new UnsupportedOperationException();
+        @Override
+        public ScoredPrimaryKey computeNext()
+        {
+            return endOfData();
+        }
+    };
+
+    public static OrderIterator empty()
+    {
+        return EMPTY;
     }
+
+    @Override
+    public void close()
+    {
+    }
+
 }

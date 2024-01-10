@@ -31,8 +31,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
-import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.index.sai.utils.OrderIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 /**
@@ -67,15 +66,15 @@ public interface SearchableIndex extends Closeable
                                 QueryContext context,
                                 boolean defer, int limit) throws IOException;
 
-    public List<ScoreOrderedIterator> searchTopK(Expression expression,
-                                                 AbstractBounds<PartitionPosition> keyRange,
-                                                 QueryContext context,
-                                                 int limit) throws IOException;
+    public List<OrderIterator> searchTopK(Expression expression,
+                                          AbstractBounds<PartitionPosition> keyRange,
+                                          QueryContext context,
+                                          int limit) throws IOException;
 
-    public List<ScoreOrderedIterator> limitToTopResults(QueryContext context,
-                                                        List<PrimaryKey> keys,
-                                                        Expression exp,
-                                                        int limit) throws IOException;
+    public List<OrderIterator> limitToTopResults(QueryContext context,
+                                                 List<PrimaryKey> keys,
+                                                 Expression exp,
+                                                 int limit) throws IOException;
 
     public void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable);
 }

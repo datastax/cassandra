@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -74,8 +73,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
-import org.apache.cassandra.index.sai.utils.ScoreOrderedIterator;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.OrderIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
@@ -438,14 +436,14 @@ public class IndexContext
         return builder.build();
     }
 
-    public List<ScoreOrderedIterator> searchTopKMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public List<OrderIterator> searchTopKMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
         if (memtables.isEmpty())
             return List.of();
 
-        var result = new ArrayList<ScoreOrderedIterator>(memtables.size());
+        var result = new ArrayList<OrderIterator>(memtables.size());
 
         for (MemtableIndex index : memtables)
             result.add(index.searchTopK(context, e, keyRange, limit));
@@ -472,14 +470,14 @@ public class IndexContext
     }
 
     // Search all memtables for all PrimaryKeys in list.
-    public List<ScoreOrderedIterator> limitToTopResults(QueryContext context, List<PrimaryKey> source, Expression e, int limit)
+    public List<OrderIterator> limitToTopResults(QueryContext context, List<PrimaryKey> source, Expression e, int limit)
     {
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
         if (memtables.isEmpty())
             return List.of();
 
-        List<ScoreOrderedIterator> result = new ArrayList<>(memtables.size());
+        List<OrderIterator> result = new ArrayList<>(memtables.size());
         for (MemtableIndex index : memtables)
             result.add(index.limitToTopResults(context, source, e, limit));
 
