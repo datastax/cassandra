@@ -444,7 +444,12 @@ public class QueryController
                                                                      .collect(Collectors.toList());
             sstableIntersections.addAll(memtableResults);
             if (sstableIntersections.isEmpty())
+            {
+                // We must release here because empty vector indexes are in the view, but they do not
+                // produce any OrderIterators. TODO can we somehow ignore empty indexes so they are not in the view?
+                queryView.referencedIndexes.forEach(SSTableIndex::release);
                 return OrderIterator.empty();
+            }
             return new MergeOrderIterator(sstableIntersections, queryView.referencedIndexes);
         }
         catch (Throwable t)
@@ -500,7 +505,12 @@ public class QueryController
                                                                      .collect(Collectors.toList());
             sstableIntersections.addAll(memtableResults);
             if (sstableIntersections.isEmpty())
+            {
+                // We must release here because empty vector indexes are in the view, but they do not
+                // produce any OrderIterators. TODO can we somehow ignore empty indexes so they are not in the view?
+                queryView.referencedIndexes.forEach(SSTableIndex::release);
                 return Pair.create(Collections.emptyList(), Collections.emptySet());
+            }
             return Pair.create(sstableIntersections, queryView.referencedIndexes);
         }
         catch (Throwable t)
