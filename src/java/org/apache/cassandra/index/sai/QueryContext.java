@@ -43,7 +43,6 @@ public class QueryContext
     private final LongAdder segmentsHit = new LongAdder();
     private final LongAdder partitionsRead = new LongAdder();
     private final LongAdder rowsFiltered = new LongAdder();
-    private final LongAdder rowsMatched = new LongAdder();
     private final LongAdder trieSegmentsHit = new LongAdder();
 
     private final LongAdder bkdPostingListsHit = new LongAdder();
@@ -73,7 +72,7 @@ public class QueryContext
     private float postFilterSelectivityEstimate = 1.0f;
 
     // Last used soft limit for vector search.
-    private int softLimit = -1;
+    private int softLimit = 0;
 
     @VisibleForTesting
     public QueryContext()
@@ -107,14 +106,6 @@ public class QueryContext
     public void addRowsFiltered(long val)
     {
         rowsFiltered.add(val);
-    }
-    public void addRowsMatched(long val)
-    {
-        rowsMatched.add(val);
-    }
-    public void resetRowsMatched()
-    {
-        rowsMatched.reset();
     }
     public void addTrieSegmentsHit(long val)
     {
@@ -194,10 +185,6 @@ public class QueryContext
     public long rowsFiltered()
     {
         return rowsFiltered.longValue();
-    }
-    public long rowsMatched()
-    {
-        return rowsMatched.longValue();
     }
     public long trieSegmentsHit()
     {
