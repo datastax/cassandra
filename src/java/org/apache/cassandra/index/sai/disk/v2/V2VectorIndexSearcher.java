@@ -131,12 +131,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
         float[] queryVector = exp.lower.value.vector;
 
-        BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, queryVector, topK, false);
-        if (bitsOrPostingList.skipANN())
-            return bitsOrPostingList.postingList();
+        BitsOrRowIds bitsOrRowIds = bitsOrPostingListForKeyRange(keyRange, queryVector, topK, false);
+        if (bitsOrRowIds.skipANN())
+            return bitsOrRowIds.postingList();
 
-        var vectorPostings = graph.search(queryVector, topK, exp.getEuclideanSearchThreshold(), limit, bitsOrPostingList.getBits(), context);
-        bitsOrPostingList.updateStatistics(vectorPostings.getVisitedCount());
+        var vectorPostings = graph.search(queryVector, topK, exp.getEuclideanSearchThreshold(), limit, bitsOrRowIds.getBits(), context);
+        bitsOrRowIds.updateStatistics(vectorPostings.getVisitedCount());
         return vectorPostings;
     }
 
@@ -158,30 +158,29 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
         float[] queryVector = exp.lower.value.vector;
 
-        BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, queryVector, topK, true);
-        // TODO need to fix this to make the naming better
-        if (bitsOrPostingList.skipANN())
-            return bitsOrPostingList.scores;
+        BitsOrRowIds bitsOrRowIds = bitsOrPostingListForKeyRange(keyRange, queryVector, topK, true);
+        if (bitsOrRowIds.skipANN())
+            return bitsOrRowIds.scoredRowIdIterator();
 
-        var vectorPostings = graph.searchWithScores(queryVector, topK, limit, bitsOrPostingList.bits, context);
-         bitsOrPostingList.updateStatistics(vectorPostings.getVisitedCount());
+        var vectorPostings = graph.searchWithScores(queryVector, topK, limit, bitsOrRowIds.bits, context);
+         bitsOrRowIds.updateStatistics(vectorPostings.getVisitedCount());
         return vectorPostings;
     }
 
     /**
-     * Return bit set if needs to search HNSW; otherwise return posting list to bypass HNSW
+     * Return bit set to configure a graph search; otherwise return posting list or ScoredRowIdIterator to bypass
+     * graph search and use brute force to order matching rows.
      */
-    private BitsOrPostingList bitsOrPostingListForKeyRange(QueryContext context,
-                                                           AbstractBounds<PartitionPosition> keyRange,
-                                                           float[] queryVector,
-                                                           int topK,
-                                                           boolean giveMeScores) throws IOException
+    private BitsOrRowIds bitsOrPostingListForKeyRange(AbstractBounds<PartitionPosition> keyRange,
+                                                      float[] queryVector,
+                                                      int topK,
+                                                      boolean orderByScore) throws IOException
     {
         try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
         {
             // not restricted
             if (RangeUtil.coversFullRing(keyRange))
-                return BitsOrPostingList.ALL_BITS;
+                return BitsOrRowIds.ALL_BITS;
 
             PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
 
@@ -189,15 +188,15 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             long minSSTableRowId = primaryKeyMap.ceiling(firstPrimaryKey);
             // If we didn't find the first key, we won't find the last primary key either
             if (minSSTableRowId < 0)
-                return new BitsOrPostingList(PostingList.EMPTY);
+                return BitsOrRowIds.EMPTY;
             long maxSSTableRowId = getMaxSSTableRowId(primaryKeyMap, keyRange.right);
 
             if (minSSTableRowId > maxSSTableRowId)
-                return new BitsOrPostingList(PostingList.EMPTY);
+                return BitsOrRowIds.EMPTY;
 
             // if it covers entire segment, skip bit set
             if (minSSTableRowId <= metadata.minSSTableRowId && maxSSTableRowId >= metadata.maxSSTableRowId)
-                return BitsOrPostingList.ALL_BITS;
+                return BitsOrRowIds.ALL_BITS;
 
             minSSTableRowId = Math.max(minSSTableRowId, metadata.minSSTableRowId);
             maxSSTableRowId = min(maxSSTableRowId, metadata.maxSSTableRowId);
@@ -214,12 +213,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 for (long i = minSSTableRowId; i <= maxSSTableRowId; i++)
                     segmentRowIds.add(metadata.toSegmentRowId(i));
 
-                if (giveMeScores)
-                {
-                    return new BitsOrPostingList(bruteForceOrdering(queryVector, segmentRowIds, topK));
-                }
+                if (orderByScore)
+                    return new BitsOrRowIds(bruteForceOrdering(queryVector, segmentRowIds));
                 var postings = findTopApproximatePostings(queryVector, segmentRowIds, topK);
-                return new BitsOrPostingList(new ArrayPostingList(postings));
+                return new BitsOrRowIds(new ArrayPostingList(postings));
             }
 
             // create a bitset of ordinals corresponding to the rows in the given key range
@@ -246,9 +243,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             cost = estimateCost(topK, bits.cardinality());
 
             if (!hasMatches)
-                return giveMeScores ? new BitsOrPostingList(ScoredRowIdIterator.empty()) : new BitsOrPostingList(PostingList.EMPTY);
+                return BitsOrRowIds.EMPTY;
 
-            return new BitsOrPostingList(bits, cost);
+            return new BitsOrRowIds(bits, cost);
         }
     }
 
@@ -288,38 +285,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         return postings;
     }
 
-    private ScoredRowIdIterator bruteForceOrdering(float[] queryVector, IntArrayList segmentRowIds, int topK) throws IOException
+    // Because we need a correct ordering of vectors, we read and rank them here. By ranking them now, we are able to
+    // take the LIMIT of Primary Keys from the final search's iterator, which means fewer rows to read materialize
+    // and score in the later steps.
+    private ScoredRowIdIterator bruteForceOrdering(float[] queryVector, IntArrayList segmentRowIds) throws IOException
     {
-        var cv = graph.getCompressedVectors();
-        if (cv == null)
-        {
-            // TODO this seems potentially expensive. Does this change the cost estimate?
-            var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
-
-            PriorityQueue<ScoredRowId> pairs = new PriorityQueue<>(segmentRowIds.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
-            try (var ordinalsView = graph.getOrdinalsView())
-            {
-                for (int i = 0; i < segmentRowIds.size(); i++)
-                {
-                    int segmentRowId = segmentRowIds.getInt(i);
-                    int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                    if (ordinal < 0)
-                        continue;
-
-                    float[] vector = graph.getVectorForOrdinal(ordinal);
-                    if (vector == null)
-                        continue;
-                    var score = similarityFunction.compare(queryVector, vector);
-                    pairs.add(new ScoredRowId(segmentRowId, score));
-                }
-            }
-            return new PriorityQueueScoredRowIdIterator(pairs);
-        }
-
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
-        var scoreFunction = cv.approximateScoreFunctionFor(queryVector, similarityFunction);
-
-        PriorityQueue<ScoredRowId> pairs = new PriorityQueue<>(segmentRowIds.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
+        PriorityQueue<ScoredRowId> pairs = new PriorityQueue<>(segmentRowIds.size(),
+                                                               (a, b) -> Float.compare(b.getScore(), a.getScore()));
         try (var ordinalsView = graph.getOrdinalsView())
         {
             for (int i = 0; i < segmentRowIds.size(); i++)
@@ -329,7 +302,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 if (ordinal < 0)
                     continue;
 
-                var score = scoreFunction.similarityTo(ordinal);
+                float[] vector = graph.getVectorForOrdinal(ordinal);
+                if (vector == null)
+                    continue;
+                var score = similarityFunction.compare(queryVector, vector);
                 pairs.add(new ScoredRowId(segmentRowId, score));
             }
         }
@@ -553,7 +529,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             // brute force using the in-memory compressed vectors to cut down the number of results returned
             var queryVector = exp.lower.value.vector;
-            return toScoreOrderedIterator(bruteForceOrdering(queryVector, rowIds, topK), context);
+            return toScoreOrderedIterator(bruteForceOrdering(queryVector, rowIds), context);
         }
         // else ask the index to perform a search limited to the bits we created
         float[] queryVector = exp.lower.value.vector;
@@ -586,35 +562,39 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         graph.close();
     }
 
-    // TODO fix name or find better model.
-    private static class BitsOrPostingList
+    private static class BitsOrRowIds
     {
-        public static final BitsOrPostingList ALL_BITS = new BitsOrPostingList(Bits.ALL, null);
+        public static final BitsOrRowIds ALL_BITS = new BitsOrRowIds(Bits.ALL, null);
+        public static final BitsOrRowIds EMPTY = new BitsOrRowIds(PostingList.EMPTY,
+                                                                  ScoredRowIdIterator.empty(),
+                                                                  null,
+                                                                  null);
         private final Bits bits;
         private final CostEstimate cost;
         private final PostingList postingList;
-        public ScoredRowIdIterator scores = null;
+        private final ScoredRowIdIterator scores;
 
-        public BitsOrPostingList(Bits bits, CostEstimate cost)
+        public BitsOrRowIds(Bits bits, CostEstimate cost)
+        {
+            this (null, null, bits, cost);
+        }
+
+        public BitsOrRowIds(ScoredRowIdIterator scores)
+        {
+            this (null, scores, null, null);
+        }
+
+        public BitsOrRowIds(PostingList postingList)
+        {
+            this (postingList, null, null, null);
+        }
+
+        private BitsOrRowIds(PostingList postingList, ScoredRowIdIterator scores, Bits bits, CostEstimate cost)
         {
             this.bits = bits;
             this.cost = cost;
-            this.postingList = null;
-        }
-
-        public BitsOrPostingList(ScoredRowIdIterator scores)
-        {
-            this.bits = null;
-            this.cost = null;
-            this.postingList = null;
+            this.postingList = postingList;
             this.scores = scores;
-        }
-
-        public BitsOrPostingList(PostingList postingList)
-        {
-            this.postingList = Preconditions.checkNotNull(postingList);
-            this.bits = null;
-            this.cost = null;
         }
 
         @Nullable
@@ -628,6 +608,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             Preconditions.checkState(skipANN());
             return postingList;
+        }
+
+        public ScoredRowIdIterator scoredRowIdIterator()
+        {
+            Preconditions.checkState(skipANN());
+            return scores;
         }
 
         public boolean skipANN()
