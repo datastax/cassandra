@@ -171,8 +171,9 @@ public class VectorMemtableIndex implements MemtableIndex
         Bits bits;
         if (RangeUtil.coversFullRing(keyRange))
         {
+            // TODO does this comment actually matter for us?
             // partition/range deletion won't trigger index update, so we have to filter shadow primary keys in memtable index
-            bits = queryContext.bitsetForShadowedPrimaryKeys(graph);
+            bits = Bits.ALL;
         }
         else
         {
@@ -187,8 +188,6 @@ public class VectorMemtableIndex implements MemtableIndex
             PrimaryKey right = isMaxToken ? null : indexContext.keyFactory().createTokenOnly(keyRange.right.getToken()); // upper bound
 
             Set<PrimaryKey> resultKeys = isMaxToken ? primaryKeys.tailSet(left, leftInclusive) : primaryKeys.subSet(left, leftInclusive, right, rightInclusive);
-            if (!queryContext.getShadowedPrimaryKeys().isEmpty())
-                resultKeys = resultKeys.stream().filter(queryContext::shouldInclude).collect(Collectors.toSet());
 
             if (resultKeys.isEmpty())
                 return RangeIterator.empty();
@@ -201,7 +200,7 @@ public class VectorMemtableIndex implements MemtableIndex
             if (resultKeys.size() <= bruteForceRows)
                 return new ReorderingRangeIterator(new PriorityQueue<>(resultKeys));
             else
-                bits = new KeyRangeFilteringBits(keyRange, queryContext.bitsetForShadowedPrimaryKeys(graph));
+                bits = new KeyRangeFilteringBits(keyRange);
         }
 
         var keyQueue = graph.search(qv, limit, expr.getEuclideanSearchThreshold(), bits);
@@ -234,8 +233,6 @@ public class VectorMemtableIndex implements MemtableIndex
             PrimaryKey right = isMaxToken ? null : indexContext.keyFactory().createTokenOnly(keyRange.right.getToken()); // upper bound
 
             Set<PrimaryKey> resultKeys = isMaxToken ? primaryKeys.tailSet(left, leftInclusive) : primaryKeys.subSet(left, leftInclusive, right, rightInclusive);
-            if (!queryContext.getShadowedPrimaryKeys().isEmpty())
-                resultKeys = resultKeys.stream().filter(queryContext::shouldInclude).collect(Collectors.toSet());
 
             if (resultKeys.isEmpty())
                 return OrderIterator.empty();
@@ -249,7 +246,7 @@ public class VectorMemtableIndex implements MemtableIndex
             if (resultKeys.size() <= bruteForceRows)
                 return orderPrimaryKeys(expr.lower.value.vector, resultKeys);
             else
-                bits = new KeyRangeFilteringBits(keyRange, queryContext.bitsetForShadowedPrimaryKeys(graph));
+                bits = new KeyRangeFilteringBits(keyRange);
         }
 
         var result = graph.searchTopK(expr.lower.value.vector, limit, bits);
@@ -416,24 +413,22 @@ public class VectorMemtableIndex implements MemtableIndex
         return null;
     }
 
+    /**
+     * A {@link Bits} implementation that filters out all ordinals that do not correspond to a {@link PrimaryKey}
+     * in the provided {@link AbstractBounds<PartitionPosition>}.
+     */
     private class KeyRangeFilteringBits implements Bits
     {
         private final AbstractBounds<PartitionPosition> keyRange;
-        @Nullable
-        private final Bits bits;
 
-        public KeyRangeFilteringBits(AbstractBounds<PartitionPosition> keyRange, @Nullable Bits bits)
+        public KeyRangeFilteringBits(AbstractBounds<PartitionPosition> keyRange)
         {
             this.keyRange = keyRange;
-            this.bits = bits;
         }
 
         @Override
         public boolean get(int ordinal)
         {
-            if (bits != null && !bits.get(ordinal))
-                return false;
-
             var keys = graph.keysFromOrdinal(ordinal);
             return keys.stream().anyMatch(k -> keyRange.contains(k.partitionKey()));
         }

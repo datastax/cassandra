@@ -183,7 +183,7 @@ public class TableQueryMetrics extends AbstractMetrics
                 recordAnnIndexMetrics(queryContext);
 
             shadowedKeysLoopsHistogram.update(queryContext.shadowedKeysLoopCount());
-            shadowedKeysScannedHistogram.update(queryContext.getShadowedPrimaryKeys().size());
+            shadowedKeysScannedHistogram.update(queryContext.getShadowedPrimaryKeyCount());
 
             totalQueriesCompleted.inc();
         }

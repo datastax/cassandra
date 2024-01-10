@@ -222,10 +222,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             {
                 var segmentRowIds = new IntArrayList(nRows, 0);
                 for (long i = minSSTableRowId; i <= maxSSTableRowId; i++)
-                {
-                    if (context.shouldInclude(i, primaryKeyMap))
-                        segmentRowIds.add(metadata.toSegmentRowId(i));
-                }
+                    segmentRowIds.add(metadata.toSegmentRowId(i));
+
                 if (giveMeScores)
                 {
                     return new BitsOrPostingList(bruteForceOrdering(queryVector, segmentRowIds, topK));
@@ -241,15 +239,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             {
                 for (long sstableRowId = minSSTableRowId; sstableRowId <= maxSSTableRowId; sstableRowId++)
                 {
-                    if (context.shouldInclude(sstableRowId, primaryKeyMap))
+                    int segmentRowId = metadata.toSegmentRowId(sstableRowId);
+                    int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
+                    if (ordinal >= 0)
                     {
-                        int segmentRowId = metadata.toSegmentRowId(sstableRowId);
-                        int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                        if (ordinal >= 0)
-                        {
-                            bits.set(ordinal);
-                            hasMatches = true;
-                        }
+                        bits.set(ordinal);
+                        hasMatches = true;
                     }
                 }
             }

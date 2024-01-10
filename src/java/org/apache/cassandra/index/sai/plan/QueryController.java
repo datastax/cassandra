@@ -573,7 +573,7 @@ public class QueryController
     {
         int target = getExactLimit();
         // shadowedCount includes also the keys filtered out by the post-filter
-        int shadowedCount = queryContext.getShadowedPrimaryKeys().size();
+        int shadowedCount = (int) Math.min(queryContext.getShadowedPrimaryKeyCount(), Integer.MAX_VALUE);
         long fetchedCount = queryContext.rowsMatched() + shadowedCount;
         int prevSoftLimit = Math.max(target, queryContext.softLimit());
         float postFilterSelectivity = queryContext.postFilterSelectivityEstimate();

@@ -18,20 +18,14 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.util.NavigableSet;
-import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import io.github.jbellis.jvector.util.Bits;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 /**
  * Tracks state relevant to the execution of a single query, including metrics and timeout monitoring.
@@ -66,8 +60,7 @@ public class QueryContext
     private final LongAdder annNodesVisited = new LongAdder();
 
     private final LongAdder shadowedKeysLoopCount = new LongAdder();
-    // TODO do we need to track these any more?
-    private final NavigableSet<PrimaryKey> shadowedPrimaryKeys = new ConcurrentSkipListSet<>();
+    private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
 
     // Total count of rows in all sstables and memtables.
     private Long totalAvailableRows = null;
@@ -277,62 +270,17 @@ public class QueryContext
         return shadowedKeysLoopCount.longValue();
     }
 
-    public void recordShadowedPrimaryKey(PrimaryKey primaryKey)
+    public void addShadowed(long count)
     {
-        boolean isNewKey = shadowedPrimaryKeys.add(primaryKey);
-        assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query. " + primaryKey;
-    }
-
-    // Returns true if the row ID will be included or false if the row ID will be shadowed
-    public boolean shouldInclude(long sstableRowId, PrimaryKeyMap primaryKeyMap)
-    {
-        return !shadowedPrimaryKeys.contains(primaryKeyMap.primaryKeyFromRowId(sstableRowId));
-    }
-
-    public boolean shouldInclude(PrimaryKey pk)
-    {
-        return !shadowedPrimaryKeys.contains(pk);
+        shadowedPrimaryKeyCount.add(count);
     }
 
     /**
      * @return shadowed primary keys, in ascending order
      */
-    public NavigableSet<PrimaryKey> getShadowedPrimaryKeys()
+    public long getShadowedPrimaryKeyCount()
     {
-        return shadowedPrimaryKeys;
-    }
-
-    public Bits bitsetForShadowedPrimaryKeys(CassandraOnHeapGraph<PrimaryKey> graph)
-    {
-        if (getShadowedPrimaryKeys().isEmpty())
-            return Bits.ALL;
-
-        return new IgnoredKeysBits(graph, getShadowedPrimaryKeys());
-    }
-
-    private static class IgnoredKeysBits implements Bits
-    {
-        private final CassandraOnHeapGraph<PrimaryKey> graph;
-        private final NavigableSet<PrimaryKey> ignored;
-
-        public IgnoredKeysBits(CassandraOnHeapGraph<PrimaryKey> graph, NavigableSet<PrimaryKey> ignored)
-        {
-            this.graph = graph;
-            this.ignored = ignored;
-        }
-
-        @Override
-        public boolean get(int ordinal)
-        {
-            var keys = graph.keysFromOrdinal(ordinal);
-            return keys.stream().anyMatch(k -> !ignored.contains(k));
-        }
-
-        @Override
-        public int length()
-        {
-            return graph.size();
-        }
+        return shadowedPrimaryKeyCount.longValue();
     }
 
     /**

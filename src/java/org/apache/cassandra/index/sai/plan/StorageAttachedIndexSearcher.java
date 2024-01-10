@@ -65,7 +65,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
-import org.apache.cassandra.index.sai.utils.MergeOrderIterator;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -781,7 +780,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             if (clusters.isEmpty())
             {
                 // shadowed by expired TTL or row tombstone or range tombstone
-                queryContext.recordShadowedPrimaryKey(key);
+                queryContext.addShadowed(1);
                 return null;
             }
 
