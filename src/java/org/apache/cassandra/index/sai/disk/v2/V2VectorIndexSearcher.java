@@ -165,13 +165,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (exp.getOp() != Expression.Op.ANN && exp.getOp() != Expression.Op.BOUNDED_ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + exp));
 
-        if (exp.getEuclideanSearchThreshold() > 0)
-            limit = 100000;
         int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
         float[] queryVector = exp.lower.value.vector;
 
         BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, queryVector, topK, true);
-        // TODO need to fix this...
+        // TODO need to fix this to make the naming better
         if (bitsOrPostingList.skipANN())
             return bitsOrPostingList.scores;
 
