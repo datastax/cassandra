@@ -124,9 +124,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
         if (!command.isTopK())
-            return new ResultRetriever(analyze(), analyzeFilter(), controller, executionController, queryContext, command.isTopK());
+            return new ResultRetriever(analyze(), analyzeFilter(), controller, executionController, queryContext);
 
-        var result = new ScoreOrderedResultRetriever(analyzeOrderedQuery(), analyzeFilter(), controller, executionController, queryContext, command.isTopK());
+        var result = new ScoreOrderedResultRetriever(analyzeOrderedQuery(), analyzeFilter(), controller, executionController, queryContext);
         // todo collect metrics like shadowed keys still?
         return (UnfilteredPartitionIterator) new VectorTopKProcessor(command).filter(result);
     }
@@ -174,7 +174,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final ReadExecutionController executionController;
         private final QueryContext queryContext;
         private final PrimaryKey.Factory keyFactory;
-        private final boolean topK;
 
         private PrimaryKey lastKey;
 
@@ -182,7 +181,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                 FilterTree filterTree,
                                 QueryController controller,
                                 ReadExecutionController executionController,
-                                QueryContext queryContext, boolean topK)
+                                QueryContext queryContext)
         {
             this.keyRanges = controller.dataRanges().iterator();
             this.currentKeyRange = keyRanges.next().keyRange();
@@ -193,7 +192,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.executionController = executionController;
             this.queryContext = queryContext;
             this.keyFactory = controller.primaryKeyFactory();
-            this.topK = topK;
 
             this.firstPrimaryKey = controller.firstPrimaryKey();
             this.lastPrimaryKey = controller.lastPrimaryKey();
@@ -534,12 +532,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
              *       and remove the static row marker from the {@code clusters} for the latter case.
              */
             if (clusters.isEmpty())
-            {
-                // shadowed by expired TTL or row tombstone or range tombstone
-                if (topK)
-                    queryContext.recordShadowedPrimaryKey(key);
                 return null;
-            }
 
             return new PartitionIterator(partition, staticRow, Iterators.filter(clusters.iterator(), u -> !((Row)u).isStatic()));
         }
@@ -592,8 +585,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final QueryController controller;
         private final ReadExecutionController executionController;
         private final QueryContext queryContext;
-        private final PrimaryKey.Factory keyFactory;
-        private final boolean topK;
 
         private HashSet<PrimaryKey> keysSeen;
         public HashSet<PrimaryKey> updatedKeys;
@@ -602,7 +593,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                             FilterTree filterTree,
                                             QueryController controller,
                                             ReadExecutionController executionController,
-                                            QueryContext queryContext, boolean topK)
+                                            QueryContext queryContext)
         {
             this.keyRanges = controller.dataRanges().stream().map(DataRange::keyRange).collect(Collectors.toList());
             this.coversFullRing = keyRanges.size() == 1 && RangeUtil.coversFullRing(keyRanges.get(0));
@@ -612,8 +603,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.controller = controller;
             this.executionController = executionController;
             this.queryContext = queryContext;
-            this.keyFactory = controller.primaryKeyFactory();
-            this.topK = topK;
 
             this.keysSeen = new HashSet<>();
             this.updatedKeys = new HashSet<>();
@@ -792,8 +781,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             if (clusters.isEmpty())
             {
                 // shadowed by expired TTL or row tombstone or range tombstone
-                if (topK)
-                    queryContext.recordShadowedPrimaryKey(key);
+                queryContext.recordShadowedPrimaryKey(key);
                 return null;
             }
 
