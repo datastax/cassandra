@@ -1057,39 +1057,4 @@ public class VectorTypeTest extends VectorTester
         // Assert that the results are the same
         assertThat(filteredRows).containsExactly(unfilteredRows);
     }
-
-    @Test
-    public void shadowedPrimaryKeysRequireDeeperSearch() throws Throwable
-    {
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 2>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
-        disableCompaction(KEYSPACE);
-
-        // Choose a row count that will essentially force us to re-query the index that still has more rows to search.
-        int baseRowCount = 5000;
-        // Create 1000 rows so that each row has a slightly less similar score.
-        for (int i = 0; i < baseRowCount; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, i));
-
-        flush();
-
-        // Create 10 rows with the worst scores, but they won't be shadowed.
-        for (int i = baseRowCount; i < baseRowCount + 10; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, baseRowCount * 2));
-
-        // Delete all but the last 10 rows
-        for (int i = 0; i < baseRowCount - 10; i++)
-            execute("DELETE FROM %s WHERE pk = ?", i);
-
-        beforeAndAfterFlush(() -> {
-            // ANN Only
-            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 1.0] LIMIT 4"),
-                       row(90), row(91), row(92), row(93));
-            // Hyrbid
-            assertRows(execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 1.0] LIMIT 4"),
-                       row(90), row(91), row(92), row(93));
-        });
-    }
 }

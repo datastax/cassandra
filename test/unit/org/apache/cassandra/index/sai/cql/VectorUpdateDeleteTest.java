@@ -789,18 +789,20 @@ public class VectorUpdateDeleteTest extends VectorTester
         waitForIndexQueryable();
         disableCompaction(KEYSPACE);
 
-        // Create 100 rows so that each row has a slightly less similar score.
-        for (int i = 0; i < 100; i++)
+        // Choose a row count that will essentially force us to re-query the index that still has more rows to search.
+        int baseRowCount = 5000;
+        // Create 1000 rows so that each row has a slightly less similar score.
+        for (int i = 0; i < baseRowCount; i++)
             execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, i));
 
         flush();
 
         // Create 10 rows with the worst scores, but they won't be shadowed.
-        for (int i = 100; i < 110; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', [1,1000])", i);
+        for (int i = baseRowCount; i < baseRowCount + 10; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, baseRowCount * 2));
 
-        // Delete first 90 rows
-        for (int i = 0; i < 90; i++)
+        // Delete all but the last 10 rows
+        for (int i = 0; i < baseRowCount - 10; i++)
             execute("DELETE FROM %s WHERE pk = ?", i);
 
         beforeAndAfterFlush(() -> {
