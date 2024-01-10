@@ -580,7 +580,6 @@ public class QueryController
         int prevSoftLimit = Math.max(target, queryContext.softLimit());
         float postFilterSelectivity = queryContext.postFilterSelectivityEstimate();
 
-        boolean firstShadowKeysLoopIteration = queryContext.shadowedKeysLoopCount() == 1;
         boolean sortBeforeFilter = queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER;
 
         // On the first iteration we need to rely on estimates for how many keys we can expect to be accepted.
@@ -589,7 +588,8 @@ public class QueryController
         // probability is simply 0 because the sample is finite. Assuming P = 0 would cause a maximum soft limit
         // in the next round. So in that case we assume the probability of success = 0.5 / N.
         // This naturally limits the soft limit increase in the next attempt.
-        float keyAcceptanceProbability = (firstShadowKeysLoopIteration && sortBeforeFilter)
+        // TODO how does this logic change now that we don't loop?
+        float keyAcceptanceProbability = (sortBeforeFilter)
             ? postFilterSelectivity
             : Math.max((float) matchedCountLowerBound, 0.5f) / Math.max((float) prevSoftLimit, 0.5f); // assume 0/0 = 1
 

@@ -58,7 +58,6 @@ public class QueryContext
 
     private final LongAdder annNodesVisited = new LongAdder();
 
-    private final LongAdder shadowedKeysLoopCount = new LongAdder();
     private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
 
     // Total count of rows in all sstables and memtables.
@@ -142,11 +141,6 @@ public class QueryContext
     public void addAnnNodesVisited(long val)
     {
         annNodesVisited.add(val);
-    }
-
-    public void addShadowedKeysLoopCount(long val)
-    {
-        shadowedKeysLoopCount.add(val);
     }
 
     public void setTotalAvailableRows(long totalAvailableRows)
@@ -250,11 +244,6 @@ public class QueryContext
             addQueryTimeouts(1);
             throw new AbortedOperationException();
         }
-    }
-
-    public long shadowedKeysLoopCount()
-    {
-        return shadowedKeysLoopCount.longValue();
     }
 
     public void addShadowed(long count)

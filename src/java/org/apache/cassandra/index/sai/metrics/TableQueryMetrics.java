@@ -101,7 +101,6 @@ public class TableQueryMetrics extends AbstractMetrics
 
         /** Shadowed keys scan metrics **/
         private final Histogram shadowedKeysScannedHistogram;
-        private final Histogram shadowedKeysLoopsHistogram;
 
         /**
          * Trie index posting lists metrics.
@@ -132,7 +131,6 @@ public class TableQueryMetrics extends AbstractMetrics
             rowsFiltered = Metrics.histogram(createMetricName("RowsFiltered"), false);
 
             shadowedKeysScannedHistogram = Metrics.histogram(createMetricName("ShadowedKeysScannedHistogram"), false);
-            shadowedKeysLoopsHistogram = Metrics.histogram(createMetricName("ShadowedKeysLoopsHistogram"), false);
         }
 
         private void recordStringIndexCacheMetrics(QueryContext events)
@@ -194,7 +192,6 @@ public class TableQueryMetrics extends AbstractMetrics
             if (queryContext.annNodesVisited() > 0)
                 recordAnnIndexMetrics(queryContext);
 
-            shadowedKeysLoopsHistogram.update(queryContext.shadowedKeysLoopCount());
             shadowedKeysScannedHistogram.update(queryContext.getShadowedPrimaryKeyCount());
 
             totalQueriesCompleted.inc();
