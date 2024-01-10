@@ -1077,9 +1077,9 @@ public class VectorTypeTest extends VectorTester
 
         // Create 10 rows with the worst scores, but they won't be shadowed.
         for (int i = baseRowCount; i < baseRowCount + 10; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', [1,1000])", i);
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, baseRowCount * 2));
 
-        // Delete first 90 rows
+        // Delete all but the last 10 rows
         for (int i = 0; i < baseRowCount - 10; i++)
             execute("DELETE FROM %s WHERE pk = ?", i);
 

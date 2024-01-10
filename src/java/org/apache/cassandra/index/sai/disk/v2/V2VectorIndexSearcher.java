@@ -143,16 +143,6 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     @Override
     public OrderIterator searchTopK(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
-//        Function<Integer, PostingList> results = (iterations) -> {
-//            try
-//            {
-//                return getTopK(context, exp, keyRange, limit);
-//            }
-//            catch (IOException e)
-//            {
-//                throw new RuntimeException(e);
-//            }
-//        };
         return toScoreOrderedIterator(getTopK(context, exp, keyRange, limit), context);
     }
 
