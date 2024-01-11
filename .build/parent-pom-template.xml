@@ -1250,6 +1250,12 @@
         <artifactId>semver4j</artifactId>
         <version>3.1.0</version>
       </dependency>
+      <dependency>
+        <groupId>com.bpodgursky</groupId>
+        <artifactId>jbool_expressions</artifactId>
+        <version>1.24</version>
+        <scope>test</scope>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 </project>

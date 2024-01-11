@@ -25,7 +25,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -161,6 +165,7 @@ public enum Operator
             return map.containsKey(mapType.getKeysType().getSerializer().deserialize(rightOperand));
         }
     },
+
     NEQ(8)
     {
         @Override
@@ -257,6 +262,117 @@ public enum Operator
         public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
         {
             throw new UnsupportedOperationException();
+        }
+    },
+    NOT_IN(16)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT IN";
+        }
+
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !IN.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_CONTAINS(17)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT CONTAINS";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !CONTAINS.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+
+    },
+    NOT_CONTAINS_KEY(18)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT CONTAINS KEY";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !CONTAINS_KEY.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE_PREFIX(19)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE '<term>%'";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE_PREFIX.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE_SUFFIX(20)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE '%<term>'";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE_SUFFIX.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE_CONTAINS(21)
+    {
+        @Override
+        public String toString()
+        {
+            return "LIKE '%<term>%'";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return ByteBufferUtil.contains(leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE_MATCHES(22)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE '<term>'";
+        }
+
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE_MATCHES.isSatisfiedBy(type, leftOperand, rightOperand);
+        }
+    },
+    NOT_LIKE(23)
+    {
+        @Override
+        public String toString()
+        {
+            return "NOT LIKE";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        {
+            return !LIKE.isSatisfiedBy(type, leftOperand, rightOperand);
         }
     };
 
