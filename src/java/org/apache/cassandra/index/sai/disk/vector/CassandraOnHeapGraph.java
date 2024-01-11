@@ -20,19 +20,17 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
-import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
+import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
 import com.google.common.collect.BiMap;
@@ -69,15 +67,12 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
-import org.apache.cassandra.index.sai.utils.ListOrderIterator;
-import org.apache.cassandra.index.sai.utils.OrderIterator;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ObjectSizes;
+import org.apache.cassandra.utils.Pair;
 import org.apache.lucene.util.StringHelper;
 
 public class CassandraOnHeapGraph<T>
@@ -312,7 +307,7 @@ public class CassandraOnHeapGraph<T>
     /**
      * @return keys (PrimaryKey or segment row id) associated with the topK vectors near the query
      */
-    public SearchResult searchTopK(float[] queryVector, int limit, Bits toAccept)
+    public Pair<SearchResult, Supplier<SearchResult>> searchTopK(float[] queryVector, int limit, Bits toAccept)
     {
         validateIndexable(queryVector, similarityFunction);
 
@@ -330,7 +325,12 @@ public class CassandraOnHeapGraph<T>
         var topK = OverqueryUtils.topKFor(limit, null);
         var result = searcher.search(scoreFunction, null, topK, 0, bits);
         Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-        return result;
+        Supplier<SearchResult> resumeSearcher = () -> {
+            var resumeResult = searcher.resume(topK);
+            Tracing.trace("ANN resume search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
+            return resumeResult;
+        };
+        return Pair.create(result, resumeSearcher);
     }
 
     public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Function<T, Integer> postingTransformer) throws IOException

@@ -69,7 +69,7 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
      */
     public abstract VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits bits, QueryContext context);
 
-    public abstract ScoredRowIdIterator searchWithScores(float[] queryVector, int topK, int limit, Bits bits, QueryContext context);
+    public abstract ScoredRowIdIterator searchWithScores(float[] queryVector, int topK, Bits bits, QueryContext context);
 
     public abstract void close() throws IOException;
 

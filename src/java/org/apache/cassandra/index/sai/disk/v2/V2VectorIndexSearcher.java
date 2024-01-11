@@ -162,7 +162,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (bitsOrRowIds.skipANN())
             return bitsOrRowIds.scoredRowIdIterator();
 
-        var vectorPostings = graph.searchWithScores(queryVector, topK, limit, bitsOrRowIds.bits, context);
+        var vectorPostings = graph.searchWithScores(queryVector, topK, bitsOrRowIds.bits, context);
          bitsOrRowIds.updateStatistics(vectorPostings.getVisitedCount());
         return vectorPostings;
     }
@@ -533,7 +533,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         }
         // else ask the index to perform a search limited to the bits we created
         float[] queryVector = exp.lower.value.vector;
-        var results = graph.searchWithScores(queryVector, topK, limit, bits, context);
+        var results = graph.searchWithScores(queryVector, topK, bits, context);
         cost.updateStatistics(results.getVisitedCount());
 
         return toScoreOrderedIterator(results, context);

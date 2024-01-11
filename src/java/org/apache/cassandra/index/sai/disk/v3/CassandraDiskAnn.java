@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
+import java.util.function.Supplier;
 import java.util.logging.Logger;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
@@ -64,6 +65,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final CachingGraphIndex graph;
+    // TODO this doesn't look thread safe, figure out how to use
     private final GraphIndex.View<float[]> view;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
@@ -143,6 +145,25 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
         var view = graph.getView();
         var searcher = new GraphSearcher.Builder<>(view).build();
+        var result = searchInternal(searcher, view, queryVector, topK, threshold, acceptBits, context);
+        return annRowIdsToPostings(result, limit);
+    }
+
+    @Override
+    public ScoredRowIdIterator searchWithScores(float[] queryVector, int topK, Bits bits, QueryContext context)
+    {
+        CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
+
+        var view = graph.getView();
+        var searcher = new GraphSearcher.Builder<>(view).build();
+        var result = searchInternal(searcher, view, queryVector, topK, 0, bits, context);
+        return new ScoredRowIdIteratorDiskAnn(result, () -> resumeSearch(searcher, topK));
+    }
+
+    private SearchResult searchInternal(GraphSearcher<float[]> searcher, GraphIndex.View<float[]> view,
+                                        float[] queryVector, int topK, float threshold, Bits acceptBits, QueryContext context)
+    {
+
         NodeSimilarity.ScoreFunction scoreFunction;
         NodeSimilarity.Reranker reranker;
         if (compressedVectors == null)
@@ -163,36 +184,14 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
                                      ordinalsMap.ignoringDeleted(acceptBits));
         context.addAnnNodesVisited(result.getVisitedCount());
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-        return annRowIdsToPostings(result, limit);
+        return result;
     }
 
-    @Override
-    public ScoredRowIdIterator searchWithScores(float[] queryVector, int topK, int limit, Bits bits, QueryContext context)
+    private SearchResult resumeSearch(GraphSearcher<float[]> searcher, int topK)
     {
-        CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
-
-        var view = graph.getView();
-        var searcher = new GraphSearcher.Builder<>(view).build();
-        NodeSimilarity.ScoreFunction scoreFunction;
-        NodeSimilarity.ReRanker<float[]> reRanker;
-        if (compressedVectors == null)
-        {
-            scoreFunction = (NodeSimilarity.ExactScoreFunction)
-                            i -> similarityFunction.compare(queryVector, view.getVector(i));
-            reRanker = null;
-        }
-        else
-        {
-            scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, similarityFunction);
-            reRanker = (i, map) -> similarityFunction.compare(queryVector, map.get(i));
-        }
-        var result = searcher.search(scoreFunction,
-                                     reRanker,
-                                     topK,
-                                     ordinalsMap.ignoringDeleted(bits));
-        context.addAnnNodesVisited(result.getVisitedCount());
-        Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-        return new ScoredRowIdIteratorDiskAnn(result);
+        var nextTopK = searcher.resume(topK);
+        Tracing.trace("DiskANN resumed search and visited {} nodes to return {} results", nextTopK.getVisitedCount(), nextTopK.getNodes().length);
+        return nextTopK;
     }
 
     @Override
@@ -247,36 +246,52 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
     private class ScoredRowIdIteratorDiskAnn implements ScoredRowIdIterator
     {
-        private final Iterator<NodeScore> it;
+        private final Supplier<SearchResult> resumeSearch;
+        private Iterator<NodeScore> it;
         private final int visitedCount;
         private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
 
         private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
         private Float currentScore = -1f;
 
-        public ScoredRowIdIteratorDiskAnn(SearchResult result)
+        public ScoredRowIdIteratorDiskAnn(SearchResult result, Supplier<SearchResult> resumeSearch)
         {
             this.it = Arrays.stream(result.getNodes()).iterator();
             this.visitedCount = result.getVisitedCount();
+            this.resumeSearch = resumeSearch;
         }
 
         @Override
         public boolean hasNext() {
-            while (!segmentRowIdIterator.hasNext() && it.hasNext()) {
-                try
+            while (true)
+            {
+                if (segmentRowIdIterator.hasNext())
+                    return true;
+
+                if (it.hasNext())
                 {
-                    NodeScore result = it.next();
-                    currentScore = result.score;
-                    var ordinal = result.node;
-                    int[] rowIds = rowIdsView.getSegmentRowIdsMatching(ordinal);
-                    segmentRowIdIterator = Arrays.stream(rowIds).iterator();
+                    try
+                    {
+                        NodeScore result = it.next();
+                        currentScore = result.score;
+                        var ordinal = result.node;
+                        int[] rowIds = rowIdsView.getSegmentRowIdsMatching(ordinal);
+                        segmentRowIdIterator = Arrays.stream(rowIds).iterator();
+                        assert segmentRowIdIterator.hasNext() : "No row IDs found for ordinal " + ordinal;
+                        return true;
+                    }
+                    catch (IOException e)
+                    {
+                        throw new RuntimeException(e);
+                    }
                 }
-                catch (IOException e)
-                {
-                    throw new RuntimeException(e);
-                }
+
+                var searchResult = resumeSearch.get();
+                it = Arrays.stream(searchResult.getNodes()).iterator();
+                // We've exhausted the graph
+                if (!it.hasNext())
+                    return false;
             }
-            return segmentRowIdIterator.hasNext();
         }
 
         @Override

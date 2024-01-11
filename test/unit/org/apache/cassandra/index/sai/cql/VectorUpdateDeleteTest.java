@@ -790,16 +790,19 @@ public class VectorUpdateDeleteTest extends VectorTester
         disableCompaction(KEYSPACE);
 
         // Choose a row count that will essentially force us to re-query the index that still has more rows to search.
-        int baseRowCount = 5000;
+        int baseRowCount = 1000;
         // Create 1000 rows so that each row has a slightly less similar score.
-        for (int i = 0; i < baseRowCount; i++)
+        for (int i = 0; i < baseRowCount - 10; i++)
             execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, i));
+
+        for (int i = baseRowCount -10; i < baseRowCount; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, -i));
 
         flush();
 
         // Create 10 rows with the worst scores, but they won't be shadowed.
         for (int i = baseRowCount; i < baseRowCount + 10; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, baseRowCount * -1));
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(-1, baseRowCount * -1));
 
         // Delete all but the last 10 rows
         for (int i = 0; i < baseRowCount - 10; i++)
@@ -808,10 +811,10 @@ public class VectorUpdateDeleteTest extends VectorTester
         beforeAndAfterFlush(() -> {
             // ANN Only
             assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 1.0] LIMIT 3"),
-                       row(baseRowCount - 10), row(baseRowCount - 9), row(baseRowCount - 7));
+                       row(baseRowCount - 10), row(baseRowCount - 9), row(baseRowCount - 8));
             // Hyrbid
             assertRows(execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 1.0] LIMIT 3"),
-                       row(baseRowCount - 10), row(baseRowCount - 9), row(baseRowCount - 7));
+                       row(baseRowCount - 10), row(baseRowCount - 9), row(baseRowCount - 8));
         });
     }
 

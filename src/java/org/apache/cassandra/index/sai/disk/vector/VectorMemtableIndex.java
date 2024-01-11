@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -31,15 +32,19 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 
+import com.google.common.collect.Iterators;
+import com.google.common.collect.PeekingIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.util.Bits;
+import io.micrometer.core.instrument.search.Search;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -51,7 +56,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.ListOrderIterator;
 import org.apache.cassandra.index.sai.utils.OrderIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PriorityQueueOrderIterator;
@@ -250,7 +254,9 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         var result = graph.searchTopK(expr.lower.value.vector, limit, bits);
-        return processSearchResult(result);
+        if (result == null)
+            return OrderIterator.empty();
+        return new SearchResultOrderIterator(result);
     }
 
 
@@ -281,22 +287,9 @@ public class VectorMemtableIndex implements MemtableIndex
 
         var bits = new KeyFilteringBits(keysInRange);
         var result = graph.searchTopK(qv, limit, bits);
-        return processSearchResult(result);
-    }
-
-    private OrderIterator processSearchResult(SearchResult searchResult)
-    {
-        if (searchResult == null)
+        if (result == null)
             return OrderIterator.empty();
-        var a = searchResult.getNodes();
-        List<ScoredPrimaryKey> keys = new ArrayList<>(a.length);
-        for (int i = 0; i < a.length; i++)
-        {
-            int node = a[i].node;
-            for (var key : graph.keysFromOrdinal(node))
-                keys.add(new ScoredPrimaryKey(key, a[i].score));
-        }
-        return new ListOrderIterator(keys);
+        return new SearchResultOrderIterator(result);
     }
 
     private OrderIterator orderPrimaryKeys(float[] queryVector, Collection<PrimaryKey> keys)
@@ -497,6 +490,47 @@ public class VectorMemtableIndex implements MemtableIndex
         public int length()
         {
             return results.size();
+        }
+    }
+
+    private class SearchResultOrderIterator extends OrderIterator
+    {
+        private Iterator<SearchResult.NodeScore> nodeScoreIterator;
+        private Iterator<ScoredPrimaryKey> keyIterator = null;
+        private final Supplier<SearchResult> searchResultSupplier;
+
+        /**
+         * Create a new {@link SearchResultOrderIterator} that iterates over the provided {@link SearchResult}.
+         * If it exhausts the {@link SearchResult}, it retrieves the next {@link SearchResult} until the supplier
+         * returns a {@link SearchResult} without any results.
+         * @param result the first {@link SearchResult} to iterate over and the supplier to retrieve the next
+         */
+        public SearchResultOrderIterator(Pair<SearchResult, Supplier<SearchResult>> result)
+        {
+            this.nodeScoreIterator = Arrays.stream(result.left.getNodes()).iterator();
+            this.searchResultSupplier = result.right;
+        }
+
+        @Override
+        protected ScoredPrimaryKey computeNext()
+        {
+            while (true)
+            {
+                if (keyIterator != null && keyIterator.hasNext())
+                    return keyIterator.next();
+                if (nodeScoreIterator.hasNext())
+                {
+                    var nodeScore = nodeScoreIterator.next();
+                    keyIterator = graph.keysFromOrdinal(nodeScore.node).stream()
+                                       .map(k -> new ScoredPrimaryKey(k, nodeScore.score)).iterator();
+                    // Continue so we can verify keyIterator hasNext because the node could have been removed from the
+                    // graph after it appeared in our searchResult
+                    continue;
+                }
+                nodeScoreIterator = Arrays.stream(searchResultSupplier.get().getNodes()).iterator();
+                if (!nodeScoreIterator.hasNext())
+                    return endOfData();
+            }
         }
     }
 }

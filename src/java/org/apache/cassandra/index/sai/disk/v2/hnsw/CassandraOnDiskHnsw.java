@@ -143,7 +143,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     }
 
     @Override
-    public ScoredRowIdIterator searchWithScores(float[] queryVector, int topK, int limit, Bits acceptBits, QueryContext context)
+    public ScoredRowIdIterator searchWithScores(float[] queryVector, int topK, Bits acceptBits, QueryContext context)
     {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
@@ -239,6 +239,8 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
                     throw new RuntimeException(e);
                 }
             }
+            if (queue.size() == 0)
+                logger.warn("HNSW queue is empty, returning false, but the search might not have been exhaustive");
             return segmentRowIdIterator.hasNext();
         }
 
