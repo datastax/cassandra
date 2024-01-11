@@ -338,7 +338,7 @@ abstract class TokenFilter implements PartitionKeyRestrictions
     }
 
     @Override
-    public void addToRowFilter(RowFilter filter, IndexRegistry indexRegistry, QueryOptions options)
+    public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
     {
         restrictions.addToRowFilter(filter, indexRegistry, options);
     }
