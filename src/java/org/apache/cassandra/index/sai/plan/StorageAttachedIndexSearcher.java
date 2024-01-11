@@ -159,8 +159,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         return controller.buildFilter();
     }
 
-    private static class ResultRetriever extends AbstractIterator<UnfilteredRowIterator>
-                implements UnfilteredPartitionIterator, ParallelCommandProcessor
+    private static class ResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
         private final PrimaryKey firstPrimaryKey;
         private final PrimaryKey lastPrimaryKey;
@@ -244,64 +243,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 iterator = apply(key);
             }
             return iterator;
-        }
-
-        /**
-         * Eagerly collects all the keys.
-         * @return List of keys
-         */
-        private @Nullable List<PrimaryKey> getKeys()
-        {
-            List<PrimaryKey> keys = new ArrayList<>();
-            while (true)
-            {
-                if (operation == null)
-                    break;
-
-                if (lastKey == null)
-                    operation.skipTo(firstPrimaryKey);
-
-                skipToNextPartition();
-
-                PrimaryKey key = nextSelectedKeyInRange();
-                if (key == null) break;
-                if (key.equals(lastKey)) break;
-
-                while (key != null)
-                {
-                    lastKey = key;
-                    keys.add(key);
-                    key = nextSelectedKeyInPartition(key.partitionKey());
-                }
-            }
-            return keys;
-        }
-
-        /**
-         * Returns a list of commands that need to be executed to retrieve the data.
-         * @return list of (key, command) tuples
-         */
-        @Override
-        public List<Pair<PrimaryKey, SinglePartitionReadCommand>> getUninitializedCommands()
-        {
-            List<PrimaryKey> keys = getKeys();
-            return keys.stream()
-                       .map(key -> Pair.create(key, controller.getPartitionReadCommand(key, executionController)))
-                       .collect(Collectors.toList());
-        }
-
-        /**
-         * Executes the given command and returns an iterator.
-         */
-        @Override
-        public UnfilteredRowIterator commandToIterator(PrimaryKey key, SinglePartitionReadCommand command)
-        {
-            try (UnfilteredRowIterator partition = controller.executePartitionReadCommand(command, executionController))
-            {
-                queryContext.addPartitionsRead(1);
-                queryContext.checkpoint();
-                return applyIndexFilter(key, partition, filterTree, queryContext);
-            }
         }
 
         /**
@@ -572,8 +513,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
     }
 
-    public static class ScoreOrderedResultRetriever extends AbstractIterator<UnfilteredRowIterator>
-    implements UnfilteredPartitionIterator//, ParallelCommandProcessor
+    public static class ScoreOrderedResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
         private final List<AbstractBounds<PartitionPosition>> keyRanges;
         private final boolean coversFullRing;
@@ -634,64 +574,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             }
             return iterator;
         }
-
-//        /**
-//         * Eagerly collects all the keys.
-//         * @return List of keys
-//         */
-//        private @Nullable List<PrimaryKey> getKeys()
-//        {
-//            List<PrimaryKey> keys = new ArrayList<>();
-//            while (true)
-//            {
-//                if (operation == null)
-//                    break;
-//
-//                if (lastKey == null)
-//                    operation.skipTo(firstPrimaryKey);
-//
-//                skipToNextPartition();
-//
-//                PrimaryKey key = nextSelectedKeyInRange();
-//                if (key == null) break;
-//                if (key.equals(lastKey)) break;
-//
-//                while (key != null)
-//                {
-//                    lastKey = key;
-//                    keys.add(key);
-//                    key = nextSelectedKeyInPartition();
-//                }
-//            }
-//            return keys;
-//        }
-//
-//        /**
-//         * Returns a list of commands that need to be executed to retrieve the data.
-//         * @return list of (key, command) tuples
-//         */
-//        @Override
-//        public List<Pair<PrimaryKey, SinglePartitionReadCommand>> getUninitializedCommands()
-//        {
-//            List<PrimaryKey> keys = getKeys();
-//            return keys.stream()
-//                       .map(key -> Pair.create(key, controller.getPartitionReadCommand(key, executionController)))
-//                       .collect(Collectors.toList());
-//        }
-
-//        /**
-//         * Executes the given command and returns an iterator.
-//         */
-//        @Override
-//        public UnfilteredRowIterator commandToIterator(PrimaryKey key, SinglePartitionReadCommand command)
-//        {
-//            try (UnfilteredRowIterator partition = controller.executePartitionReadCommand(command, executionController))
-//            {
-//                queryContext.addPartitionsRead(1);
-//                queryContext.checkpoint();
-//                return applyIndexFilter(key, partition, filterTree, queryContext);
-//            }
-//        }
 
         /**
          * Determine if the key is in one of the queried key ranges. We do not iterate through results in

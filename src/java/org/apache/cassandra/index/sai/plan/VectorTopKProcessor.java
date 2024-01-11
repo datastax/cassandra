@@ -194,7 +194,8 @@ public class VectorTopKProcessor
             var retriever = (StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) partitions;
             // FilteredPartitions does not implement ParallelizablePartitionIterator.
             // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
-            while (retriever.hasNext() && topK.size() < limit)
+            int rowsMatched = 0;
+            while (retriever.hasNext() && rowsMatched < limit)
             {
                 // have to close to move to the next partition, otherwise hasNext() fails
                 try (var partitionRowIterator = retriever.next())
@@ -205,7 +206,9 @@ public class VectorTopKProcessor
                         continue;
                     if (!retriever.updatedKeys.isEmpty())
                         retriever.updatedKeys.remove(iter.scoredPrimaryKey);
-                    topK.addAll(pr.rows);
+                    rowsMatched += pr.rows.size();
+                    for (var row : pr.rows)
+                        addUnfiltered(unfilteredByPartition, row.getLeft(), row.getMiddle());
                     for (var uf : pr.tombstones)
                         addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
                 }
