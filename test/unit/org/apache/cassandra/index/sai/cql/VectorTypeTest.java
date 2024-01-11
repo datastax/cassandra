@@ -965,6 +965,34 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
+    public void testSearchClusteringColumnsWithStaticVector() throws Throwable
+    {
+        setMaxBruteForceRows(0);
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2> static, PRIMARY KEY(pk, a))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // Create two partitions. 1 has the first row with the vector and 2 has the last.
+        execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, 1, 'A', [1, 3])");
+        execute("INSERT INTO %s (pk, a, val)      VALUES (1, 2, 'A')");
+        execute("INSERT INTO %s (pk, a, val)      VALUES (1, 3, 'A')");
+        execute("INSERT INTO %s (pk, a, val)      VALUES (2, 4, 'A')");
+        execute("INSERT INTO %s (pk, a, val, vec) VALUES (2, 5, 'A', [1, 1])");
+
+        // Get all rows using first predicate, then filter to get top 1
+        // Use a small limit to ensure we do not use brute force
+        beforeAndAfterFlush(() -> {
+            // Hybrid
+            assertRows(execute("SELECT a FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,3] LIMIT 3"), row(1), row(2), row(3));
+            assertRows(execute("SELECT a FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 2"), row(4), row(5));
+            // ANN only
+            assertRows(execute("SELECT a FROM %s ORDER BY vec ANN OF [1,3] LIMIT 3"), row(1), row(2), row(3));
+            assertRows(execute("SELECT a FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2"), row(4), row(5));
+        });
+    }
+
+    @Test
     public void testHybridSearchHoleInClusteringColumnOrdering() throws Throwable
     {
         setMaxBruteForceRows(0);
