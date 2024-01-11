@@ -17,7 +17,19 @@
  */
 package org.apache.cassandra.cql3.restrictions;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.NavigableSet;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
+
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.Multimap;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
@@ -49,7 +61,7 @@ public abstract class RestrictionSet implements Restrictions
         }
 
         @Override
-        public void addToRowFilter(RowFilter filter, IndexRegistry indexRegistry, QueryOptions options) throws InvalidRequestException
+        public void addToRowFilter(RowFilter.Builder rowFilter, IndexRegistry indexRegistry, QueryOptions options) throws InvalidRequestException
         {
         }
 
@@ -148,7 +160,7 @@ public abstract class RestrictionSet implements Restrictions
          * The values as returned from {@link #restrictions()}.
          */
         private final List<SingleRestriction> restrictionsValues;
-        private final Map<ColumnMetadata, SingleRestriction> restrictionsHashMap;
+        private final Multimap<ColumnMetadata, SingleRestriction> restrictionsMap;
         private final int hasBitmap;
         private final int restrictionForKindBitmap;
         private static final int maskHasContains = 1;
@@ -158,7 +170,7 @@ public abstract class RestrictionSet implements Restrictions
         private static final int maskHasMultiColumnSlice = 16;
         private static final int maskHasMultipleContains = 32;
 
-        private DefaultRestrictionSet(Map<ColumnMetadata, SingleRestriction> restrictions,
+        private DefaultRestrictionSet(Multimap<ColumnMetadata, SingleRestriction> restrictions,
                                       boolean hasMultiColumnRestrictions)
         {
             this.restrictionsKeys = new ArrayList<>(restrictions.keySet());
@@ -174,52 +186,55 @@ public abstract class RestrictionSet implements Restrictions
             for (int i = 0; i < restrictionsKeys.size(); i++)
             {
                 ColumnMetadata col = restrictionsKeys.get(i);
-                SingleRestriction singleRestriction = restrictions.get(col);
+                Collection<SingleRestriction> columnRestrictions = restrictions.get(col);
 
-                if (singleRestriction.isContains())
+                for (SingleRestriction singleRestriction : columnRestrictions)
                 {
-                    bitmap |= maskHasContains;
-                    ContainsRestriction contains = (ContainsRestriction) singleRestriction;
-                    numberOfContains += (contains.numberOfValues() + contains.numberOfKeys() + contains.numberOfEntries());
+                    if (singleRestriction.isContains())
+                    {
+                        bitmap |= maskHasContains;
+                        ContainsRestriction contains = (ContainsRestriction) singleRestriction;
+                        numberOfContains += (contains.numberOfValues() + contains.numberOfKeys() + contains.numberOfEntries());
+                    }
+
+                    if (hasMultiColumnRestrictions)
+                    {
+                        if (singleRestriction.equals(previous))
+                            continue;
+                        previous = singleRestriction;
+                    }
+
+                    restrictionForBitmap |= 1 << col.kind.ordinal();
+
+                    sortedRestrictions.add(singleRestriction);
+
+                    if (singleRestriction.isSlice())
+                    {
+                        bitmap |= maskHasSlice;
+                        if (singleRestriction.isMultiColumn())
+                            bitmap |= maskHasMultiColumnSlice;
+                    }
+
+                    if (singleRestriction.isIN())
+                        bitmap |= maskHasIN;
+                    else if (!singleRestriction.isEQ())
+                        bitmap &= ~maskHasOnlyEqualityRestrictions;
                 }
-
-                if (hasMultiColumnRestrictions)
-                {
-                    if (singleRestriction.equals(previous))
-                        continue;
-                    previous = singleRestriction;
-                }
-
-                restrictionForBitmap |= 1 << col.kind.ordinal();
-
-                sortedRestrictions.add(singleRestriction);
-
-                if (singleRestriction.isSlice())
-                {
-                    bitmap |= maskHasSlice;
-                    if (singleRestriction.isMultiColumn())
-                        bitmap |= maskHasMultiColumnSlice;
-                }
-
-                if (singleRestriction.isIN())
-                    bitmap |= maskHasIN;
-                else if (!singleRestriction.isEQ())
-                    bitmap &= ~maskHasOnlyEqualityRestrictions;
             }
             this.hasBitmap = bitmap | (numberOfContains > 1 ? maskHasMultipleContains : 0);
             this.restrictionForKindBitmap = restrictionForBitmap;
 
             this.restrictionsValues = Collections.unmodifiableList(sortedRestrictions);
-            this.restrictionsHashMap = restrictions;
+            this.restrictionsMap = restrictions;
         }
 
         @Override
-        public void addToRowFilter(RowFilter filter,
+        public void addToRowFilter(RowFilter.Builder rowFilter,
                                    IndexRegistry indexRegistry,
                                    QueryOptions options) throws InvalidRequestException
         {
-            for (SingleRestriction restriction : restrictionsHashMap.values())
-                restriction.addToRowFilter(filter, indexRegistry, options);
+            for (SingleRestriction restriction : restrictionsMap.values())
+                restriction.addToRowFilter(rowFilter, indexRegistry, options);
         }
 
         @Override
@@ -256,14 +271,13 @@ public abstract class RestrictionSet implements Restrictions
         @Override
         public Set<Restriction> getRestrictions(ColumnMetadata columnDef)
         {
-            Restriction existing = restrictionsHashMap.get(columnDef);
-            return existing == null ? Collections.emptySet() : Collections.singleton(existing);
+            return restrictionsMap.get(columnDef).stream().map(r -> ((Restriction)r)).collect(Collectors.toSet());
         }
 
         @Override
         public boolean hasSupportingIndex(IndexRegistry indexRegistry)
         {
-            for (SingleRestriction restriction : restrictionsHashMap.values())
+            for (SingleRestriction restriction : restrictionsMap.values())
                 if (restriction.hasSupportingIndex(indexRegistry))
                     return true;
             return false;
@@ -272,7 +286,7 @@ public abstract class RestrictionSet implements Restrictions
         @Override
         public boolean needsFiltering(Index.Group indexGroup)
         {
-            for (SingleRestriction restriction : restrictionsHashMap.values())
+            for (SingleRestriction restriction : restrictionsMap.values())
                 if (restriction.needsFiltering(indexGroup))
                     return true;
 
@@ -377,7 +391,7 @@ public abstract class RestrictionSet implements Restrictions
 
     public static final class Builder
     {
-        private final Map<ColumnMetadata, SingleRestriction> newRestrictions = new HashMap<>();
+        private final Multimap<ColumnMetadata, SingleRestriction> newRestrictions = ArrayListMultimap.create();
         private boolean multiColumn = false;
 
         private ColumnMetadata lastRestrictionColumn;
@@ -387,27 +401,40 @@ public abstract class RestrictionSet implements Restrictions
         {
         }
 
-        public void addRestriction(SingleRestriction restriction)
+        public void addRestriction(SingleRestriction restriction, boolean isDisjunction)
         {
             List<ColumnMetadata> columnDefs = restriction.getColumnDefs();
-            Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
 
-            if (existingRestrictions.isEmpty())
+            if (isDisjunction)
             {
-                addRestrictionForColumns(columnDefs, restriction);
+                // If this restriction is part of a disjunction query then we don't want
+                // to merge the restrictions (if that is possible), we just add the
+                // restriction to the set of restrictions for the column.
+                addRestrictionForColumns(columnDefs, restriction, false);
             }
             else
             {
-                for (SingleRestriction existing : existingRestrictions)
-                {
-                    SingleRestriction newRestriction = existing.mergeWith(restriction);
+                // If this restriction isn't part of a disjunction then we need to get
+                // the set of existing restrictions for the column and merge them with the
+                // new restriction
+                Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
 
-                    addRestrictionForColumns(columnDefs, newRestriction);
+                if (existingRestrictions.isEmpty())
+                {
+                    addRestrictionForColumns(columnDefs, restriction, false);
+                }
+                else
+                {
+                    SingleRestriction merged = restriction;
+                    for (SingleRestriction existing : existingRestrictions)
+                        merged = existing.mergeWith(merged);
+
+                    addRestrictionForColumns(merged.getColumnDefs(), merged, true);
                 }
             }
         }
 
-        private void addRestrictionForColumns(List<ColumnMetadata> columnDefs, SingleRestriction restriction)
+        private void addRestrictionForColumns(List<ColumnMetadata> columnDefs, SingleRestriction restriction, boolean replace)
         {
             for (int i = 0; i < columnDefs.size(); i++)
             {
@@ -417,21 +444,23 @@ public abstract class RestrictionSet implements Restrictions
                     lastRestrictionColumn = column;
                     lastRestriction = restriction;
                 }
+                if (replace)
+                    newRestrictions.removeAll(column);
                 newRestrictions.put(column, restriction);
             }
 
             multiColumn |= restriction.isMultiColumn();
         }
 
-        private static Set<SingleRestriction> getRestrictions(Map<ColumnMetadata, SingleRestriction> restrictions,
+        private static Set<SingleRestriction> getRestrictions(Multimap<ColumnMetadata, SingleRestriction> restrictions,
                                                               List<ColumnMetadata> columnDefs)
         {
             Set<SingleRestriction> set = new HashSet<>();
             for (int i = 0; i < columnDefs.size(); i++)
             {
-                SingleRestriction existing = restrictions.get(columnDefs.get(i));
-                if (existing != null)
-                    set.add(existing);
+                Collection<SingleRestriction> existing = restrictions.get(columnDefs.get(i));
+                if (!existing.isEmpty())
+                    set.addAll(existing);
             }
             return set;
         }

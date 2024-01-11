@@ -1038,7 +1038,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                 throw new InvalidRequestException(CUSTOM_EXPRESSIONS_NOT_ALLOWED);
 
             boolean applyOnlyToStaticColumns = appliesOnlyToStaticColumns(operations, conditions);
-            return new StatementRestrictions(state, type, metadata, where, boundNames, applyOnlyToStaticColumns, false, false);
+            return StatementRestrictions.create(state, type, metadata, where, boundNames, applyOnlyToStaticColumns, false, false);
         }
 
         public List<Pair<ColumnIdentifier, ColumnCondition.Raw>> getConditions()
