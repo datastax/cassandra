@@ -799,7 +799,7 @@ public class VectorUpdateDeleteTest extends VectorTester
 
         // Create 10 rows with the worst scores, but they won't be shadowed.
         for (int i = baseRowCount; i < baseRowCount + 10; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, baseRowCount * 2));
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, baseRowCount * -1));
 
         // Delete all but the last 10 rows
         for (int i = 0; i < baseRowCount - 10; i++)
@@ -807,11 +807,11 @@ public class VectorUpdateDeleteTest extends VectorTester
 
         beforeAndAfterFlush(() -> {
             // ANN Only
-            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 1.0] LIMIT 4"),
-                       row(90), row(91), row(92), row(93));
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 1.0] LIMIT 3"),
+                       row(baseRowCount - 10), row(baseRowCount - 9), row(baseRowCount - 7));
             // Hyrbid
-            assertRows(execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 1.0] LIMIT 4"),
-                       row(90), row(91), row(92), row(93));
+            assertRows(execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 1.0] LIMIT 3"),
+                       row(baseRowCount - 10), row(baseRowCount - 9), row(baseRowCount - 7));
         });
     }
 
