@@ -65,8 +65,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final CachingGraphIndex graph;
-    // TODO this doesn't look thread safe, figure out how to use
-    private final GraphIndex.View<float[]> view;
+    private final ThreadLocal<GraphIndex.View<float[]>> view;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
@@ -80,7 +79,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         SegmentMetadata.ComponentMetadata termsMetadata = getComponentMetadata(IndexComponent.TERMS_DATA);
         graphHandle = indexFiles.termsData();
         graph = new CachingGraphIndex(new OnDiskGraphIndex<>(graphHandle::createReader, termsMetadata.offset));
-        view = graph.getView();
+        view = ThreadLocal.withInitial(graph::getView);
 
         long pqSegmentOffset = getComponentMetadata(IndexComponent.PQ).offset;
         try (var pqFile = indexFiles.pq();
@@ -143,9 +142,8 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
-        var view = graph.getView();
-        var searcher = new GraphSearcher.Builder<>(view).build();
-        var result = searchInternal(searcher, view, queryVector, topK, threshold, acceptBits, context);
+        var searcher = new GraphSearcher.Builder<>(view.get()).build();
+        var result = searchInternal(searcher, queryVector, topK, threshold, acceptBits, context);
         return annRowIdsToPostings(result, limit);
     }
 
@@ -154,28 +152,28 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
-        var view = graph.getView();
-        var searcher = new GraphSearcher.Builder<>(view).build();
-        var result = searchInternal(searcher, view, queryVector, topK, 0, bits, context);
+        var searcher = new GraphSearcher.Builder<>(view.get()).build();
+        var result = searchInternal(searcher, queryVector, topK, 0, bits, context);
         return new ScoredRowIdIteratorDiskAnn(result, () -> resumeSearch(searcher, topK));
     }
 
-    private SearchResult searchInternal(GraphSearcher<float[]> searcher, GraphIndex.View<float[]> view,
-                                        float[] queryVector, int topK, float threshold, Bits acceptBits, QueryContext context)
+    private SearchResult searchInternal(GraphSearcher<float[]> searcher, float[] queryVector, int topK, float threshold,
+                                        Bits acceptBits, QueryContext context)
     {
-
+        // Retrieve the view reference once.
+        var localView = view.get();
         NodeSimilarity.ScoreFunction scoreFunction;
         NodeSimilarity.Reranker reranker;
         if (compressedVectors == null)
         {
             scoreFunction = (NodeSimilarity.ExactScoreFunction)
-                            i -> similarityFunction.compare(queryVector, view.getVector(i));
+                            i -> similarityFunction.compare(queryVector, localView.getVector(i));
             reranker = null;
         }
         else
         {
             scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, similarityFunction);
-            reranker = i -> similarityFunction.compare(queryVector, view.getVector(i));
+            reranker = i -> similarityFunction.compare(queryVector, localView.getVector(i));
         }
         var result = searcher.search(scoreFunction,
                                      reranker,
@@ -339,6 +337,6 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     @Override
     public float[] getVectorForOrdinal(int ordinal)
     {
-        return view.getVector(ordinal);
+        return view.get().getVector(ordinal);
     }
 }
