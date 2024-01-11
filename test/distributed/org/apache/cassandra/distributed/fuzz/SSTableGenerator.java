@@ -306,15 +306,15 @@ public class SSTableGenerator
                                                  new AbstractMarker.Raw(values.size() - 1)));
         }
 
-        StatementRestrictions restrictions = new StatementRestrictions(null,
-                                                                       StatementType.DELETE,
-                                                                       metadata,
-                                                                       builder.build(),
-                                                                       new VariableSpecifications(variableNames),
-                                                                       false,
-                                                                       false,
-                                                                       false,
-                                                                       false);
+        StatementRestrictions restrictions = StatementRestrictions.create(null,
+                                                                          StatementType.DELETE,
+                                                                          metadata,
+                                                                          builder.build(),
+                                                                          new VariableSpecifications(variableNames),
+                                                                          false,
+                                                                          false,
+                                                                          false,
+                                                                          false);
 
         QueryOptions options = QueryOptions.forInternalCalls(ConsistencyLevel.QUORUM, values);
         SortedSet<ClusteringBound<?>> startBounds = restrictions.getClusteringColumnsBounds(Bound.START, options);
