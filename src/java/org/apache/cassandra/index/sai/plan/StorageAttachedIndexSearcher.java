@@ -611,7 +611,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         public UnfilteredRowIterator apply(ScoredPrimaryKey key)
         {
             // If we've seen the key already, we can skip it. However, we cannot skip keys that were updated to a
-            // worse score.
+            // worse score because the key's updated value could still be in the topk--we just didn't know when we
+            // saw it last time.
             if (!keysSeen.add(key) && !updatedKeys.contains(key))
                 return null;
 

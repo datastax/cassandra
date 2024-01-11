@@ -204,8 +204,6 @@ public class VectorTopKProcessor
                     PartitionResults pr = processPartition(iter, iter.scoredPrimaryKey, retriever.updatedKeys);
                     if (pr == null)
                         continue;
-                    if (!retriever.updatedKeys.isEmpty())
-                        retriever.updatedKeys.remove(iter.scoredPrimaryKey);
                     rowsMatched += pr.rows.size();
                     for (var row : pr.rows)
                         addUnfiltered(unfilteredByPartition, row.getLeft(), row.getMiddle());
@@ -315,11 +313,19 @@ public class VectorTopKProcessor
 
             Row row = (Row) unfiltered;
             float rowScore = getScoreForRow(null, row);
-            // todo what precision tolerance do we want?
+            // Accept the Primary Key if its score, which comes from the vector index, is greater than the score
+            // of the row read from storage. If the score is less than the score of the row read from storage,
+            // then it might not be in the global top k.
             if (key.score > rowScore + 0.0001f)
             {
                 updatedKeys.add(key);
                 return null;
+            }
+            else if (!updatedKeys.isEmpty())
+            {
+                // The score is accepted, so the Primary Key no longer needs special treatment and can be removed
+                // from the updatedKeys set.
+                updatedKeys.remove(key);
             }
             pr.addRow(Triple.of(partitionInfo, row, keyAndStaticScore + rowScore));
         }

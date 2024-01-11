@@ -819,7 +819,7 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
-    public void testUpdateVectorToWorsePosition() throws Throwable
+    public void testUpdateVectorToWorseAndBetterPositions() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
@@ -833,6 +833,7 @@ public class VectorUpdateDeleteTest extends VectorTester
 
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 1"), row(1));
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 2"), row(1), row(0));
         });
 
         // And now update pk 1 to show that we can get 0 too
@@ -840,6 +841,18 @@ public class VectorUpdateDeleteTest extends VectorTester
 
         beforeAndAfterFlush(() -> {
             assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 1"), row(0));
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 2"), row(0), row(1));
+        });
+
+        // And now update both PKs so that the stream of ranked rows is PKs: 0, 1, [1], 0, 1, [0], where the numbers
+        // wrapped in brackets are the "real" scores of the vectors. This test makes sure that we correctly remove
+        // PrimaryKeys from the updatedKeys map so that we don't accidentally duplicate PKs.
+        execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 3.5])");
+        execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 6.0])");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 1"), row(1));
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 2"), row(1), row(0));
         });
     }
 
