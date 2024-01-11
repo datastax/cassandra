@@ -44,11 +44,11 @@ class RestrictionSetWrapper implements Restrictions
     }
 
     @Override
-    public void addToRowFilter(RowFilter filter,
+    public void addToRowFilter(RowFilter.Builder rowFilter,
                                IndexRegistry indexRegistry,
                                QueryOptions options)
     {
-        restrictions.addToRowFilter(filter, indexRegistry, options);
+        restrictions.addToRowFilter(rowFilter, indexRegistry, options);
     }
 
     @Override

@@ -1204,6 +1204,12 @@
         <artifactId>big-math</artifactId>
         <version>2.3.0</version>
       </dependency>
+      <dependency>
+        <groupId>com.bpodgursky</groupId>
+        <artifactId>jbool_expressions</artifactId>
+        <version>1.24</version>
+        <scope>test</scope>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 </project>
