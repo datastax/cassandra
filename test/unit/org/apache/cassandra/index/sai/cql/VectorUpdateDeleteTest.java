@@ -818,6 +818,31 @@ public class VectorUpdateDeleteTest extends VectorTester
         });
     }
 
+    @Test
+    public void testUpdateVectorToWorsePosition() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, val vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])");
+        execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 3.0])");
+
+        flush();
+        execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 4.0])");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 1"), row(1));
+        });
+
+        // And now update pk 1 to show that we can get 0 too
+        execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 5.0])");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 1"), row(0));
+        });
+    }
+
     private static void setChunkSize(final int selectivityLimit) throws Exception
     {
         Field selectivity = QueryController.class.getDeclaredField("ORDER_CHUNK_SIZE");
