@@ -23,7 +23,6 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -322,9 +321,19 @@ public class SerializationHeader
                                                     AbstractType<?> type,
                                                     boolean isPrimaryKeyColumn)
         {
+            boolean dropped = table.getDroppedColumn(columnName) != null;
+            if (!dropped && type.isTuple() && type.isMultiCell())
+            {
+                logger.error("Error reading SSTable header {}, the type for column {} in {} is not-frozen {}, " +
+                             "but the column isn't marked as dropped, which is invalid; " +
+                             "Will continue with that type, but something may break.",
+                             descriptor, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type().toSchemaString());
+                dropped = true;
+            }
+
             try
             {
-                type.validateForColumn(columnName, isPrimaryKeyColumn, table.isCounter(), table.getDroppedColumn(columnName) != null);
+                type.validateForColumn(columnName, isPrimaryKeyColumn, table.isCounter(), dropped);
                 return type;
             }
             catch (InvalidColumnTypeException e)
@@ -344,7 +353,7 @@ public class SerializationHeader
                 {
                     logger.warn("Error reading SSTable header {}, the type for column {} in {} is {}, which is " +
                                 "invalid ({}); Will continue with modified valid type {}, but please contact " +
-                                "support if this is incorrect",
+                                "support if this is incorrect.",
                                 descriptor, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type(),
                                 e.getMessage(), fixed.asCQL3Type());
                     return fixed;
@@ -429,39 +438,12 @@ public class SerializationHeader
                                                                 metadata.clusteringColumns(),
                                                                 clusteringTypes);
 
-            RegularAndStaticColumns headerColumns = builder.build();
-            checkColumnsOrder(headerColumns.regulars, regularColumns.entrySet());
-            checkColumnsOrder(headerColumns.statics, staticColumns.entrySet());
-
             return new SerializationHeader(true,
                                            partitionKeys,
                                            clusterings,
-                                           headerColumns,
+                                           builder.build(),
                                            stats,
                                            typeMap);
-        }
-
-        private void checkColumnsOrder(Iterable<ColumnMetadata> headerColumns, Iterable<Map.Entry<ByteBuffer, AbstractType<?>>> serializedColumns)
-        {
-            Iterator<ColumnMetadata> h = headerColumns.iterator();
-            Iterator<Map.Entry<ByteBuffer, AbstractType<?>>> s = serializedColumns.iterator();
-            while (h.hasNext() && s.hasNext())
-            {
-                ColumnMetadata headerColumn = h.next();
-                Map.Entry<ByteBuffer, AbstractType<?>> serializedColumn = s.next();
-                if (!headerColumn.name.bytes.equals(serializedColumn.getKey()) || headerColumn.type.isMultiCell() != serializedColumn.getValue().isMultiCell())
-                {
-                    String headerColumnsString =
-                            Iterables.toString(Iterables.transform(headerColumns,
-                                                                   cm -> String.format("%s: %s", cm.name.toCQLString(), cm.type.asCQL3Type())));
-                    String serializedColumnsString =
-                            Iterables.toString(Iterables.transform(serializedColumns,
-                                                                   e -> String.format("%s: %s", ColumnIdentifier.toCQLString(e.getKey()), e.getValue().asCQL3Type())));
-                    throw new IllegalStateException(String.format("Invalid order of columns in serialization header around column %s. " +
-                                                                  "Expecting header columns: %s to be the same as serialized columns %s",
-                                                                  headerColumn.name, headerColumnsString, serializedColumnsString));
-                }
-            }
         }
 
         @Override

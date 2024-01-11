@@ -30,6 +30,9 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.tools.SSTableExport;
+import org.apache.cassandra.tools.ToolRunner;
+import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
@@ -92,6 +95,19 @@ public class DropUDTWithRestartTest extends TestBaseImpl
             node.startup();
 
             checkData(cluster);
+
+            // verify that the sstable can be read with sstabledump
+            String sstable = node.callOnInstance(() -> Keyspace.open("ks").getColumnFamilyStore("tab")
+                                                               .getDirectories().getCFDirectories()
+                                                               .get(0).tryList()[0].toString());
+            ToolRunner.ToolResult tool = ToolRunner.invokeClass(SSTableExport.class, sstable);
+            tool.assertCleanStdErr();
+            tool.assertOnExitCode();
+            Assertions.assertThat(tool.getStdout())
+                      .contains("\"key\" : [ \"1\" ],")
+                      .contains("\"key\" : [ \"2\" ],")
+                      .contains("{ \"name\" : \"c\", \"value\" : \"c_value\" }")
+                      .contains("{ \"name\" : \"b\", \"value\" : \"b_value\" }");
         }
     }
 
