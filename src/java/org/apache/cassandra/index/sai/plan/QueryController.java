@@ -431,26 +431,18 @@ public class QueryController
         logger.debug("getTopKRows using limit = {}", limit);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        // todo fix me (we need to search memtables,
-        List<OrderIterator> memtableResults = getContext(expression).searchTopKMemtable(queryContext, planExpression, mergeRange, limit);
+        List<OrderIterator> memtableResults = getContext(expression).orderMemtable(queryContext, planExpression, mergeRange, limit);
 
         var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
 
         try
         {
-            List<OrderIterator> sstableIntersections = queryView.view.values()
-                                                                     .stream()
-                                                                     .flatMap(e -> createRowIdIterator(e, limit).stream())
-                                                                     .collect(Collectors.toList());
-            sstableIntersections.addAll(memtableResults);
-            if (sstableIntersections.isEmpty())
-            {
-                // We must release here because empty vector indexes are in the view, but they do not
-                // produce any OrderIterators. TODO can we somehow ignore empty indexes so they are not in the view?
-                queryView.referencedIndexes.forEach(SSTableIndex::release);
-                return OrderIterator.empty();
-            }
-            return new MergeOrderIterator(sstableIntersections, queryView.referencedIndexes);
+            List<OrderIterator> sstableResults = queryView.view.values()
+                                                               .stream()
+                                                               .flatMap(e -> orderBy(e, limit).stream())
+                                                               .collect(Collectors.toList());
+            sstableResults.addAll(memtableResults);
+            return new MergeOrderIterator(sstableResults, queryView.referencedIndexes);
         }
         catch (Throwable t)
         {
@@ -474,8 +466,6 @@ public class QueryController
                 indexesToRelease.addAll(next.right());
             }
         }
-        if (orderIterators.isEmpty())
-            return OrderIterator.empty();
         return new MergeOrderIterator(orderIterators, indexesToRelease);
     }
 
@@ -494,24 +484,26 @@ public class QueryController
         queryContext.setSoftLimit(limit);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        List<OrderIterator> memtableResults = this.getContext(expression).limitToTopResults(queryContext, sourceKeys, planExpression, limit);
+        List<OrderIterator> memtableResults = this.getContext(expression)
+                                                  .orderResultsBy(queryContext, sourceKeys, planExpression, limit);
         var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
 
         try
         {
-            List<OrderIterator> sstableIntersections = queryView.view.values()
-                                                                     .stream()
-                                                                     .flatMap(e -> reorderAndLimitBySSTableRowIds(sourceKeys, e, limit).stream())
-                                                                     .collect(Collectors.toList());
-            sstableIntersections.addAll(memtableResults);
-            if (sstableIntersections.isEmpty())
+            List<OrderIterator> sstableOrderIterators = queryView.view.values()
+                                                                      .stream()
+                                                                      .flatMap(e -> orderResultsBy(sourceKeys, e, limit).stream())
+                                                                      .collect(Collectors.toList());
+            sstableOrderIterators.addAll(memtableResults);
+            if (sstableOrderIterators.isEmpty())
             {
-                // We must release here because empty vector indexes are in the view, but they do not
-                // produce any OrderIterators. TODO can we somehow ignore empty indexes so they are not in the view?
+                // We release here because an empty vector index will produce 0 iterators
+                // but still needs to be released.
+                // VSTODO Maybe we can remove empty indexes from the view.
                 queryView.referencedIndexes.forEach(SSTableIndex::release);
                 return Pair.create(Collections.emptyList(), Collections.emptySet());
             }
-            return Pair.create(sstableIntersections, queryView.referencedIndexes);
+            return Pair.create(sstableOrderIterators, queryView.referencedIndexes);
         }
         catch (Throwable t)
         {
@@ -522,14 +514,14 @@ public class QueryController
 
     }
 
-    private List<OrderIterator> reorderAndLimitBySSTableRowIds(List<PrimaryKey> keys, List<QueryViewBuilder.IndexExpression> annIndexExpressions, int limit)
+    private List<OrderIterator> orderResultsBy(List<PrimaryKey> keys, List<QueryViewBuilder.IndexExpression> annIndexExpressions, int limit)
     {
         assert annIndexExpressions.size() == 1 : "only one index is expected in ANN expression, found " + annIndexExpressions.size() + " in " + annIndexExpressions;
         QueryViewBuilder.IndexExpression annIndexExpression = annIndexExpressions.get(0);
 
         try
         {
-            return annIndexExpression.index.limitToTopResults(queryContext, keys, annIndexExpression.expression, limit);
+            return annIndexExpression.index.orderResultsBy(queryContext, keys, annIndexExpression.expression, limit);
         }
         catch (IOException e)
         {
@@ -540,7 +532,7 @@ public class QueryController
     /**
      * Create row id iterator from different indexes' on-disk searcher of the same sstable
      */
-    private List<OrderIterator> createRowIdIterator(List<QueryViewBuilder.IndexExpression> indexExpressions, int limit)
+    private List<OrderIterator> orderBy(List<QueryViewBuilder.IndexExpression> indexExpressions, int limit)
     {
         return indexExpressions
                .stream()
@@ -548,7 +540,7 @@ public class QueryController
                     {
                         try
                         {
-                            return ie.index.searchTopK(ie.expression, mergeRange, queryContext, limit);
+                            return ie.index.orderBy(ie.expression, mergeRange, queryContext, limit);
                         }
                         catch (Throwable ex)
                         {

@@ -81,15 +81,15 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
     public abstract RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit) throws IOException;
 
     /**
-     * Search on-disk index synchronously
+     * Order the on-disk index synchronously and produce an iterator in score order
      *
      * @param expression   to filter on disk index
      * @param keyRange     key range specific in read command, used by ANN index
      * @param queryContext to track per sstable cache and per query metrics
      * @param limit        the num of rows to returned, used by ANN index
-     * @return {@link RangeIterator} that matches given expression
+     * @return {@link OrderIterator} that matches given expression
      */
-    public OrderIterator searchTopK(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
+    public OrderIterator orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
     {
         throw new UnsupportedOperationException();
     }

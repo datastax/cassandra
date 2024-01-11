@@ -163,17 +163,17 @@ public class Segment implements Closeable, SegmentOrdering
     }
 
     /**
-     * Search on-disk index synchronously
+     * Order the on-disk index synchronously and produce an iterator in score order
      *
      * @param expression to filter on disk index
      * @param keyRange   key range specific in read command, used by ANN index
      * @param context    to track per sstable cache and per query metrics
      * @param limit      the num of rows to returned, used by ANN index
-     * @return range iterator of {@link PrimaryKey} that matches given expression
+     * @return {@link OrderIterator} that matches given expression
      */
-    public OrderIterator searchTopK(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public OrderIterator orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
-        return index.searchTopK(expression, keyRange, context, limit);
+        return index.orderBy(expression, keyRange, context, limit);
     }
 
 
@@ -193,9 +193,9 @@ public class Segment implements Closeable, SegmentOrdering
     }
 
     @Override
-    public OrderIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public OrderIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
-        return index.limitToTopResults(context, keys, exp, limit);
+        return index.orderResultsBy(context, keys, exp, limit);
     }
 
     @Override

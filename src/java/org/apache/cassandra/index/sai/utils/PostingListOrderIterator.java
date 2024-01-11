@@ -23,7 +23,7 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
- * An iterator over scored primary keys ordered by the score descending (maybe that could change?)
+ * An iterator over scored primary keys ordered by the score descending
  * Not skippable.
  */
 public class PostingListOrderIterator extends OrderIterator

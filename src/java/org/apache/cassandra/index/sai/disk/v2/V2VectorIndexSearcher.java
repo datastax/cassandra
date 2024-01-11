@@ -141,13 +141,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public OrderIterator searchTopK(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
-    {
-        return toScoreOrderedIterator(getTopK(context, exp, keyRange, limit), context);
-    }
-
-
-    private ScoredRowIdIterator getTopK(QueryContext context, Expression exp, AbstractBounds<PartitionPosition> keyRange, int limit) throws IOException
+    public OrderIterator orderBy(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
@@ -160,11 +154,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
         BitsOrRowIds bitsOrRowIds = bitsOrPostingListForKeyRange(keyRange, queryVector, topK, true);
         if (bitsOrRowIds.skipANN())
-            return bitsOrRowIds.scoredRowIdIterator();
+            return toScoreOrderedIterator(bitsOrRowIds.scoredRowIdIterator(), context);
 
         var vectorPostings = graph.searchWithScores(queryVector, topK, bitsOrRowIds.bits, context);
          bitsOrRowIds.updateStatistics(vectorPostings.getVisitedCount());
-        return vectorPostings;
+        return toScoreOrderedIterator(vectorPostings, context);
     }
 
     /**
@@ -413,7 +407,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public OrderIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public OrderIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         // create a sublist of the keys within this segment's bounds
         int minIndex = findBoundaryIndex(keys, true);

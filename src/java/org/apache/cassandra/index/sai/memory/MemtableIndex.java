@@ -75,7 +75,7 @@ public interface MemtableIndex extends MemtableOrdering
     }
 
     RangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit);
-    default OrderIterator searchTopK(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
+    default OrderIterator orderBy(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         throw new UnsupportedOperationException();
     }

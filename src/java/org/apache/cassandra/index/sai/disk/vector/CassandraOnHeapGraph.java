@@ -316,7 +316,6 @@ public class CassandraOnHeapGraph<T>
             return null;
 
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
-        // VSTODO re-use searcher objects
         GraphIndex<float[]> graph = builder.getGraph();
         var searcher = new GraphSearcher.Builder<>(graph.getView()).withConcurrentUpdates().build();
         NodeSimilarity.ExactScoreFunction scoreFunction = node2 -> {

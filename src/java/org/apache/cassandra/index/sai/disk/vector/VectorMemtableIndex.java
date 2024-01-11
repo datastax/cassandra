@@ -214,7 +214,7 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public OrderIterator searchTopK(QueryContext queryContext, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public OrderIterator orderBy(QueryContext queryContext, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         assert expr.getOp() == Expression.Op.ANN : "Only ANN is supported for vector search, received " + expr.getOp();
 
@@ -261,7 +261,7 @@ public class VectorMemtableIndex implements MemtableIndex
 
 
     @Override
-    public OrderIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
+    public OrderIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
     {
         if (minimumKey == null)
             // This case implies maximumKey is empty too.

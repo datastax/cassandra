@@ -181,17 +181,17 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public List<OrderIterator> searchTopK(Expression expression,
-                                          AbstractBounds<PartitionPosition> keyRange,
-                                          QueryContext context,
-                                          int limit) throws IOException
+    public List<OrderIterator> orderBy(Expression expression,
+                                       AbstractBounds<PartitionPosition> keyRange,
+                                       QueryContext context,
+                                       int limit) throws IOException
     {
         var iterators = new ArrayList<OrderIterator>(segments.size());
         for (Segment segment : segments)
         {
             if (segment.intersects(keyRange))
             {
-                iterators.add(segment.searchTopK(expression, keyRange, context, limit));
+                iterators.add(segment.orderBy(expression, keyRange, context, limit));
             }
         }
 
@@ -199,11 +199,11 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public List<OrderIterator> limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<OrderIterator> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         List<OrderIterator> results = new ArrayList<>(segments.size());
         for (Segment segment : segments)
-            results.add(segment.limitToTopResults(context, keys, exp, limit));
+            results.add(segment.orderResultsBy(context, keys, exp, limit));
 
         return results;
     }

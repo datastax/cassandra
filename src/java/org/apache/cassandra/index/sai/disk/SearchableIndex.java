@@ -66,15 +66,15 @@ public interface SearchableIndex extends Closeable
                                 QueryContext context,
                                 boolean defer, int limit) throws IOException;
 
-    public List<OrderIterator> searchTopK(Expression expression,
-                                          AbstractBounds<PartitionPosition> keyRange,
-                                          QueryContext context,
-                                          int limit) throws IOException;
+    public List<OrderIterator> orderBy(Expression expression,
+                                       AbstractBounds<PartitionPosition> keyRange,
+                                       QueryContext context,
+                                       int limit) throws IOException;
 
-    public List<OrderIterator> limitToTopResults(QueryContext context,
-                                                 List<PrimaryKey> keys,
-                                                 Expression exp,
-                                                 int limit) throws IOException;
+    public List<OrderIterator> orderResultsBy(QueryContext context,
+                                              List<PrimaryKey> keys,
+                                              Expression exp,
+                                              int limit) throws IOException;
 
     public void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable);
 }

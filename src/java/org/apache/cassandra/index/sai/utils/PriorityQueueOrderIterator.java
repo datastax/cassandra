@@ -20,6 +20,9 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.PriorityQueue;
 
+/**
+ * An iterator that returns elements from a priority queue in order.
+ */
 public class PriorityQueueOrderIterator extends OrderIterator
 {
     private final PriorityQueue<ScoredPrimaryKey> pq;

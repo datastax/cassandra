@@ -167,12 +167,12 @@ public class SSTableIndex
         return searchableIndex.search(expression, keyRange, context, defer, limit);
     }
 
-    public List<OrderIterator> searchTopK(Expression expression,
-                                          AbstractBounds<PartitionPosition> keyRange,
-                                          QueryContext context,
-                                          int limit) throws IOException
+    public List<OrderIterator> orderBy(Expression expression,
+                                       AbstractBounds<PartitionPosition> keyRange,
+                                       QueryContext context,
+                                       int limit) throws IOException
     {
-        return searchableIndex.searchTopK(expression, keyRange, context, limit);
+        return searchableIndex.orderBy(expression, keyRange, context, limit);
     }
 
     public void populateSegmentView(SimpleDataSet dataSet)
@@ -258,9 +258,9 @@ public class SSTableIndex
         return Objects.hashCode(sstableContext, indexContext);
     }
 
-    public List<OrderIterator> limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<OrderIterator> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
-        return searchableIndex.limitToTopResults(context, keys, exp, limit);
+        return searchableIndex.orderResultsBy(context, keys, exp, limit);
     }
 
     public String toString()

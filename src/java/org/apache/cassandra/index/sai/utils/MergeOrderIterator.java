@@ -26,19 +26,21 @@ import java.util.Set;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.io.util.FileUtils;
 
+/**
+ * An {@link OrderIterator} that merges multiple iterators into a single iterator by taking the
+ * scores of the top element of each iterator and returning the {@link ScoredPrimaryKey} with the
+ * highest score.
+ */
 public class MergeOrderIterator extends OrderIterator
 {
     private final PriorityQueue<OrderIterator> pq;
-    // Defer closing the iterators because the PKs might be materialized after this.
-    // todo should we just force load here to close earlier?
     private final List<OrderIterator> iteratorsToBeClosed;
     private final Collection<SSTableIndex> indexesToBeClosed;
 
     public MergeOrderIterator(List<OrderIterator> iterators, Collection<SSTableIndex> referencedIndexes)
     {
-        // todo we need a "better" priority queue??
-        assert !iterators.isEmpty();
-        this.pq = new PriorityQueue<>(iterators.size(), (o1, o2) -> Float.compare(o2.peek().score, o1.peek().score));
+        int size = !iterators.isEmpty() ? iterators.size() : 1;
+        this.pq = new PriorityQueue<>(size, (o1, o2) -> Float.compare(o2.peek().score, o1.peek().score));
         for (OrderIterator iterator : iterators)
             if (iterator.hasNext())
                 pq.add(iterator);

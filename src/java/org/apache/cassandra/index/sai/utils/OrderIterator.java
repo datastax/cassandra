@@ -21,7 +21,8 @@ package org.apache.cassandra.index.sai.utils;
 import java.io.Closeable;
 
 /**
- * An iterator over {@link ScoredPrimaryKey} ordered by score in either ascending or descending order.
+ * An iterator over {@link ScoredPrimaryKey} ordered by score in descending order. Ascending order might be added
+ * later.
  */
 public abstract class OrderIterator extends AbstractIterator<ScoredPrimaryKey> implements Closeable
 {

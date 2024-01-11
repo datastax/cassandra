@@ -436,7 +436,7 @@ public class IndexContext
         return builder.build();
     }
 
-    public List<OrderIterator> searchTopKMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public List<OrderIterator> orderMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
@@ -446,7 +446,7 @@ public class IndexContext
         var result = new ArrayList<OrderIterator>(memtables.size());
 
         for (MemtableIndex index : memtables)
-            result.add(index.searchTopK(context, e, keyRange, limit));
+            result.add(index.orderBy(context, e, keyRange, limit));
 
         return result;
     }
@@ -470,7 +470,7 @@ public class IndexContext
     }
 
     // Search all memtables for all PrimaryKeys in list.
-    public List<OrderIterator> limitToTopResults(QueryContext context, List<PrimaryKey> source, Expression e, int limit)
+    public List<OrderIterator> orderResultsBy(QueryContext context, List<PrimaryKey> source, Expression e, int limit)
     {
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
@@ -479,7 +479,7 @@ public class IndexContext
 
         List<OrderIterator> result = new ArrayList<>(memtables.size());
         for (MemtableIndex index : memtables)
-            result.add(index.limitToTopResults(context, source, e, limit));
+            result.add(index.orderResultsBy(context, source, e, limit));
 
         return result;
     }

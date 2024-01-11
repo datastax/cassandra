@@ -94,7 +94,7 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
-    public List<OrderIterator> searchTopK(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public List<OrderIterator> orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
         return List.of();
     }
@@ -116,7 +116,7 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
-    public List<OrderIterator> limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<OrderIterator> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         return List.of();
     }
