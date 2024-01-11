@@ -214,7 +214,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    VariableSpecifications.empty(),
                                    defaultParameters,
                                    selection,
-                                   StatementRestrictions.empty(StatementType.SELECT, table),
+                                   StatementRestrictions.empty(table),
                                    false,
                                    null,
                                    null,
@@ -348,7 +348,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                               int pageSize,
                               AggregationSpecification aggregationSpec)
     {
-        boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing();
+        boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing() || restrictions.isDisjunction();
 
         DataLimits limit = getDataLimits(userLimit, perPartitionLimit, pageSize, aggregationSpec);
 
@@ -760,6 +760,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // so that it's hard to really optimize properly internally. So to keep it simple, we simply query
             // for the first row of the partition and hence uses Slices.ALL. We'll limit it to the first live
             // row however in getLimit().
+            return new ClusteringIndexSliceFilter(Slices.ALL, false);
+        }
+
+        if (restrictions.isDisjunction())
+        {
             return new ClusteringIndexSliceFilter(Slices.ALL, false);
         }
 
@@ -1183,7 +1188,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                     orderingComparator = Collections.reverseOrder(orderingComparator);
             }
 
-            checkNeedsFiltering(table, restrictions);
+            checkDisjunctionIsSupported(table, restrictions);
+
+            checkNeedsFiltering(table, restrictions, state);
 
             return new SelectStatement(table,
                                        bindVariables,
@@ -1280,14 +1287,14 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                                           boolean selectsOnlyStaticColumns,
                                                           boolean forView) throws InvalidRequestException
         {
-            return new StatementRestrictions(state,
+            return StatementRestrictions.create(state,
                                              StatementType.SELECT,
-                                             metadata,
-                                             whereClause,
-                                             boundNames,
-                                             selectsOnlyStaticColumns,
-                                             parameters.allowFiltering,
-                                             forView);
+                                                metadata,
+                                                whereClause,
+                                                boundNames,
+                                                selectsOnlyStaticColumns,
+                                                parameters.allowFiltering,
+                                                forView);
         }
 
         /** Returns a Term for the limit or null if no limit is set */
@@ -1339,7 +1346,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
          * @param metadata the table metadata
          * @param selection the selection
          * @param restrictions the restrictions
-         * @param isDistinct <code>true</code> if the query is a DISTINCT one. 
+         * @param isDistinct <code>true</code> if the query is a DISTINCT one.
          * @return the {@code AggregationSpecification.Factory} used to make the aggregates
          */
         private AggregationSpecification.Factory getAggregationSpecFactory(TableMetadata metadata,
@@ -1491,8 +1498,19 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             return isReversed;
         }
 
+        /**
+         * This verifies that if the expression contains a disjunction - "value = 1 or value = 2" or "value in (1, 2)"
+         * the indexes involved in the query support disjunction.
+         */
+        private void checkDisjunctionIsSupported(TableMetadata table, StatementRestrictions restrictions) throws InvalidRequestException
+        {
+            if (restrictions.usesSecondaryIndexing())
+                if (restrictions.needsDisjunctionSupport(table))
+                    restrictions.throwsRequiresIndexSupportingDisjunctionError();
+        }
+
         /** If ALLOW FILTERING was not specified, this verifies that it is not needed */
-        private void checkNeedsFiltering(TableMetadata table, StatementRestrictions restrictions) throws InvalidRequestException
+        private void checkNeedsFiltering(TableMetadata table, StatementRestrictions restrictions, ClientState state) throws InvalidRequestException
         {
             // non-key-range non-indexed queries cannot involve filtering underneath
             if (!parameters.allowFiltering && (restrictions.isKeyRange() || restrictions.usesSecondaryIndexing()))
@@ -1501,7 +1519,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 // supporting all the expressions in the filter.
                 if (restrictions.needFiltering(table))
                 {
-                    restrictions.throwRequiresAllowFilteringError(table);
+                    restrictions.throwRequiresAllowFilteringError(table, state);
                 }
             }
         }

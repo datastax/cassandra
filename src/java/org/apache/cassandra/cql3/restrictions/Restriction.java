@@ -88,7 +88,7 @@ public interface Restriction
      * @param indexRegistry the index registry
      * @param options the query options
      */
-    public void addToRowFilter(RowFilter filter,
+    public void addToRowFilter(RowFilter.Builder filter,
                                IndexRegistry indexRegistry,
                                QueryOptions options);
 }
