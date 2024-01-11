@@ -155,5 +155,9 @@
       <groupId>org.bouncycastle</groupId>
       <artifactId>bcutil-jdk18on</artifactId>
     </dependency>
+    <dependency>
+      <groupId>com.bpodgursky</groupId>
+      <artifactId>jbool_expressions</artifactId>
+    </dependency>
   </dependencies>
 </project>
