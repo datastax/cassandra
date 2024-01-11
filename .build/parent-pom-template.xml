@@ -1248,7 +1248,7 @@
       <dependency>
         <groupId>io.github.jbellis</groupId>
         <artifactId>jvector</artifactId>
-        <version>2.0.4</version>
+        <version>3.0.0-alpha.2</version>
       </dependency>
       <dependency>
         <groupId>com.carrotsearch.randomizedtesting</groupId>

@@ -26,7 +26,6 @@ import java.util.Map;
 import com.google.common.base.Throwables;
 import org.junit.Assert;
 
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.lucene.store.IndexInput;
@@ -49,9 +48,9 @@ public class TrackingIndexFileUtils extends IndexFileUtils
     }
 
     @Override
-    public IndexInput openBlockingInput(File file)
+    public IndexInput openBlockingInput(FileHandle fileHandle)
     {
-        TrackingIndexInput input = new TrackingIndexInput(super.openBlockingInput(file));
+        TrackingIndexInput input = new TrackingIndexInput(super.openBlockingInput(fileHandle));
         openInputs.put(input, Throwables.getStackTraceAsString(new RuntimeException("Blocking input created")));
         return input;
     }
