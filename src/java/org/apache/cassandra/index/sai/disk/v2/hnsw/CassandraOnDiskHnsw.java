@@ -217,7 +217,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
 
         private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
-        private Float currentScore = -1f;
+        private float currentScore = -1f;
 
         public ScoredRowIdIteratorHNSW(NeighborQueue queue)
         {
