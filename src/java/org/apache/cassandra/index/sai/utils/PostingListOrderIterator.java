@@ -50,10 +50,8 @@ public class PostingListOrderIterator extends OrderIterator
     protected ScoredPrimaryKey computeNext()
     {
         if (!scoredRowIdIterator.hasNext())
-        {
-            System.out.println("PostingListOrderIterator.computeNext() scoredRowIdIterator.hasNext() is false");
             return endOfData();
-        }
+
         var scoredRowId = scoredRowIdIterator.next();
         var primaryKey = primaryKeyMap.primaryKeyFromRowId(searcherContext.getSegmentRowIdOffset() + scoredRowId.segmentRowId);
         return new ScoredPrimaryKey(primaryKey, scoredRowId.score);
