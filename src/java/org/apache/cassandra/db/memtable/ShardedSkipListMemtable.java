@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterators;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,6 +46,7 @@ import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
@@ -52,6 +54,7 @@ import org.apache.cassandra.dht.IncludingExcludingBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
+import static org.apache.cassandra.io.sstable.SSTableReadsListener.NOOP_LISTENER;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -153,6 +156,30 @@ public class ShardedSkipListMemtable extends AbstractShardedMemtable
         int total = 0;
         for (MemtableShard shard : shards)
             total += shard.size();
+        return total;
+    }
+
+
+    @Override
+    public long rowCount()
+    {
+        DataRange range = DataRange.allData(metadata().partitioner);
+        ColumnFilter columnFilter = ColumnFilter.allRegularColumnsBuilder(metadata(), true).build();
+        return rowCount(columnFilter, range);
+    }
+
+    public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
+    {
+        int total = 0;
+        for (var iter = partitionIterator(columnFilter, dataRange, NOOP_LISTENER); iter.hasNext(); )
+        {
+            for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
+            {
+                Unfiltered uRow = it.next();
+                if (uRow.isRow())
+                    total++;
+            }
+        }
         return total;
     }
 
