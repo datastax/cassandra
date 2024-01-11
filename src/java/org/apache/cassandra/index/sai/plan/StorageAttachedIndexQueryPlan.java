@@ -44,19 +44,19 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     private final ColumnFamilyStore cfs;
     private final TableQueryMetrics queryMetrics;
     private final RowFilter postIndexFilter;
-    private final List<RowFilter.Expression> expressions;
+    private final RowFilter.FilterElement filterOperation;
     private final Set<Index> indexes;
 
     private StorageAttachedIndexQueryPlan(ColumnFamilyStore cfs,
                                           TableQueryMetrics queryMetrics,
                                           RowFilter postIndexFilter,
-                                          List<RowFilter.Expression> expressions,
+                                          RowFilter.FilterElement filterOperation,
                                           ImmutableSet<Index> indexes)
     {
         this.cfs = cfs;
         this.queryMetrics = queryMetrics;
         this.postIndexFilter = postIndexFilter;
-        this.expressions = expressions;
+        this.filterOperation = filterOperation;
         this.indexes = indexes;
     }
 
@@ -108,7 +108,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         if (selectedIndexes.isEmpty())
             return null;
 
-        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, preIndexFilter.getExpressions(), selectedIndexes);
+        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, preIndexFilter.root(), selectedIndexes);
     }
 
     @Override
@@ -135,7 +135,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         return new StorageAttachedIndexSearcher(cfs,
                                                 queryMetrics,
                                                 command,
-                                                expressions,
+                                                filterOperation,
                                                 DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
     }
 
