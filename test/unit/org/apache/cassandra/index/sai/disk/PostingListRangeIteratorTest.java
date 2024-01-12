@@ -20,15 +20,19 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 
+import com.google.common.collect.Lists;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
+import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 
 public class PostingListRangeIteratorTest
@@ -55,5 +59,39 @@ public class PostingListRangeIteratorTest
             assertEquals(pkm.primaryKeyFromRowId(3), iterator.next());
             assertFalse(iterator.hasNext());
         }
+    }
+
+    @Test
+    @SuppressWarnings("resource")
+    public void testContrivedScenariosUnion() throws IOException
+    {
+        var postingList1 = new ArrayPostingList(new int[]{3});
+        var postingList2 = new ArrayPostingList(new int[]{1});
+        var postingList3 = new ArrayPostingList(new int[]{3});
+        var mockIndexContext = mock(IndexContext.class);
+        var mpl = MergePostingList.merge(Lists.newArrayList(postingList1.peekable(), postingList2.peekable()));
+        var indexContext1 = buildIndexContext(1, 3, mpl.peekable());
+        var indexContext2 = buildIndexContext(3, 3, postingList3.peekable());
+        var plri1 = new PostingListRangeIterator(mockIndexContext, pkm, indexContext1);
+        var plri2 = new PostingListRangeIterator(mockIndexContext, pkm, indexContext2);
+        try (var union = RangeUnionIterator.builder().add(plri1).add(plri2).build();)
+        {
+            union.skipTo(pkm.primaryKeyFromRowId(2));
+            assertTrue(union.hasNext());
+            union.next();
+            union.skipTo(pkm.primaryKeyFromRowId(3));
+            assertFalse(union.hasNext());
+        }
+    }
+
+    private IndexSearcherContext buildIndexContext(int minRowId, int maxRowId, PostingList.PeekablePostingList list) throws IOException
+    {
+        return new IndexSearcherContext(pkm.primaryKeyFromRowId(minRowId),
+                                        pkm.primaryKeyFromRowId(maxRowId),
+                                        minRowId,
+                                        maxRowId,
+                                        0,
+                                        new QueryContext(10000),
+                                        list);
     }
 }
