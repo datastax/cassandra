@@ -31,6 +31,8 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.SyncUtil;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.COMMITLOG_SKIP_FILE_ADVICE;
+
 /*
  * Memory-mapped segment. Maps the destination channel into an appropriately-sized memory-mapped buffer in which the
  * mutation threads write. On sync forces the buffer to disk.
@@ -39,7 +41,7 @@ import org.apache.cassandra.utils.SyncUtil;
 class MemoryMappedSegment extends CommitLogSegment
 {
     @VisibleForTesting
-    static boolean skipFileAdviseToFreePageCache = Boolean.getBoolean("cassandra.commitlog.skip_file_advice");
+    static boolean skipFileAdviseToFreePageCache = COMMITLOG_SKIP_FILE_ADVICE.getBoolean();
 
     /**
      * Constructs a new segment file.
