@@ -122,6 +122,19 @@ public class MergePostingListTest extends SaiRandomizedTest
     }
 
     @Test
+    public void handleEmptyLists() throws IOException
+    {
+        var lists = listOfLists(
+        new ArrayPostingList(new int[]{ }),
+        new ArrayPostingList(new int[]{ }));
+
+        final PostingList merged = MergePostingList.merge(lists);
+
+        // merged.advance() should not throw
+        assertEquals(PostingList.END_OF_STREAM, merged.advance(-1));
+    }
+
+    @Test
     public void shouldInterleaveNextAndAdvance() throws IOException
     {
         var lists = listOfLists(
