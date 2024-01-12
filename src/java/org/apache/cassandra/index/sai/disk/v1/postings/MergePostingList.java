@@ -74,6 +74,10 @@ public class MergePostingList implements PostingList
         // lazily create PQ if we haven't already
         if (pq == null)
         {
+            // elements could be removed in advance() even thouh postingLists started as non-empty
+            if (postingLists.isEmpty())
+                return PostingList.END_OF_STREAM;
+
             pq = new PriorityQueue<>(postingLists.size(), COMPARATOR);
             pq.addAll(postingLists);
         }
