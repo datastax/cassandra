@@ -410,7 +410,10 @@ public enum CassandraRelevantProperties
 
     // Enables parallel index read.
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
-    PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num");
+    PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num"),
+
+    // Allows skipping advising the OS to free cached pages associated commitlog flushing
+    COMMITLOG_SKIP_FILE_ADVICE("cassandra.commitlog.skip_file_advice");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

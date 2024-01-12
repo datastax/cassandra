@@ -25,6 +25,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.distributed.Cluster;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.COMMITLOG_SKIP_FILE_ADVICE;
 import static org.junit.Assert.assertEquals;
 
 public class MemoryMappedSegmentStartupTest
@@ -32,13 +33,13 @@ public class MemoryMappedSegmentStartupTest
     @After
     public void tearDown() throws Exception
     {
-        System.clearProperty("cassandra.commitlog.skip_file_advice");
+        COMMITLOG_SKIP_FILE_ADVICE.reset();
     }
 
     @Test
     public void shouldSetSkipFileAdviceTrueWithParameterTrue() throws IOException
     {
-        System.setProperty("cassandra.commitlog.skip_file_advice", "true");
+        COMMITLOG_SKIP_FILE_ADVICE.setBoolean(true);
         try (Cluster cluster = Cluster.build(1).start())
         {
             assertEquals(true, cluster.get(1).callOnInstance(() -> MemoryMappedSegment.skipFileAdviseToFreePageCache));
@@ -48,7 +49,7 @@ public class MemoryMappedSegmentStartupTest
     @Test
     public void shouldSetSkipFileAdviceFalseWithParameterFalse() throws IOException
     {
-        System.setProperty("cassandra.commitlog.skip_file_advice", "false");
+        COMMITLOG_SKIP_FILE_ADVICE.setBoolean(false);
         try (Cluster cluster = Cluster.build(1).start())
         {
             assertEquals(false, cluster.get(1).callOnInstance(() -> MemoryMappedSegment.skipFileAdviseToFreePageCache));
