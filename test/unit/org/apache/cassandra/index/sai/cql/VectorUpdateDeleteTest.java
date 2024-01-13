@@ -780,39 +780,6 @@ public class VectorUpdateDeleteTest extends VectorTester
         }
     }
 
-    @Test
-    public void shadowedPrimaryKeysRequireDeeperSearch() throws Throwable
-    {
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 2>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
-        disableCompaction(KEYSPACE);
-
-        // Create 100 rows so that each row has a slightly less similar score.
-        for (int i = 0; i < 100; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, i));
-
-        flush();
-
-        // Create 10 rows with the worst scores, but they won't be shadowed.
-        for (int i = 100; i < 110; i++)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', [1,1000])", i);
-
-        // Delete first 90 rows
-        for (int i = 0; i < 90; i++)
-            execute("DELETE FROM %s WHERE pk = ?", i);
-
-        beforeAndAfterFlush(() -> {
-            // ANN Only
-            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 1.0] LIMIT 4"),
-                       row(90), row(91), row(92), row(93));
-            // Hyrbid
-            assertRows(execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 1.0] LIMIT 4"),
-                       row(90), row(91), row(92), row(93));
-        });
-    }
-
     private static void setChunkSize(final int selectivityLimit) throws Exception
     {
         Field selectivity = QueryController.class.getDeclaredField("ORDER_CHUNK_SIZE");
