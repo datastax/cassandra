@@ -134,21 +134,25 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             queryContext.addShadowedKeysLoopCount(1L);
             long lastShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
             ResultRetriever result = queryIndexes.get();
+            queryContext.resetRowsMatched();
             UnfilteredPartitionIterator topK = (UnfilteredPartitionIterator) new VectorTopKProcessor(command).filter(result);
             long currentShadowedKeysCount = queryContext.getShadowedPrimaryKeys().size();
             long newShadowedKeysCount = currentShadowedKeysCount - lastShadowedKeysCount;
             logger.debug("Shadow loop iteration {}: rows matched: {}, keys shadowed: {}",
                          queryContext.shadowedKeysLoopCount(),
-                         Math.max(0, queryContext.softLimit() - currentShadowedKeysCount),
+                         queryContext.rowsMatched(),
                          currentShadowedKeysCount);
-            // Stop if no new shadowed keys found or if we already got enough rows (In this case, we're basically
-            // checking that if all the shadowed keys came from one index, we still got enough non-shadowed rows from
-            // that index to still guarantee we have a valid result.)
-            if (newShadowedKeysCount == 0 || exactLimit <= queryContext.softLimit() - currentShadowedKeysCount)
+            // Stop if no new shadowed keys found or if we already got enough rows
+            if (newShadowedKeysCount == 0 || exactLimit <= queryContext.rowsMatched())
             {
                 cfs.metric.incShadowedKeys(loopsCount, currentShadowedKeysCount - startShadowedKeysCount);
                 if (loopsCount > 1)
-                    Tracing.trace("Got enough rows after query loop {}", loopsCount);
+                {
+                    if (newShadowedKeysCount == 0)
+                        Tracing.trace("No new shadowed keys after query loop {}", loopsCount);
+                    else if (exactLimit <= queryContext.rowsMatched())
+                        Tracing.trace("Got enough rows after query loop {}", loopsCount);
+                }
                 return topK;
             }
             loopsCount++;
@@ -531,6 +535,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 queryContext.addRowsFiltered(1);
                 if (tree.isSatisfiedBy(key.partitionKey(), row, staticRow))
                 {
+                    queryContext.addRowsMatched(1);
                     clusters.add(row);
                 }
             }
@@ -540,6 +545,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 queryContext.addRowsFiltered(1);
                 if (tree.isSatisfiedBy(key.partitionKey(), staticRow, staticRow))
                 {
+                    queryContext.addRowsMatched(1);
                     clusters.add(staticRow);
                 }
             }
