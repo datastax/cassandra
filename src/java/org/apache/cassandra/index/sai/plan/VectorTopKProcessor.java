@@ -89,7 +89,7 @@ import static java.lang.Math.min;
 public class VectorTopKProcessor
 {
     protected static final Logger logger = LoggerFactory.getLogger(VectorTopKProcessor.class);
-    private static final LocalAwareExecutorService PARALLEL_EXECUTOR = getExecutor();
+    private static final LocalAwareExecutorService PARALLEL_EXECUTOR = getExecutor("IndexParallelRead");
     private final ReadCommand command;
     private final IndexContext indexContext;
     private final float[] queryVector;
@@ -112,11 +112,9 @@ public class VectorTopKProcessor
      * Executor to use for parallel index reads.
      * Defined by -Dcassandra.index_read.parallele=true/false, true by default.
      *
-     * INDEX_READ uses 2 * cpus threads by default but can be overridden with -Dcassandra.index_read.parallel_thread_num=<value>
-     *
-     * @return stage to use, default INDEX_READ
+     * Uses 2 * cpus threads by default but can be overridden with -Dcassandra.index_read.parallel_thread_num=<value>
      */
-    private static LocalAwareExecutorService getExecutor()
+    private static LocalAwareExecutorService getExecutor(String name)
     {
         boolean isParallel = CassandraRelevantProperties.USE_PARALLEL_INDEX_READ.getBoolean();
 
@@ -125,7 +123,7 @@ public class VectorTopKProcessor
             int numThreads = CassandraRelevantProperties.PARALLEL_INDEX_READ_NUM_THREADS.isPresent()
                                 ? CassandraRelevantProperties.PARALLEL_INDEX_READ_NUM_THREADS.getInt()
                                 : FBUtilities.getAvailableProcessors() * 2;
-            return SharedExecutorPool.SHARED.newExecutor(numThreads, maximumPoolSize -> {}, "request", "IndexParallelRead");
+            return SharedExecutorPool.SHARED.newExecutor(numThreads, maximumPoolSize -> {}, "request", name);
         }
         else
             return ImmediateExecutor.INSTANCE;

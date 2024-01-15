@@ -20,8 +20,11 @@
  */
 package org.apache.cassandra.cql3.validation.miscellaneous;
 
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -35,6 +38,18 @@ import static org.junit.Assert.assertEquals;
  */
 public class SSTablesIteratedTest extends CQLTester
 {
+    @BeforeClass
+    public static void setUp()
+    {
+        System.setProperty(CassandraRelevantProperties.USE_PARALLEL_SSTABLES_READ.getKey(), "false");
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
+        System.clearProperty(CassandraRelevantProperties.USE_PARALLEL_SSTABLES_READ.getKey());
+    }
+
     private void executeAndCheck(String query, int numSSTables, Object[]... rows) throws Throwable
     {
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore(KEYSPACE_PER_TEST);

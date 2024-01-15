@@ -43,6 +43,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -134,6 +135,8 @@ public class ReadCommandTest
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        System.setProperty(CassandraRelevantProperties.USE_PARALLEL_SSTABLES_READ.getKey(), "false");
+
         DatabaseDescriptor.daemonInitialization();
 
         TableMetadata.Builder metadata1 = SchemaLoader.standardCFMD(KEYSPACE, CF1);
