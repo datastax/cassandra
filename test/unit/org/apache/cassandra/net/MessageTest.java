@@ -30,6 +30,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -37,6 +38,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.Tracing.TraceType;
@@ -246,6 +248,26 @@ public class MessageTest
         assertEquals(2, msg.header.customParams().size());
         assertEquals("custom1value", new String(msg.header.customParams().get("custom1"), StandardCharsets.UTF_8));
         assertEquals("custom2value", new String(msg.header.customParams().get("custom2"), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    public void testResponseWithCustomParams()
+    {
+        long id = 1;
+        InetAddressAndPort from = FBUtilities.getLocalAddressAndPort();
+
+        Message<NoPayload> msg =
+                Message.builder(Verb._TEST_1, noPayload)
+                        .withId(1)
+                        .from(from)
+                        .build();
+
+        Message reply = msg.responseWith(msg.emptyResponse(), "custom1", "custom1value".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(id, reply.id());
+        assertEquals(from, reply.from());
+        assertEquals(1, reply.header.customParams().size());
+        assertEquals("custom1value", new String(reply.header.customParams().get("custom1"), StandardCharsets.UTF_8));
     }
 
     private void testAddTraceHeaderWithType(TraceType traceType)

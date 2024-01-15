@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Optional;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,6 +33,8 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -77,7 +81,18 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         }
 
         Tracing.trace("Enqueuing response to {}", message.from());
-        Message<ReadResponse> reply = message.responseWith(response);
+
+        Optional<Sensor> readBytesSensor = RequestTracker.instance.get().getSensor(Type.READ_BYTES);
+        Message<ReadResponse> reply;
+        if (readBytesSensor.isPresent())
+        {
+            reply = message.responseWith(response, Type.READ_BYTES.name(), readBytesSensor.get().getValueAsBytes());
+        }
+        else
+        {
+            reply = message.responseWith(response);
+        }
+
         MessagingService.instance().send(reply, message.from());
     }
 

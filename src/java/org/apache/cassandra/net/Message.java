@@ -226,6 +226,11 @@ public class Message<T>
         return outWithParam(id, verb, expiresAtNanos, payload, 0, paramType, paramValue);
     }
 
+    private static <T> Message<T> outWithCustomParam(long id, Verb verb, long expiresAtNanos, T payload, String paramName, byte[] paramValue)
+    {
+        return outWithCustomParam(id, verb, expiresAtNanos, payload, 0, paramName, paramValue);
+    }
+
     private static <T> Message<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, int flags, ParamType paramType, Object paramValue)
     {
         if (payload == null)
@@ -237,6 +242,21 @@ public class Message<T>
             expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
 
         return new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, buildParams(paramType, paramValue)), payload);
+    }
+
+    private static <T> Message<T> outWithCustomParam(long id, Verb verb, long expiresAtNanos, T payload, int flags, String paramName, byte[] paramValue)
+    {
+        if (payload == null || paramName == null || paramValue == null)
+            throw new IllegalArgumentException();
+
+        InetAddressAndPort from = FBUtilities.getBroadcastAddressAndPort();
+        long createdAtNanos = approxTime.now();
+        if (expiresAtNanos == 0)
+            expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
+        Map<String,byte[]> customParams  = new HashMap<>();
+
+        customParams.put(paramName, paramValue);
+        return new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, buildParams(ParamType.CUSTOM_MAP, customParams)), payload);
     }
 
     public static <T> Message<T> internalResponse(Verb verb, T payload)
@@ -261,6 +281,14 @@ public class Message<T>
     public <T> Message<T> responseWith(T payload)
     {
         return outWithParam(id(), verb().responseVerb, expiresAtNanos(), payload, null, null);
+    }
+
+    /** Builds a response Message with provided payload and custom param, and all the right fields
+     * inferred from request Message.
+     */
+    public <T> Message<T> responseWith(T payload, String paramName, byte[] paramValue)
+    {
+        return outWithCustomParam(id(), verb().responseVerb, expiresAtNanos(), payload, paramName, paramValue);
     }
 
     /** Builds a response Message with no payload, and all the right fields inferred from request Message */

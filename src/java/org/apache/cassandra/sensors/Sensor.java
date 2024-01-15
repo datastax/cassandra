@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.sensors;
 
+import java.nio.ByteBuffer;
 import java.util.Objects;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -67,6 +68,14 @@ public class Sensor
     public double getValue()
     {
         return value.doubleValue();
+    }
+
+    public byte[] getValueAsBytes()
+    {
+        ByteBuffer readBytesBuffer = ByteBuffer.allocate(Double.BYTES);
+        readBytesBuffer.putDouble(value.doubleValue());
+
+        return readBytesBuffer.array();
     }
 
     @VisibleForTesting
