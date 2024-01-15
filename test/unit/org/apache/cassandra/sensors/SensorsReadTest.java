@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.sensors;
 
+import java.nio.ByteBuffer;
+import java.util.concurrent.CopyOnWriteArrayList;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -35,6 +38,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.BloomFilter;
@@ -50,6 +54,7 @@ public class SensorsReadTest
     public static final String CF_STANDARD_CLUSTERING = "StandardClustering";
 
     private ColumnFamilyStore store;
+    private CopyOnWriteArrayList<Message> capturedOutboundMessages;
 
     @BeforeClass
     public static void defineSchema() throws Exception
@@ -71,6 +76,13 @@ public class SensorsReadTest
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE1).getMetadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).metadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_CLUSTERING).metadata());
+
+        capturedOutboundMessages = new CopyOnWriteArrayList<>();
+        MessagingService.instance().outboundSink.add((message, to) ->
+        {
+            capturedOutboundMessages.add(message);
+            return false;
+        });
     }
 
     @After
@@ -104,6 +116,7 @@ public class SensorsReadTest
         handleReadCommand(command);
 
         assertRequestAndRegistrySensorsEquality(context);
+        assertRegistrySensorAndResponseEquality();
     }
 
     @Test
@@ -129,6 +142,7 @@ public class SensorsReadTest
         handleReadCommand(command);
 
         assertRequestAndRegistrySensorsEquality(context);
+        assertRegistrySensorAndResponseEquality();
     }
 
     @Test
@@ -155,6 +169,7 @@ public class SensorsReadTest
         handleReadCommand(command);
 
         assertRequestAndRegistrySensorsEquality(context);
+        assertRegistrySensorAndResponseEquality();
     }
 
     @Test
@@ -186,6 +201,7 @@ public class SensorsReadTest
 
         assertThat(request1Sensor.getValue()).isGreaterThan(0);
         assertThat(request1Sensor).isEqualTo(getRegistrySensor(context));
+        assertRegistrySensorAndResponseEquality();
 
         getThreadLocalRequestSensor().reset();
 
@@ -195,6 +211,7 @@ public class SensorsReadTest
         Sensor request2Sensor = getThreadLocalRequestSensor();
         assertThat(request2Sensor.getValue()).isEqualTo(request1Bytes * 10);
         assertThat(getRegistrySensor(context).getValue()).isEqualTo(request1Bytes + request2Sensor.getValue());
+        assertRegistrySensorAndResponseEquality(request1Bytes, request2Sensor.getValue());
     }
 
     @Test
@@ -225,6 +242,7 @@ public class SensorsReadTest
 
         assertThat(request1Sensor.getValue()).isGreaterThan(0);
         assertThat(request1Sensor).isEqualTo(getRegistrySensor(context));
+        assertRegistrySensorAndResponseEquality();
 
         getThreadLocalRequestSensor().reset();
 
@@ -234,6 +252,7 @@ public class SensorsReadTest
         Sensor request2Sensor = getThreadLocalRequestSensor();
         assertThat(request2Sensor.getValue()).isEqualTo(request1Bytes * 10);
         assertThat(getRegistrySensor(context).getValue()).isEqualTo(request1Bytes + request2Sensor.getValue());
+        assertRegistrySensorAndResponseEquality(request1Bytes, request2Sensor.getValue());
     }
 
     private ColumnFamilyStore discardSSTables(String ks, String cf)
@@ -256,6 +275,39 @@ public class SensorsReadTest
 
         Sensor registrySensor = getRegistrySensor(context);
         assertThat(registrySensor).isEqualTo(localSensor);
+    }
+
+    private void assertRegistrySensorAndResponseEquality()
+    {
+        Sensor localSensor = getThreadLocalRequestSensor();
+        assertThat(localSensor.getValue()).isGreaterThan(0);
+
+        assertRegistrySensorAndResponseEquality(localSensor.getValue());
+    }
+
+    private void assertRegistrySensorAndResponseEquality(double ...requestSensorValues)
+    {
+        String readBytesTotalHeader = Type.READ_BYTES.name() + "_TOTAL";
+        double readBytesSum = 0;
+        int messageIndex = 0;
+        for (Message message : capturedOutboundMessages)
+        {
+            assertThat(message.header.customParams()).isNotNull();
+            assertThat(message.header.customParams()).containsKey(Type.READ_BYTES.name());
+            assertThat(message.header.customParams()).containsKey(readBytesTotalHeader);
+            double requestReadBytes = bytesToDouble(message.header.customParams().get(Type.READ_BYTES.name()));
+            assertThat(requestReadBytes).isEqualTo(requestSensorValues[messageIndex++]);
+            readBytesSum += requestReadBytes;
+            // for each message, the total read bytes should be equal to the sum of the previous messages
+            assertThat(bytesToDouble(message.header.customParams().get(readBytesTotalHeader))).isEqualTo(readBytesSum);
+        }
+    }
+    private static double bytesToDouble(byte[] bytes)
+    {
+        ByteBuffer readBytesBuffer = ByteBuffer.allocate(Double.BYTES);
+        readBytesBuffer.put(bytes);
+        readBytesBuffer.flip();
+        return readBytesBuffer.getDouble();
     }
 
     /**

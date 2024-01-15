@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.sensors;
 
+import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -157,6 +158,16 @@ public class SensorsRegistry implements SchemaChangeListener
     public Set<Sensor> getSensorsByKeyspace(String keyspace)
     {
         return Optional.ofNullable(byKeyspace.get(keyspace)).orElseGet(() -> ImmutableSet.of());
+    }
+
+    public Optional<Double> aggregateSensorValueBy(String keyspace, Type type)
+    {
+        return Optional.ofNullable(byKeyspace.get(keyspace))
+                .orElseGet(() -> ImmutableSet.of())
+                .stream()
+                .filter(s -> s.getType().equals(type))
+                .map(Sensor::getValue)
+                .reduce(Double::sum);
     }
 
     public Set<Sensor> getSensorsByTableId(String tableId)

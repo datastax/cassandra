@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.db;
 
+import java.nio.ByteBuffer;
+import java.util.Optional;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,8 +32,12 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -77,8 +84,15 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         }
 
         Tracing.trace("Enqueuing response to {}", message.from());
-        Message<ReadResponse> reply = message.responseWith(response);
-        MessagingService.instance().send(reply, message.from());
+
+        Optional<Sensor> readBytesSensor = RequestTracker.instance.get().getSensor(Type.READ_BYTES);
+        Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
+        readBytesSensor.map(s -> SensorsCustomParams.doubleAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES, bytes));
+
+        Optional<Double> aggregareReadBytes = SensorsRegistry.instance.aggregateSensorValueBy(cfs.getKeyspaceName(), Type.READ_BYTES);
+        aggregareReadBytes.map(SensorsCustomParams::doubleAsBytes).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_TOTAL, bytes));
+
+        MessagingService.instance().send(reply.build(), message.from());
     }
 
     private void validateTransientStatus(Message<ReadCommand> message)

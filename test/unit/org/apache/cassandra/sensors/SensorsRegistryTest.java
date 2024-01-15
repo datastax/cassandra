@@ -204,4 +204,25 @@ public class SensorsRegistryTest
         verify(listener, never()).onSensorCreated(any());
         verify(listener, never()).onSensorRemoved(any());
     }
+
+    @Test
+    public void testAggregateSensorValueByKeyspaceAndType()
+    {
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2).metadata());
+
+        SensorsRegistry.instance.updateSensor(context1, type1, 1.0);
+        SensorsRegistry.instance.updateSensor(context2, type1, 2.0);
+        SensorsRegistry.instance.updateSensor(context2, type1, 3.0);
+        SensorsRegistry.instance.updateSensor(context2, type2, 5.0);
+
+        assertThat(SensorsRegistry.instance.aggregateSensorValueBy(KEYSPACE, type1)).hasValueSatisfying(s -> assertThat(s).isEqualTo(6.0));
+        assertThat(SensorsRegistry.instance.aggregateSensorValueBy(KEYSPACE, type2)).hasValueSatisfying(s -> assertThat(s).isEqualTo(5.0));
+        assertThat(SensorsRegistry.instance.aggregateSensorValueBy("non_exisant_ks", type2)).isEmpty();
+
+        Type nonRegisteredType = Type.WRITE_BYTES;
+        assertThat(SensorsRegistry.instance.getSensorsByType(nonRegisteredType)).isEmpty();
+        assertThat(SensorsRegistry.instance.aggregateSensorValueBy(KEYSPACE, nonRegisteredType)).isEmpty();
+    }
 }
