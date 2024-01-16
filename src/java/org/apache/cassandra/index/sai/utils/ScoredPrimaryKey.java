@@ -24,6 +24,10 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
+/**
+ * A PrimaryKey with a score. The score is not used to determine equality or hash code because the same PrimaryKey
+ * could have different scores depending on the source sstable/index.
+ */
 public class ScoredPrimaryKey implements PrimaryKey
 {
     public final PrimaryKey primaryKey;
@@ -38,11 +42,6 @@ public class ScoredPrimaryKey implements PrimaryKey
     public float getScore()
     {
         return score;
-    }
-
-    public static ScoredPrimaryKey create(PrimaryKey key, float score)
-    {
-        return new ScoredPrimaryKey(key, score);
     }
 
     @Override
