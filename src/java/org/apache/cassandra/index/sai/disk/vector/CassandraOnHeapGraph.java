@@ -156,8 +156,8 @@ public class CassandraOnHeapGraph<T>
         var bytesUsed = 0L;
 
         // Store a cached reference to the vector for brute force computations later.
-        // TODO is the race condition here reasonable? Two writes might result in inconsistent views in the
-        // different maps.
+        // TODO is the race condition here reasonable? Two writes for the same primary key might result in
+        //  inconsistent views in the different maps.
         if (cacheVectors)
         {
             vectorCache.put(key, vector);

@@ -296,7 +296,7 @@ public class VectorTopKProcessor
     private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator, ScoredPrimaryKey key, HashSet<PrimaryKey> updatedKeys) {
         Row staticRow = partitionRowIterator.staticRow();
         PartitionInfo partitionInfo = PartitionInfo.create(partitionRowIterator);
-        // todo do we do this because a vector can be static??
+        // VSTODO vector columns shouldn't be static, so can we remove this?
         float keyAndStaticScore = getScoreForRow(key.partitionKey(), staticRow);
         var pr = new PartitionResults(partitionInfo);
 

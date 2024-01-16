@@ -126,7 +126,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return new ResultRetriever(analyze(), analyzeFilter(), controller, executionController, queryContext);
 
         var result = new ScoreOrderedResultRetriever(analyzeOrderedQuery(), analyzeFilter(), controller, executionController, queryContext);
-        // todo collect metrics like shadowed keys still?
         return (UnfilteredPartitionIterator) new VectorTopKProcessor(command).filter(result);
     }
 

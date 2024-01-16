@@ -22,12 +22,13 @@ import java.util.Iterator;
 
 import org.apache.cassandra.utils.Pair;
 
-// TODO can probably find a better way to encapsulate
+/**
+ * A {@link ScoredRowId} iterator that returns results in score order.
+ */
 public interface ScoredRowIdIterator extends Iterator<ScoredRowId>, AutoCloseable
 {
     static ScoredRowIdIterator empty()
     {
-        // todo find right way to do this
         return new ScoredRowIdIterator()
         {
             @Override

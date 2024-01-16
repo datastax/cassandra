@@ -280,7 +280,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     // Because we need a correct ordering of vectors, we read and rank them here. By ranking them now, we are able to
-    // take the LIMIT of Primary Keys from the final search's iterator, which means fewer rows to read materialize
+    // take the LIMIT of Primary Keys from the final search's iterator, which means fewer rows to materialize
     // and score in the later steps.
     private ScoredRowIdIterator bruteForceOrdering(float[] queryVector, IntArrayList segmentRowIds) throws IOException
     {

@@ -175,7 +175,7 @@ public class VectorMemtableIndex implements MemtableIndex
         Bits bits;
         if (RangeUtil.coversFullRing(keyRange))
         {
-            // TODO does this comment actually matter for us?
+            // TODO does this comment actually matter for us? We don't have shadowed keys yet.
             // partition/range deletion won't trigger index update, so we have to filter shadow primary keys in memtable index
             bits = Bits.ALL;
         }

@@ -53,6 +53,8 @@ import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
+import static java.util.function.Function.identity;
+
 public class TrieMemtableIndex implements MemtableIndex
 {
     private final ShardBoundaries boundaries;
@@ -173,7 +175,6 @@ public class TrieMemtableIndex implements MemtableIndex
 
         return builder.build();
     }
-
 
     /**
      * NOTE: returned data may contain partition key not within the provided min and max which are only used to find

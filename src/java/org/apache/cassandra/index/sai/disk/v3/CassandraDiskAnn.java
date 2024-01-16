@@ -161,19 +161,19 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
                                         Bits acceptBits, QueryContext context)
     {
         // Retrieve the view reference once.
-        var localView = view.get();
+        var threadLocalView = view.get();
         NodeSimilarity.ScoreFunction scoreFunction;
         NodeSimilarity.Reranker reranker;
         if (compressedVectors == null)
         {
             scoreFunction = (NodeSimilarity.ExactScoreFunction)
-                            i -> similarityFunction.compare(queryVector, localView.getVector(i));
+                            i -> similarityFunction.compare(queryVector, threadLocalView.getVector(i));
             reranker = null;
         }
         else
         {
             scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, similarityFunction);
-            reranker = i -> similarityFunction.compare(queryVector, localView.getVector(i));
+            reranker = i -> similarityFunction.compare(queryVector, threadLocalView.getVector(i));
         }
         var result = searcher.search(scoreFunction,
                                      reranker,
@@ -242,6 +242,10 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         }
     }
 
+    /**
+     * An iterator over {@link ScoredRowId}. This iterator is backed by a {@link SearchResult} and resumes the search
+     * when the backing {@link SearchResult} is exhausted.
+     */
     private class ScoredRowIdIteratorDiskAnn implements ScoredRowIdIterator
     {
         private final Supplier<SearchResult> resumeSearch;
@@ -250,7 +254,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
 
         private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
-        private Float currentScore = -1f;
+        private float currentScore = -1f;
 
         public ScoredRowIdIteratorDiskAnn(SearchResult result, Supplier<SearchResult> resumeSearch)
         {

@@ -258,7 +258,7 @@ public class QueryController
 
     public RangeIterator buildIterator()
     {
-        // TODO we can clean this up when we break ordering out
+        // VSTODO we can clean this up when we break ordering out
         var nonOrderingExpressions = filterOperation.expressions().stream()
                                                     .filter(e -> e.operator() != Operator.ANN)
                                                     .collect(Collectors.toList());
@@ -469,7 +469,6 @@ public class QueryController
         return new MergeOrderIterator(orderIterators, indexesToRelease);
     }
 
-    // TODO figure out better way to encapsulate
     private Pair<List<OrderIterator>, Set<SSTableIndex>> getTopKRows(List<PrimaryKey> sourceKeys, RowFilter.Expression expression)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
