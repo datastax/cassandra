@@ -23,10 +23,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
+import org.apache.cassandra.utils.TimeUUID;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -67,7 +67,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
     @Test
     public void testSstableAdded() throws IOException
     {
-        UUID repairID = registerSession(cfs, true, true);
+        TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         SSTableReader sstable = makeSSTable(true);
@@ -87,7 +87,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
     @Test
     public void testSstableDeleted() throws IOException
     {
-        UUID repairID = registerSession(cfs, true, true);
+        TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         final boolean isOrphan = true;
@@ -113,7 +113,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
     @Test
     public void testSstableListChangedAddAndRemove() throws IOException
     {
-        UUID repairID = registerSession(cfs, true, true);
+        TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         final boolean isOrphan = true;
@@ -150,7 +150,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
     @Test
     public void testSstableRepairStatusChanged() throws IOException
     {
-        UUID repairID = registerSession(cfs, true, true);
+        TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         // add as unrepaired
@@ -181,7 +181,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
     @Test
     public void testStrategiesContainsPendingRepair() throws IOException
     {
-        UUID repairID = registerSession(cfs, true, true);
+        TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         final boolean isOrphan = true;
@@ -211,7 +211,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
     @Test
     public void testCleanupCompactionFinalized() throws IOException
     {
-        UUID repairID = registerSession(cfs, true, true);
+        TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         final boolean isOrphan = true;
@@ -311,7 +311,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
     @Test
     public void testFinalizedSessionTransientCleanup() throws IOException
     {
-        UUID repairID = registerSession(cfs, true, true);
+        TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         final boolean isOrphan = true;
@@ -409,7 +409,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
     @Test
     public void testFailedSessionTransientCleanup() throws IOException
     {
-        UUID repairID = registerSession(cfs, true, true);
+        TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         final boolean isOrphan = true;
@@ -518,7 +518,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
     @Test
     public void testCleanupCompactionFailed() throws IOException
     {
-        UUID repairID = registerSession(cfs, true, true);
+        TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         final boolean isOrphan = true;
@@ -622,7 +622,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
     @Test
     public void testSessionCompleted() throws IOException
     {
-        UUID repairID = registerSession(cfs, true, true);
+        TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
 
         // add sstables as unrepaired
@@ -731,8 +731,8 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
     @Test
     public void testSessionCompletedWithDifferentSSTables() throws IOException
     {
-        UUID repairID1 = registerSession(cfs, true, true);
-        UUID repairID2 = registerSession(cfs, true, true);
+        TimeUUID repairID1 = registerSession(cfs, true, true);
+        TimeUUID repairID2 = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID1, COORDINATOR, PARTICIPANTS);
         LocalSessionAccessor.prepareUnsafe(repairID2, COORDINATOR, PARTICIPANTS);
 
@@ -875,7 +875,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
                                             boolean expectedIsRepaired,
                                             boolean expectedIsPending,
                                             boolean expectedIsTransient,
-                                            UUID expectedRepairId,
+                                            TimeUUID expectedRepairId,
                                             boolean expectedRepairStatus,
                                             boolean expectedContainsSstable)
     {

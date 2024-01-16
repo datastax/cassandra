@@ -317,7 +317,7 @@ class PendingRepairManager
         return ImmutableList.of();
     }
 
-    synchronized Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
+    synchronized Collection<AbstractCompactionTask> getNextBackgroundTasks(long gcBefore)
     {
         if (strategies.isEmpty())
             return ImmutableList.of();

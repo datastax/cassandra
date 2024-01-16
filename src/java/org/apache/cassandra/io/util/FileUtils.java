@@ -714,7 +714,7 @@ public final class FileUtils
      */
     public static long handleLargeFileSystem(long size)
     {
-        return parent.isAncestorOf(child);
+        return size < 0 ? Long.MAX_VALUE : size;
     }
 
     @Deprecated

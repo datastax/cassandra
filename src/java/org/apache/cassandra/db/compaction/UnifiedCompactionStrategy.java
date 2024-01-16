@@ -34,6 +34,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Ordering;
+import org.apache.cassandra.utils.Clock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -439,7 +440,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                      rateLimitLog);
 
         List<CompactionAggregate.UnifiedAggregate> pending = new ArrayList<>();
-        long ts = System.currentTimeMillis();
+        long ts = Clock.Global.currentTimeMillis();
         boolean expiredCheck = ts - lastExpiredCheck > controller.getExpiredSSTableCheckFrequency();
         if (expiredCheck)
             lastExpiredCheck = ts;

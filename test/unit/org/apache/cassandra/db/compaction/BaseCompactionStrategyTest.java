@@ -23,10 +23,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableList;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.commons.math3.random.JDKRandomGenerator;
 
 import org.junit.Ignore;
@@ -216,7 +216,7 @@ public class BaseCompactionStrategyTest
                               DecoratedKey last,
                               int diskIndex,
                               boolean repaired,
-                              UUID pendingRepair,
+                              TimeUUID pendingRepair,
                               int ttl)
     {
         // We create a ton of mock SSTables that mockito is going to keep until the end of the test suite without stubOnly.
@@ -242,11 +242,11 @@ public class BaseCompactionStrategyTest
         when(ret.getId()).thenReturn(new SequenceBasedSSTableId(level));
         when(ret.toString()).thenReturn(String.format("Bytes on disk: %s, level %d, hotness %f, timestamp %d, first %s, last %s, disk index: %d, repaired: %b, pend. repair: %b",
                                                       FBUtilities.prettyPrintMemory(bytesOnDisk), level, hotness, timestamp, first, last, diskIndex, repaired, pendingRepair));
-        int deletionTime;
+        long deletionTime;
         if (ttl > 0)
-            deletionTime = (int) TimeUnit.MILLISECONDS.toSeconds(timestamp) + ttl;
+            deletionTime = TimeUnit.MILLISECONDS.toSeconds(timestamp) + ttl;
         else
-            deletionTime = Integer.MAX_VALUE;
+            deletionTime = Long.MAX_VALUE;
 
         when(ret.getMinLocalDeletionTime()).thenReturn(deletionTime);
         when(ret.getMaxLocalDeletionTime()).thenReturn(deletionTime);
@@ -262,7 +262,7 @@ public class BaseCompactionStrategyTest
         return mockSSTables(numSSTables, bytesOnDisk, hotness, timestamp, 0, true,null);
     }
 
-    List<SSTableReader> mockSSTables(int numSSTables, long bytesOnDisk, double hotness, long timestamp, int diskIndex, boolean repaired, UUID pendingRepair)
+    List<SSTableReader> mockSSTables(int numSSTables, long bytesOnDisk, double hotness, long timestamp, int diskIndex, boolean repaired, TimeUUID pendingRepair)
     {
         DecoratedKey first = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
         DecoratedKey last = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
@@ -297,7 +297,7 @@ public class BaseCompactionStrategyTest
         List<SSTableReader> sstables = new ArrayList<>(numSSTables);
         for (int i = 0; i < numSSTables; i++)
         {
-            DecoratedKey first = new BufferDecoratedKey(boundaries.get(i).increaseSlightly(), emptyBuffer);
+            DecoratedKey first = new BufferDecoratedKey(boundaries.get(i).nextValidToken(), emptyBuffer);
             DecoratedKey last =  new BufferDecoratedKey(boundaries.get(i+1), emptyBuffer);
             sstables.add(mockSSTable(level, bytesOnDisk, timestamp, 0., first, last));
 
@@ -307,7 +307,7 @@ public class BaseCompactionStrategyTest
         return sstables;
     }
 
-    CompactionProgress mockCompletedCompactionProgress(Set<SSTableReader> compacting, UUID id)
+    CompactionProgress mockCompletedCompactionProgress(Set<SSTableReader> compacting, TimeUUID id)
     {
         CompactionProgress progress = Mockito.mock(CompactionProgress.class);
 

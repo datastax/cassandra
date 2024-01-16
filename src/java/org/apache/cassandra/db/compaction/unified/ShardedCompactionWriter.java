@@ -19,6 +19,7 @@ package org.apache.cassandra.db.compaction.unified;
 import java.util.List;
 import java.util.Set;
 
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -102,16 +103,18 @@ public class ShardedCompactionWriter extends CompactionAwareWriter
         while (diskBoundary != null && currentIndex < boundaries.size() && diskBoundary.compareTo(boundaries.get(currentIndex)) < 0)
             currentIndex++;
 
-        return SSTableWriter.create(cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory)),
-                                    shardAdjustedKeyCount(currentIndex, boundaries, minSstableSizeInBytes, nonExpiredSSTables, overwriteRatio),
-                                    minRepairedAt,
-                                    pendingRepair,
-                                    isTransient,
-                                    cfs.metadata,
-                                    new MetadataCollector(txn.originals(), cfs.metadata().comparator, 0),
-                                    SerializationHeader.make(cfs.metadata(), nonExpiredSSTables),
-                                    cfs.indexManager.listIndexGroups(),
-                                    txn);
+        Descriptor descriptor = cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
+        return descriptor.getFormat().getWriterFactory().builder(descriptor)
+                         .setKeyCount(shardAdjustedKeyCount(currentIndex, boundaries, minSstableSizeInBytes, nonExpiredSSTables, overwriteRatio))
+                         .setRepairedAt(minRepairedAt)
+                         .setPendingRepair(pendingRepair)
+                         .setTransientSSTable(isTransient)
+                         .setTableMetadataRef(cfs.metadata)
+                         .setMetadataCollector(new MetadataCollector(txn.originals(), cfs.metadata().comparator))
+                         .setSerializationHeader(SerializationHeader.make(cfs.metadata(), nonExpiredSSTables))
+                         .addDefaultComponents(cfs.indexManager.listIndexGroups())
+                         .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
+                         .build(txn, cfs);
     }
 
     private long shardAdjustedKeyCount(int shardIdx,

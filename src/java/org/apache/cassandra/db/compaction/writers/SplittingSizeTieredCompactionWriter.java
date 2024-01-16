@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction.writers;
 import java.util.Arrays;
 import java.util.Set;
 
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,6 +31,8 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 
 /**
  * CompactionAwareWriter that splits input in differently sized sstables
@@ -99,16 +102,18 @@ public class SplittingSizeTieredCompactionWriter extends CompactionAwareWriter
         long currentPartitionsToWrite = Math.round(ratios[currentRatioIndex] * estimatedTotalKeys);
         logger.trace("Switching writer, currentPartitionsToWrite = {}", currentPartitionsToWrite);
 
-        return SSTableWriter.create(cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory)),
-                                    currentPartitionsToWrite,
-                                    minRepairedAt,
-                                    pendingRepair,
-                                    isTransient,
-                                    cfs.metadata,
-                                    new MetadataCollector(allSSTables, cfs.metadata().comparator, 0),
-                                    SerializationHeader.make(cfs.metadata(), nonExpiredSSTables),
-                                    cfs.indexManager.listIndexGroups(),
-                                    txn);
+        Descriptor descriptor = cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
+        return descriptor.getFormat().getWriterFactory().builder(descriptor)
+                         .setKeyCount(currentPartitionsToWrite)
+                         .setRepairedAt(minRepairedAt)
+                         .setPendingRepair(pendingRepair)
+                         .setTransientSSTable(isTransient)
+                         .setTableMetadataRef(cfs.metadata)
+                         .setMetadataCollector(new MetadataCollector(allSSTables, cfs.metadata().comparator))
+                         .setSerializationHeader(SerializationHeader.make(cfs.metadata(), nonExpiredSSTables))
+                         .addDefaultComponents(cfs.indexManager.listIndexGroups())
+                         .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
+                         .build(txn, cfs);
     }
 
     @Override

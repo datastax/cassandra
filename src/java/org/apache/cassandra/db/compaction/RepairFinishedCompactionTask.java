@@ -19,12 +19,12 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.Set;
-import java.util.UUID;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.utils.TimeUUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,13 +42,13 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
 {
     private static final Logger logger = LoggerFactory.getLogger(RepairFinishedCompactionTask.class);
 
-    private final UUID sessionID;
+    private final TimeUUID sessionID;
     private final long repairedAt;
     private final boolean isTransient;
 
     public RepairFinishedCompactionTask(ColumnFamilyStore cfs,
                                         LifecycleTransaction transaction,
-                                        UUID sessionID,
+                                        TimeUUID sessionID,
                                         long repairedAt,
                                         boolean isTransient)
     {
@@ -59,7 +59,7 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
     }
 
     @VisibleForTesting
-    UUID getSessionID()
+    TimeUUID getSessionID()
     {
         return sessionID;
     }

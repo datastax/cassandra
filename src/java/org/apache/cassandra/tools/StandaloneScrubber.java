@@ -208,7 +208,7 @@ public class StandaloneScrubber
     {
         if (cfs.getCompactionParams().klass().equals(LeveledCompactionStrategy.class))
         {
-            int maxSizeInMB = (int)((cfs.getCompactionStrategy().getMaxSSTableBytes()) / (1024L * 1024L));
+            int maxSizeInMiB = (int)((cfs.getCompactionStrategy().getMaxSSTableBytes()) / (1024L * 1024L));
             int fanOut = cfs.getCompactionStrategy().getLevelFanoutSize();
             CompactionStrategyManager csm = (CompactionStrategyManager) cfs.getCompactionStrategyContainer();
             for (AbstractStrategyHolder.GroupedSSTableContainer sstableGroup : csm.groupSSTables(sstables))

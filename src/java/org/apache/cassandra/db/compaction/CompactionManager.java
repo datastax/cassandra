@@ -31,8 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
-//import java.util.concurrent.Future;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletableFuture;  //checkstyle: permit this import
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
@@ -58,7 +57,6 @@ import com.google.common.collect.Multimap;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.Longs;
-import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.RateLimiter;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.cassandra.io.sstable.indexsummary.IndexSummaryRedistribution;
@@ -94,7 +92,6 @@ import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.IScrubber;
@@ -136,6 +133,7 @@ import static org.apache.cassandra.concurrent.FutureTask.callable;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COMPACTION_RATE_LIMIT_GRANULARITY_IN_KB;
 import static org.apache.cassandra.config.DatabaseDescriptor.getConcurrentCompactors;
 import static org.apache.cassandra.db.compaction.CompactionManager.CompactionExecutor.compactionThreadGroup;
+import static org.apache.cassandra.io.sstable.format.SSTableFormat.Components.DATA;
 import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
 import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
@@ -251,17 +249,17 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
      * It's okay to over-call (within reason) if a call is unnecessary, it will
      * turn into a no-op in the bucketing/candidate-scan phase.
      */
-    public java.util.concurrent.Future<?> submitBackground(final ColumnFamilyStore cfs)
+    public Future<?> submitBackground(final ColumnFamilyStore cfs)
     {
         if (!cfs.isValid())
         {
             logger.trace("Aborting compaction for dropped CF {}.{}", cfs.keyspace.getName(), cfs.name);
-            return CompletableFuture.completedFuture(null);
+            return ImmediateFuture.success(null);
         }
         if (cfs.isAutoCompactionDisabled())
         {
             logger.trace("Autocompaction is disabled");
-            return CompletableFuture.completedFuture(null);
+            return ImmediateFuture.success(null);
         }
 
         /**
@@ -273,14 +271,14 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
          ** We will check again when the scheduled task is executed.
          */
         if (hasEnoughCompactionsRunning(cfs))
-            return CompletableFuture.completedFuture(null);
+            return ImmediateFuture.success(null);
 
         logger.trace("Scheduling a background task check for {}.{} with {}",
                      cfs.keyspace.getName(),
                      cfs.name,
                      cfs.getCompactionStrategy().getName());
 
-        ListenableFuture<?> fut = executor.submitIfRunning(new BackgroundCompactionCandidate(cfs), "background task");
+        Future<?> fut = executor.submitIfRunning(new BackgroundCompactionCandidate(cfs), "background task");
         if (fut.isCancelled())
             compactingCF.remove(cfs);
         return fut;
@@ -516,8 +514,8 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
                                                       .stream()
                                                       .filter(s -> !compacting.contains(s) && !s.descriptor.version.isLatestVersion())
                                                       .sorted((o1, o2) -> {
-                                                          File f1 = new File(o1.descriptor.filenameFor(Component.DATA));
-                                                          File f2 = new File(o2.descriptor.filenameFor(Component.DATA));
+                                                          File f1 = o1.descriptor.fileFor(DATA);
+                                                          File f2 = o2.descriptor.fileFor(DATA);
                                                           return Longs.compare(f1.lastModified(), f2.lastModified());
                                                       }).collect(Collectors.toList());
             for (SSTableReader sstable : potentialUpgrade)

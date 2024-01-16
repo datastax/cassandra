@@ -21,7 +21,6 @@ package org.apache.cassandra.db.compaction;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -264,7 +263,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
      */
     @Override
     @Test
-    public void testCleanupCompactionFinalized() throws IOException
+    public void testCleanupCompactionFinalized() throws NoSuchRepairSessionException
     {
         TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
@@ -347,7 +346,7 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void testSessionCompleted() throws IOException
     {
-        UUID repairID = registerSession(cfs, true, true);
+        TimeUUID repairID = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID, COORDINATOR, PARTICIPANTS);
         assertCompactionStrategyManagerPendingRepairs(true);
 
@@ -381,8 +380,8 @@ public class CompactionStrategyManagerPendingRepairTest extends AbstractPendingR
     @Test
     public void testSessionCompletedWithDifferentSSTables() throws IOException
     {
-        UUID repairID1 = registerSession(cfs, true, true);
-        UUID repairID2 = registerSession(cfs, true, true);
+        TimeUUID repairID1 = registerSession(cfs, true, true);
+        TimeUUID repairID2 = registerSession(cfs, true, true);
         LocalSessionAccessor.prepareUnsafe(repairID1, COORDINATOR, PARTICIPANTS);
         LocalSessionAccessor.prepareUnsafe(repairID2, COORDINATOR, PARTICIPANTS);
         assertCompactionStrategyManagerPendingRepairs(true);

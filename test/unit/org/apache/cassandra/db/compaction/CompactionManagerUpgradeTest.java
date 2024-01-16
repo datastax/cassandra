@@ -23,8 +23,6 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import javax.sound.midi.Sequence;
-
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;

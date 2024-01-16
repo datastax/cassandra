@@ -20,6 +20,8 @@ import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Random;
 
+import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
+import org.apache.cassandra.utils.TimeUUID;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -37,7 +39,6 @@ import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.UUIDGen;
 
 import static org.junit.Assert.assertEquals;
 
@@ -133,25 +134,35 @@ public class ShardedCompactionWriterTest extends CQLTester
         assertEquals(numOutputSSTables, cfs.getLiveSSTables().size());
         assertEquals(rowCount, rows);
 
-        long totalOnDiskLength = cfs.getLiveSSTables().stream().map(SSTableReader::onDiskLength).mapToLong(Long::longValue).sum();
-        long totalBFSize = cfs.getLiveSSTables().stream().map(SSTableReader::getBloomFilterSerializedSize).mapToLong(Long::longValue).sum();
+        long totalOnDiskLength = cfs.getLiveSSTables().stream().mapToLong(SSTableReader::onDiskLength).sum();
+        long totalBFSize = cfs.getLiveSSTables().stream().mapToLong(ShardedCompactionWriterTest::getFilterSize).sum();
         assert totalBFSize > 16 * numOutputSSTables : "Bloom Filter is empty"; // 16 is the size of empty bloom filter
         for (SSTableReader rdr : cfs.getLiveSSTables())
+        {
             assertEquals((double) rdr.onDiskLength() / totalOnDiskLength,
-                         (double) rdr.getBloomFilterSerializedSize() / totalBFSize, 0.1);
+                         (double) getFilterSize(rdr) / totalBFSize, 0.1);
+            assertEquals(1.0 / numOutputSSTables, rdr.tokenSpaceCoverage(), 0.05);
+        }
 
         validateData(cfs, rowCount);
         cfs.truncateBlocking();
+    }
+
+    static long getFilterSize(SSTableReader rdr)
+    {
+        if (!(rdr instanceof SSTableReaderWithFilter))
+            return 0;
+        return ((SSTableReaderWithFilter) rdr).getFilterSerializedSize();
     }
 
     private int compact(ColumnFamilyStore cfs, LifecycleTransaction txn, CompactionAwareWriter writer)
     {
         //assert txn.originals().size() == 1;
         int rowsWritten = 0;
-        int nowInSec = FBUtilities.nowInSeconds();
+        long nowInSec = FBUtilities.nowInSeconds();
         try (ScannerList scanners = cfs.getCompactionStrategy().getScanners(txn.originals());
              CompactionController controller = new CompactionController(cfs, txn.originals(), cfs.gcBefore(nowInSec));
-             CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, scanners.scanners, controller, nowInSec, UUIDGen.getTimeUUID()))
+             CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, scanners.scanners, controller, nowInSec, TimeUUID.Generator.nextTimeUUID()))
         {
             while (ci.hasNext())
             {

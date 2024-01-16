@@ -65,7 +65,6 @@ public class DefaultFSErrorHandler implements FSErrorHandler
 
         switch (DatabaseDescriptor.getDiskFailurePolicy())
         {
-            case die:
             case stop_paranoid:
             case stop:
                 // exception not logged here on purpose as it is already logged

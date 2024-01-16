@@ -17,24 +17,16 @@
  */
 package org.apache.cassandra.db.compaction;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import java.util.UUID;
+import java.util.*;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.commitlog.CommitLogPosition;
-import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -116,7 +108,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     }
 
     @Override
-    public void onCompleted(UUID id)
+    public void onCompleted(TimeUUID id)
     {
         backgroundCompactions.onCompleted(this, id);
     }
@@ -173,7 +165,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
      */
     @Override
     @SuppressWarnings("resource")
-    public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput)
+    public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput)
     {
         Iterable<SSTableReader> filteredSSTables = Iterables.filter(getSSTables(), sstable -> !sstable.isMarkedSuspect());
         if (Iterables.isEmpty(filteredSSTables))
@@ -195,7 +187,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
      */
     @Override
     @SuppressWarnings("resource")
-    public synchronized CompactionTasks getUserDefinedTasks(Collection<SSTableReader> sstables, int gcBefore)
+    public synchronized CompactionTasks getUserDefinedTasks(Collection<SSTableReader> sstables, long gcBefore)
     {
         assert !sstables.isEmpty(); // checked for by CM.submitUserDefined
 
@@ -237,7 +229,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
      * @return a compaction task, see {@link AbstractCompactionTask} and sub-classes
      */
     @Override
-    public AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, final int gcBefore, long maxSSTableBytes)
+    public AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, final long gcBefore, long maxSSTableBytes)
     {
         return new CompactionTask(cfs, txn, gcBefore, false, this);
     }
@@ -257,6 +249,12 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     int getEstimatedRemainingTasks(int additionalSSTables, long additionalBytes)
     {
         return getEstimatedRemainingTasks() + (int)Math.ceil((double)additionalSSTables / cfs.getMaximumCompactionThreshold());
+    }
+
+    @Override
+    public int getEstimatedRemainingTasks(int additionalSSTables, long additionalBytes, boolean isIncremental) throws IllegalArgumentException
+    {
+        return getEstimatedRemainingTasks(additionalSSTables, additionalBytes);
     }
 
     /**
@@ -291,6 +289,24 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
         return new int[0];
     }
 
+    @Override
+    public long[] getPerLevelSizeBytes()
+    {
+        return new long[0];
+    }
+    
+    @Override
+    public boolean isLeveledCompaction()
+    {
+        return false;
+    }
+
+    @Override
+    public int[] getSSTableCountPerTWCSBucket()
+    {
+        return new int[0];
+    }
+    
     @Override
     public int getLevelFanoutSize()
     {
@@ -367,23 +383,22 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
                                                        long repairedAt,
                                                        TimeUUID pendingRepair,
                                                        boolean isTransient,
-                                                       IntervalSet<CommitLogPosition> commitLogPositions,
-                                                       int sstableLevel,
+                                                       MetadataCollector meta,
                                                        SerializationHeader header,
                                                        Collection<Index.Group> indexGroups,
                                                        LifecycleNewTracker lifecycleNewTracker)
     {
-        return SimpleSSTableMultiWriter.create(descriptor,
-                                               keyCount,
-                                               repairedAt,
-                                               pendingRepair,
-                                               isTransient,
-                                               cfs.metadata,
-                                               commitLogPositions,
-                                               sstableLevel,
-                                               header,
-                                               indexGroups,
-                                               lifecycleNewTracker, cfs);
+        return SimpleSSTableMultiWriter.create(descriptor, 
+                                               keyCount, 
+                                               repairedAt, 
+                                               pendingRepair, 
+                                               isTransient, 
+                                               cfs.metadata, 
+                                               meta, 
+                                               header, 
+                                               indexGroups, 
+                                               lifecycleNewTracker, 
+                                               cfs);
     }
 
     @Override

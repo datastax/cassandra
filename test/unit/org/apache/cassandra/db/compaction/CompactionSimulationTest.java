@@ -26,7 +26,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
@@ -41,6 +40,7 @@ import javax.inject.Inject;
 
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.RateLimiter;
+import org.apache.cassandra.utils.*;
 import org.apache.commons.math3.distribution.AbstractIntegerDistribution;
 import org.apache.commons.math3.distribution.UniformIntegerDistribution;
 import org.apache.commons.math3.distribution.ZipfDistribution;
@@ -74,13 +74,10 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
-import org.apache.cassandra.utils.ExpMovingAverage;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MonotonicClock;
-import org.apache.cassandra.utils.MovingAverage;
-import org.apache.cassandra.utils.PageAware;
+import org.apache.cassandra.io.util.PageAware;
 import org.mockito.Mockito;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.LOG_DIR;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.when;
 
@@ -118,7 +115,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
 {
     private final static Logger logger = LoggerFactory.getLogger(CompactionSimulationTest.class);
 
-    private static final String logDirectory = System.getProperty("cassandra.logdir", ".");
+    private static final String logDirectory = LOG_DIR.getString();
 
     /**
      * The average time for flushing 1kb of data, as measured on Fallout tests ran on ironic.
@@ -372,7 +369,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         double maxSpaceOverhead = 0.2;
 
         Controller controller = adaptive
-                                ? new AdaptiveController(MonotonicClock.preciseTime,
+                                ? new AdaptiveController(MonotonicClock.Global.preciseTime,
                                                          new SimulatedEnvironment(counters, valueSize), Ws[0],
                                                          o,
                                                          datasetSizeGB << 10,  // MB
@@ -1302,7 +1299,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                     for (SSTableReader candidate : candidates)
                         counters.numReadForCompaction.addAndGet(candidate.keyCardinalityEstimator().cardinality());
 
-                    UUID id = txn.opId();
+                    TimeUUID id = txn.opId();
 
                     //strategy.getBackgroundCompactions().setInProgress(mockCompletedCompactionProgress(candidates, id));
                     ICardinality merged = getMerged(candidates);
@@ -1424,7 +1421,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                 when(sstable.keyCardinalityEstimator()).thenReturn(cardinality);
                 sstables.add(sstable);
 
-                min = boundaries.get(max).getToken().increaseSlightly();
+                min = boundaries.get(max).getToken().nextValidToken();
                 max += numShardsCoveredByEachSStable;
             }
 

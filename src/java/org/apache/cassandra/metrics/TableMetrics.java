@@ -169,6 +169,8 @@ public class TableMetrics
     public final Gauge<Long> maxPartitionSize;
     /** Size of the smallest compacted partition */
     public final Gauge<Long> meanPartitionSize;
+    /** False positive ratio of bloom filter */
+    public final Gauge<Double> bloomFilterFalseRatio;
     /** Off heap memory used by compression meta data*/
     public final Gauge<Long> compressionMetadataOffHeapMemoryUsed;
     /** Tombstones scanned in queries on this CF */
@@ -780,6 +782,39 @@ public class TableMetrics
                     }
                 }
                 return count > 0 ? sum / count : 0;
+            }
+        });
+        bloomFilterFalseRatio = createTableGauge("BloomFilterFalseRatio", new Gauge<Double>()
+        {
+            public Double getValue()
+            {
+                long falsePositiveCount = cfs.getBloomFilterFalsePositiveCount();
+                long truePositiveCount = cfs.getBloomFilterTruePositiveCount();
+                long trueNegativeCount = cfs.getBloomFilterTrueNegativeCount();
+
+                if (falsePositiveCount == 0L && truePositiveCount == 0L)
+                    return 0d;
+                return (double) falsePositiveCount / (truePositiveCount + falsePositiveCount + trueNegativeCount);
+            }
+        }, new Gauge<Double>() // global gauge
+        {
+            public Double getValue()
+            {
+                long falsePositiveCount = 0L;
+                long truePositiveCount = 0L;
+                long trueNegativeCount = 0L;
+                for (Keyspace keyspace : Keyspace.all())
+                {
+                    for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
+                    {
+                        falsePositiveCount += cfs.getBloomFilterFalsePositiveCount();
+                        truePositiveCount += cfs.getBloomFilterTruePositiveCount();
+                        trueNegativeCount += cfs.getBloomFilterTrueNegativeCount();
+                    }
+                }
+                if (falsePositiveCount == 0L && truePositiveCount == 0L)
+                    return 0d;
+                return (double) falsePositiveCount / (truePositiveCount + falsePositiveCount + trueNegativeCount);
             }
         });
         compressionMetadataOffHeapMemoryUsed = createTableGauge("CompressionMetadataOffHeapMemoryUsed", new Gauge<Long>()

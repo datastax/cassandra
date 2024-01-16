@@ -17,7 +17,7 @@
 package org.apache.cassandra.tools;
 
 import java.io.BufferedReader;
-import java.io.File;
+import java.io.File; //checkstyle: permit this import
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintWriter;
@@ -37,7 +37,6 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Table;
@@ -278,7 +277,7 @@ public class CompactionLogAnalyzer
             System.exit(1);
         }
 
-        File logPath = new File(cmd.getArgs()[0]);
+        File logPath = new File(cmd.getArgs()[0]); // checkstyle: permit this instantiation
         File[] files = logPath.listFiles(f -> CSVNamePattern.matcher(f.getName()).matches());
         Arrays.sort(files);
 
@@ -295,7 +294,7 @@ public class CompactionLogAnalyzer
         main.put("title", "Compaction report");
         main.put("stats", marr);
 
-        generateGraph(new File(logPath.getPath() + File.separator + "compaction_report.html"), main);
+        generateGraph(new File(logPath.getPath() + File.separator + "compaction_report.html"), main); // checkstyle: permit this instantiation
 
         System.exit(0);
     }

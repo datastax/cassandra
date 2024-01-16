@@ -41,14 +41,13 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.commitlog.CommitLogPosition;
-import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.compaction.AbstractStrategyHolder.TasksSupplier;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -63,7 +62,6 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
@@ -184,7 +182,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
         this.partitionSSTablesByTokenRange = partitionSSTablesByTokenRange;
 
         currentBoundaries = boundariesSupplier.get();
-        params = schemaCompactionParams = cfs.metadata().params.compaction;
+        params = cfs.metadata().params.compaction;
         enabled = params.isEnabled();
     }
 
@@ -438,25 +436,6 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     }
 
     /**
-     * @param newParams new CompactionParams set via JMX
-     */
-    private void reloadParamsFromJMX(CompactionParams newParams)
-    {
-        logger.debug("Recreating compaction strategy for {}.{} - compaction parameters changed via JMX",
-                     cfs.getKeyspaceName(), cfs.getTableName());
-
-        setStrategy(newParams);
-
-        // compaction params set via JMX override enable/disable via JMX
-        if (enabled && !shouldBeEnabled())
-            disable();
-        else if (!enabled && shouldBeEnabled())
-            enable();
-
-        startup();
-    }
-
-    /**
      * Checks if the disk boundaries changed and reloads the compaction strategies
      * to reflect the most up-to-date disk boundaries.
      * <p>
@@ -616,7 +595,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
             if (repaired.first() instanceof LeveledCompactionStrategy)
             {
                 long [] res = new long[LeveledGenerations.MAX_LEVEL_COUNT];
-                for (AbstractCompactionStrategy strategy : getAllStrategies())
+                for (CompactionStrategy strategy : getAllStrategies())
                 {
                     long[] repairedCountPerLevel = ((LeveledCompactionStrategy) strategy).getAllLevelSizeBytes();
                     res = sumArrays(res, repairedCountPerLevel);
@@ -1035,6 +1014,12 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     public CompactionTasks getMaximalTasks(final long gcBefore, final boolean splitOutput)
     {
         maybeReloadDiskBoundaries();
+        
+        // FIXME STAR-13 - workaround for getMaximalTasks being defined in the CompactionStrategy interface
+        // and not havine an OpertionType parameter. When this is called from CompactionManager, the current
+        // callstack will always pass in MAJOR_COMPACTION, so we can just hardcode that here.
+        OperationType operationType = OperationType.MAJOR_COMPACTION;
+        
         // runWithCompactionsDisabled cancels active compactions and disables them, then we are able
         // to make the repaired/unrepaired strategies mark their own sstables as compacting. Once the
         // sstables are marked the compactions are re-enabled
@@ -1096,6 +1081,46 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
                                    .flatMap(list -> list.stream())
                                    .mapToInt(CompactionStrategy::getEstimatedRemainingTasks)
                                    .sum();
+    }
+
+    public int getEstimatedRemainingTasks(int additionalSSTables, long additionalBytes, boolean isIncremental)
+    {
+        if (additionalBytes == 0 || additionalSSTables == 0)
+            return getEstimatedRemainingTasks();
+
+        maybeReloadDiskBoundaries();
+        readLock.lock();
+        try
+        {
+            int tasks = pendingRepairs.getEstimatedRemainingTasks();
+
+            Iterable<LegacyAbstractCompactionStrategy> strategies;
+            if (isIncremental)
+            {
+                // Note that it is unlikely that we are behind in the pending strategies (as they only have a small fraction
+                // of the total data), so we assume here that any pending sstables go directly to the repaired bucket.
+                strategies = repaired.allStrategies();
+                tasks += unrepaired.getEstimatedRemainingTasks();
+            }
+            else
+            {
+                // Here we assume that all sstables go to unrepaired, which can be wrong if we are running
+                // both incremental and full repairs.
+                strategies = unrepaired.allStrategies();
+                tasks += repaired.getEstimatedRemainingTasks();
+
+            }
+            int strategyCount = Math.max(1, Iterables.size(strategies));
+            int sstablesPerStrategy = additionalSSTables / strategyCount;
+            long bytesPerStrategy = additionalBytes / strategyCount;
+            for (AbstractCompactionStrategy strategy : strategies)
+                tasks += strategy.getEstimatedRemainingTasks(sstablesPerStrategy, bytesPerStrategy);
+            return tasks;
+        }
+        finally
+        {
+            readLock.unlock();
+        }
     }
 
     @Override
@@ -1193,8 +1218,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
                                                        long repairedAt,
                                                        TimeUUID pendingRepair,
                                                        boolean isTransient,
-                                                       IntervalSet<CommitLogPosition> commitLogPositions,
-                                                       int sstableLevel,
+                                                       MetadataCollector collector,
                                                        SerializationHeader header,
                                                        Collection<Index.Group> indexGroups,
                                                        LifecycleNewTracker lifecycleNewTracker)
@@ -1209,8 +1233,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
                                                                                               repairedAt,
                                                                                               pendingRepair,
                                                                                               isTransient,
-                                                                                              commitLogPositions,
-                                                                                              sstableLevel,
+                                                                                              collector,
                                                                                               header,
                                                                                               indexGroups,
                                                                                               lifecycleNewTracker);
@@ -1239,7 +1262,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     @VisibleForTesting
     public Set<TimeUUID> pendingRepairs()
     {
-        Set<UUID> ids = new HashSet<>();
+        Set<TimeUUID> ids = new HashSet<>();
         pendingRepairs.getManagers().forEach(p -> ids.addAll(p.getSessions()));
         return ids;
     }
@@ -1262,7 +1285,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     }
 
     @Override
-    public void onCompleted(UUID id)
+    public void onCompleted(TimeUUID id)
     {
 
     }

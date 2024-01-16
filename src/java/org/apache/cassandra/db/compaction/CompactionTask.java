@@ -378,23 +378,23 @@ public class CompactionTask extends AbstractCompactionTask
 
             if (completed)
             {
-                updateCompactionHistory(taskId, cfs.keyspace.getName(), cfs.getTableName(), progress);
+                updateCompactionHistory(taskId, cfs.keyspace.getName(), cfs.getTableName(), progress, ImmutableMap.of(COMPACTION_TYPE_PROPERTY, compactionType.type));
                 CompactionManager.instance.incrementRemovedExpiredSSTables(fullyExpiredSSTables.size());
                 if (transaction.originals().size() > 0 && actuallyCompact.size() == 0)
                     // this CompactionOperation only deleted fully expired SSTables without compacting anything
                     CompactionManager.instance.incrementDeleteOnlyCompactions();
 
                 if (logger.isDebugEnabled())
-                    debugLogCompactionSummaryInfo(taskId, System.nanoTime() - startNanos, totalKeysWritten, newSStables, progress);
+                    debugLogCompactionSummaryInfo(taskId, Clock.Global.nanoTime() - startNanos, totalKeysWritten, newSStables, progress);
                 if (logger.isTraceEnabled())
                     traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, progress);
 
-                strategy.getCompactionLogger().compaction(startTime, transaction.originals(), System.currentTimeMillis(), newSStables);
+                strategy.getCompactionLogger().compaction(startTime, transaction.originals(), Clock.Global.currentTimeMillis(), newSStables);
 
                 // update the metrics
                 cfs.metric.incBytesCompacted(progress.adjustedInputDiskSize(),
                                              progress.outputDiskSize(),
-                                             System.nanoTime() - startNanos);
+                                             Clock.Global.nanoTime() - startNanos);
             }
 
             Throwables.maybeFail(err);

@@ -31,6 +31,8 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MonotonicClock;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.*;
+
 /**
  * The adaptive compaction controller dynamically calculates the optimal scaling parameter W.
  * <p/>
@@ -49,28 +51,28 @@ public class AdaptiveController extends Controller
 
     /** The starting value for the scaling parameter */
     static final String STARTING_SCALING_PARAMETER = "adaptive_starting_scaling_parameter";
-    private static final int DEFAULT_STARTING_SCALING_PARAMETER = Integer.getInteger(PREFIX + STARTING_SCALING_PARAMETER, 0);
+    private static final int DEFAULT_STARTING_SCALING_PARAMETER = UCS_ADAPTIVE_STARTING_SCALING_PARAMETER.getInt();
 
     /** The minimum valid value for the scaling parameter */
     static final String MIN_SCALING_PARAMETER = "adaptive_min_scaling_parameter";
-    static private final int DEFAULT_MIN_SCALING_PARAMETER = Integer.getInteger(PREFIX + MIN_SCALING_PARAMETER, -10);
+    static private final int DEFAULT_MIN_SCALING_PARAMETER = UCS_ADAPTIVE_MIN_SCALING_PARAMETER.getInt();
 
     /** The maximum valid value for the scaling parameter */
     static final String MAX_SCALING_PARAMETER = "adaptive_max_scaling_parameter";
-    static private final int DEFAULT_MAX_SCALING_PARAMETER = Integer.getInteger(PREFIX + MIN_SCALING_PARAMETER, 36);
+    static private final int DEFAULT_MAX_SCALING_PARAMETER = UCS_ADAPTIVE_MAX_SCALING_PARAMETER.getInt();
 
     /** The interval for periodically checking the optimal value for W */
     static final String INTERVAL_SEC = "adaptive_interval_sec";
-    static private final int DEFAULT_INTERVAL_SEC = Integer.getInteger(PREFIX + INTERVAL_SEC, 300);
+    static private final int DEFAULT_INTERVAL_SEC = UCS_ADAPTIVE_INTERVAL_SEC.getInt();
 
     /** The gain is a number between 0 and 1 used to determine if a new choice of W is better than the current one */
     static final String THRESHOLD = "adaptive_threshold";
-    private static final double DEFAULT_THRESHOLD = Double.parseDouble(System.getProperty(PREFIX + THRESHOLD, "0.15"));
+    private static final double DEFAULT_THRESHOLD = UCS_ADAPTIVE_THRESHOLD.getDouble();
 
     /** Below the minimum cost we don't try to optimize W, we consider the current W good enough. This is necessary because the cost
      * can vanish to zero when there are neither reads nor writes and right now we don't know how to handle this case.  */
     static final String MIN_COST = "adaptive_min_cost";
-    static private final int DEFAULT_MIN_COST = Integer.getInteger(PREFIX + MIN_COST, 1000);
+    static private final int DEFAULT_MIN_COST = UCS_ADAPTIVE_MIN_COST.getInt();
 
     private final int intervalSec;
     private final int minW;
@@ -129,7 +131,7 @@ public class AdaptiveController extends Controller
         double threshold = options.containsKey(THRESHOLD) ? Double.parseDouble(options.get(THRESHOLD)) : DEFAULT_THRESHOLD;
         int minCost = options.containsKey(MIN_COST) ? Integer.parseInt(options.get(MIN_COST)) : DEFAULT_MIN_COST;
 
-        return new AdaptiveController(MonotonicClock.preciseTime, env, W, survivalFactor, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, intervalSec, minW, maxW, threshold, minCost);
+        return new AdaptiveController(MonotonicClock.Global.preciseTime, env, W, survivalFactor, dataSetSizeMB, numShards, minSstableSizeMB, flushSizeOverrideMB, maxSpaceOverhead, maxSSTablesToCompact, expiredSSTableCheckFrequency, ignoreOverlapsInExpirationCheck, intervalSec, minW, maxW, threshold, minCost);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException

@@ -19,7 +19,6 @@ package org.apache.cassandra.db.compaction;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -32,6 +31,7 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.utils.TimeUUID;
 
 /**
  * The common interface between legacy compaction strategies (those that extend {@link LegacyAbstractCompactionStrategy}
@@ -73,7 +73,7 @@ public interface CompactionStrategy extends CompactionObserver
      *
      * Is responsible for marking its sstables as compaction-pending.
      */
-    Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore);
+    Collection<AbstractCompactionTask> getNextBackgroundTasks(long gcBefore);
 
     /**
      * @param gcBefore throw away tombstones older than this
@@ -84,7 +84,7 @@ public interface CompactionStrategy extends CompactionObserver
      * Is responsible for marking its sstables as compaction-pending.
      */
     @SuppressWarnings("resource")
-    CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput);
+    CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput);
 
     /**
      * @param sstables SSTables to compact. Must be marked as compacting.
@@ -96,7 +96,7 @@ public interface CompactionStrategy extends CompactionObserver
      * Is responsible for marking its sstables as compaction-pending.
      */
     @SuppressWarnings("resource")
-    CompactionTasks getUserDefinedTasks(Collection<SSTableReader> sstables, int gcBefore);
+    CompactionTasks getUserDefinedTasks(Collection<SSTableReader> sstables, long gcBefore);
 
     /**
      * Get the estimated remaining compactions.
@@ -105,12 +105,14 @@ public interface CompactionStrategy extends CompactionObserver
      */
     int getEstimatedRemainingTasks();
 
+    int getEstimatedRemainingTasks(int additionalSSTables, long additionalBytes, boolean isIncremental);
+    
     /**
      * Create a compaction task for the sstables in the transaction.
      *
      * @return a valid compaction task that can be executed.
      */
-    AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, int gcBefore, long maxSSTableBytes);
+    AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, long gcBefore, long maxSSTableBytes);
 
     /**
      * @return the total number of background compactions, pending or in progress
@@ -135,6 +137,21 @@ public interface CompactionStrategy extends CompactionObserver
      */
     int[] getSSTableCountPerLevel();
 
+    /**
+     * @return total size on disk for each level. null unless leveled compaction is used.
+     */
+    long[] getPerLevelSizeBytes();
+
+    /**
+     * @return true if the table is using LeveledCompactionStrategy. false otherwise.
+     */
+    boolean isLeveledCompaction();
+
+    /**
+     * @return sstable count for each bucket in TWCS. null unless time window compaction is used.
+     */
+    int[] getSSTableCountPerTWCSBucket();
+    
     /**
      * @return the level fanout size if applicable to this strategy. Otherwise return the default LCS fanout size.
      */
@@ -174,7 +191,7 @@ public interface CompactionStrategy extends CompactionObserver
     SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor,
                                                 long keyCount,
                                                 long repairedAt,
-                                                UUID pendingRepair,
+                                                TimeUUID pendingRepair,
                                                 boolean isTransient,
                                                 MetadataCollector collector,
                                                 SerializationHeader header,

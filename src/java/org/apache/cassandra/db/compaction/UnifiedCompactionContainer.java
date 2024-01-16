@@ -19,7 +19,6 @@ package org.apache.cassandra.db.compaction;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import javax.annotation.Nonnull;
@@ -41,6 +40,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.schema.CompactionParams;
+import org.apache.cassandra.utils.TimeUUID;
 
 public class UnifiedCompactionContainer implements CompactionStrategyContainer
 {
@@ -172,13 +172,13 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     }
 
     @Override
-    public List<CompactionStrategy> getStrategies(boolean isRepaired, @Nullable UUID pendingRepair)
+    public List<CompactionStrategy> getStrategies(boolean isRepaired, @Nullable TimeUUID pendingRepair)
     {
         return getStrategies();
     }
 
     @Override
-    public void repairSessionCompleted(UUID sessionID)
+    public void repairSessionCompleted(TimeUUID sessionID)
     {
         // We are not tracking SSTables, so nothing to do here.
     }
@@ -224,19 +224,19 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     }
 
     @Override
-    public Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
+    public Collection<AbstractCompactionTask> getNextBackgroundTasks(long gcBefore)
     {
         return strategy.getNextBackgroundTasks(gcBefore);
     }
 
     @Override
-    public CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput)
+    public CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput)
     {
         return strategy.getMaximalTasks(gcBefore, splitOutput);
     }
 
     @Override
-    public CompactionTasks getUserDefinedTasks(Collection<SSTableReader> sstables, int gcBefore)
+    public CompactionTasks getUserDefinedTasks(Collection<SSTableReader> sstables, long gcBefore)
     {
         return strategy.getUserDefinedTasks(sstables, gcBefore);
     }
@@ -248,7 +248,13 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     }
 
     @Override
-    public AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, int gcBefore, long maxSSTableBytes)
+    public int getEstimatedRemainingTasks(int additionalSSTables, long additionalBytes, boolean isIncremental)
+    {
+        return strategy.getEstimatedRemainingTasks(additionalSSTables, additionalBytes, isIncremental);
+    }
+
+    @Override
+    public AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, long gcBefore, long maxSSTableBytes)
     {
         return strategy.createCompactionTask(txn, gcBefore, maxSSTableBytes);
     }
@@ -277,6 +283,24 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
         return strategy.getSSTableCountPerLevel();
     }
 
+    @Override
+    public long[] getPerLevelSizeBytes()
+    {
+        return strategy.getPerLevelSizeBytes();
+    }
+    
+    @Override
+    public boolean isLeveledCompaction()
+    {
+        return strategy.isLeveledCompaction();
+    }
+    
+    @Override
+    public int[] getSSTableCountPerTWCSBucket()
+    {
+        return strategy.getSSTableCountPerTWCSBucket();
+    }
+    
     @Override
     public int getLevelFanoutSize()
     {
@@ -311,7 +335,7 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     public SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor,
                                                        long keyCount,
                                                        long repairedAt,
-                                                       UUID pendingRepair,
+                                                       TimeUUID pendingRepair,
                                                        boolean isTransient,
                                                        MetadataCollector collector,
                                                        SerializationHeader header,
@@ -347,7 +371,7 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     }
 
     @Override
-    public void onCompleted(UUID id)
+    public void onCompleted(TimeUUID id)
     {
         strategy.onCompleted(id);
     }

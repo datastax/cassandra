@@ -120,7 +120,8 @@ public class ShardedMultiWriter implements SSTableMultiWriter
                                                 meta,
                                                 header,
                                                 indexGroups,
-                                                lifecycleNewTracker);
+                                                lifecycleNewTracker,
+                                                cfs);
     }
 
     private long forSplittingKeysBy(long splits) {

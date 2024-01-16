@@ -40,7 +40,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
@@ -56,7 +55,6 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.LegacySSTableTest;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.CompactionParams;
@@ -572,8 +570,8 @@ public class CompactionsCQLTest extends CQLTester
         createTable(String.format("CREATE TABLE %%s (id text PRIMARY KEY) WITH compaction = {'class':'%s'};", strategyClass.getSimpleName()));
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         assertEquals(strategyClass, cfs.getCompactionStrategyContainer().getCompactionParams().klass());
-        alterTable("ALTER TABLE %s WITH compaction = {'class': 'DateTieredCompactionStrategy'}");
-        assertEquals(DateTieredCompactionStrategy.class, cfs.getCompactionStrategyContainer().getCompactionParams().klass());
+        alterTable("ALTER TABLE %s WITH compaction = {'class': 'TimeWindowCompactionStrategy'}");
+        assertEquals(TimeWindowCompactionStrategy.class, cfs.getCompactionStrategyContainer().getCompactionParams().klass());
         alterTable(String.format("ALTER TABLE %%s WITH compaction = {'class': '%s'}", strategyClass.getSimpleName()));
         assertEquals(strategyClass, cfs.getCompactionStrategyContainer().getCompactionParams().klass());
     }

@@ -77,6 +77,7 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
@@ -659,7 +660,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         assert executionController != null && executionController.validForReadOn(cfs);
         Tracing.trace("Executing single-partition query on {}", cfs.name);
 
-        return queryMemtableAndDiskInternal(cfs, executionController, System.nanoTime());
+        return queryMemtableAndDiskInternal(cfs, executionController, Clock.Global.nanoTime());
     }
 
     private UnfilteredRowIterator queryMemtableAndDiskInternal(ColumnFamilyStore cfs, ReadExecutionController controller, long startTimeNanos)
@@ -903,7 +904,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
            public void onPartitionClose()
            {
                int mergedSSTablesIterated = metricsCollector.getMergedSSTables();
-               metrics.updateSSTableIterated(mergedSSTablesIterated, System.nanoTime() - startTimeNanos);
+               metrics.updateSSTableIterated(mergedSSTablesIterated, Clock.Global.nanoTime() - startTimeNanos);
                Tracing.trace("Merged data from memtables and {} sstables", mergedSSTablesIterated);
            }
         }
@@ -1024,7 +1025,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             }
         }
 
-        cfs.metric.updateSSTableIterated(metricsCollector.getMergedSSTables(), System.nanoTime() - startTimeNanos);
+        cfs.metric.updateSSTableIterated(metricsCollector.getMergedSSTables(), Clock.Global.nanoTime() - startTimeNanos);
 
         if (result == null || result.isEmpty())
             return EmptyIterators.unfilteredRow(metadata(), partitionKey(), false);

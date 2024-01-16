@@ -656,7 +656,7 @@ public abstract class ReadCommand extends AbstractReadQuery
             @Override
             public void onClose()
             {
-                recordReadLatency(metric, System.nanoTime() - startTimeNanos);
+                recordReadLatency(metric, nanoTime() - startTimeNanos);
 
                 metric.tombstoneScannedHistogram.update(tombstones.get());
                 metric.liveScannedHistogram.update(liveRows);

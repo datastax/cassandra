@@ -51,9 +51,6 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
-import org.apache.cassandra.schema.CompactionParams;
-import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.TOLERATE_SSTABLE_SIZE;
 

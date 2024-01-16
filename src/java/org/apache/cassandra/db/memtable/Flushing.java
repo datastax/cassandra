@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
+import org.apache.cassandra.utils.Clock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -188,7 +189,7 @@ public class Flushing
                 return;
             }
 
-            long before = System.nanoTime();
+            long before = Clock.Global.nanoTime();
             logger.debug("Writing {}, flushed range = ({}, {}], state: {}",
                          toFlush.memtable().toString(), toFlush.from(), toFlush.to(), state);
 
@@ -236,7 +237,7 @@ public class Flushing
                                         segmentCount,
                                         toFlush.memtable().getFinalCommitLogUpperBound());
                             // Update the metrics
-                            metrics.incBytesFlushed(toFlush.memtable().getLiveDataSize(), bytesFlushed, before - System.nanoTime());
+                            metrics.incBytesFlushed(toFlush.memtable().getLiveDataSize(), bytesFlushed, before - Clock.Global.nanoTime());
                             metrics.flushSizeOnDisk.update(onDiskBytesWritten);
                             metrics.flushSegmentCount.update(segmentCount);
                         }

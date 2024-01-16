@@ -17,7 +17,6 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -25,6 +24,7 @@ import javax.annotation.Nullable;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.schema.CompactionParams;
+import org.apache.cassandra.utils.TimeUUID;
 
 /**
  * A strategy container manages compaction strategies for a {@link ColumnFamilyStore}.
@@ -174,14 +174,14 @@ public interface CompactionStrategyContainer extends CompactionStrategy, INotifi
      *
      * @return a list of inner strategies that match given parameters
      */
-    List<CompactionStrategy> getStrategies(boolean isRepaired, @Nullable UUID pendingRepair);
+    List<CompactionStrategy> getStrategies(boolean isRepaired, @Nullable TimeUUID pendingRepair);
 
     /**
      * Called to clean up state when a repair session completes.
      *
      * @param sessionID repair session id.
      */
-    void repairSessionCompleted(UUID sessionID);
+    void repairSessionCompleted(TimeUUID sessionID);
 
     /**
      * The method is for CompactionStrategyManager to use with {@link org.apache.cassandra.db.ColumnFamilyStore#mutateRepaired}.

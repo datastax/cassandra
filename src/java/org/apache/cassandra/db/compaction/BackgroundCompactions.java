@@ -63,7 +63,7 @@ public class BackgroundCompactions
     private volatile List<CompactionAggregate> aggregates;
 
     /**  The ongoing compactions grouped by unique operation ID. */
-    private final ConcurrentHashMap<UUID, CompactionPick> compactions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<TimeUUID, CompactionPick> compactions = new ConcurrentHashMap<>();
 
     /**
      * Rate of progress (per thread) of recent compactions for the CFS. Used by the UnifiedCompactionStrategy to
@@ -164,7 +164,7 @@ public class BackgroundCompactions
         }
     }
 
-    void setSubmitted(CompactionStrategy strategy, UUID id, CompactionAggregate aggregate)
+    void setSubmitted(CompactionStrategy strategy, TimeUUID id, CompactionAggregate aggregate)
     {
         if (id == null || aggregate == null)
             throw new IllegalArgumentException("arguments cannot be null");
@@ -239,7 +239,7 @@ public class BackgroundCompactions
         compaction.setProgress(progress);
     }
 
-    public void onCompleted(CompactionStrategy strategy, UUID id)
+    public void onCompleted(CompactionStrategy strategy, TimeUUID id)
     {
         if (id == null)
             throw new IllegalArgumentException("argument cannot be null");

@@ -20,6 +20,9 @@ package org.apache.cassandra.db.compaction.writers;
 
 import java.util.Set;
 
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,16 +64,18 @@ public class DefaultCompactionWriter extends CompactionAwareWriter
     @Override
     protected SSTableWriter sstableWriter(Directories.DataDirectory directory, PartitionPosition diskBoundary)
     {
-        return SSTableWriter.create(cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory)),
-                                    estimatedTotalKeys,
-                                    minRepairedAt,
-                                    pendingRepair,
-                                    isTransient,
-                                    cfs.metadata,
-                                    new MetadataCollector(txn.originals(), cfs.metadata().comparator, sstableLevel),
-                                    SerializationHeader.make(cfs.metadata(), nonExpiredSSTables),
-                                    cfs.indexManager.listIndexGroups(),
-                                    txn);
+        Descriptor descriptor = cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
+        return descriptor.getFormat().getWriterFactory().builder(descriptor)
+                         .setKeyCount(estimatedTotalKeys)
+                         .setRepairedAt(minRepairedAt)
+                         .setPendingRepair(pendingRepair)
+                         .setTransientSSTable(isTransient)
+                         .setTableMetadataRef(cfs.metadata)
+                         .setMetadataCollector(new MetadataCollector(txn.originals(), cfs.metadata().comparator, sstableLevel))
+                         .setSerializationHeader(SerializationHeader.make(cfs.metadata(), nonExpiredSSTables))
+                         .addDefaultComponents(cfs.indexManager.listIndexGroups())
+                         .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
+                         .build(txn, cfs);
     }
 
     protected long sstableKeyCount()

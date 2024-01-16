@@ -33,9 +33,9 @@ import com.google.common.collect.ImmutableList;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.utils.Clock;
 
 /**
  * Pluggable compaction strategy determines how SSTables get merged.
@@ -66,7 +66,7 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
 
         @Override
         @SuppressWarnings("resource")
-        public Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
+        public Collection<AbstractCompactionTask> getNextBackgroundTasks(long gcBefore)
         {
             CompactionPick previous = null;
             while (true)
@@ -104,9 +104,9 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
         /**
          * Select the next compaction to perform. This method is typically synchronized.
          */
-        protected abstract CompactionAggregate getNextBackgroundAggregate(int gcBefore);
+        protected abstract CompactionAggregate getNextBackgroundAggregate(long gcBefore);
 
-        protected AbstractCompactionTask createCompactionTask(final int gcBefore, LifecycleTransaction txn, CompactionAggregate compaction)
+        protected AbstractCompactionTask createCompactionTask(final long gcBefore, LifecycleTransaction txn, CompactionAggregate compaction)
         {
             return new CompactionTask(cfs, txn, gcBefore, false, this);
         }
@@ -138,7 +138,7 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
 
         @Override
         @SuppressWarnings("resource")
-        public Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
+        public Collection<AbstractCompactionTask> getNextBackgroundTasks(long gcBefore)
         {
             List<SSTableReader> previousCandidate = null;
             while (true)
@@ -174,7 +174,7 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
         /**
          * Select the next tables to compact. This method is typically synchronized.
          */
-        protected abstract List<SSTableReader> getNextBackgroundSSTables(final int gcBefore);
+        protected abstract List<SSTableReader> getNextBackgroundSSTables(final long gcBefore);
     }
 
     /**
@@ -244,7 +244,7 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
         }
     }
 
-    public synchronized CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput)
+    public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput)
     {
         removeDeadSSTables();
         return super.getMaximalTasks(gcBefore, splitOutput);
@@ -266,7 +266,7 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
      * Select a table for tombstone-removing compaction from the given set. Returns null if no table is suitable.
      */
     @Nullable
-    CompactionAggregate makeTombstoneCompaction(int gcBefore,
+    CompactionAggregate makeTombstoneCompaction(long gcBefore,
                                                 Iterable<SSTableReader> candidates,
                                                 Function<Collection<SSTableReader>, SSTableReader> selector)
     {
@@ -291,14 +291,14 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
      * @param gcBefore time to drop tombstones
      * @return true if given sstable's tombstones are expected to be removed
      */
-    protected boolean worthDroppingTombstones(SSTableReader sstable, int gcBefore)
+    protected boolean worthDroppingTombstones(SSTableReader sstable, long gcBefore)
     {
-        if (options.isDisableTombstoneCompactions() || CompactionController.NEVER_PURGE_TOMBSTONES || cfs.getNeverPurgeTombstones())
+        if (options.isDisableTombstoneCompactions() || CompactionController.NEVER_PURGE_TOMBSTONES_PROPERTY_VALUE || cfs.getNeverPurgeTombstones())
             return false;
         // since we use estimations to calculate, there is a chance that compaction will not drop tombstones actually.
         // if that happens we will end up in infinite compaction loop, so first we check enough if enough time has
         // elapsed since SSTable created.
-        if (System.currentTimeMillis() < sstable.getCreationTimeFor(Component.DATA) + options.getTombstoneCompactionInterval() * 1000)
+        if (Clock.Global.currentTimeMillis() < sstable.getDataCreationTime() + options.getTombstoneCompactionInterval() * 1000)
             return false;
 
         double droppableRatio = sstable.getEstimatedDroppableTombstoneRatio(gcBefore);
@@ -322,7 +322,7 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
         else
         {
             // what percentage of columns do we expect to compact outside of overlap?
-            if (sstable.getIndexSummarySize() < 2)
+            if (sstable.isEstimationInformative())
             {
                 // we have too few samples to estimate correct percentage
                 return false;

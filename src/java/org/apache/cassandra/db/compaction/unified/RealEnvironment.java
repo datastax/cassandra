@@ -20,11 +20,11 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.io.util.PageAware;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MovingAverage;
-import org.apache.cassandra.utils.PageAware;
 
 /**
  * An implementation of {@link Environment} that returns

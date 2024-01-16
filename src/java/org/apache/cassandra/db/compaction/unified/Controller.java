@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +44,7 @@ import org.apache.cassandra.metrics.MetricNameFactory;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.MonotonicClock;
 
-import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
+import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 
 /**
 * The controller provides compaction parameters to the unified compaction strategy
@@ -53,13 +54,10 @@ public abstract class Controller
     protected static final Logger logger = LoggerFactory.getLogger(Controller.class);
     private static final ConcurrentMap<TableMetadata, Controller.Metrics> allMetrics = new ConcurrentHashMap<>();
 
-    static final String PREFIX = "unified_compaction.";
-
     /** The data size in GB, it will be assumed that the node will have on disk roughly this size of data when it
      * reaches equilibrium. By default 1 TB. */
     public static final String DATASET_SIZE_OPTION_GB = "dataset_size_in_gb";
-    static final long DEFAULT_DATASET_SIZE_GB = Long.getLong(PREFIX + DATASET_SIZE_OPTION_GB,
-                                                             DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB());
+    static final long DEFAULT_DATASET_SIZE_GB = UCS_DATASET_SIZE_OPTION_GB.getLong(DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB());
 
     /** The number of shards. The shard size will be calculated by dividing the data size by this number.
      * By default, 10 would be used for single disk. If the data size is 1 TB, then the shard size becomes 100 GB.
@@ -67,8 +65,7 @@ public abstract class Controller
      * With data size 10 TB, the shard size would be 200 GB.
      * */
     static final String NUM_SHARDS_OPTION = "num_shards";
-    static final int DEFAULT_NUM_SHARDS = Integer.getInteger(PREFIX + NUM_SHARDS_OPTION,
-                                                             10 * DatabaseDescriptor.getAllDataFileLocations().length);
+    static final int DEFAULT_NUM_SHARDS = UCS_NUM_SHARDS_OPTION.getInt(10 * DatabaseDescriptor.getAllDataFileLocations().length);
 
     /**
      * The minimum sstable size. Sharded writers split sstables over shard only if they are at least as large
@@ -78,7 +75,7 @@ public abstract class Controller
      * looking at the initial flush size.
      */
     static final String MIN_SSTABLE_SIZE_OPTION_MB = "min_sstable_size_in_mb";
-    static final int DEFAULT_MIN_SSTABLE_SIZE_MB = Integer.getInteger(PREFIX + MIN_SSTABLE_SIZE_OPTION_MB, 100);
+    static final int DEFAULT_MIN_SSTABLE_SIZE_MB = UCS_MIN_SSTABLE_SIZE_OPTION_MB.getInt();
 
     /**
      * Override for the flush size in MB. The database should be able to calculate this from executing flushes, this
@@ -95,20 +92,20 @@ public abstract class Controller
      * behind, higher read amplification, and other problems of that nature.
      */
     static public final String MAX_SPACE_OVERHEAD_OPTION = "max_space_overhead";
-    static final double DEFAULT_MAX_SPACE_OVERHEAD = Double.parseDouble(System.getProperty(PREFIX + MAX_SPACE_OVERHEAD_OPTION, "0.2"));
+    static final double DEFAULT_MAX_SPACE_OVERHEAD = UCS_MAX_SPACE_OVERHEAD_OPTION.getDouble();
     static final double MAX_SPACE_OVERHEAD_LOWER_BOUND = 0.01;
     static final double MAX_SPACE_OVERHEAD_UPPER_BOUND = 1.0;
 
     /**
      * This parameter is intended to modify the shape of the LSM by taking into account the survival ratio of data, for now it is fixed to one.
      */
-    static final double DEFAULT_SURVIVAL_FACTOR = Double.parseDouble(System.getProperty(PREFIX + "survival_factor", "1"));
+    static final double DEFAULT_SURVIVAL_FACTOR = UCS_SURVIVAL_FACTOR.getDouble();
 
     /**
      * Either true or false. This parameter determines which controller will be used.
      */
     static final String ADAPTIVE_OPTION = "adaptive";
-    static final boolean DEFAULT_ADAPTIVE = Boolean.parseBoolean(System.getProperty(PREFIX + ADAPTIVE_OPTION, "false"));
+    static final boolean DEFAULT_ADAPTIVE = UCS_ADAPTIVE_ENABLED.getBoolean();
 
     /**
      * The maximum number of sstables to compact in one operation.
@@ -124,7 +121,7 @@ public abstract class Controller
 
     static final String ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_OPTION = "unsafe_aggressive_sstable_expiration";
     static final String ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_PROPERTY = Config.PROPERTY_PREFIX + "allow_unsafe_aggressive_sstable_expiration";
-    static final boolean ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION = Boolean.parseBoolean(System.getProperty(ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_PROPERTY));
+    static final boolean ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION = CassandraRelevantProperties.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION.getBoolean();
     static final boolean DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION = false;
 
     static final int DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS = 60 * 10;
@@ -770,10 +767,10 @@ public abstract class Controller
             this.factory = new DefaultNameFactory("CompactionCosts",
                                                   String.format("%s.%s", metadata.keyspace, metadata.name));
             this.controllerRef = new AtomicReference<>();
-            this.totWAGauge = Metrics.register(factory.createMetricName("WA"), this::getMeasuredWA);
-            this.readIOCostGauge = Metrics.register(factory.createMetricName("ReadIOCost"), this::getReadIOCost);
-            this.writeIOCostGauge = Metrics.register(factory.createMetricName("WriteIOCost"), this::getWriteIOCost);
-            this.totIOCostGauge = Metrics.register(factory.createMetricName("TotIOCost"), this::getTotalIOCost);
+            this.totWAGauge = org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics.register(factory.createMetricName("WA"), this::getMeasuredWA);
+            this.readIOCostGauge = org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics.register(factory.createMetricName("ReadIOCost"), this::getReadIOCost);
+            this.writeIOCostGauge = org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics.register(factory.createMetricName("WriteIOCost"), this::getWriteIOCost);
+            this.totIOCostGauge = org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics.register(factory.createMetricName("TotIOCost"), this::getTotalIOCost);
         }
 
         void setController(Controller controller)
@@ -788,10 +785,10 @@ public abstract class Controller
 
         void release()
         {
-            Metrics.remove(factory.createMetricName("WA"));
-            Metrics.remove(factory.createMetricName("ReadIOCost"));
-            Metrics.remove(factory.createMetricName("WriteIOCost"));
-            Metrics.remove(factory.createMetricName("TotIOCost"));
+            org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics.remove(factory.createMetricName("WA"));
+            org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics.remove(factory.createMetricName("ReadIOCost"));
+            org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics.remove(factory.createMetricName("WriteIOCost"));
+            org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics.remove(factory.createMetricName("TotIOCost"));
         }
 
         double getMeasuredWA()

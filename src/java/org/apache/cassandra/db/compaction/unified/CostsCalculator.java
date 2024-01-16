@@ -33,6 +33,8 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MovingAverage;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.*;
+
 /**
  * This class periodically retrieves delta values from the environment and stores them into exponentially weighted averages.
  * It then uses these values to calculate IO costs that are exported to {@link CompactionMetrics} and used by {@link AdaptiveController}
@@ -44,13 +46,13 @@ public class CostsCalculator
 
     /** How often values are sampled. Sampling for periods that are too short (<= 1 second) may not give good results since
      * we many not collect sufficient data. */
-    final static int samplingPeriodMs = Integer.getInteger(Controller.PREFIX + "sample_time_ms", 5000);
+    final static int samplingPeriodMs = UCS_ADAPTIVE_SAMPLE_TIME_MS.getInt();
 
     /** The multipliers can be used by users if they wish to adjust the costs. We reduce the read costs because writes are batch processes (flush and compaction)
      * and therefore the costs tend to be lower that for reads, so by reducing read costs we make the costs more comparable.
      */
-    final static double defaultWriteMultiplier = Double.parseDouble(System.getProperty(Controller.PREFIX + "costs_write_multiplier", "1"));
-    final static double defaultReadMultiplier = Double.parseDouble(System.getProperty(Controller.PREFIX + "costs_read_multiplier", "0.1"));
+    final static double defaultWriteMultiplier = UCS_ADAPTIVE_COSTS_WRITE_MULTIPLIER.getDouble();
+    final static double defaultReadMultiplier = UCS_ADAPTIVE_COSTS_READ_MULTIPLIER.getDouble();
 
     private final Environment env;
     private final double readMultiplier;

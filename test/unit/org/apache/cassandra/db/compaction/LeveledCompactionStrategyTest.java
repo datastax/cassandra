@@ -808,7 +808,9 @@ public class LeveledCompactionStrategyTest
 
         assertEquals(sstable.onDiskLength(), cfs.getPerLevelSizeBytes()[0]);
 
-        LeveledCompactionStrategy strategy = (LeveledCompactionStrategy) ( cfs.getCompactionStrategyManager()).getStrategies().get(1).get(0);
+        LeveledCompactionStrategy strategy = (LeveledCompactionStrategy) cfs.getCompactionStrategyContainer()
+                                                                            .getStrategies(false, null)
+                                                                            .get(0);
         strategy.manifest.remove(sstable);
         sstable.descriptor.getMetadataSerializer().mutateLevel(sstable.descriptor, 2);
         sstable.reloadSSTableMetadata();

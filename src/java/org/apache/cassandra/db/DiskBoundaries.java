@@ -178,8 +178,8 @@ public class DiskBoundaries
     {
         if (positions == null || first == null || last == null)
             return directories;
-        int firstIndex = getDiskIndex(first);
-        int lastIndex = getDiskIndex(last);
+        int firstIndex = getDiskIndexFromKey(first);
+        int lastIndex = getDiskIndexFromKey(last);
         return directories.subList(firstIndex, lastIndex + 1);
     }
 

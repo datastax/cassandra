@@ -29,7 +29,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Throwables;
@@ -84,10 +83,10 @@ class Helpers
      * A convenience method for encapsulating this action over multiple SSTableReader with exception-safety
      * @return accumulate if not null (with any thrown exception attached), or any thrown exception otherwise
      */
-    static void setupOnline(ColumnFamilyStore cfs, Iterable<SSTableReader> readers)
+    static void setupOnline(Iterable<SSTableReader> readers)
     {
         for (SSTableReader reader : readers)
-            reader.setupOnline(cfs);
+            reader.setupOnline();
     }
 
     /**

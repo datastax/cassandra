@@ -342,7 +342,7 @@ public class LocalSessions
                 return session != null && sessions.contains(session);
             };
             return cfs.runWithCompactionsDisabled(() -> doReleaseRepairData(cfs, sessions),
-                                                  predicate, false, true, true);
+                                                  predicate, OperationType.STREAM, false, true, true);
         }
         else
         {

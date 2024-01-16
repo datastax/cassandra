@@ -79,7 +79,7 @@ public class SplitterTest
 
         for (int i = 1; i <= (rt - lt); i++)
         {
-            List<Token> splits = splitter.splitOwnedRanges(i, Arrays.asList(new Splitter.WeightedRange(1.0d, range)), false);
+            List<Token> splits = splitter.splitOwnedRanges(i, Arrays.asList(new Splitter.WeightedRange(1.0d, range)), Splitter.SplitType.ALWAYS_SPLIT).boundaries;
             logger.info("{} splits of {} are: {}", i, range, splits);
             Assertions.assertThat(splits).hasSize(i);
         }

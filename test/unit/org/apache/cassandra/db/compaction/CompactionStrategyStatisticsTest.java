@@ -459,7 +459,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         for (AbstractCompactionTask task : tasks)
         {
             assertNotNull(task);
-            UUID id = task.transaction().opId();
+            TimeUUID id = task.transaction().opId();
 
             verifyStatistics(strategy,
                              1,
@@ -570,7 +570,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         int i = 0;
         while (i < numExpectedCompactions)
         {
-            List<Pair<Set<SSTableReader>, UUID>> tasksCompactions = new ArrayList<>(compactions.size());
+            List<Pair<Set<SSTableReader>, TimeUUID>> tasksCompactions = new ArrayList<>(compactions.size());
             Collection<AbstractCompactionTask> tasks = strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds());
             assertFalse(tasks.isEmpty());
 
@@ -582,7 +582,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
                 i++;
 
                 assertNotNull(task);
-                UUID id = task.transaction().opId();
+                TimeUUID id = task.transaction().opId();
 
                 numCompactionsInProgress++;
                 numSSTablesCompacting += candidates.size();
@@ -602,9 +602,9 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
                              totHotness);
 
             // Start the compactions and check the statistics are updated
-            for (Pair<Set<SSTableReader>, UUID> pair : tasksCompactions)
+            for (Pair<Set<SSTableReader>, TimeUUID> pair : tasksCompactions)
             {
-                UUID id = pair.right;
+                TimeUUID id = pair.right;
                 Set<SSTableReader> candidates = pair.left;
 
                 // Now we simulate starting the compaction task

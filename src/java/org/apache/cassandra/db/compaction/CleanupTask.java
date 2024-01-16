@@ -21,8 +21,8 @@ package org.apache.cassandra.db.compaction;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
+import org.apache.cassandra.utils.TimeUUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,9 +35,9 @@ public class CleanupTask
     private static final Logger logger = LoggerFactory.getLogger(CleanupTask.class);
 
     private final ColumnFamilyStore cfs;
-    private final List<Pair<UUID, RepairFinishedCompactionTask>> tasks;
+    private final List<Pair<TimeUUID, RepairFinishedCompactionTask>> tasks;
 
-    public CleanupTask(ColumnFamilyStore cfs, List<Pair<UUID, RepairFinishedCompactionTask>> tasks)
+    public CleanupTask(ColumnFamilyStore cfs, List<Pair<TimeUUID, RepairFinishedCompactionTask>> tasks)
     {
         this.cfs = cfs;
         this.tasks = tasks;
@@ -45,11 +45,11 @@ public class CleanupTask
 
     public CleanupSummary cleanup()
     {
-        Set<UUID> successful = new HashSet<>();
-        Set<UUID> unsuccessful = new HashSet<>();
-        for (Pair<UUID, RepairFinishedCompactionTask> pair : tasks)
+        Set<TimeUUID> successful = new HashSet<>();
+        Set<TimeUUID> unsuccessful = new HashSet<>();
+        for (Pair<TimeUUID, RepairFinishedCompactionTask> pair : tasks)
         {
-            UUID session = pair.left;
+            TimeUUID session = pair.left;
             RepairFinishedCompactionTask task = pair.right;
 
             if (task != null)
@@ -76,7 +76,7 @@ public class CleanupTask
 
     public Throwable abort(Throwable accumulate)
     {
-        for (Pair<UUID, RepairFinishedCompactionTask> pair : tasks)
+        for (Pair<TimeUUID, RepairFinishedCompactionTask> pair : tasks)
             accumulate = pair.right.transaction.abort(accumulate);
         return accumulate;
     }

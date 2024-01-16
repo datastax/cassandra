@@ -252,7 +252,7 @@ public class Tracker
                                      boolean updateSize)
     {
         if (!isDummy())
-            setupOnline(cfstore, sstables);
+            setupOnline(sstables);
         apply(updateLiveSet(emptySet(), sstables));
         if(updateSize)
             maybeFail(updateSizeTracking(emptySet(), sstables, null));
@@ -403,7 +403,7 @@ public class Tracker
             return;
         }
 
-        setupOnline(cfstore, sstables);
+        sstables.forEach(SSTableReader::setupOnline);
         // back up before creating a new Snapshot (which makes the new one eligible for compaction)
         maybeIncrementallyBackup(sstables);
 

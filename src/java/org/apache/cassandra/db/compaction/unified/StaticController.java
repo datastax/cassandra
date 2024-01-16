@@ -25,6 +25,8 @@ import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.MonotonicClock;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_STATIC_SCALING_PARAMETERS_OPTION;
+
 /**
  * The static compaction controller periodically checks the IO costs
  * that result from the current configuration of the {@link UnifiedCompactionStrategy}.
@@ -36,7 +38,7 @@ public class StaticController extends Controller
      * Higher indexes will use the value of the last index with a W specified.
      */
     final static String STATIC_SCALING_PARAMETERS_OPTION = "static_scaling_parameters";
-    private final static String DEFAULT_STATIC_SCALING_PARAMETERS = System.getProperty(PREFIX + STATIC_SCALING_PARAMETERS_OPTION, "2");
+    private final static String DEFAULT_STATIC_SCALING_PARAMETERS = UCS_STATIC_SCALING_PARAMETERS_OPTION.getString();
 
     private final int[] scalingParameters;
 
@@ -53,7 +55,7 @@ public class StaticController extends Controller
                             long expiredSSTableCheckFrequency,
                             boolean ignoreOverlapsInExpirationCheck)
     {
-        super(MonotonicClock.preciseTime,
+        super(MonotonicClock.Global.preciseTime,
               env,
               survivalFactor,
               dataSetSizeMB,

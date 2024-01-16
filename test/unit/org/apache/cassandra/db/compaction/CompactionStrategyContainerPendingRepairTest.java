@@ -44,7 +44,7 @@ public interface CompactionStrategyContainerPendingRepairTest
      * Tests that finalized repairs result in cleanup compaction tasks
      * which reclassify the sstables as repaired
      */
-    void testCleanupCompactionFinalized() throws IOException;
+    void testCleanupCompactionFinalized() throws Exception;
 
     void testFinalizedSessionTransientCleanup() throws IOException;
 

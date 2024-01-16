@@ -27,8 +27,6 @@ import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.commitlog.CommitLogPosition;
-import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -37,6 +35,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.TimeUUID;
@@ -219,8 +218,7 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
                                                        long repairedAt,
                                                        TimeUUID pendingRepair,
                                                        boolean isTransient,
-                                                       IntervalSet<CommitLogPosition> commitLogPositions,
-                                                       int sstableLevel,
+                                                       MetadataCollector collector,
                                                        SerializationHeader header,
                                                        Collection<Index.Group> indexGroups,
                                                        LifecycleNewTracker lifecycleNewTracker)
@@ -244,8 +242,7 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
                                                  repairedAt,
                                                  pendingRepair,
                                                  isTransient,
-                                                 commitLogPositions,
-                                                 sstableLevel,
+                                                 collector,
                                                  header,
                                                  indexGroups,
                                                  lifecycleNewTracker);

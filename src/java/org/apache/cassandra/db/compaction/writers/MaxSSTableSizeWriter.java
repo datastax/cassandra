@@ -26,7 +26,10 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 
 public class MaxSSTableSizeWriter extends CompactionAwareWriter
 {
@@ -83,16 +86,18 @@ public class MaxSSTableSizeWriter extends CompactionAwareWriter
     @Override
     protected SSTableWriter sstableWriter(Directories.DataDirectory directory, PartitionPosition diskBoundary)
     {
-        return SSTableWriter.create(cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory)),
-                                    estimatedTotalKeys / estimatedSSTables,
-                                    minRepairedAt,
-                                    pendingRepair,
-                                    isTransient,
-                                    cfs.metadata,
-                                    new MetadataCollector(txn.originals(), cfs.metadata().comparator, level),
-                                    SerializationHeader.make(cfs.metadata(), nonExpiredSSTables),
-                                    cfs.indexManager.listIndexGroups(),
-                                    txn);
+        Descriptor descriptor = cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
+        return descriptor.getFormat().getWriterFactory().builder(descriptor)
+                         .setKeyCount(estimatedTotalKeys / estimatedSSTables)
+                         .setRepairedAt(minRepairedAt)
+                         .setPendingRepair(pendingRepair)
+                         .setTransientSSTable(isTransient)
+                         .setTableMetadataRef(cfs.metadata)
+                         .setMetadataCollector(new MetadataCollector(txn.originals(), cfs.metadata().comparator, level))
+                         .setSerializationHeader(SerializationHeader.make(cfs.metadata(), nonExpiredSSTables))
+                         .addDefaultComponents(cfs.indexManager.listIndexGroups())
+                         .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
+                         .build(txn, cfs);
     }
 
     @Override

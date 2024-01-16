@@ -148,11 +148,6 @@ public final class CompactionParams
         return create(TimeWindowCompactionStrategy.class, options);
     }
 
-    public static CompactionParams ucs(Map<String, String> options)
-    {
-        return create(UnifiedCompactionStrategy.class, options);
-    }
-
     public int minCompactionThreshold()
     {
         return strategyOptions.minCompactionThreshold();

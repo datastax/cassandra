@@ -101,7 +101,7 @@ public class CompactionTaskTest
         try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION))
         {
             id = txn.opId();
-            CompactionTask task = new CompactionTask(cfs, txn, 0, false);
+            CompactionTask task = new CompactionTask(cfs, txn, 0, false, null);
             task.execute(CompactionManager.instance.active);
         }
 
@@ -285,7 +285,7 @@ public class CompactionTaskTest
     public void testMajorCompactTask()
     {
         //major compact without range/pk specified 
-        CompactionTasks compactionTasks = cfs.getCompactionStrategyManager().getMaximalTasks(Integer.MAX_VALUE, false, OperationType.MAJOR_COMPACTION);
+        CompactionTasks compactionTasks = cfs.getCompactionStrategyContainer().getMaximalTasks(Integer.MAX_VALUE, false);
         Assert.assertTrue(compactionTasks.stream().allMatch(task -> task.compactionType.equals(OperationType.MAJOR_COMPACTION)));
     }
     

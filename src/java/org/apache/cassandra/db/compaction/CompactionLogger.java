@@ -51,7 +51,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -230,7 +229,7 @@ public class CompactionLogger
     {
         node.put("keyspace", keyspace);
         node.put("table", table);
-        node.put("time", System.currentTimeMillis());
+        node.put("time", currentTimeMillis());
     }
 
     private JsonNode getEventJsonNode()
@@ -368,7 +367,7 @@ public class CompactionLogger
 
     private String currentTime()
     {
-        return dateFormatter.format(Instant.ofEpochMilli(System.currentTimeMillis()));
+        return dateFormatter.format(Instant.ofEpochMilli(currentTimeMillis()));
     }
 
     private static class CompactionLogSerializer implements Writer

@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -122,7 +121,7 @@ import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.sstable.BloomFilterTracker;
+import org.apache.cassandra.io.sstable.filter.BloomFilterTracker;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IScrubber;
@@ -690,6 +689,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public SSTableMultiWriter createSSTableMultiWriter(Descriptor descriptor, long keyCount, long repairedAt, TimeUUID pendingRepair, boolean isTransient, IntervalSet<CommitLogPosition> commitLogPositions, int sstableLevel, SerializationHeader header, LifecycleNewTracker lifecycleNewTracker)
     {
+        MetadataCollector metadataCollector = new MetadataCollector(metadata.get().comparator)
+                .commitLogIntervals(commitLogPositions != null ? commitLogPositions : IntervalSet.empty())
+                .sstableLevel(sstableLevel);
         return getCompactionStrategy().createSSTableMultiWriter(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadataCollector, header, indexManager.listIndexGroups(), lifecycleNewTracker);
     }
 
@@ -1499,17 +1501,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                : UpdateTransaction.NO_OP;
     }
 
-    public static class VersionedLocalRanges extends ArrayList<Splitter.WeightedRange>
-    {
-        public final long ringVersion;
-
-        public VersionedLocalRanges(long ringVersion, int initialSize)
-        {
-            super(initialSize);
-            this.ringVersion = ringVersion;
-        }
-    }
-
     @Override
     public ShardBoundaries localRangeSplits(int shardCount)
     {
@@ -1531,14 +1522,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             logger.info("Memtable shard boundaries for {}.{}: {}", keyspace.getName(), getTableName(), positions);
         }
         return shardBoundaries;
-    }
-
-    @VisibleForTesting
-    public static VersionedLocalRanges fullWeightedRange(long ringVersion, IPartitioner partitioner)
-    {
-        VersionedLocalRanges ranges = new VersionedLocalRanges(ringVersion, 1);
-        ranges.add(new Splitter.WeightedRange(1.0, new Range<>(partitioner.getMinimumToken(), partitioner.getMinimumToken())));
-        return ranges;
     }
 
     /**
@@ -3249,19 +3232,19 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     @Override
     public long[] getPerLevelSizeBytes()
     {
-        return compactionStrategyManager.getPerLevelSizeBytes();
+        return strategyContainer.getPerLevelSizeBytes();
     }
 
     @Override
     public boolean isLeveledCompaction()
     {
-        return compactionStrategyManager.isLeveledCompaction();
+        return strategyContainer.isLeveledCompaction();
     }
 
     @Override
     public int[] getSSTableCountPerTWCSBucket()
     {
-        return compactionStrategyManager.getSSTableCountPerTWCSBucket();
+        return strategyContainer.getSSTableCountPerTWCSBucket();
     }
 
     @Override

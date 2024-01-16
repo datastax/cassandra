@@ -21,16 +21,21 @@ import com.codahale.metrics.Meter;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 public abstract class BloomFilterTracker
 {
     public abstract void addFalsePositive();
     public abstract void addTruePositive();
     public abstract void addTrueNegative();
     public abstract long getFalsePositiveCount();
+    public abstract long getRecentFalsePositiveCount();
     public abstract double getRecentFalsePositiveRate();
     public abstract long getTruePositiveCount();
+    public abstract long getRecentTruePositiveCount();
     public abstract double getRecentTruePositiveRate();
     public abstract long getTrueNegativeCount();
+    public abstract long getRecentTrueNegativeCount();
     public abstract double getRecentTrueNegativeRate();
 
     public static BloomFilterTracker createNoopTracker()
@@ -48,6 +53,9 @@ public abstract class BloomFilterTracker
         private final Meter falsePositiveCount = new Meter();
         private final Meter truePositiveCount = new Meter();
         private final Meter trueNegativeCount = new Meter();
+        private final AtomicLong lastFalsePositiveCount = new AtomicLong();
+        private final AtomicLong lastTruePositiveCount = new AtomicLong();
+        private final AtomicLong lastTrueNegativeCount = new AtomicLong();
 
         @Override
         public void addFalsePositive()
@@ -73,6 +81,13 @@ public abstract class BloomFilterTracker
             return falsePositiveCount.getCount();
         }
 
+        public long getRecentFalsePositiveCount()
+        {
+            long fpc = getFalsePositiveCount();
+            long last = lastFalsePositiveCount.getAndSet(fpc);
+            return fpc - last;
+        }
+
         @Override
         public double getRecentFalsePositiveRate()
         {
@@ -83,6 +98,13 @@ public abstract class BloomFilterTracker
         public long getTruePositiveCount()
         {
             return truePositiveCount.getCount();
+        }
+
+        public long getRecentTruePositiveCount()
+        {
+            long tpc = getTruePositiveCount();
+            long last = lastTruePositiveCount.getAndSet(tpc);
+            return tpc - last;
         }
 
         @Override
@@ -97,6 +119,12 @@ public abstract class BloomFilterTracker
             return trueNegativeCount.getCount();
         }
 
+        public long getRecentTrueNegativeCount()
+        {
+            long tnc = getTrueNegativeCount();
+            long last = lastTrueNegativeCount.getAndSet(tnc);
+            return tnc - last;
+        }
         @Override
         public double getRecentTrueNegativeRate()
         {
@@ -131,6 +159,12 @@ public abstract class BloomFilterTracker
         }
 
         @Override
+        public long getRecentFalsePositiveCount()
+        {
+            return 0;
+        }
+        
+        @Override
         public double getRecentFalsePositiveRate()
         {
             return 0;
@@ -143,6 +177,11 @@ public abstract class BloomFilterTracker
         }
 
         @Override
+        public long getRecentTruePositiveCount()
+        {
+            return 0;
+        }
+        @Override
         public double getRecentTruePositiveRate()
         {
             return 0;
@@ -150,6 +189,12 @@ public abstract class BloomFilterTracker
 
         @Override
         public long getTrueNegativeCount()
+        {
+            return 0;
+        }
+
+        @Override
+        public long getRecentTrueNegativeCount()
         {
             return 0;
         }

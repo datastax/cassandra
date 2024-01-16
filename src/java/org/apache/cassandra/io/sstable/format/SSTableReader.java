@@ -44,12 +44,8 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Ordering;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
-import org.apache.cassandra.cache.KeyCacheKey;
-import org.apache.cassandra.io.sstable.filter.BloomFilterTracker;
-import org.apache.cassandra.io.sstable.indexsummary.IndexSummary;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.*;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -252,12 +248,6 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     public final OpenReason openReason;
 
     protected final FileHandle dfile;
-    protected final IFilter bf;
-    public final IndexSummary indexSummary;
-
-    protected InstrumentingCache<KeyCacheKey, BigTableRowIndexEntry> keyCache;
-
-    private volatile BloomFilterTracker bloomFilterTracker = BloomFilterTracker.createNoopTracker();
 
     // technically isCompacted is not necessary since it should never be unreferenced unless it is also compacted,
     // but it seems like a good extra layer of protection against reference counting bugs to not delete data based on that alone
@@ -370,10 +360,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         }
     }
 
-    /**
-     * Estimates how much of the keys we would keep if the sstables were compacted together
-     */
-    public static double estimateCompactionGain(Set<SSTableReader> overlapping)
+    public static SSTableReader open(SSTable.Owner owner, Descriptor descriptor)
     {
         return open(owner, descriptor, null);
     }
@@ -483,20 +470,6 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     }
 
 
-    /**
-     * Set the Bloom Filter tracker. The argument supplied is obtained
-     * from the the property of the owning CFS.
-     **/
-    public void setBloomFilterTracker(BloomFilterTracker bloomFilterTracker)
-    {
-        this.bloomFilterTracker = bloomFilterTracker;
-    }
-
-    public BloomFilterTracker getBloomFilterTracker()
-    {
-        return this.bloomFilterTracker;
-    }
-
     protected SSTableReader(Builder<?, ?> builder, Owner owner)
     {
         super(builder, owner);
@@ -583,70 +556,8 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         return dfile.path();
     }
 
-    public void setupOnline()
-    {
-        final ColumnFamilyStore cfs = Schema.instance.getColumnFamilyStoreInstance(metadata().id);
-        setupOnline(cfs);
-    }
-
-    public void setupOnline(ColumnFamilyStore cfs)
-    {
-        // under normal operation we can do this at any time, but SSTR is also used outside C* proper,
-        // e.g. by BulkLoader, which does not initialize the cache.  As a kludge, we set up the cache
-        // here when we know we're being wired into the rest of the server infrastructure.
-        InstrumentingCache<KeyCacheKey, BigTableRowIndexEntry> maybeKeyCache = CacheService.instance.keyCache;
-        if (maybeKeyCache.getCapacity() > 0)
-            keyCache = maybeKeyCache;
-
-        if (cfs != null)
-        {
-            setCrcCheckChance(cfs.getCrcCheckChance());
-            setBloomFilterTracker(cfs.getBloomFilterTracker());
-        }
-    }
-
-    /**
-     * Save index summary to Summary.db file.
-     */
-    public static void saveSummary(Descriptor descriptor, DecoratedKey first, DecoratedKey last, IndexSummary summary)
-    {
-        File summariesFile = new File(descriptor.filenameFor(Component.SUMMARY));
-        if (summariesFile.exists())
-            FileUtils.deleteWithConfirm(summariesFile);
-
-        try (DataOutputStreamPlus oStream = new BufferedDataOutputStreamPlus(new FileOutputStream(summariesFile)))
-        {
-            IndexSummary.serializer.serialize(summary, oStream);
-            ByteBufferUtil.writeWithLength(first.getKey(), oStream);
-            ByteBufferUtil.writeWithLength(last.getKey(), oStream);
-        }
-        catch (IOException e)
-        {
-            logger.trace("Cannot save SSTable Summary: ", e);
-
-            // corrupted hence delete it and let it load it now.
-            if (summariesFile.exists())
-                FileUtils.deleteWithConfirm(summariesFile);
-        }
-    }
-
-    public static void saveBloomFilter(Descriptor descriptor, IFilter filter)
-    {
-        File filterFile = new File(descriptor.filenameFor(Component.FILTER));
-        try (DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(new FileOutputStream(filterFile)))
-        {
-            BloomFilter.serializer.serialize((BloomFilter) filter, stream);
-            stream.flush();
-        }
-        catch (IOException e)
-        {
-            logger.trace("Cannot save SSTable bloomfilter: ", e);
-
-            // corrupted hence delete it and let it load it now.
-            if (filterFile.exists())
-                FileUtils.deleteWithConfirm(filterFile);
-        }
-
+    public void setupOnline() {
+        owner().ifPresent(o -> setCrcCheckChance(o.getCrcCheckChance()));
     }
 
     /**
@@ -1326,11 +1237,6 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
                 return comparison > 0 ? 0 : 1;
             }
         }
-    }
-
-    public InstrumentingCache<KeyCacheKey, BigTableRowIndexEntry> getKeyCache()
-    {
-        return keyCache;
     }
 
     public EstimatedHistogram getEstimatedPartitionSize()

@@ -398,9 +398,9 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         CompactionStrategyContainer compactionStrategyContainer = cfs.getCompactionStrategyContainer();
         assert compactionStrategyContainer instanceof CompactionStrategyManager;
         CompactionStrategyManager compactionStrategyManager = (CompactionStrategyManager) compactionStrategyContainer;
-        Collection<Collection<CompactionSSTable>> groups = compactionStrategyManager.getCompactionStrategyFor(sstables.get(0)).groupSSTablesForAntiCompaction(sstables);
+        Collection<Collection<SSTableReader>> groups = compactionStrategyManager.getCompactionStrategyFor(sstables.get(0)).groupSSTablesForAntiCompaction(sstables);
         assertTrue(groups.size() > 0);
-        for (Collection<CompactionSSTable> group : groups)
+        for (Collection<SSTableReader> group : groups)
             assertEquals(1, group.size());
     }
 

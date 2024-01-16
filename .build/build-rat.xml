@@ -78,6 +78,7 @@
                  <exclude NAME="CHANGES.txt"/>
                  <exclude NAME="CASSANDRA-14092.txt"/>
                  <exclude NAME="debian/TODO"/>
+                 <exclude NAME="doc/unified_compaction_level_formula.svg"/>
                  <!-- legal files -->
                  <exclude NAME="NOTICE.txt"/>
                  <exclude NAME="LICENSE.txt"/>
@@ -93,6 +94,8 @@
                  <exclude NAME="debian/dirs"/>
                  <exclude NAME="debian/patches/series"/>
                  <exclude NAME="update-history/**"/>
+                 <exclude NAME="tools/analytics/plot_adaptive.gnu"/>
+                 <exclude NAME="tools/analytics/plot_static.gnu"/>
             </fileset>
         </rat:report>
         <exec executable="grep" outputproperty="rat.failed.files" failifexecutionfails="false">

@@ -32,7 +32,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FixedMonotonicClock;
 import org.apache.cassandra.utils.MovingAverage;
-import org.apache.cassandra.utils.PageAware;
+import org.apache.cassandra.io.util.PageAware;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
