@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.PriorityQueue;
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
@@ -45,7 +46,7 @@ public class MergePostingList implements PostingList
     final long size;
     private long lastRowId = -1;
 
-    private MergePostingList(ArrayList<PeekablePostingList> postingLists, Closeable onClose)
+    private MergePostingList(ArrayList<PeekablePostingList> postingLists, @Nullable Closeable onClose)
     {
         this.onClose = onClose;
         this.postingLists = postingLists;
@@ -57,15 +58,17 @@ public class MergePostingList implements PostingList
         this.size = totalPostings;
     }
 
-    public static PostingList merge(ArrayList<PeekablePostingList> postings, Closeable onClose)
+    public static PostingList merge(ArrayList<PeekablePostingList> postings, @Nullable Closeable onClose)
     {
         checkArgument(!postings.isEmpty());
-        return postings.size() > 1 ? new MergePostingList(postings, onClose) : postings.iterator().next();
+        return postings.size() == 1
+               ? postings.get(0).onClose(onClose)
+               : new MergePostingList(postings, onClose);
     }
 
     public static PostingList merge(ArrayList<PeekablePostingList> postings)
     {
-        return merge(postings, () -> FileUtils.close(postings));
+        return merge(postings, null);
     }
 
     @Override
@@ -162,6 +165,8 @@ public class MergePostingList implements PostingList
     @Override
     public void close() throws IOException
     {
-        onClose.close();
+        FileUtils.close(postingLists);
+        if (onClose != null)
+            onClose.close();
     }
 }

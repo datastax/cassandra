@@ -19,7 +19,6 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.utils.Throwables;
@@ -166,6 +165,52 @@ public interface PostingList extends Closeable
         public long advance(long targetRowID) throws IOException
         {
             return END_OF_STREAM;
+        }
+    }
+
+    /**
+     * @param onClose what to do on close
+     * @return a wrapper for this posting list that replaces the {@link #close()} method by a call to {@code onClose}.
+     */
+    default PostingList onClose(Closeable onClose)
+    {
+        return onClose == null ? this : new PostingListWithOnClose(this, onClose);
+    }
+
+    class PostingListWithOnClose implements PostingList
+    {
+        private final PostingList delegate;
+        private final Closeable onClose;
+
+        public PostingListWithOnClose(PostingList delegate, Closeable onClose)
+        {
+            this.delegate = delegate;
+            this.onClose = onClose;
+        }
+
+        @Override
+        public long size()
+        {
+            return delegate.size();
+        }
+
+        @Override
+        public long advance(long targetRowID) throws IOException
+        {
+            return delegate.advance(targetRowID);
+        }
+
+        @Override
+        public long nextPosting() throws IOException
+        {
+            return delegate.nextPosting();
+        }
+
+        @Override
+        public void close() throws IOException
+        {
+            delegate.close();
+            onClose.close();
         }
     }
 }
