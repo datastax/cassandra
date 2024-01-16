@@ -16,6 +16,7 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -24,11 +25,17 @@ import java.util.concurrent.TimeUnit;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileWriter;
 import org.apache.cassandra.schema.CachingParams;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FixedMonotonicClock;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
 import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
@@ -108,7 +115,7 @@ public class AdaptiveControllerTest extends ControllerTest
 
         int[] scalingParameters = new int[30];
         Arrays.fill(scalingParameters, 1);
-        AdaptiveController.storeOptions(keyspaceName, tableName, scalingParameters, 10 << 20);
+        storeOptions(keyspaceName, tableName, scalingParameters, 10 << 20);
 
         Controller controller = testFromOptions(true, options);
         assertTrue(controller instanceof AdaptiveController);
@@ -119,7 +126,7 @@ public class AdaptiveControllerTest extends ControllerTest
             assertEquals(1, controller.getPreviousScalingParameter(i));
         }
         int[] emptyScalingParameters = {};
-        AdaptiveController.storeOptions(keyspaceName, tableName, emptyScalingParameters, 10 << 20);
+        storeOptions(keyspaceName, tableName, emptyScalingParameters, 10 << 20);
 
         Controller controller2 = testFromOptions(true, options);
         assertTrue(controller2 instanceof AdaptiveController);
@@ -129,7 +136,7 @@ public class AdaptiveControllerTest extends ControllerTest
             assertEquals(3, controller2.getScalingParameter(i));
             assertEquals(3, controller2.getPreviousScalingParameter(i));
         }
-        AdaptiveController.getControllerConfigPath(keyspaceName, tableName).delete();
+        getControllerConfigPath(keyspaceName, tableName).delete();
 
         Map<String, String> options2 = new HashMap<>();
         options2.put(AdaptiveController.MIN_SCALING_PARAMETER, "-10");
@@ -262,6 +269,35 @@ public class AdaptiveControllerTest extends ControllerTest
 
         when(env.flushSize()).thenReturn(flushSizeBytes2 * 1.0);
         assertEquals(minSSTableSizeMB2 << 20, controller.getMinSstableSizeBytes());
+    }
+
+    public static void storeOptions(String keyspaceName, String tableName, int[] scalingParameters, long flushSizeBytes)
+    {
+        if (SchemaConstants.isSystemKeyspace(keyspaceName))
+            return;
+        File f = getControllerConfigPath(keyspaceName, tableName);
+        try(FileWriter fileWriter = new FileWriter(f, File.WriteMode.OVERWRITE);)
+        {
+            JSONArray jsonArray = new JSONArray();
+            JSONObject jsonObject = new JSONObject();
+            for (int i = 0; i < scalingParameters.length; i++)
+            {
+                jsonArray.add(scalingParameters[i]);
+            }
+            jsonObject.put("scaling_parameters", jsonArray);
+            jsonObject.put("current_flush_size", flushSizeBytes);
+            fileWriter.write(jsonObject.toString());
+            fileWriter.flush();
+        }
+        catch(IOException e)
+        {
+        }
+    }
+
+    public static File getControllerConfigPath(String keyspaceName, String tableName)
+    {
+        String fileName = keyspaceName + '.' + tableName + '-' + "controller-config.JSON";
+        return new File(DatabaseDescriptor.getMetadataDirectory(), fileName);
     }
 
 

@@ -20,8 +20,10 @@ import java.util.List;
 import java.util.Random;
 
 import org.agrona.collections.IntArrayList;
+import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.db.compaction.CompactionAggregate;
 import org.apache.cassandra.db.compaction.CompactionPick;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.MovingAverage;
 
 /**
@@ -111,4 +113,8 @@ public interface Environment
      * in the compaction pick passed in.
      */
     long getOverheadSizeInBytes(CompactionPick compactionPick);
+
+    void storeOptions(String keyspaceName, String tableName, int[] scalingParameters, long flushSizeBytes);
+
+    File getControllerConfigPath(String keyspaceName, String tableName);
 }

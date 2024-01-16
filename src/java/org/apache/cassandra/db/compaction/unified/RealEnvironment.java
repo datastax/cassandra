@@ -16,18 +16,27 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
+import java.io.IOException;
 import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.CompactionPick;
 import org.apache.cassandra.db.compaction.CompactionRealm;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileWriter;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MovingAverage;
 import org.apache.cassandra.utils.PageAware;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
 
 /**
  * An implementation of {@link Environment} that returns
@@ -35,6 +44,7 @@ import org.apache.cassandra.utils.PageAware;
  */
 public class RealEnvironment implements Environment
 {
+    private static final Logger logger = LoggerFactory.getLogger(RealEnvironment.class);
     private final CompactionRealm realm;
 
     public RealEnvironment(CompactionRealm realm)
@@ -142,6 +152,38 @@ public class RealEnvironment implements Environment
     {
         // The estimate the compaction overhead to be the same as the size of the input sstables
         return compactionPick.totSizeInBytes();
+    }
+
+    public void storeOptions(String keyspaceName, String tableName, int[] scalingParameters, long flushSizeBytes)
+    {
+        if (SchemaConstants.isSystemKeyspace(keyspaceName))
+            return;
+        File f = getControllerConfigPath(keyspaceName, tableName);
+        try(FileWriter fileWriter = new FileWriter(f, File.WriteMode.OVERWRITE);)
+        {
+            JSONArray jsonArray = new JSONArray();
+            JSONObject jsonObject = new JSONObject();
+            for (int i = 0; i < scalingParameters.length; i++)
+            {
+                jsonArray.add(scalingParameters[i]);
+            }
+            jsonObject.put("scaling_parameters", jsonArray);
+            jsonObject.put("current_flush_size", flushSizeBytes);
+            fileWriter.write(jsonObject.toString());
+            fileWriter.flush();
+
+            logger.debug(String.format("Writing current scaling parameters and flush size to file %s: %s", f.toPath().toString(), jsonObject));
+        }
+        catch(IOException e)
+        {
+            logger.warn("Unable to save current scaling parameters and flush size. Current controller configuration will be lost if a node restarts: ", e);
+        }
+    }
+
+    public File getControllerConfigPath(String keyspaceName, String tableName)
+    {
+        String fileName = keyspaceName + '.' + tableName + '-' + "controller-config.JSON";
+        return new File(DatabaseDescriptor.getMetadataDirectory(), fileName);
     }
 
     @Override

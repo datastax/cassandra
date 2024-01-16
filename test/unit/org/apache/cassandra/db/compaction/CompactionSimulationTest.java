@@ -78,6 +78,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MonotonicClock;
@@ -659,6 +660,16 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         public long getOverheadSizeInBytes(CompactionPick compactionPick)
         {
             return compactionPick.totSizeInBytes();
+        }
+
+        @Override
+        public void storeOptions(String keyspaceName, String tableName, int[] scalingParameters, long flushSizeBytes)
+        {
+        }
+
+        public File getControllerConfigPath(String keyspaceName, String tableName)
+        {
+            return null;
         }
 
         @Override

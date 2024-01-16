@@ -63,12 +63,12 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                                  //manually write new scaling parameters and flushSizeBytes to see if they are picked up on restart
                                                  int[] scalingParameters = new int[32];
                                                  Arrays.fill(scalingParameters, 5);
-                                                 AdaptiveController.storeOptions("ks", "tbl", scalingParameters, 10 << 20);
+                                                 controller.getEnv().storeOptions("ks", "tbl", scalingParameters, 10 << 20);
 
 
                                                  //write different scaling parameters to second table to make sure each table keeps its own configuration
                                                  Arrays.fill(scalingParameters, 8);
-                                                 AdaptiveController.storeOptions("ks", "tbl2", scalingParameters, 10 << 20);
+                                                 controller.getEnv().storeOptions("ks", "tbl2", scalingParameters, 10 << 20);
                                              });
             waitOn(cluster.get(1).shutdown());
             cluster.get(1).startup();
@@ -119,7 +119,7 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                              //manually write new flushSizeBytes to see if it is picked up on restart
                                              int[] scalingParameters = new int[32];
                                              Arrays.fill(scalingParameters, 0);
-                                             AdaptiveController.storeOptions("ks", "tbl", scalingParameters, 10 << 20);
+                                             controller.getEnv().storeOptions("ks", "tbl", scalingParameters, 10 << 20);
                                          });
             waitOn(cluster.get(1).shutdown());
             cluster.get(1).startup();
@@ -155,22 +155,26 @@ public class CompactionControllerConfigTest extends TestBaseImpl
 
             cluster.get(1).runOnInstance(() ->
                                          {
+                                             ColumnFamilyStore cfs = Keyspace.open("ks").getColumnFamilyStore("tbl");
+                                             UnifiedCompactionContainer container = (UnifiedCompactionContainer) cfs.getCompactionStrategy();
+                                             UnifiedCompactionStrategy ucs = (UnifiedCompactionStrategy) container.getStrategies().get(0);
+                                             Controller controller = ucs.getController();
                                              //logs should show that scaling parameters and flush size are written to a file for each table
                                              CompactionManager.storeControllerConfig();
 
                                              //store controller config for a table that does not exist to see if it is removed by the cleanup method
                                              int[] scalingParameters = new int[32];
                                              Arrays.fill(scalingParameters, 5);
-                                             AdaptiveController.storeOptions("does_not", "exist", scalingParameters, 10 << 20);
+                                             controller.getEnv().storeOptions("does_not", "exist", scalingParameters, 10 << 20);
 
                                              //verify that the file was created
-                                             assert Controller.getControllerConfigPath("does_not", "exist").exists();
+                                             assert controller.getEnv().getControllerConfigPath("does_not", "exist").exists();
 
                                              //cleanup method should remove the file corresponding to the table "does_not.exist"
                                              CompactionManager.cleanupControllerConfig();
 
                                              //verify that the file was deleted
-                                             assert !Controller.getControllerConfigPath("does_not", "exist").exists();
+                                             assert !controller.getEnv().getControllerConfigPath("does_not", "exist").exists();
 
                                          });
 

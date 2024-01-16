@@ -354,38 +354,6 @@ public abstract class Controller
         this.ignoreOverlapsInExpirationCheck = ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION && ignoreOverlapsInExpirationCheck;
     }
 
-    public static File getControllerConfigPath(String keyspaceName, String tableName)
-    {
-        String fileName = keyspaceName + '.' + tableName + '-' + "controller-config.JSON";
-        return new File(DatabaseDescriptor.getMetadataDirectory(), fileName);
-    }
-
-    public static void storeOptions(String keyspaceName, String tableName, int[] scalingParameters, long flushSizeBytes)
-    {
-        if (SchemaConstants.isSystemKeyspace(keyspaceName))
-            return;
-        File f = getControllerConfigPath(keyspaceName, tableName);
-        try(FileWriter fileWriter = new FileWriter(f, File.WriteMode.OVERWRITE);)
-        {
-            JSONArray jsonArray = new JSONArray();
-            JSONObject jsonObject = new JSONObject();
-            for (int i = 0; i < scalingParameters.length; i++)
-            {
-                jsonArray.add(scalingParameters[i]);
-            }
-            jsonObject.put("scaling_parameters", jsonArray);
-            jsonObject.put("current_flush_size", flushSizeBytes);
-            fileWriter.write(jsonObject.toString());
-            fileWriter.flush();
-
-            logger.debug(String.format("Writing current scaling parameters and flush size to file %s: %s", f.toPath().toString(), jsonObject));
-        }
-        catch(IOException e)
-        {
-            logger.warn("Unable to save current scaling parameters and flush size. Current controller configuration will be lost if a node restarts: ", e);
-        }
-    }
-
     public abstract void storeControllerConfig();
 
     @VisibleForTesting

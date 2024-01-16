@@ -175,7 +175,7 @@ public class AdaptiveController extends Controller
         int[] scalingParameters = null;
         long currentFlushSize = flushSizeOverride;
 
-        File f = getControllerConfigPath(keyspaceName, tableName);
+        File f = env.getControllerConfigPath(keyspaceName, tableName);
         try
         {
             JSONParser jsonParser = new JSONParser();
@@ -572,7 +572,7 @@ public class AdaptiveController extends Controller
     @Override
     public void storeControllerConfig()
     {
-        storeOptions(keyspaceName, tableName, scalingParameters, getFlushSizeBytes());
+        env.storeOptions(keyspaceName, tableName, scalingParameters, getFlushSizeBytes());
     }
 
     @Override

@@ -115,7 +115,7 @@ public class StaticController extends Controller
             scalingParameters = parseScalingParameters(options.getOrDefault(SCALING_PARAMETERS_OPTION, DEFAULT_STATIC_SCALING_PARAMETERS));
         long currentFlushSize = flushSizeOverride;
 
-        File f = getControllerConfigPath(keyspaceName, tableName);
+        File f = env.getControllerConfigPath(keyspaceName, tableName);
         try
         {
             JSONParser jsonParser = new JSONParser();
@@ -199,7 +199,7 @@ public class StaticController extends Controller
     @Override
     public void storeControllerConfig()
     {
-        storeOptions(keyspaceName, tableName, scalingParameters, getFlushSizeBytes());
+        env.storeOptions(keyspaceName, tableName, scalingParameters, getFlushSizeBytes());
     }
 
     @Override
