@@ -86,7 +86,12 @@ public class Context
 
     public static Context from(ReadCommand command)
     {
-        TableMetadata table = command.metadata();
+        return from(command.metadata());
+    }
+
+    public static Context from(TableMetadata table)
+    {
         return new Context(table.keyspace, table.name, table.id.toString());
+
     }
 }
