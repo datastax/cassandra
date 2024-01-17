@@ -127,6 +127,8 @@ public enum CassandraRelevantProperties
     COMMITLOG_IGNORE_REPLAY_ERRORS("cassandra.commitlog.ignorereplayerrors"),
     COMMITLOG_MAX_OUTSTANDING_REPLAY_BYTES("cassandra.commitlog_max_outstanding_replay_bytes", convertToString(1024 * 1024 * 64)),
     COMMITLOG_MAX_OUTSTANDING_REPLAY_COUNT("cassandra.commitlog_max_outstanding_replay_count", "1024"),
+    // Allows skipping advising the OS to free cached pages associated with commitlog flushing
+    COMMITLOG_SKIP_FILE_ADVICE("cassandra.commitlog.skip_file_advice"),
     COMMITLOG_STOP_ON_ERRORS("cassandra.commitlog.stop_on_errors"),
     /**
      * Entities to replay mutations for upon commit log replay, property is meant to contain
