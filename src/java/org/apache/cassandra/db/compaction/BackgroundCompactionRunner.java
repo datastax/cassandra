@@ -29,17 +29,19 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
+import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
+import org.apache.cassandra.concurrent.WrappedExecutorPlus;
+import org.apache.cassandra.utils.concurrent.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
-import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -50,6 +52,8 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Throwables;
+
+import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 
 public class BackgroundCompactionRunner implements Runnable
 {
@@ -73,7 +77,7 @@ public class BackgroundCompactionRunner implements Runnable
         COMPLETED
     }
 
-    private final DebuggableScheduledThreadPoolExecutor checkExecutor;
+    private final ScheduledExecutorPlus checkExecutor;
 
     /**
      * CFSs for which a compaction was requested mapped to the promise returned to the requesting code
@@ -90,18 +94,18 @@ public class BackgroundCompactionRunner implements Runnable
 
     private final Random random = new Random();
 
-    private final DebuggableThreadPoolExecutor compactionExecutor;
+    private final WrappedExecutorPlus compactionExecutor;
 
     private final ActiveOperations activeOperations;
 
 
-    BackgroundCompactionRunner(DebuggableThreadPoolExecutor compactionExecutor, ActiveOperations activeOperations)
+    BackgroundCompactionRunner(WrappedExecutorPlus compactionExecutor, ActiveOperations activeOperations)
     {
-        this(compactionExecutor, new DebuggableScheduledThreadPoolExecutor("BackgroundTaskExecutor"), activeOperations);
+        this(compactionExecutor, executorFactory().scheduled("BackgroundTaskExecutor"), activeOperations);
     }
 
     @VisibleForTesting
-    BackgroundCompactionRunner(DebuggableThreadPoolExecutor compactionExecutor, DebuggableScheduledThreadPoolExecutor checkExecutor, ActiveOperations activeOperations)
+    BackgroundCompactionRunner(WrappedExecutorPlus compactionExecutor, ScheduledExecutorPlus checkExecutor, ActiveOperations activeOperations)
     {
         this.compactionExecutor = compactionExecutor;
         this.checkExecutor = checkExecutor;
@@ -110,12 +114,12 @@ public class BackgroundCompactionRunner implements Runnable
 
     /**
      * This extends and behave like a {@link CompletableFuture}, with the exception that one cannot call
-     * {@link #cancel}, {@link #complete} and {@link #completeExceptionally} (they throw {@link UnsupportedOperationException}).
+     * {@link #cancel}, {@link #setSuccess} and {@link #setFailure} (they throw {@link UnsupportedOperationException}).
      */
-    public static class FutureRequestResult extends CompletableFuture<RequestResult>
+    public static class FutureRequestResult extends AsyncPromise<RequestResult>
     {
         @Override
-        public boolean complete(RequestResult t)
+        public Promise<RequestResult> setSuccess(RequestResult t)
         {
             throw new UnsupportedOperationException();
         }
@@ -127,19 +131,19 @@ public class BackgroundCompactionRunner implements Runnable
         }
 
         @Override
-        public boolean completeExceptionally(Throwable throwable)
+        public Promise<RequestResult> setFailure(Throwable throwable)
         {
             throw new UnsupportedOperationException();
         }
 
         private void completeInternal(RequestResult t)
         {
-            super.complete(t);
+            super.setSuccess(t);
         }
 
         private void completeExceptionallyInternal(Throwable throwable)
         {
-            super.completeExceptionally(throwable);
+            super.setFailure(throwable);
         }
     }
 
@@ -167,11 +171,11 @@ public class BackgroundCompactionRunner implements Runnable
      * @return a promise which will be completed when the mark is cleared. The returned future should not be cancelled or
      * completed by the caller.
      */
-    CompletableFuture<RequestResult> markForCompactionCheck(ColumnFamilyStore cfs)
+    Promise<RequestResult> markForCompactionCheck(ColumnFamilyStore cfs)
     {
         FutureRequestResult p = requestCompactionInternal(cfs);
         if (p == null)
-            return CompletableFuture.completedFuture(RequestResult.ABORTED);
+            return new AsyncPromise<RequestResult>().setSuccess(RequestResult.ABORTED);
 
         if (!maybeScheduleNextCheck())
         {
@@ -259,7 +263,18 @@ public class BackgroundCompactionRunner implements Runnable
             if (promise.isDone())
             {
                 // A shutdown request may abort processing while we are still processing
-                assert promise.join() == RequestResult.ABORTED : "Background compaction checker must be single-threaded";
+                try
+                {
+                    assert promise.get() == RequestResult.ABORTED : "Background compaction checker must be single-threaded";
+                }
+                catch (InterruptedException e)
+                {
+                    throw new UncheckedInterruptedException(e);
+                }
+                catch (ExecutionException e)
+                {
+                    throw new RuntimeException(e);
+                }
 
                 logger.trace("The request for {} was aborted due to shutdown", cfs);
                 continue;
@@ -310,7 +325,7 @@ public class BackgroundCompactionRunner implements Runnable
 
     private boolean maybeScheduleNextCheck()
     {
-        if (checkExecutor.getQueue().isEmpty())
+        if (checkExecutor.getPendingTaskCount() == 0)
         {
             try
             {

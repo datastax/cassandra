@@ -70,6 +70,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
+import org.apache.cassandra.db.compaction.*;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,15 +86,6 @@ import org.apache.cassandra.config.DurationSpec;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
-import org.apache.cassandra.db.compaction.AbstractTableOperation;
-import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.db.compaction.CompactionStrategy;
-import org.apache.cassandra.db.compaction.CompactionStrategyContainer;
-import org.apache.cassandra.db.compaction.CompactionStrategyFactory;
-import org.apache.cassandra.db.compaction.CompactionStrategyManager;
-import org.apache.cassandra.db.compaction.CompactionStrategyOptions;
-import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -2925,8 +2917,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return getLiveSSTables().stream()
                                 .filter(s -> !compacting.contains(s) && !s.descriptor.version.isLatestVersion())
                                 .sorted((o1, o2) -> {
-                                    File f1 = new File(o1.descriptor.filenameFor(Component.DATA));
-                                    File f2 = new File(o2.descriptor.filenameFor(Component.DATA));
+                                    File f1 = o1.descriptor.fileFor(Components.DATA);
+                                    File f2 = o2.descriptor.fileFor(Components.DATA);
                                     return Longs.compare(f1.lastModified(), f2.lastModified());
                                 }).collect(Collectors.toList());
     }

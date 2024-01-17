@@ -22,22 +22,19 @@ import java.io.IOError;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
-import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.*;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
+import org.apache.cassandra.concurrent.WrappedExecutorPlus;
+import org.apache.cassandra.utils.concurrent.Promise;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
-import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.compaction.BackgroundCompactionRunner.RequestResult;
@@ -49,8 +46,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.notNull;
@@ -66,14 +62,14 @@ import static org.mockito.Mockito.when;
 
 public class BackgroundCompactionRunnerTest
 {
-    private final DebuggableThreadPoolExecutor compactionExecutor = Mockito.mock(DebuggableThreadPoolExecutor.class);
-    private final DebuggableScheduledThreadPoolExecutor checkExecutor = Mockito.mock(DebuggableScheduledThreadPoolExecutor.class);
+    private final WrappedExecutorPlus compactionExecutor = Mockito.mock(WrappedExecutorPlus.class);
+    private final ScheduledExecutorPlus checkExecutor = Mockito.mock(ScheduledExecutorPlus.class);
     private final ActiveOperations activeOperations = Mockito.mock(ActiveOperations.class);
     private final ColumnFamilyStore cfs = Mockito.mock(ColumnFamilyStore.class);
     private final CompactionStrategy compactionStrategy = Mockito.mock(CompactionStrategy.class);
 
     private BackgroundCompactionRunner runner;
-    private BlockingQueue<Runnable> queue;
+    public int pendingTaskCount;
     private List<AbstractCompactionTask> compactionTasks;
     private ArgumentCaptor<Runnable> capturedCompactionRunnables, capturedCheckRunnables;
 
@@ -101,7 +97,7 @@ public class BackgroundCompactionRunnerTest
         DatabaseDescriptor.setAutomaticSSTableUpgradeEnabled(true);
         DatabaseDescriptor.setMaxConcurrentAutoUpgradeTasks(2);
 
-        queue = new ArrayBlockingQueue<>(100);
+        pendingTaskCount = 0;
         runner = new BackgroundCompactionRunner(compactionExecutor, checkExecutor, activeOperations);
         compactionTasks = new ArrayList<>();
         capturedCompactionRunnables = ArgumentCaptor.forClass(Runnable.class);
@@ -113,9 +109,9 @@ public class BackgroundCompactionRunnerTest
         when(compactionExecutor.getMaximumPoolSize()).thenReturn(2);
         when(cfs.isAutoCompactionDisabled()).thenReturn(false);
         when(cfs.isValid()).thenReturn(true);
-        when(checkExecutor.getQueue()).thenReturn(queue);
+        when(checkExecutor.getPendingTaskCount()).thenAnswer(i-> pendingTaskCount);
         when(cfs.getCompactionStrategy()).thenReturn(compactionStrategy);
-        when(compactionStrategy.getNextBackgroundTasks(ArgumentMatchers.anyInt())).thenReturn(compactionTasks);
+        when(compactionStrategy.getNextBackgroundTasks(ArgumentMatchers.anyLong())).thenReturn(compactionTasks);
         doNothing().when(checkExecutor).execute(capturedCheckRunnables.capture());
         doNothing().when(compactionExecutor).execute(capturedCompactionRunnables.capture());
     }
@@ -134,9 +130,10 @@ public class BackgroundCompactionRunnerTest
         when(cfs.isAutoCompactionDisabled()).thenReturn(false);
         when(cfs.isValid()).thenReturn(false);
 
-        CompletableFuture<RequestResult> result = runner.markForCompactionCheck(cfs);
+        Promise<RequestResult> result = runner.markForCompactionCheck(cfs);
 
-        assertThat(result).isCompletedWithValue(RequestResult.ABORTED);
+        assertThat(result).isDone();
+        assertThat(result.get()).isEqualTo(RequestResult.ABORTED);
         assertThat(runner.getMarkedCFSs()).isEmpty();
         verify(checkExecutor, never()).execute(notNull());
     }
@@ -149,9 +146,10 @@ public class BackgroundCompactionRunnerTest
         when(cfs.isAutoCompactionDisabled()).thenReturn(true);
         when(cfs.isValid()).thenReturn(true);
 
-        CompletableFuture<RequestResult> result = runner.markForCompactionCheck(cfs);
+        Promise<RequestResult> result = runner.markForCompactionCheck(cfs);
 
-        assertThat(result).isCompletedWithValue(RequestResult.ABORTED);
+        assertThat(result).isDone();
+        assertThat(result.get()).isEqualTo(RequestResult.ABORTED);
         assertThat(runner.getMarkedCFSs()).isEmpty();
         verify(checkExecutor, never()).execute(notNull());
     }
@@ -161,9 +159,9 @@ public class BackgroundCompactionRunnerTest
     @Test
     public void markCFSForCompactionAndScheduleCheck() throws Exception
     {
-        CompletableFuture<RequestResult> result = runner.markForCompactionCheck(cfs);
+        Promise<RequestResult> result = runner.markForCompactionCheck(cfs);
 
-        assertThat(result).isNotCompleted();
+        assertThat(result).isNotDone();
 
         verify(checkExecutor).execute(notNull());
         assertThat(runner.getMarkedCFSs()).contains(cfs);
@@ -213,10 +211,10 @@ public class BackgroundCompactionRunnerTest
     @Test
     public void markCFSForCompactionAndNotScheduleCheck() throws Exception
     {
-        queue.add(mock(Runnable.class));
-        CompletableFuture<RequestResult> result = runner.markForCompactionCheck(cfs);
+        pendingTaskCount = 100;
+        Promise<RequestResult> result = runner.markForCompactionCheck(cfs);
 
-        assertThat(result).isNotCompleted();
+        assertThat(result).isNotDone();
 
         verify(checkExecutor, never()).execute(notNull());
         assertThat(runner.getMarkedCFSs()).contains(cfs);
@@ -230,9 +228,10 @@ public class BackgroundCompactionRunnerTest
         when(checkExecutor.isShutdown()).thenReturn(true);
         doThrow(new RejectedExecutionException("rejected")).when(checkExecutor).execute(ArgumentMatchers.notNull());
 
-        CompletableFuture<RequestResult> result = runner.markForCompactionCheck(cfs);
+        Promise<RequestResult> result = runner.markForCompactionCheck(cfs);
 
-        assertThat(result).isCompletedWithValue(RequestResult.ABORTED);
+        assertThat(result).isDone();
+        assertThat(result.get()).isEqualTo(RequestResult.ABORTED);
 
         verify(checkExecutor).execute(notNull());
     }
@@ -242,13 +241,14 @@ public class BackgroundCompactionRunnerTest
     @Test
     public void shutdown() throws Exception
     {
-        CompletableFuture<RequestResult> result = runner.markForCompactionCheck(cfs);
+        Promise<RequestResult> result = runner.markForCompactionCheck(cfs);
 
         assertThat(result.isDone()).isFalse();
 
         runner.shutdown();
 
-        assertThat(result).isCompletedWithValue(RequestResult.ABORTED);
+        assertThat(result).isDone();
+        assertThat(result.get()).isEqualTo(RequestResult.ABORTED);
 
         verify(checkExecutor).shutdown();
         verify(compactionExecutor, never()).shutdown();
@@ -263,11 +263,12 @@ public class BackgroundCompactionRunnerTest
 
         when(cfs.getCandidatesForUpgrade()).thenReturn(ImmutableList.of(mock(SSTableReader.class)));
 
-        CompletableFuture<RequestResult> result = runner.markForCompactionCheck(cfs);
+        Promise<RequestResult> result = runner.markForCompactionCheck(cfs);
         verifyCFSWasMarkedForCompaction();
         capturedCheckRunnables.getValue().run();
 
-        assertThat(result).isCompletedWithValue(RequestResult.NOT_NEEDED);
+        assertThat(result).isDone();
+        assertThat(result.get()).isEqualTo(RequestResult.NOT_NEEDED);
         verify(checkExecutor, never()).execute(notNull());
         assertThat(runner.getMarkedCFSs()).isEmpty();
     }
@@ -278,11 +279,12 @@ public class BackgroundCompactionRunnerTest
     {
         when(cfs.getCandidatesForUpgrade()).thenReturn(Lists.emptyList());
 
-        CompletableFuture<RequestResult> result = runner.markForCompactionCheck(cfs);
+        Promise<RequestResult> result = runner.markForCompactionCheck(cfs);
         verifyCFSWasMarkedForCompaction();
         capturedCheckRunnables.getValue().run();
 
-        assertThat(result).isCompletedWithValue(RequestResult.NOT_NEEDED);
+        assertThat(result).isDone();
+        assertThat(result.get()).isEqualTo(RequestResult.NOT_NEEDED);
         verify(checkExecutor, never()).execute(notNull());
         assertThat(runner.getMarkedCFSs()).isEmpty();
     }
@@ -293,12 +295,12 @@ public class BackgroundCompactionRunnerTest
     public void startCompactionTask() throws Exception
     {
         // although it is possible to run upgrade tasks, we make sure that compaction tasks are selected
-        CompletableFuture<RequestResult> result = markCFSAndRunCheck();
+        Promise<RequestResult> result = markCFSAndRunCheck();
 
         // check the task was scheduled on compaction executor
         verifyTaskScheduled(compactionExecutor);
         verifyState(1, 0);
-        assertThat(result).isNotCompleted();
+        assertThat(result).isNotDone();
 
         // ... we immediatelly marked that CFS for compaction again
         verifyCFSWasMarkedForCompaction();
@@ -307,7 +309,8 @@ public class BackgroundCompactionRunnerTest
         capturedCompactionRunnables.getValue().run();
 
         // so we expect that:
-        assertThat(result).isCompletedWithValue(RequestResult.COMPLETED);
+        assertThat(result).isDone();
+        assertThat(result.get()).isEqualTo(RequestResult.COMPLETED);
         verifyState(0, 0);
 
         // another check should be schedued upon task completion
@@ -331,9 +334,9 @@ public class BackgroundCompactionRunnerTest
         when(cfs.getCandidatesForUpgrade()).thenReturn(Collections.singletonList(sstable));
         when(cfs.getTracker()).thenReturn(tracker);
         when(tracker.tryModify(sstable, OperationType.UPGRADE_SSTABLES)).thenReturn(txn);
-        when(compactionStrategy.createCompactionTask(same(txn), anyInt(), anyLong())).thenReturn(compactionTask);
+        when(compactionStrategy.createCompactionTask(same(txn), anyLong(), anyLong())).thenReturn(compactionTask);
 
-        CompletableFuture<RequestResult> result = runner.markForCompactionCheck(cfs);
+        Promise<RequestResult> result = runner.markForCompactionCheck(cfs);
         verifyCFSWasMarkedForCompaction();
 
         capturedCheckRunnables.getValue().run();
@@ -344,7 +347,7 @@ public class BackgroundCompactionRunnerTest
         // check the task was scheduled on compaction executor
         verifyTaskScheduled(compactionExecutor);
         verifyState(1, 1);
-        assertThat(result).isNotCompleted();
+        assertThat(result).isNotDone();
 
         // ... we immediatelly marked that CFS for compaction again
         verifyCFSWasMarkedForCompaction();
@@ -353,7 +356,8 @@ public class BackgroundCompactionRunnerTest
         capturedCompactionRunnables.getValue().run();
 
         // so we expect that:
-        assertThat(result).isCompletedWithValue(RequestResult.COMPLETED);
+        assertThat(result).isDone();
+        assertThat(result.get()).isEqualTo(RequestResult.COMPLETED);
         verifyState(0, 0);
 
         // another check should be schedued upon task completion
@@ -366,13 +370,13 @@ public class BackgroundCompactionRunnerTest
     public void startMultipleCompactionTasksInParallel() throws Exception
     {
         // first task
-        CompletableFuture<RequestResult> result1 = markCFSAndRunCheck();
+        Promise<RequestResult> result1 = markCFSAndRunCheck();
         verifyTaskScheduled(compactionExecutor);
         verifyState(1, 0);
         verifyCFSWasMarkedForCompaction();
 
         // second task
-        CompletableFuture<RequestResult> result2 = markCFSAndRunCheck();
+        Promise<RequestResult> result2 = markCFSAndRunCheck();
         verifyTaskScheduled(compactionExecutor);
         verifyState(2, 0);
         verifyCFSWasMarkedForCompaction();
@@ -380,17 +384,19 @@ public class BackgroundCompactionRunnerTest
         assertThat(result2).isNotSameAs(result1);
 
         // now we will execute the first task
-        assertThat(result1).isNotCompleted();
+        assertThat(result1).isNotDone();
         capturedCompactionRunnables.getAllValues().get(0).run();
-        assertThat(result1).isCompletedWithValue(RequestResult.COMPLETED);
+        assertThat(result1).isDone();
+        assertThat(result1.get()).isEqualTo(RequestResult.COMPLETED);
 
         // so we expect that:
         verifyState(1, 0);
 
         // execute the second task
-        assertThat(result2).isNotCompleted();
+        assertThat(result2).isNotDone();
         capturedCompactionRunnables.getAllValues().get(1).run();
-        assertThat(result2).isCompletedWithValue(RequestResult.COMPLETED);
+        assertThat(result2).isDone();
+        assertThat(result2.get()).isEqualTo(RequestResult.COMPLETED);
 
         // so we expect that:
         verifyState(0, 0);
@@ -404,20 +410,20 @@ public class BackgroundCompactionRunnerTest
     public void postponeCompactionTasksIfPoolIsBusy() throws Exception
     {
         // first task
-        CompletableFuture<RequestResult> result1 = markCFSAndRunCheck();
+        Promise<RequestResult> result1 = markCFSAndRunCheck();
         verifyTaskScheduled(compactionExecutor);
         verifyState(1, 0);
         verifyCFSWasMarkedForCompaction();
 
         // second task
-        CompletableFuture<RequestResult> result2 = markCFSAndRunCheck();
+        Promise<RequestResult> result2 = markCFSAndRunCheck();
         verifyTaskScheduled(compactionExecutor);
         verifyState(2, 0);
         verifyCFSWasMarkedForCompaction();
 
         // third task, but now the task should not be scheduled for execution because of the pool size (2)
         clearInvocations(compactionStrategy);
-        CompletableFuture<RequestResult> result3 = markCFSAndRunCheck();
+        Promise<RequestResult> result3 = markCFSAndRunCheck();
         verifyState(2, 0);
         // we should not execute a new task, actually not even attempt to get a new compaction task
         verify(compactionStrategy, never()).getNextBackgroundTasks(anyInt());
@@ -430,10 +436,11 @@ public class BackgroundCompactionRunnerTest
         assertThat(result3).isNotSameAs(result2);
 
         // now we will execute the task 1
-        assertThat(result1).isNotCompleted();
+        assertThat(result1).isNotDone();
         capturedCompactionRunnables.getAllValues().get(0).run();
         // so we expect that:
-        assertThat(result1).isCompletedWithValue(RequestResult.COMPLETED);
+        assertThat(result1).isDone();
+        assertThat(result1.get()).isEqualTo(RequestResult.COMPLETED);
         verifyState(1, 0);
 
         // execute the check, so that the thrid task is submitted
@@ -444,13 +451,15 @@ public class BackgroundCompactionRunnerTest
         verifyCFSWasMarkedForCompaction();
 
         // execute the rest of the tasks
-        assertThat(result2).isNotCompleted();
+        assertThat(result2).isNotDone();
         capturedCompactionRunnables.getAllValues().get(1).run();
-        assertThat(result2).isCompletedWithValue(RequestResult.COMPLETED);
+        assertThat(result2).isDone();
+        assertThat(result2.get()).isEqualTo(RequestResult.COMPLETED);
 
-        assertThat(result3).isNotCompleted();
+        assertThat(result3).isNotDone();
         capturedCompactionRunnables.getAllValues().get(2).run();
-        assertThat(result3).isCompletedWithValue(RequestResult.COMPLETED);
+        assertThat(result3).isDone();
+        assertThat(result3.get()).isEqualTo(RequestResult.COMPLETED);
 
         verifyState(0, 0);
     }
@@ -460,10 +469,10 @@ public class BackgroundCompactionRunnerTest
     @Test
     public void futureRequestResultNotSupportForTermination()
     {
-        CompletableFuture<RequestResult> result = markCFSAndRunCheck();
+        Promise<RequestResult> result = markCFSAndRunCheck();
 
-        assertThatExceptionOfType(UnsupportedOperationException.class).isThrownBy(() -> result.complete(RequestResult.COMPLETED));
-        assertThatExceptionOfType(UnsupportedOperationException.class).isThrownBy(() -> result.completeExceptionally(new RuntimeException()));
+        assertThatExceptionOfType(UnsupportedOperationException.class).isThrownBy(() -> result.setSuccess(RequestResult.COMPLETED));
+        assertThatExceptionOfType(UnsupportedOperationException.class).isThrownBy(() -> result.setFailure(new RuntimeException()));
         assertThatExceptionOfType(UnsupportedOperationException.class).isThrownBy(() -> result.cancel(false));
 
         runner.shutdown();
@@ -476,11 +485,12 @@ public class BackgroundCompactionRunnerTest
     {
         doThrow(new RejectedExecutionException()).when(compactionExecutor).execute(notNull());
 
-        CompletableFuture<RequestResult> result = markCFSAndRunCheck();
+        Promise<RequestResult> result = markCFSAndRunCheck();
         clearInvocations(checkExecutor);
 
         // so we expect that:
-        assertThat(result).isCompletedWithValue(RequestResult.COMPLETED);
+        assertThat(result).isDone();
+        assertThat(result.get()).isEqualTo(RequestResult.COMPLETED);
         verifyState(0, 0);
 
         verify(checkExecutor, never()).execute(notNull());
@@ -491,14 +501,14 @@ public class BackgroundCompactionRunnerTest
     @Test
     public void handleTaskFailure() throws Exception
     {
-        CompletableFuture<RequestResult> result = markCFSAndRunCheck();
+        Promise<RequestResult> result = markCFSAndRunCheck();
         clearInvocations(checkExecutor);
 
         doThrow(new IOError(new RuntimeException())).when(compactionTasks.get(0)).execute(activeOperations);
         capturedCompactionRunnables.getValue().run();
 
         // so we expect that:
-        assertThat(result).isCompletedExceptionally();
+        assertThatThrownBy(() -> result.get()).isInstanceOf(ExecutionException.class);
         verifyState(0, 0);
 
         // another check should be schedued upon task completion
@@ -524,14 +534,14 @@ public class BackgroundCompactionRunnerTest
         assertThat(runner.getMarkedCFSs()).contains(cfs);
     }
 
-    private CompletableFuture<RequestResult> markCFSAndRunCheck()
+    private Promise<RequestResult> markCFSAndRunCheck()
     {
         AbstractCompactionTask compactionTask = mock(AbstractCompactionTask.class);
 
         compactionTasks.clear();
         compactionTasks.add(compactionTask);
 
-        CompletableFuture<RequestResult> result = runner.markForCompactionCheck(cfs);
+        Promise<RequestResult> result = runner.markForCompactionCheck(cfs);
         verifyCFSWasMarkedForCompaction();
 
         capturedCheckRunnables.getValue().run();

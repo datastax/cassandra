@@ -30,7 +30,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CompletableFuture;  //checkstyle: permit this import
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
@@ -127,7 +126,6 @@ import static org.apache.cassandra.concurrent.FutureTask.callable;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COMPACTION_RATE_LIMIT_GRANULARITY_IN_KB;
 import static org.apache.cassandra.config.DatabaseDescriptor.getConcurrentCompactors;
 import static org.apache.cassandra.db.compaction.CompactionManager.CompactionExecutor.compactionThreadGroup;
-import static org.apache.cassandra.io.sstable.format.SSTableFormat.Components.DATA;
 import static org.apache.cassandra.service.ActiveRepairService.NO_PENDING_REPAIR;
 import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
@@ -239,7 +237,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
      * It's okay to over-call (within reason) if a call is unnecessary, it will
      * turn into a no-op in the bucketing/candidate-scan phase.
      */
-    public CompletableFuture<RequestResult> submitBackground(final ColumnFamilyStore cfs)
+    public Future<RequestResult> submitBackground(final ColumnFamilyStore cfs)
     {
         return backgroundCompactionRunner.markForCompactionCheck(cfs);
     }
