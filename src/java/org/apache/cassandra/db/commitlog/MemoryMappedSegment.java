@@ -25,13 +25,18 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
 import net.openhft.chronicle.core.util.ThrowingFunction;
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.SimpleCachedBufferPool;
 import org.apache.cassandra.utils.NativeLibrary;
 import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.SyncUtil;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.COMMITLOG_SKIP_FILE_ADVICE;
 
 /*
  * Memory-mapped segment. Maps the destination channel into an appropriately-sized memory-mapped buffer in which the
@@ -40,7 +45,11 @@ import org.apache.cassandra.utils.SyncUtil;
  */
 public class MemoryMappedSegment extends CommitLogSegment
 {
-    private final int fd;
+    @VisibleForTesting
+    final int fd;
+
+    @VisibleForTesting
+    static boolean skipFileAdviseToFreePageCache = COMMITLOG_SKIP_FILE_ADVICE.getBoolean();
 
     /**
      * Constructs a new segment file.
@@ -97,6 +106,15 @@ public class MemoryMappedSegment extends CommitLogSegment
         {
             throw new FSWriteError(e, getPath());
         }
+
+        if (!skipFileAdviseToFreePageCache)
+        {
+            adviceOnFileToFreePageCache(fd, startMarker, nextMarker, logFile);
+        }
+    }
+
+    void adviceOnFileToFreePageCache(int fd, int startMarker, int nextMarker, File logFile)
+    {
         INativeLibrary.instance.trySkipCache(fd, startMarker, nextMarker, logFile.absolutePath());
     }
 
