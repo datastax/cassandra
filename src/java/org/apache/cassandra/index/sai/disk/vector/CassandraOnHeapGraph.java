@@ -85,16 +85,16 @@ public class CassandraOnHeapGraph<T>
     private final VectorSimilarityFunction similarityFunction;
     private final ConcurrentMap<float[], VectorPostings<T>> postingsMap;
     private final NonBlockingHashMapLong<VectorPostings<T>> postingsByOrdinal;
-    private final NonBlockingHashMap<T, float[]> vectorCache;
-    private final boolean cacheVectors;
+    private final NonBlockingHashMap<T, float[]> vectorsByKey;
     private final AtomicInteger nextOrdinal = new AtomicInteger();
     private volatile boolean hasDeletions;
 
     /**
      * @param termComparator the vector type -- passed as AbstractType for caller's convenience
      * @param indexWriterConfig
+     * @param forSearching if true, vectorsByKey will be initialized and populated with vectors as they are added
      */
-    public CassandraOnHeapGraph(AbstractType<?> termComparator, IndexWriterConfig indexWriterConfig, boolean shouldCacheVectors)
+    public CassandraOnHeapGraph(AbstractType<?> termComparator, IndexWriterConfig indexWriterConfig, boolean forSearching)
     {
         serializer = (VectorType.VectorSerializer)termComparator.getSerializer();
         vectorValues = new ConcurrentVectorValues(((VectorType<?>) termComparator).dimension);
@@ -105,8 +105,7 @@ public class CassandraOnHeapGraph<T>
         // is thus a better option than hash-based (which has to look at all elements to compute the hash).
         postingsMap = new ConcurrentSkipListMap<>(Arrays::compare);
         postingsByOrdinal = new NonBlockingHashMapLong<>();
-        cacheVectors = shouldCacheVectors;
-        vectorCache = cacheVectors ? new NonBlockingHashMap<>() : null;
+        vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
 
         builder = new GraphIndexBuilder<>(vectorValues,
                                           VectorEncoding.FLOAT32,
@@ -155,13 +154,13 @@ public class CassandraOnHeapGraph<T>
 
         var bytesUsed = 0L;
 
-        // Store a cached reference to the vector for brute force computations later.
-        // TODO is the race condition here reasonable? Two writes for the same primary key might result in
-        //  inconsistent views in the different maps.
-        if (cacheVectors)
+        // Store a cached reference to the vector for brute force computations later. There is a small race
+        // condition here: if inserts for the same PrimaryKey add different vectors, vectorsByKey might
+        // become out of sync with the graph.
+        if (vectorsByKey != null)
         {
-            vectorCache.put(key, vector);
-            // TODO is this correct?
+            vectorsByKey.put(key, vector);
+            // The size of the entries themselves are counted below, so just count the two extra references
             bytesUsed += RamUsageEstimator.NUM_BYTES_OBJECT_REF * 2L;
         }
 
@@ -245,11 +244,11 @@ public class CassandraOnHeapGraph<T>
         return postingsByOrdinal.get(node).getPostings();
     }
 
-    public float[] vectorForKey(T node)
+    public float[] vectorForKey(T key)
     {
-        if (!cacheVectors)
-            throw new UnsupportedOperationException("Cannot retrieve vectors when cacheVectors is false");
-        return vectorCache.get(node);
+        if (vectorsByKey == null)
+            throw new IllegalStateException("vectorsByKey is not initialized");
+        return vectorsByKey.get(key);
     }
 
     public void remove(ByteBuffer term, T key)
@@ -268,8 +267,8 @@ public class CassandraOnHeapGraph<T>
 
         hasDeletions = true;
         postings.remove(key);
-        if (cacheVectors)
-            vectorCache.remove(key);
+        if (vectorsByKey != null)
+            vectorsByKey.remove(key);
     }
 
     /**
