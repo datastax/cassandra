@@ -18,24 +18,20 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.PriorityQueue;
+import java.util.Iterator;
 
-/**
- * An iterator that returns elements from a priority queue in order.
- */
-public class PriorityQueueOrderIterator extends OrderIterator
+public class WrappedOrderIterator extends OrderIterator
 {
-    private final PriorityQueue<ScoredPrimaryKey> pq;
+    private final Iterator<ScoredPrimaryKey> wrapped;
 
-    public PriorityQueueOrderIterator(PriorityQueue<ScoredPrimaryKey> pq)
+    public WrappedOrderIterator(Iterator<ScoredPrimaryKey> wrapped)
     {
-        this.pq = pq;
+        this.wrapped = wrapped;
     }
 
     @Override
     protected ScoredPrimaryKey computeNext()
     {
-        var result = pq.poll();
-        return result == null ? endOfData() : result;
+        return wrapped.hasNext() ? wrapped.next() : endOfData();
     }
 }

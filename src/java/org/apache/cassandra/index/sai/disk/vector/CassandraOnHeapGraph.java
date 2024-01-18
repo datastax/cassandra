@@ -22,7 +22,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentMap;
@@ -62,14 +64,17 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.Pair;
@@ -274,15 +279,16 @@ public class CassandraOnHeapGraph<T>
     }
 
     /**
-     * @return keys (PrimaryKey or segment row id) associated with the topK vectors near the query
+     * @return an itererator of type S (PrimaryKey or ScoredPrimaryKey) in the graph's {@link SearchResult} order
      */
-    public PriorityQueue<T> search(float[] queryVector, int limit, float threshold, Bits toAccept)
+    public <S> Iterator<S> search(QueryContext context, float[] queryVector, int limit, float threshold, Bits toAccept,
+                                  Function<SearchResult.NodeScore, Iterator<S>> nodeScoreToIterator)
     {
         validateIndexable(queryVector, similarityFunction);
 
         // search() errors out when an empty graph is passed to it
         if (vectorValues.size() == 0)
-            return new PriorityQueue<>();
+            return Collections.emptyIterator();
 
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
         // VSTODO re-use searcher objects
@@ -294,43 +300,19 @@ public class CassandraOnHeapGraph<T>
         var topK = OverqueryUtils.topKFor(limit, null);
         var result = searcher.search(scoreFunction, null, topK, threshold, bits);
         Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-        var a = result.getNodes();
-        PriorityQueue<T> keyQueue = new PriorityQueue<>();
-        for (int i = 0; i < a.length; i++)
-        {
-            int node = a[i].node;
-            Collection<T> keys = keysFromOrdinal(node);
-            keyQueue.addAll(keys);
-        }
-        return keyQueue;
+        context.addAnnNodesVisited(result.getVisitedCount());
+        // Threshold based searches do not support resuming the search.
+        Supplier<SearchResult> reSearcher = threshold <= 0 ? () -> resumeSearch(searcher, topK, context) : null;
+        return new SearchResultOrderIterator<>(result, reSearcher, nodeScoreToIterator);
     }
 
-    /**
-     * @return keys (PrimaryKey or segment row id) associated with the topK vectors near the query
-     */
-    public Pair<SearchResult, Supplier<SearchResult>> searchTopK(float[] queryVector, int limit, Bits toAccept)
+    private SearchResult resumeSearch(GraphSearcher<float[]> searcher, int topK, QueryContext context)
     {
-        validateIndexable(queryVector, similarityFunction);
-
-        // search() errors out when an empty graph is passed to it
-        if (vectorValues.size() == 0)
-            return null;
-
-        Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
-        GraphIndex<float[]> graph = builder.getGraph();
-        var searcher = new GraphSearcher.Builder<>(graph.getView()).withConcurrentUpdates().build();
-        NodeSimilarity.ExactScoreFunction scoreFunction = node2 -> {
-            return similarityFunction.compare(queryVector, ((RandomAccessVectorValues<float[]>) vectorValues).vectorValue(node2));
-        };
-        var topK = OverqueryUtils.topKFor(limit, null);
-        var result = searcher.search(scoreFunction, null, topK, 0, bits);
-        Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-        Supplier<SearchResult> resumeSearcher = () -> {
-            var resumeResult = searcher.resume(topK);
-            Tracing.trace("ANN resume search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-            return resumeResult;
-        };
-        return Pair.create(result, resumeSearcher);
+        var nextTopK = searcher.resume(topK);
+        Tracing.trace("ANN resumed search and visited {} in-memory nodes to return {} results",
+                      nextTopK.getVisitedCount(), nextTopK.getNodes().length);
+        context.addAnnNodesVisited(nextTopK.getVisitedCount());
+        return nextTopK;
     }
 
     public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Function<T, Integer> postingTransformer) throws IOException
@@ -559,5 +541,53 @@ public class CassandraOnHeapGraph<T>
     {
         IGNORE,
         FAIL
+    }
+
+    private static class SearchResultOrderIterator<S> extends AbstractIterator<S>
+    {
+        private Iterator<SearchResult.NodeScore> nodeScoreIterator;
+        private Iterator<S> iter = null;
+        private final Supplier<SearchResult> searchResultSupplier;
+        private final Function<SearchResult.NodeScore, Iterator<S>> nodeScoreToIterator;
+
+        /**
+         * Create a new {@link SearchResultOrderIterator} that iterates over the provided {@link SearchResult}.
+         * If it exhausts the {@link SearchResult}, it retrieves the next {@link SearchResult} until the supplier
+         * returns a {@link SearchResult} without any results.
+         * @param result the first {@link SearchResult} to iterate over
+         * @param searchResultSupplier a supplier that returns the next {@link SearchResult} to iterate over
+         * @param nodeScoreToIterator a function that maps a {@link SearchResult.NodeScore} to an iterator
+         */
+        public SearchResultOrderIterator(SearchResult result,
+                                         Supplier<SearchResult> searchResultSupplier,
+                                         Function<SearchResult.NodeScore, Iterator<S>> nodeScoreToIterator)
+        {
+            this.nodeScoreIterator = Arrays.stream(result.getNodes()).iterator();
+            this.searchResultSupplier = searchResultSupplier;
+            this.nodeScoreToIterator = nodeScoreToIterator;
+        }
+
+        @Override
+        protected S computeNext()
+        {
+            while (true)
+            {
+                if (iter != null && iter.hasNext())
+                    return iter.next();
+                if (nodeScoreIterator.hasNext())
+                {
+                    var nodeScore = nodeScoreIterator.next();
+                    iter = nodeScoreToIterator.apply(nodeScore);
+                    // Continue so we can verify keyIterator hasNext because the node could have been removed from the
+                    // graph after it appeared in our searchResult
+                    continue;
+                }
+                if (searchResultSupplier == null)
+                    return endOfData();
+                nodeScoreIterator = Arrays.stream(searchResultSupplier.get().getNodes()).iterator();
+                if (!nodeScoreIterator.hasNext())
+                    return endOfData();
+            }
+        }
     }
 }

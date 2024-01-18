@@ -126,7 +126,6 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (exp.getOp() != Expression.Op.BOUNDED_ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during BOUNDED_ANN index query: " + exp));
 
-        assert exp.getEuclideanSearchThreshold() > 0;
         float[] queryVector = exp.lower.value.vector;
 
         var result = searchInternal(keyRange, context, queryVector, graph.size(), graph.size(), exp.getEuclideanSearchThreshold());

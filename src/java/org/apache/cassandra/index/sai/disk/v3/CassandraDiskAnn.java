@@ -108,15 +108,14 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     }
 
     /**
-     * @return Row IDs associated with the topK vectors near the query. If a threshold is specified, only vectors with
-     * a similarity score >= threshold will be returned.
      * @param queryVector the query vector
      * @param topK the number of results to look for in the index (>= limit)
      * @param threshold the minimum similarity score to accept
      * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
      * @param context unused (vestige from HNSW, retained in signature to allow calling both easily)
      * @param nodesVisitedConsumer a consumer that will be called with the number of nodes visited during the search
-     * @return
+     * @return Row IDs associated with the topK vectors near the query. If a threshold is specified, only vectors with
+     * a similarity score >= threshold will be returned.
      */
     @Override
     public NodeScoreToScoredRowIdIterator search(float[] queryVector, int topK, float threshold, Bits acceptBits, QueryContext context,
@@ -143,7 +142,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         var result = searcher.search(scoreFunction, reranker, topK, threshold, ordinalsMap.ignoringDeleted(acceptBits));
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         // Threshold based searches do not support resuming the search.
-        Supplier<SearchResult> reSearcher = threshold == 0 ? () -> resumeSearch(searcher, topK) : null;
+        Supplier<SearchResult> reSearcher = threshold <= 0 ? () -> resumeSearch(searcher, topK) : null;
         var nodeScores = new NodeScoreIterator(result, reSearcher, nodesVisitedConsumer);
         return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
     }

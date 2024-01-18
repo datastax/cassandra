@@ -20,9 +20,9 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -37,14 +37,11 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 
-import com.google.common.collect.Iterators;
-import com.google.common.collect.PeekingIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.util.Bits;
-import io.micrometer.core.instrument.search.Search;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -58,11 +55,13 @@ import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.OrderIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.PriorityQueueOrderIterator;
+import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.WrappedOrderIterator;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -164,58 +163,53 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public RangeIterator search(QueryContext queryContext, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public RangeIterator search(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
-        assert expr.getOp() == Expression.Op.ANN || expr.getOp() == Expression.Op.BOUNDED_ANN : "Only ANN is supported for vector search, received " + expr.getOp();
-
+        if (expr.getOp() != Expression.Op.BOUNDED_ANN)
+            throw new IllegalArgumentException(indexContext.logMessage("Only BOUNDED_ANN is supported, received: " + expr));
         float[] qv = expr.lower.value.vector;
-        if (expr.getEuclideanSearchThreshold() > 0)
-            limit = 100000;
+        float threshold = expr.getEuclideanSearchThreshold();
 
-        Bits bits;
-        if (RangeUtil.coversFullRing(keyRange))
-        {
-            bits = Bits.ALL;
-        }
-        else
-        {
-            // if left bound is MIN_BOUND or KEY_BOUND, we need to include all token-only PrimaryKeys with same token
-            boolean leftInclusive = keyRange.left.kind() != PartitionPosition.Kind.MAX_BOUND;
-            // if right bound is MAX_BOUND or KEY_BOUND, we need to include all token-only PrimaryKeys with same token
-            boolean rightInclusive = keyRange.right.kind() != PartitionPosition.Kind.MIN_BOUND;
-            // if right token is MAX (Long.MIN_VALUE), there is no upper bound
-            boolean isMaxToken = keyRange.right.getToken().isMinimum(); // max token
+        var pkIterator = searchInternal(context, qv, keyRange, graph.size(), threshold,
+                                        (keys) -> this.filterPrimaryKeys(qv, threshold, keys),
+                                        this::nodeScoreToPrimaryKey);
 
-            PrimaryKey left = indexContext.keyFactory().createTokenOnly(keyRange.left.getToken()); // lower bound
-            PrimaryKey right = isMaxToken ? null : indexContext.keyFactory().createTokenOnly(keyRange.right.getToken()); // upper bound
+        PriorityQueue<PrimaryKey> keyQueue = new PriorityQueue<>();
+        while (pkIterator.hasNext())
+            keyQueue.add(pkIterator.next());
 
-            Set<PrimaryKey> resultKeys = isMaxToken ? primaryKeys.tailSet(left, leftInclusive) : primaryKeys.subSet(left, leftInclusive, right, rightInclusive);
-
-            if (resultKeys.isEmpty())
-                return RangeIterator.empty();
-
-            int bruteForceRows = maxBruteForceRows(limit, resultKeys.size(), graph.size());
-            logger.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-                         resultKeys.size(), bruteForceRows, graph.size(), limit);
-            Tracing.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-                          resultKeys.size(), bruteForceRows, graph.size(), limit);
-            if (resultKeys.size() <= bruteForceRows)
-                return new ReorderingRangeIterator(new PriorityQueue<>(resultKeys));
-            else
-                bits = new KeyRangeFilteringBits(keyRange);
-        }
-
-        var keyQueue = graph.search(qv, limit, expr.getEuclideanSearchThreshold(), bits);
         if (keyQueue.isEmpty())
             return RangeIterator.empty();
         return new ReorderingRangeIterator(keyQueue);
     }
 
     @Override
-    public OrderIterator orderBy(QueryContext queryContext, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public OrderIterator orderBy(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         assert expr.getOp() == Expression.Op.ANN : "Only ANN is supported for vector search, received " + expr.getOp();
 
+        float[] qv = expr.lower.value.vector;
+
+        var result = searchInternal(context, qv, keyRange, limit, 0,
+                                    (keys) -> orderPrimaryKeys(qv, keys),
+                                    this::nodeScoreToScoredPrimaryKey);
+        return new WrappedOrderIterator(result);
+    }
+
+    private Iterator<PrimaryKey> nodeScoreToPrimaryKey(SearchResult.NodeScore nodeScore)
+    {
+        return graph.keysFromOrdinal(nodeScore.node).stream().iterator();
+    }
+
+    private Iterator<ScoredPrimaryKey> nodeScoreToScoredPrimaryKey(SearchResult.NodeScore nodeScore)
+    {
+        return graph.keysFromOrdinal(nodeScore.node).stream().map(k -> new ScoredPrimaryKey(k, nodeScore.score)).iterator();
+    }
+
+    private <T> Iterator<T> searchInternal(QueryContext context, float[] queryVector, AbstractBounds<PartitionPosition> keyRange, int limit, float threshold,
+                                           Function<NavigableSet<PrimaryKey>, Iterator<T>> bruteForceFunction,
+                                           Function<SearchResult.NodeScore, Iterator<T>> nodeScoreToT)
+    {
         Bits bits;
         if (RangeUtil.coversFullRing(keyRange))
         {
@@ -233,10 +227,11 @@ public class VectorMemtableIndex implements MemtableIndex
             PrimaryKey left = indexContext.keyFactory().createTokenOnly(keyRange.left.getToken()); // lower bound
             PrimaryKey right = isMaxToken ? null : indexContext.keyFactory().createTokenOnly(keyRange.right.getToken()); // upper bound
 
-            Set<PrimaryKey> resultKeys = isMaxToken ? primaryKeys.tailSet(left, leftInclusive) : primaryKeys.subSet(left, leftInclusive, right, rightInclusive);
+            NavigableSet<PrimaryKey> resultKeys = isMaxToken ? primaryKeys.tailSet(left, leftInclusive)
+                                                             : primaryKeys.subSet(left, leftInclusive, right, rightInclusive);
 
             if (resultKeys.isEmpty())
-                return OrderIterator.empty();
+                return Collections.emptyIterator();
 
             int bruteForceRows = maxBruteForceRows(limit, resultKeys.size(), graph.size());
             logger.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
@@ -245,15 +240,12 @@ public class VectorMemtableIndex implements MemtableIndex
                           resultKeys.size(), bruteForceRows, graph.size(), limit);
             // do brute force for vectorFromOrdinal
             if (resultKeys.size() <= bruteForceRows)
-                return orderPrimaryKeys(expr.lower.value.vector, resultKeys);
+                return bruteForceFunction.apply(resultKeys);
             else
                 bits = new KeyRangeFilteringBits(keyRange);
         }
 
-        var result = graph.searchTopK(expr.lower.value.vector, limit, bits);
-        if (result == null)
-            return OrderIterator.empty();
-        return new SearchResultOrderIterator(result);
+        return graph.search(context, queryVector, limit, threshold, bits, nodeScoreToT);
     }
 
 
@@ -279,36 +271,48 @@ public class VectorMemtableIndex implements MemtableIndex
         {
             if (keysInRange.isEmpty())
                 return OrderIterator.empty();
-            return orderPrimaryKeys(qv, keysInRange);
+            return new WrappedOrderIterator(orderPrimaryKeys(qv, keysInRange));
         }
 
         var bits = new KeyFilteringBits(keysInRange);
-        var result = graph.searchTopK(qv, limit, bits);
-        if (result == null)
-            return OrderIterator.empty();
-        return new SearchResultOrderIterator(result);
+        var result = graph.search(context, qv, limit, 0, bits, this::nodeScoreToScoredPrimaryKey);
+        return new WrappedOrderIterator(result);
     }
 
-    private OrderIterator orderPrimaryKeys(float[] queryVector, Collection<PrimaryKey> keys)
+    private Iterator<PrimaryKey> filterPrimaryKeys(float[] queryVector, float threshold, NavigableSet<PrimaryKey> keys)
+    {
+        var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
+        // Keys are already ordered in ascending PK order
+        return keys.stream()
+                   .filter(k -> {
+                       float[] vector = graph.vectorForKey(k);
+                       if (vector == null)
+                           return false;
+                       return similarityFunction.compare(queryVector, vector) >= threshold;
+                   })
+                   .iterator();
+    }
+
+    private Iterator<ScoredPrimaryKey> orderPrimaryKeys(float[] queryVector, Collection<PrimaryKey> keys)
     {
         // search() errors out when an empty graph is passed to it
         if (keys.isEmpty())
-            return OrderIterator.empty();
+            return Collections.emptyIterator();
 
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
 
-        // Use a priority queue because we don't need to consume the entire iterator
-        var pairs = new PriorityQueue<ScoredPrimaryKey>(keys.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
+        // Use a priority queue because we often don't need to consume the entire iterator
+        var scoredPrimaryKeys = new PriorityQueue<ScoredPrimaryKey>(keys.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
         for (var key : keys)
         {
             float[] vector = graph.vectorForKey(key);
             if (vector == null)
                 continue;
             var score = similarityFunction.compare(queryVector, vector);
-            pairs.add(new ScoredPrimaryKey(key, score));
+            scoredPrimaryKeys.add(new ScoredPrimaryKey(key, score));
         }
 
-        return new PriorityQueueOrderIterator(pairs);
+        return new PriorityQueueIterator<>(scoredPrimaryKeys);
     }
 
     private int maxBruteForceRows(int limit, int nPermittedOrdinals, int graphSize)
@@ -487,47 +491,6 @@ public class VectorMemtableIndex implements MemtableIndex
         public int length()
         {
             return results.size();
-        }
-    }
-
-    private class SearchResultOrderIterator extends OrderIterator
-    {
-        private Iterator<SearchResult.NodeScore> nodeScoreIterator;
-        private Iterator<ScoredPrimaryKey> keyIterator = null;
-        private final Supplier<SearchResult> searchResultSupplier;
-
-        /**
-         * Create a new {@link SearchResultOrderIterator} that iterates over the provided {@link SearchResult}.
-         * If it exhausts the {@link SearchResult}, it retrieves the next {@link SearchResult} until the supplier
-         * returns a {@link SearchResult} without any results.
-         * @param result the first {@link SearchResult} to iterate over and the supplier to retrieve the next
-         */
-        public SearchResultOrderIterator(Pair<SearchResult, Supplier<SearchResult>> result)
-        {
-            this.nodeScoreIterator = Arrays.stream(result.left.getNodes()).iterator();
-            this.searchResultSupplier = result.right;
-        }
-
-        @Override
-        protected ScoredPrimaryKey computeNext()
-        {
-            while (true)
-            {
-                if (keyIterator != null && keyIterator.hasNext())
-                    return keyIterator.next();
-                if (nodeScoreIterator.hasNext())
-                {
-                    var nodeScore = nodeScoreIterator.next();
-                    keyIterator = graph.keysFromOrdinal(nodeScore.node).stream()
-                                       .map(k -> new ScoredPrimaryKey(k, nodeScore.score)).iterator();
-                    // Continue so we can verify keyIterator hasNext because the node could have been removed from the
-                    // graph after it appeared in our searchResult
-                    continue;
-                }
-                nodeScoreIterator = Arrays.stream(searchResultSupplier.get().getNodes()).iterator();
-                if (!nodeScoreIterator.hasNext())
-                    return endOfData();
-            }
         }
     }
 }
