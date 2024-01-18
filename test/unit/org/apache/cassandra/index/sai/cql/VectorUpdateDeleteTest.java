@@ -856,6 +856,50 @@ public class VectorUpdateDeleteTest extends VectorTester
         });
     }
 
+    @Test
+    public void testBruteForceRangeQueryWithUpdatedVectors1536D() throws Throwable
+    {
+        testBruteForceRangeQueryWithUpdatedVectors(1536);
+    }
+
+    @Test
+    public void testBruteForceRangeQueryWithUpdatedVectors2D() throws Throwable
+    {
+        testBruteForceRangeQueryWithUpdatedVectors(2);
+    }
+
+    private void testBruteForceRangeQueryWithUpdatedVectors(int vectorDimension) throws Throwable
+    {
+        setMaxBruteForceRows(0);
+        createTable("CREATE TABLE %s (pk int, val vector<float, " + vectorDimension + ">, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // Insert 100 vectors
+        for (int i = 0; i < 100; i++)
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, randomVector(vectorDimension));
+
+        // Update those vectors so some ordinals are changed
+        for (int i = 0; i < 100; i++)
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, randomVector(vectorDimension));
+
+        // Delete the first 50 PKs.
+        for (int i = 0; i < 50; i++)
+            execute("DELETE FROM %s WHERE pk = ?", i);
+
+        // All of the above inserts and deletes are performed on the same index to verify internal index behavior
+        // for both memtables and sstables.
+        beforeAndAfterFlush(() -> {
+            // Query for the first 10 vectors, we don't care which.
+            // Use a range query to hit the right brute force code path
+            var results = execute("SELECT pk FROM %s WHERE token(pk) < 0 ORDER BY val ann of ? LIMIT 10",
+                                  randomVector(vectorDimension));
+            assertThat(results).hasSize(10);
+            // Make sure we don't get any of the deleted PKs
+            assertThat(results).allSatisfy(row -> assertThat(row.getInt("pk")).isGreaterThanOrEqualTo(50));
+        });
+    }
+
     private static void setChunkSize(final int selectivityLimit) throws Exception
     {
         Field selectivity = QueryController.class.getDeclaredField("ORDER_CHUNK_SIZE");

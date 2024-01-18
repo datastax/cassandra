@@ -268,7 +268,9 @@ public class CassandraOnHeapGraph<T>
         hasDeletions = true;
         postings.remove(key);
         if (vectorsByKey != null)
-            vectorsByKey.remove(key);
+            // On updates to a row, we call add then remove, so we must pass the key's value to ensure we only remove
+            // the deleted vector from vectorsByKey
+            vectorsByKey.remove(key, vector);
     }
 
     /**
