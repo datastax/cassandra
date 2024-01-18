@@ -64,6 +64,7 @@ import org.apache.cassandra.metrics.PairedSlidingWindowReservoir;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.Pair;
 
 import static java.lang.Math.ceil;
 import static java.lang.Math.min;
@@ -437,6 +438,31 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             return ScoredPrimaryKeyIterator.empty();
 
         int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
+        // Convert PKs to segment row ids and then to ordinals, skipping any that don't exist in this segment
+        var bitsAndRows = flatmapPrimaryKeysToBitsAndRows(keysInRange);
+        var bits = bitsAndRows.left;
+        var rowIds = bitsAndRows.right;
+        var numRows = rowIds.size();
+        final CostEstimate cost = estimateCost(topK, numRows);
+        Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; expected nodes visited is {} for index with {} nodes, LIMIT {}",
+                            numRows, keysInRange.size(), cost.expectedNodesVisited, graph.size(), limit);
+        if (numRows == 0)
+            return ScoredPrimaryKeyIterator.empty();
+
+        if (cost.shouldUseBruteForce())
+        {
+            // brute force using the in-memory compressed vectors to cut down the number of results returned
+            var queryVector = exp.lower.value.vector;
+            return toScoreOrderedIterator(bruteForceOrdering(queryVector, rowIds, limit, topK, 0), context);
+        }
+        // else ask the index to perform a search limited to the bits we created
+        float[] queryVector = exp.lower.value.vector;
+        var results = graph.search(queryVector, topK, 0, bits, context, cost::updateStatistics);
+        return toScoreOrderedIterator(results, context);
+    }
+
+    private Pair<SparseFixedBitSet, IntArrayList> flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange) throws IOException
+    {
         // if we are brute forcing the similarity search, we want to build a list of segment row ids,
         // but if not, we want to build a bitset of ordinals corresponding to the rows.
         // We won't know which path to take until we have an accurate key count.
@@ -531,24 +557,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 }
             }
         }
-
-        var numRows = rowIds.size();
-        final CostEstimate cost = estimateCost(topK, numRows);
-        Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; expected nodes visited is {} for index with {} nodes, LIMIT {}",
-                            numRows, keysInRange.size(), cost.expectedNodesVisited, graph.size(), limit);
-        if (numRows == 0)
-            return ScoredPrimaryKeyIterator.empty();
-
-        if (cost.shouldUseBruteForce())
-        {
-            // brute force using the in-memory compressed vectors to cut down the number of results returned
-            var queryVector = exp.lower.value.vector;
-            return toScoreOrderedIterator(bruteForceOrdering(queryVector, rowIds, limit, topK, 0), context);
-        }
-        // else ask the index to perform a search limited to the bits we created
-        float[] queryVector = exp.lower.value.vector;
-        var results = graph.search(queryVector, topK, 0, bits, context, cost::updateStatistics);
-        return toScoreOrderedIterator(results, context);
+        return Pair.create(bits, rowIds);
     }
 
     public static double logBase2(double number) {
