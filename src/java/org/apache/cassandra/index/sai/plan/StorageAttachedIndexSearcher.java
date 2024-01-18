@@ -523,7 +523,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final QueryContext queryContext;
 
         private HashSet<PrimaryKey> keysSeen;
-        public HashSet<PrimaryKey> updatedKeys;
+        private HashSet<PrimaryKey> updatedKeys;
 
         private ScoreOrderedResultRetriever(OrderIterator orderIterator,
                                             FilterTree filterTree,
@@ -665,6 +665,27 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             assert clusters.size() == 1 : "Ordering results in just one row";
             // TODO what about static clusters? There is a filtering thing above
             return new PrimaryKeyIterator(key, partition, staticRow, clusters.get(0));
+        }
+
+        /**
+         * Returns true if the key should be included in the global top k. Otherwise, skip the key for now.
+         */
+        public boolean shouldInclude(ScoredPrimaryKey key, float rowScore)
+        {
+            // Accept the Primary Key if its score, which comes from its source vector index, is greater than the score
+            // of the row read from storage. If the score is less than the score of the row read from storage,
+            // then it might not be in the global top k.
+            if (key.score > rowScore + 0.0001f)
+            {
+                updatedKeys.add(key);
+                return false;
+            }
+
+            // The score is accepted, so the Primary Key no longer needs special treatment and can be removed
+            // from the updatedKeys set.
+            if (!updatedKeys.isEmpty())
+                updatedKeys.remove(key);
+            return true;
         }
 
         public static class PrimaryKeyIterator extends AbstractUnfilteredRowIterator

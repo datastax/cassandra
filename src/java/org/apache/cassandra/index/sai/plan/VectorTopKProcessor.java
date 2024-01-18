@@ -201,9 +201,7 @@ public class VectorTopKProcessor
                 try (var partitionRowIterator = retriever.next())
                 {
                     var iter = (StorageAttachedIndexSearcher.ScoreOrderedResultRetriever.PrimaryKeyIterator) partitionRowIterator;
-                    PartitionResults pr = processPartition(iter, iter.scoredPrimaryKey, retriever.updatedKeys);
-                    if (pr == null)
-                        continue;
+                    PartitionResults pr = processPartition(iter, iter.scoredPrimaryKey, retriever);
                     rowsMatched += pr.rows.size();
                     for (var row : pr.rows)
                         addUnfiltered(unfilteredByPartition, row.getLeft(), row.getMiddle());
@@ -293,7 +291,8 @@ public class VectorTopKProcessor
     /**
      * Processes a single partition, calculating scores for rows and extracting tombstones.
      */
-    private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator, ScoredPrimaryKey key, HashSet<PrimaryKey> updatedKeys) {
+    private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator, ScoredPrimaryKey key,
+                                              StorageAttachedIndexSearcher.ScoreOrderedResultRetriever retriever) {
         Row staticRow = partitionRowIterator.staticRow();
         PartitionInfo partitionInfo = PartitionInfo.create(partitionRowIterator);
         // VSTODO vector columns shouldn't be static, so can we remove this?
@@ -313,22 +312,9 @@ public class VectorTopKProcessor
         }
 
         Row row = (Row) unfiltered;
-        float rowScore = getScoreForRow(null, row);
-        // Accept the Primary Key if its score, which comes from the vector index, is greater than the score
-        // of the row read from storage. If the score is less than the score of the row read from storage,
-        // then it might not be in the global top k.
-        if (key.score > rowScore + 0.0001f)
-        {
-            updatedKeys.add(key);
-            return null;
-        }
-        else if (!updatedKeys.isEmpty())
-        {
-            // The score is accepted, so the Primary Key no longer needs special treatment and can be removed
-            // from the updatedKeys set.
-            updatedKeys.remove(key);
-        }
-        pr.addRow(Triple.of(partitionInfo, row, keyAndStaticScore + rowScore));
+        float rowScore = keyAndStaticScore + getScoreForRow(null, row);
+        if (retriever.shouldInclude(key, rowScore))
+            pr.addRow(Triple.of(partitionInfo, row, rowScore));
 
         return pr;
     }
