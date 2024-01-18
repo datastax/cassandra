@@ -527,7 +527,7 @@ public class ActiveRepairServiceTest
     public void testPrepareRepairWithDeadNodes()
     {
         Set<Range<Token>> ranges = StorageService.instance.getLocalReplicas(KEYSPACE5).ranges();
-        UUID parentRepairSession = UUID.randomUUID();
+        TimeUUID parentRepairSession = TimeUUID.Generator.nextTimeUUID();
         List<ColumnFamilyStore> columnFamilyStores = Arrays.asList(prepareColumnFamilyStore());
         boolean isForcedRepair = false;
 
@@ -542,10 +542,13 @@ public class ActiveRepairServiceTest
         Util.markNodeAsDead(REMOTE);
         endpoints.add(REMOTE);
 
-        RepairOption options = new RepairOption(RepairParallelism.PARALLEL, true, true, false, 1, ranges, false, false, false,  PreviewKind.ALL, false, false);
+        RepairOption options = new RepairOption(RepairParallelism.PARALLEL, true, true,
+                                                false, 1, ranges, false, false,
+                                                false, PreviewKind.ALL, false,
+                                                false, false, false);
         try
         {
-            ActiveRepairService.instance.prepareForRepair(parentRepairSession, LOCAL, endpoints, options, isForcedRepair, columnFamilyStores);
+            ActiveRepairService.instance().prepareForRepair(parentRepairSession, LOCAL, endpoints, options, isForcedRepair, columnFamilyStores);
             fail();
         }
         catch (RuntimeException ex)
@@ -559,7 +562,7 @@ public class ActiveRepairServiceTest
     @Test
     public void testCleanUpLiveAndDeadNodes()
     {
-        UUID parentRepairSession = UUID.randomUUID();
+        TimeUUID parentRepairSession = TimeUUID.Generator.nextTimeUUID();
         Set<InetAddressAndPort> endpoints = new HashSet<>();
         endpoints.add(LOCAL);
 
@@ -572,6 +575,6 @@ public class ActiveRepairServiceTest
 
         endpoints.add(REMOTE);
 
-        ActiveRepairService.instance.cleanUp(parentRepairSession, endpoints);
+        ActiveRepairService.instance().cleanUp(parentRepairSession, endpoints);
     }
 }

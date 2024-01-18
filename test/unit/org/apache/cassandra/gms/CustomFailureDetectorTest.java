@@ -20,10 +20,12 @@ package org.apache.cassandra.gms;
 
 import org.junit.Test;
 
-import junit.framework.TestCase;
 import org.apache.cassandra.locator.InetAddressAndPort;
 
-public class CustomFailureDetectorTest extends TestCase
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
+
+public class CustomFailureDetectorTest
 {
     public static class TestFailureDetector implements IFailureDetector
     {

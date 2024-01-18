@@ -187,6 +187,8 @@ public enum CassandraRelevantProperties
     CONSISTENT_RANGE_MOVEMENT("cassandra.consistent.rangemovement", "true"),
     CONSISTENT_SIMULTANEOUS_MOVES_ALLOW("cassandra.consistent.simultaneousmoves.allow"),
     CRYPTO_PROVIDER_CLASS_NAME("cassandra.crypto_provider_class_name"),
+    /** Which class to use for failure detection */
+    CUSTOM_FAILURE_DETECTOR_PROPERTY("cassandra.custom_failure_detector_class"),
     CUSTOM_GUARDRAILS_CONFIG_PROVIDER_CLASS("cassandra.custom_guardrails_config_provider_class"),
     CUSTOM_QUERY_HANDLER_CLASS("cassandra.custom_query_handler_class"),
     CUSTOM_TRACING_CLASS("cassandra.custom_tracing_class"),
@@ -597,8 +599,6 @@ public enum CassandraRelevantProperties
                 prev = next;
         }
     }
-    /** Which class to use for failure detection */
-    CUSTOM_FAILURE_DETECTOR_PROPERTY("cassandra.custom_failure_detector_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

@@ -289,7 +289,7 @@ public class TokenMetadata
         InetAddressAndPort storedEp = endpointToHostIdMap.inverse().get(hostId);
         if (storedEp != null)
         {
-            if (!storedEp.equals(endpoint) && (FailureDetector.instance.isAlive(storedEp)))
+            if (!storedEp.equals(endpoint) && (IFailureDetector.instance.isAlive(storedEp)))
             {
                 throw new RuntimeException(String.format("Host ID collision between active endpoint %s and %s (id=%s)",
                                                          storedEp,
