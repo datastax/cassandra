@@ -50,6 +50,8 @@ public class NodeScoreToScoredRowIdIterator implements CloseableIterator<ScoredR
     {
         try
         {
+            // nodeScores.hasNext() can trigger a deeper search of the vector graph, so only call it
+            // when necessary.
             while (!segmentRowIdIterator.hasNext() && nodeScores.hasNext())
             {
                 SearchResult.NodeScore result = nodeScores.next();
@@ -68,6 +70,9 @@ public class NodeScoreToScoredRowIdIterator implements CloseableIterator<ScoredR
     @Override
     public ScoredRowId next()
     {
+        // We only verify that segmentRowIdIterator hasNext because we are about to call next on it.
+        // We do not call this.hasNext() because that could unnecessarily trigger a deeper search of the vector graph.
+        // The expected usage pattern is to call hasNext() before calling next().
         if (!segmentRowIdIterator.hasNext())
             throw new NoSuchElementException();
         return new ScoredRowId(segmentRowIdIterator.nextInt(), currentScore);
