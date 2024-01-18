@@ -300,35 +300,35 @@ public class VectorTopKProcessor
         float keyAndStaticScore = getScoreForRow(key.partitionKey(), staticRow);
         var pr = new PartitionResults(partitionInfo);
 
-        if (partitionRowIterator.hasNext())
-        {
-            Unfiltered unfiltered = partitionRowIterator.next();
-            // Always include tombstones for coordinator. It relies on ReadCommand#withMetricsRecording to throw
-            // TombstoneOverwhelmingException to prevent OOM.
-            if (unfiltered.isRangeTombstoneMarker())
-            {
-                pr.addTombstone(unfiltered);
-                return pr;
-            }
+        if (!partitionRowIterator.hasNext())
+            return pr;
 
-            Row row = (Row) unfiltered;
-            float rowScore = getScoreForRow(null, row);
-            // Accept the Primary Key if its score, which comes from the vector index, is greater than the score
-            // of the row read from storage. If the score is less than the score of the row read from storage,
-            // then it might not be in the global top k.
-            if (key.score > rowScore + 0.0001f)
-            {
-                updatedKeys.add(key);
-                return null;
-            }
-            else if (!updatedKeys.isEmpty())
-            {
-                // The score is accepted, so the Primary Key no longer needs special treatment and can be removed
-                // from the updatedKeys set.
-                updatedKeys.remove(key);
-            }
-            pr.addRow(Triple.of(partitionInfo, row, keyAndStaticScore + rowScore));
+        Unfiltered unfiltered = partitionRowIterator.next();
+        // Always include tombstones for coordinator. It relies on ReadCommand#withMetricsRecording to throw
+        // TombstoneOverwhelmingException to prevent OOM.
+        if (unfiltered.isRangeTombstoneMarker())
+        {
+            pr.addTombstone(unfiltered);
+            return pr;
         }
+
+        Row row = (Row) unfiltered;
+        float rowScore = getScoreForRow(null, row);
+        // Accept the Primary Key if its score, which comes from the vector index, is greater than the score
+        // of the row read from storage. If the score is less than the score of the row read from storage,
+        // then it might not be in the global top k.
+        if (key.score > rowScore + 0.0001f)
+        {
+            updatedKeys.add(key);
+            return null;
+        }
+        else if (!updatedKeys.isEmpty())
+        {
+            // The score is accepted, so the Primary Key no longer needs special treatment and can be removed
+            // from the updatedKeys set.
+            updatedKeys.remove(key);
+        }
+        pr.addRow(Triple.of(partitionInfo, row, keyAndStaticScore + rowScore));
 
         return pr;
     }
