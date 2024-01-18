@@ -30,7 +30,7 @@ import org.apache.cassandra.index.sai.disk.PostingListRangeIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.OrderIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 
@@ -85,9 +85,9 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
      * @param keyRange     key range specific in read command, used by ANN index
      * @param queryContext to track per sstable cache and per query metrics
      * @param limit        the num of rows to returned, used by ANN index
-     * @return {@link OrderIterator} that matches given expression
+     * @return {@link ScoredPrimaryKeyIterator} that matches given expression
      */
-    public OrderIterator orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
+    public ScoredPrimaryKeyIterator orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
     {
         throw new UnsupportedOperationException();
     }

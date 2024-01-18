@@ -53,7 +53,7 @@ public interface SegmentOrdering
      * Order a list of primary keys to the top results. The limit is a hint indicating the minimum number of
      * results the query requested.
      */
-    default OrderIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    default ScoredPrimaryKeyIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         throw new UnsupportedOperationException();
     }

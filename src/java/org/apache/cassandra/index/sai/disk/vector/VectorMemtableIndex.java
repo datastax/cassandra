@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -32,7 +31,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
@@ -53,15 +51,14 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.OrderIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
-import org.apache.cassandra.index.sai.utils.WrappedOrderIterator;
+import org.apache.cassandra.index.sai.utils.WrappedScoredPrimaryKeyIterator;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -184,7 +181,7 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public OrderIterator orderBy(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public ScoredPrimaryKeyIterator orderBy(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         assert expr.getOp() == Expression.Op.ANN : "Only ANN is supported for vector search, received " + expr.getOp();
 
@@ -193,7 +190,7 @@ public class VectorMemtableIndex implements MemtableIndex
         var result = searchInternal(context, qv, keyRange, limit, 0,
                                     (keys) -> orderPrimaryKeys(qv, keys),
                                     this::nodeScoreToScoredPrimaryKey);
-        return new WrappedOrderIterator(result);
+        return new WrappedScoredPrimaryKeyIterator(result);
     }
 
     private Iterator<PrimaryKey> nodeScoreToPrimaryKey(SearchResult.NodeScore nodeScore)
@@ -250,11 +247,11 @@ public class VectorMemtableIndex implements MemtableIndex
 
 
     @Override
-    public OrderIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
+    public ScoredPrimaryKeyIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
     {
         if (minimumKey == null)
             // This case implies maximumKey is empty too.
-            return OrderIterator.empty();
+            return ScoredPrimaryKeyIterator.empty();
 
         float[] qv = exp.lower.value.vector;
         List<PrimaryKey> keysInRange = keys.stream()
@@ -270,13 +267,13 @@ public class VectorMemtableIndex implements MemtableIndex
         if (keysInRange.size() <= maxBruteForceRows)
         {
             if (keysInRange.isEmpty())
-                return OrderIterator.empty();
-            return new WrappedOrderIterator(orderPrimaryKeys(qv, keysInRange));
+                return ScoredPrimaryKeyIterator.empty();
+            return new WrappedScoredPrimaryKeyIterator(orderPrimaryKeys(qv, keysInRange));
         }
 
         var bits = new KeyFilteringBits(keysInRange);
         var result = graph.search(context, qv, limit, 0, bits, this::nodeScoreToScoredPrimaryKey);
-        return new WrappedOrderIterator(result);
+        return new WrappedScoredPrimaryKeyIterator(result);
     }
 
     private Iterator<PrimaryKey> filterPrimaryKeys(float[] queryVector, float threshold, NavigableSet<PrimaryKey> keys)

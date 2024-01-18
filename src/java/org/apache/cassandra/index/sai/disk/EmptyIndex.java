@@ -28,7 +28,7 @@ import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.OrderIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -94,7 +94,7 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
-    public List<OrderIterator> orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public List<ScoredPrimaryKeyIterator> orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
         return List.of();
     }
@@ -116,7 +116,7 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
-    public List<OrderIterator> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<ScoredPrimaryKeyIterator> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         return List.of();
     }

@@ -53,8 +53,8 @@ import org.apache.cassandra.index.sai.disk.vector.OverqueryUtils;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.OrderIterator;
-import org.apache.cassandra.index.sai.utils.PostingListOrderIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
+import org.apache.cassandra.index.sai.utils.PostingListScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -133,7 +133,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public OrderIterator orderBy(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public ScoredPrimaryKeyIterator orderBy(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
@@ -232,10 +232,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         }
     }
 
-    protected OrderIterator toScoreOrderedIterator(CloseableIterator<ScoredRowId> scoredRowIdIterator, QueryContext queryContext) throws IOException
+    protected ScoredPrimaryKeyIterator toScoreOrderedIterator(CloseableIterator<ScoredRowId> scoredRowIdIterator, QueryContext queryContext) throws IOException
     {
         if (scoredRowIdIterator == null || !scoredRowIdIterator.hasNext())
-            return OrderIterator.empty();
+            return ScoredPrimaryKeyIterator.empty();
 
         IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
                                                                         metadata.maxKey,
@@ -244,7 +244,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                                                         metadata.segmentRowIdOffset,
                                                                         queryContext,
                                                                         null);
-        return new PostingListOrderIterator(scoredRowIdIterator, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
+        return new PostingListScoredPrimaryKeyIterator(scoredRowIdIterator, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
     }
 
     private CloseableIterator<ScoredRowId> bruteForceOrdering(float[] queryVector, IntArrayList segmentRowIds, int limit, int topK, float threshold) throws IOException
@@ -425,14 +425,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public OrderIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public ScoredPrimaryKeyIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         // create a sublist of the keys within this segment's bounds
         int minIndex = findBoundaryIndex(keys, true);
         int maxIndex = findBoundaryIndex(keys, false);
         List<PrimaryKey> keysInRange = keys.subList(minIndex, maxIndex);
         if (keysInRange.isEmpty())
-            return OrderIterator.empty();
+            return ScoredPrimaryKeyIterator.empty();
 
         int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
         // if we are brute forcing the similarity search, we want to build a list of segment row ids,
@@ -535,7 +535,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; expected nodes visited is {} for index with {} nodes, LIMIT {}",
                             numRows, keysInRange.size(), cost.expectedNodesVisited, graph.size(), limit);
         if (numRows == 0)
-            return OrderIterator.empty();
+            return ScoredPrimaryKeyIterator.empty();
 
         if (cost.shouldUseBruteForce())
         {

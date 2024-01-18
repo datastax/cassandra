@@ -41,9 +41,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.RegularAndStaticColumns;
-import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.db.partitions.ParallelCommandProcessor;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
@@ -60,7 +58,7 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
-import org.apache.cassandra.index.sai.utils.OrderIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -68,7 +66,6 @@ import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
-import org.apache.cassandra.utils.Pair;
 
 public class StorageAttachedIndexSearcher implements Index.Searcher
 {
@@ -125,7 +122,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         if (!command.isTopK())
             return new ResultRetriever(analyze(), analyzeFilter(), controller, executionController, queryContext);
 
-        var result = new ScoreOrderedResultRetriever(analyzeOrderedQuery(), analyzeFilter(), controller, executionController, queryContext);
+        var result = new ScoreOrderedResultRetriever(buildScoredPrimaryKeyIterator(), analyzeFilter(), controller,
+                                                     executionController, queryContext);
         return (UnfilteredPartitionIterator) new VectorTopKProcessor(command).filter(result);
     }
 
@@ -139,9 +137,14 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         return controller.buildIterator();
     }
 
-    private OrderIterator analyzeOrderedQuery()
+    /**
+     * Converts expressions into a {@link ScoredPrimaryKeyIterator} that contains a superset of the keys that
+     * satisfy the query. The {@link ScoredPrimaryKeyIterator} is sorted by score, so the top k keys can be
+     * retrieved by iterating the iterator until a sufficient number of valid rows are found.
+     */
+    private ScoredPrimaryKeyIterator buildScoredPrimaryKeyIterator()
     {
-        return controller.buildScoredPriorityQueue();
+        return controller.buildScoredPrimaryKeyIterator();
     }
 
     /**
@@ -516,7 +519,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     {
         private final List<AbstractBounds<PartitionPosition>> keyRanges;
         private final boolean coversFullRing;
-        private final OrderIterator orderIterator;
+        private final ScoredPrimaryKeyIterator scoredPrimaryKeyIterator;
         private final FilterTree filterTree;
         private final QueryController controller;
         private final ReadExecutionController executionController;
@@ -525,7 +528,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private HashSet<PrimaryKey> keysSeen;
         private HashSet<PrimaryKey> updatedKeys;
 
-        private ScoreOrderedResultRetriever(OrderIterator orderIterator,
+        private ScoreOrderedResultRetriever(ScoredPrimaryKeyIterator scoredPrimaryKeyIterator,
                                             FilterTree filterTree,
                                             QueryController controller,
                                             ReadExecutionController executionController,
@@ -534,7 +537,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.keyRanges = controller.dataRanges().stream().map(DataRange::keyRange).collect(Collectors.toList());
             this.coversFullRing = keyRanges.size() == 1 && RangeUtil.coversFullRing(keyRanges.get(0));
 
-            this.orderIterator = orderIterator;
+            this.scoredPrimaryKeyIterator = scoredPrimaryKeyIterator;
             this.filterTree = filterTree;
             this.controller = controller;
             this.executionController = executionController;
@@ -598,9 +601,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
          */
         private @Nullable ScoredPrimaryKey nextSelectedKeyInRange()
         {
-            while (orderIterator.hasNext())
+            while (scoredPrimaryKeyIterator.hasNext())
             {
-                ScoredPrimaryKey key = orderIterator.next();
+                ScoredPrimaryKey key = scoredPrimaryKeyIterator.next();
                 if (isInRange(key.partitionKey()) && controller.selects(key))
                     return key;
             }
@@ -723,7 +726,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         @Override
         public void close()
         {
-            FileUtils.closeQuietly(orderIterator);
+            FileUtils.closeQuietly(scoredPrimaryKeyIterator);
             controller.finish();
         }
     }

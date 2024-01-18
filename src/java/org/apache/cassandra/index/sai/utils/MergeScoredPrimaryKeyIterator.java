@@ -21,27 +21,26 @@ package org.apache.cassandra.index.sai.utils;
 import java.util.Collection;
 import java.util.List;
 import java.util.PriorityQueue;
-import java.util.Set;
 
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
- * An {@link OrderIterator} that merges multiple iterators into a single iterator by taking the
+ * An {@link ScoredPrimaryKeyIterator} that merges multiple iterators into a single iterator by taking the
  * scores of the top element of each iterator and returning the {@link ScoredPrimaryKey} with the
  * highest score.
  */
-public class MergeOrderIterator extends OrderIterator
+public class MergeScoredPrimaryKeyIterator extends ScoredPrimaryKeyIterator
 {
-    private final PriorityQueue<OrderIterator> pq;
-    private final List<OrderIterator> iteratorsToBeClosed;
+    private final PriorityQueue<ScoredPrimaryKeyIterator> pq;
+    private final List<ScoredPrimaryKeyIterator> iteratorsToBeClosed;
     private final Collection<SSTableIndex> indexesToBeClosed;
 
-    public MergeOrderIterator(List<OrderIterator> iterators, Collection<SSTableIndex> referencedIndexes)
+    public MergeScoredPrimaryKeyIterator(List<ScoredPrimaryKeyIterator> iterators, Collection<SSTableIndex> referencedIndexes)
     {
         int size = !iterators.isEmpty() ? iterators.size() : 1;
         this.pq = new PriorityQueue<>(size, (o1, o2) -> Float.compare(o2.peek().score, o1.peek().score));
-        for (OrderIterator iterator : iterators)
+        for (ScoredPrimaryKeyIterator iterator : iterators)
             if (iterator.hasNext())
                 pq.add(iterator);
         iteratorsToBeClosed = iterators;
@@ -62,7 +61,7 @@ public class MergeOrderIterator extends OrderIterator
     @Override
     public void close()
     {
-        for (OrderIterator iterator : iteratorsToBeClosed)
+        for (ScoredPrimaryKeyIterator iterator : iteratorsToBeClosed)
             FileUtils.closeQuietly(iterator);
         for (SSTableIndex index : indexesToBeClosed)
             index.release();

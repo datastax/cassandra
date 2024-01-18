@@ -18,20 +18,31 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.Iterator;
+import java.io.Closeable;
 
-public class WrappedOrderIterator extends OrderIterator
+/**
+ * An iterator over {@link ScoredPrimaryKey} ordered by score in descending order. Ascending order might be added
+ * later.
+ */
+public abstract class ScoredPrimaryKeyIterator extends AbstractIterator<ScoredPrimaryKey> implements Closeable
 {
-    private final Iterator<ScoredPrimaryKey> wrapped;
-
-    public WrappedOrderIterator(Iterator<ScoredPrimaryKey> wrapped)
+    private static final ScoredPrimaryKeyIterator EMPTY = new ScoredPrimaryKeyIterator()
     {
-        this.wrapped = wrapped;
+        @Override
+        public ScoredPrimaryKey computeNext()
+        {
+            return endOfData();
+        }
+    };
+
+    public static ScoredPrimaryKeyIterator empty()
+    {
+        return EMPTY;
     }
 
     @Override
-    protected ScoredPrimaryKey computeNext()
+    public void close()
     {
-        return wrapped.hasNext() ? wrapped.next() : endOfData();
     }
+
 }

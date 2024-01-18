@@ -39,7 +39,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.OrderIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -169,9 +169,9 @@ public class Segment implements Closeable, SegmentOrdering
      * @param keyRange   key range specific in read command, used by ANN index
      * @param context    to track per sstable cache and per query metrics
      * @param limit      the num of rows to returned, used by ANN index
-     * @return {@link OrderIterator} that matches given expression
+     * @return {@link ScoredPrimaryKeyIterator} that matches given expression
      */
-    public OrderIterator orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public ScoredPrimaryKeyIterator orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
         return index.orderBy(expression, keyRange, context, limit);
     }
@@ -193,7 +193,7 @@ public class Segment implements Closeable, SegmentOrdering
     }
 
     @Override
-    public OrderIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public ScoredPrimaryKeyIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         return index.orderResultsBy(context, keys, exp, limit);
     }

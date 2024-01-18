@@ -34,7 +34,7 @@ public interface MemtableOrdering
      *
      * Assumes that the given  spans the same rows as the implementing index's segment.
      */
-    default OrderIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
+    default ScoredPrimaryKeyIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
     {
         throw new UnsupportedOperationException();
     }
