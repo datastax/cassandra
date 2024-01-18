@@ -249,7 +249,6 @@ public class SensorsReadTest
         ReadCommandVerbHandler.instance.doVerb(Message.builder(Verb.READ_REQ, command).build());
     }
 
-
     private void assertRequestAndRegistrySensorsEquality(Context context)
     {
         Sensor localSensor = getThreadLocalRequestSensor();
