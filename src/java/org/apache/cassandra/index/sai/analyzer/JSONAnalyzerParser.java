@@ -19,15 +19,14 @@
 package org.apache.cassandra.index.sai.analyzer;
 
 import java.io.IOException;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import com.google.common.collect.Sets;
 
-import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.utils.JsonUtils;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.custom.CustomAnalyzer;
 
@@ -43,7 +42,7 @@ public class JSONAnalyzerParser
 
     public static Analyzer parse(String json) throws IOException
     {
-        List<Map<String,String>> list = (List<Map<String,String>>) Json.decodeJson(json);
+        List<Map<String,String>> list = (List<Map<String,String>>) JsonUtils.decodeJson(json);
         CustomAnalyzer.Builder builder = CustomAnalyzer.builder();
         for (int x = 0; x < list.size(); x++)
         {

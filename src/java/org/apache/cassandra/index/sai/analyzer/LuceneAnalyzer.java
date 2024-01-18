@@ -30,12 +30,10 @@ import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.NoSuchElementException;
 
-import com.google.common.base.Charsets;
 import com.google.common.base.MoreObjects;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.disk.io.BytesRefUtil;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;

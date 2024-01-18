@@ -24,7 +24,6 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;

@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
-import com.datastax.driver.core.exceptions.InvalidConfigurationInQueryException;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.index.sai.SAITester;
 
@@ -44,7 +43,7 @@ public class LuceneAnalyzerTest extends SAITester
                     "\t{\"filter\":\"porterstem\"}\n" +
                     "]'};");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'the query')");
 
@@ -85,7 +84,7 @@ public class LuceneAnalyzerTest extends SAITester
                     "\t{\"charfilter\":\"htmlstrip\"}\n" +
                     "]'}");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', '<b>hello</b>')");
 
@@ -104,7 +103,7 @@ public class LuceneAnalyzerTest extends SAITester
                     "\t{\"filter\":\"lowercase\"}\n" +
                     "]'}");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'DoG')");
 
@@ -125,7 +124,7 @@ public class LuceneAnalyzerTest extends SAITester
                     "\t{\"filter\":\"lowercase\"}\n" +
                     "]'}");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'DoG')");
 
@@ -143,7 +142,7 @@ public class LuceneAnalyzerTest extends SAITester
                     "{\"tokenizer\":\"whitespace\"}\n" +
                     "]'}");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'hello world twice the and')");
 
@@ -165,7 +164,7 @@ public class LuceneAnalyzerTest extends SAITester
                     "\t{\"filter\":\"lowercase\"}\n" +
                     "]'}");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'hELlo woRlD tWice tHe aNd')");
 
@@ -187,7 +186,7 @@ public class LuceneAnalyzerTest extends SAITester
                     "\t{\"filter\":\"porterstem\"}\n" +
                     "]'}");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'the queries')");
 
