@@ -49,7 +49,6 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.QueryInfoTracker;
-import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.reads.DataResolver;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.service.reads.ShortReadPartitionsProtection;
@@ -176,7 +175,7 @@ public class EndpointGroupingCoordinator
 
         // Create a handler for the range and add it, by replica, to the endpoint contexts.
         ReadCallback<EndpointsForRange, ReplicaPlan.ForRangeRead> handler =
-                new ReadCallback<>(resolver, subrangeCommand, sharedReplicaPlan, queryStartNanoTime);
+                new ReadCallback<>(resolver, subrangeCommand, sharedReplicaPlan, queryStartNanoTime, readTracker);
         
         perRangeHandlers.add(handler);
         for (Replica replica : replicaPlan.contacts())

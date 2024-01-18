@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.service.reads;
 
+import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -24,6 +25,7 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.service.QueryInfoTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,8 +62,9 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     private volatile int failures = 0;
     private final Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint;
     private final boolean couldSpeculate;
+    private final QueryInfoTracker.ReadTracker readTracker;
 
-    public ReadCallback(ResponseResolver<E, P> resolver, ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime)
+    public ReadCallback(ResponseResolver<E, P> resolver, ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime, QueryInfoTracker.ReadTracker readTracker)
     {
         this.command = command;
         this.resolver = resolver;
@@ -69,6 +72,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         this.replicaPlan = replicaPlan;
         this.blockFor = replicaPlan.get().blockFor();
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
+        this.readTracker = readTracker;
         // we don't support read repair (or rapid read protection) for range scans yet (CASSANDRA-6897)
         assert !(command instanceof PartitionRangeReadCommand) || blockFor >= replicaPlan().contacts().size();
         SpeculativeRetryPolicy retry = replicaPlan()
@@ -142,10 +146,12 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         return blockFor;
     }
 
+
     @Override
     public void onResponse(Message<ReadResponse> message)
     {
         assertWaitingFor(message.from());
+        readTracker.onResponse(message);
         resolver.preprocess(message);
 
         /*

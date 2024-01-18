@@ -151,7 +151,7 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
                                queryStartNanoTime,
                                QueryInfoTracker.ReadTracker.NOOP);
 
-        ReadCallback<EndpointsForToken, ReplicaPlan.ForTokenRead> handler = new ReadCallback<>(resolver, cmd, replicaPlan, queryStartNanoTime);
+        ReadCallback<EndpointsForToken, ReplicaPlan.ForTokenRead> handler = new ReadCallback<>(resolver, cmd, replicaPlan, queryStartNanoTime, QueryInfoTracker.ReadTracker.NOOP);
 
         if (source.isSelf())
         {

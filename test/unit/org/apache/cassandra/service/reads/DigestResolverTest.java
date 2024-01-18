@@ -100,7 +100,7 @@ public class DigestResolverTest extends AbstractReadResponseTest
             {
                 final long startNanos = System.nanoTime();
                 final DigestResolver<EndpointsForToken, ReplicaPlan.ForTokenRead> resolver = new DigestResolver<>(command, plan, startNanos, noopReadTracker());
-                final ReadCallback<EndpointsForToken, ReplicaPlan.ForTokenRead> callback = new ReadCallback<>(resolver, command, plan, startNanos);
+                final ReadCallback<EndpointsForToken, ReplicaPlan.ForTokenRead> callback = new ReadCallback<>(resolver, command, plan, startNanos, noopReadTracker());
                 
                 final CountDownLatch startlatch = new CountDownLatch(2);
 

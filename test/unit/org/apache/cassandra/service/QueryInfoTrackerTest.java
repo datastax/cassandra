@@ -38,10 +38,12 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.TableMetadata;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
@@ -544,6 +546,12 @@ public class QueryInfoTrackerTest extends CQLTester
 
                 readRows.incrementAndGet();
             }
+
+            @Override
+            public void onResponse(Message<ReadResponse> message)
+            {
+                // TODO: unit test
+            }
         }
 
         private class TestRangeReadTracker implements ReadTracker
@@ -576,6 +584,12 @@ public class QueryInfoTrackerTest extends CQLTester
             public void onRow(Row row)
             {
                 readRows.incrementAndGet();
+            }
+
+            @Override
+            public void onResponse(Message<ReadResponse> message)
+            {
+                // TODO: unit test
             }
         }
 
@@ -622,6 +636,12 @@ public class QueryInfoTrackerTest extends CQLTester
             public void onRow(Row row)
             {
                 readRows.incrementAndGet();
+            }
+
+            @Override
+            public void onResponse(Message<ReadResponse> message)
+            {
+                // TODO: unit test
             }
         }
     }

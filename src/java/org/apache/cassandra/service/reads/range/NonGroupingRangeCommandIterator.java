@@ -113,7 +113,7 @@ public class NonGroupingRangeCommandIterator extends RangeCommandIterator
         DataResolver<EndpointsForRange, ReplicaPlan.ForRangeRead> resolver =
         new DataResolver<>(rangeCommand, sharedReplicaPlan, readRepair, queryStartNanoTime, trackRepairData, readTracker);
         ReadCallback<EndpointsForRange, ReplicaPlan.ForRangeRead> handler =
-        new ReadCallback<>(resolver, rangeCommand, sharedReplicaPlan, queryStartNanoTime);
+        new ReadCallback<>(resolver, rangeCommand, sharedReplicaPlan, queryStartNanoTime, readTracker);
 
         if (replicaPlan.contacts().size() == 1 && replicaPlan.contacts().get(0).isSelf())
         {

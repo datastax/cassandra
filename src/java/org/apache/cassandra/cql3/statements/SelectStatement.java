@@ -24,6 +24,7 @@ import java.util.function.UnaryOperator;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
+import com.google.common.collect.ImmutableMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,10 +65,13 @@ import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.sensors.read.SensorsReadTracker;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.pager.AggregationQueryPager;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.service.pager.QueryPager;
@@ -494,6 +498,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         try (PartitionIterator page = pager.fetchPage(pageSize, queryStartNanoTime))
         {
             msg = processResults(page, options, selectors, nowInSec, userLimit);
+            QueryInfoTracker.ReadTracker readTracker = StorageProxy.readTracker();
+            if (readTracker instanceof SensorsReadTracker) {
+                SensorsReadTracker sensorsReadTracker = (SensorsReadTracker) readTracker;
+                msg.setCustomPayload(ImmutableMap.of("QUERY_READ_BYTES", sensorsReadTracker.getQueryReadBytesAsByteBuffer()));
+            }
         }
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this

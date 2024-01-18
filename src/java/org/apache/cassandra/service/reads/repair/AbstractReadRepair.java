@@ -134,7 +134,7 @@ public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends Repli
 
         // Do a full data read to resolve the correct response (and repair node that need be)
         DataResolver<E, P> resolver = new DataResolver<>(command, replicaPlan, this, queryStartNanoTime, trackRepairedStatus, digestResolver.getReadTracker());
-        ReadCallback<E, P> readCallback = new ReadCallback<>(resolver, command, replicaPlan, queryStartNanoTime);
+        ReadCallback<E, P> readCallback = new ReadCallback<>(resolver, command, replicaPlan, queryStartNanoTime, digestResolver.getReadTracker());
 
         digestRepair = new DigestRepair<>(resolver, readCallback, resultConsumer);
 

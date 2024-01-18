@@ -37,6 +37,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
+import org.apache.cassandra.net.MessageSerializationPropertyTest;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.schema.Schema;

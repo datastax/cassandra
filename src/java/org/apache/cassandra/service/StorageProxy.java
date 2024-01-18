@@ -49,6 +49,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.batchlog.Batch;
 import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.concurrent.Stage;
@@ -119,6 +120,7 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.SensorsQueryTracker;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.service.paxos.PrepareCallback;
@@ -162,6 +164,8 @@ public class StorageProxy implements StorageProxyMBean
     public static final StorageProxy instance = new StorageProxy();
 
     private static final Mutator mutator = MutatorProvider.instance;
+
+    private static final FastThreadLocal<QueryInfoTracker.ReadTracker> readTrackerLocal = new FastThreadLocal<>();
 
     public static class DefaultMutator implements Mutator
     {
@@ -342,6 +346,7 @@ public class StorageProxy implements StorageProxyMBean
     {
         MBeanWrapper.instance.registerMBean(instance, MBEAN_NAME);
         HintsService.instance.registerMBean();
+        instance.registerQueryTracker(new SensorsQueryTracker());
 
         standardWritePerformer = (mutation, targets, responseHandler, localDataCenter) ->
         {
@@ -399,6 +404,10 @@ public class StorageProxy implements StorageProxyMBean
 
     public static QueryInfoTracker queryTracker() {
         return queryInfoTracker;
+    }
+
+    public static QueryInfoTracker.ReadTracker readTracker() {
+        return readTrackerLocal.get();
     }
 
     /**
@@ -1874,6 +1883,7 @@ public class StorageProxy implements StorageProxyMBean
                                                                                       group.metadata(),
                                                                                       group.queries,
                                                                                       consistencyLevel);
+        readTrackerLocal.set(readTracker);
         PartitionIterator partitions = read(group, consistencyLevel, queryState, queryStartNanoTime, readTracker);
         return PartitionIterators.doOnClose(partitions, readTracker::onDone);
     }

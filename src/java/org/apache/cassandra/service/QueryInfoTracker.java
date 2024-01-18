@@ -21,14 +21,11 @@ package org.apache.cassandra.service;
 import java.util.Collection;
 import java.util.List;
 
-import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.IMutation;
-import org.apache.cassandra.db.PartitionRangeReadCommand;
-import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -213,9 +210,19 @@ public interface QueryInfoTracker
         /**
          * Called on every row read.
          *
-         * @param row          the merged row.
+         * @param row the merged row.
          */
         void onRow(Row row);
+
+        /**
+         * Called on every message reponse reveibed from a replica
+         *
+         * @param message the received message
+         */
+        default void onResponse(Message<ReadResponse> message)
+        {
+            // NOOP
+        }
 
         ReadTracker NOOP = new ReadTracker()
         {
@@ -231,6 +238,11 @@ public interface QueryInfoTracker
 
             @Override
             public void onRow(Row row)
+            {
+            }
+
+            @Override
+            public void onResponse(Message<ReadResponse> message)
             {
             }
 
@@ -288,6 +300,11 @@ public interface QueryInfoTracker
             }
 
             @Override
+            public void onResponse(Message<ReadResponse> message)
+            {
+            }
+
+            @Override
             public void onNotApplied()
             {
             }
@@ -307,6 +324,5 @@ public interface QueryInfoTracker
             {
             }
         };
-
     }
 }

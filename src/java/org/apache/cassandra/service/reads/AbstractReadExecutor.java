@@ -94,7 +94,7 @@ public abstract class AbstractReadExecutor
         // the ReadRepair and DigestResolver both need to see our updated
         this.readRepair = ReadRepair.create(command, this.replicaPlan, queryStartNanoTime);
         this.digestResolver = new DigestResolver<>(command, this.replicaPlan, queryStartNanoTime, readTracker);
-        this.handler = new ReadCallback<>(digestResolver, command, this.replicaPlan, queryStartNanoTime);
+        this.handler = new ReadCallback<>(digestResolver, command, this.replicaPlan, queryStartNanoTime, readTracker);
         this.cfs = cfs;
         this.traceState = Tracing.instance.get();
         this.queryStartNanoTime = queryStartNanoTime;

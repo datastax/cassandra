@@ -198,7 +198,7 @@ public class ShortReadPartitionsProtection extends Transformation<UnfilteredRowI
                                                          (NoopReadRepair<E, P>)NoopReadRepair.instance,
                                                          queryStartNanoTime,
                                                          QueryInfoTracker.ReadTracker.NOOP);
-        ReadCallback<E, P> handler = new ReadCallback<>(resolver, cmd, replicaPlan, queryStartNanoTime);
+        ReadCallback<E, P> handler = new ReadCallback<>(resolver, cmd, replicaPlan, queryStartNanoTime, QueryInfoTracker.ReadTracker.NOOP);
 
         if (source.isSelf())
         {
