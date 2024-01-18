@@ -28,13 +28,15 @@ import org.apache.cassandra.utils.CloseableIterator;
  * An iterator over scored primary keys ordered by the score descending
  * Not skippable.
  */
-public class PostingListScoredPrimaryKeyIterator extends ScoredPrimaryKeyIterator
+public class ScoredRowIdPrimaryKeyMapIterator extends ScoredPrimaryKeyIterator
 {
     private final PrimaryKeyMap primaryKeyMap;
     private final CloseableIterator<ScoredRowId> scoredRowIdIterator;
     private final IndexSearcherContext searcherContext;
 
-    public PostingListScoredPrimaryKeyIterator(CloseableIterator<ScoredRowId> scoredRowIdIterator, PrimaryKeyMap primaryKeyMap, IndexSearcherContext context)
+    public ScoredRowIdPrimaryKeyMapIterator(CloseableIterator<ScoredRowId> scoredRowIdIterator,
+                                            PrimaryKeyMap primaryKeyMap,
+                                            IndexSearcherContext context)
     {
         this.scoredRowIdIterator = scoredRowIdIterator;
         this.primaryKeyMap = primaryKeyMap;

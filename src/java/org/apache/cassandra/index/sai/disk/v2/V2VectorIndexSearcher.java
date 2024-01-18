@@ -54,7 +54,7 @@ import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
-import org.apache.cassandra.index.sai.utils.PostingListScoredPrimaryKeyIterator;
+import org.apache.cassandra.index.sai.utils.ScoredRowIdPrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -244,7 +244,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                                                         metadata.segmentRowIdOffset,
                                                                         queryContext,
                                                                         null);
-        return new PostingListScoredPrimaryKeyIterator(scoredRowIdIterator, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
+        return new ScoredRowIdPrimaryKeyMapIterator(scoredRowIdIterator,
+                                                    primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(),
+                                                    searcherContext);
     }
 
     private CloseableIterator<ScoredRowId> bruteForceOrdering(float[] queryVector, IntArrayList segmentRowIds, int limit, int topK, float threshold) throws IOException
