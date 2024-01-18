@@ -16,39 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk;
+package org.apache.cassandra.index.sai.disk.vector;
 
-import java.util.PriorityQueue;
-
-import org.apache.cassandra.index.sai.utils.ScoredRowId;
-import org.apache.cassandra.index.sai.utils.ScoredRowIdIterator;
-
-public class PriorityQueueScoredRowIdIterator implements ScoredRowIdIterator
+public class ScoredRowId
 {
-    private final PriorityQueue<ScoredRowId> scoredRowIdIterator;
-    public PriorityQueueScoredRowIdIterator(PriorityQueue<ScoredRowId> scoredRowIds)
+    final int segmentRowId;
+    final float score;
+
+    public ScoredRowId(int segmentRowId, float score)
     {
-        scoredRowIdIterator = scoredRowIds;
+        this.segmentRowId = segmentRowId;
+        this.score = score;
     }
 
-    @Override
-    public void close() throws Exception {}
-
-    @Override
-    public boolean hasNext()
+    public float getScore()
     {
-        return scoredRowIdIterator.peek() != null;
+        return score;
     }
 
-    @Override
-    public ScoredRowId next()
+    public int getSegmentRowId()
     {
-        return scoredRowIdIterator.poll();
-    }
-
-    @Override
-    public int getVisitedCount()
-    {
-        return scoredRowIdIterator.size();
+        return segmentRowId;
     }
 }

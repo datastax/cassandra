@@ -16,26 +16,31 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.disk.vector;
 
-public class ScoredRowId
+import org.apache.cassandra.utils.CloseableIterator;
+
+public class EmptyScoreRowIdIterator implements CloseableIterator<ScoredRowId>
 {
-    final int segmentRowId;
-    final float score;
+    private static final EmptyScoreRowIdIterator INSTANCE = new EmptyScoreRowIdIterator();
 
-    public ScoredRowId(int segmentRowId, float score)
+    public static EmptyScoreRowIdIterator instance()
     {
-        this.segmentRowId = segmentRowId;
-        this.score = score;
+        return INSTANCE;
     }
 
-    public float getScore()
+    @Override
+    public void close() {}
+
+    @Override
+    public boolean hasNext()
     {
-        return score;
+        return false;
     }
 
-    public int getSegmentRowId()
+    @Override
+    public ScoredRowId next()
     {
-        return segmentRowId;
+        throw new UnsupportedOperationException();
     }
 }

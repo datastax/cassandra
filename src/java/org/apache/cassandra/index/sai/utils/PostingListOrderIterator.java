@@ -20,7 +20,9 @@ package org.apache.cassandra.index.sai.utils;
 
 import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
+import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.CloseableIterator;
 
 /**
  * An iterator over scored primary keys ordered by the score descending
@@ -29,10 +31,10 @@ import org.apache.cassandra.io.util.FileUtils;
 public class PostingListOrderIterator extends OrderIterator
 {
     private final PrimaryKeyMap primaryKeyMap;
-    private final ScoredRowIdIterator scoredRowIdIterator;
+    private final CloseableIterator<ScoredRowId> scoredRowIdIterator;
     private final IndexSearcherContext searcherContext;
 
-    public PostingListOrderIterator(ScoredRowIdIterator scoredRowIdIterator, PrimaryKeyMap primaryKeyMap, IndexSearcherContext context)
+    public PostingListOrderIterator(CloseableIterator<ScoredRowId> scoredRowIdIterator, PrimaryKeyMap primaryKeyMap, IndexSearcherContext context)
     {
         this.scoredRowIdIterator = scoredRowIdIterator;
         this.primaryKeyMap = primaryKeyMap;
@@ -53,7 +55,7 @@ public class PostingListOrderIterator extends OrderIterator
             return endOfData();
 
         var scoredRowId = scoredRowIdIterator.next();
-        var primaryKey = primaryKeyMap.primaryKeyFromRowId(searcherContext.getSegmentRowIdOffset() + scoredRowId.segmentRowId);
-        return new ScoredPrimaryKey(primaryKey, scoredRowId.score);
+        var primaryKey = primaryKeyMap.primaryKeyFromRowId(searcherContext.getSegmentRowIdOffset() + scoredRowId.getSegmentRowId());
+        return new ScoredPrimaryKey(primaryKey, scoredRowId.getScore());
     }
 }

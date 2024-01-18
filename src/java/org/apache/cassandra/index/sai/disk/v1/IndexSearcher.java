@@ -31,9 +31,7 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.OrderIterator;
-import org.apache.cassandra.index.sai.utils.PostingListOrderIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.ScoredRowIdIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 
 /**
@@ -107,20 +105,5 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
                                                                         queryContext,
                                                                         postingList.peekable());
         return new PostingListRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
-    }
-
-    protected OrderIterator toScoreOrderedIterator(ScoredRowIdIterator scoredRowIdIterator, QueryContext queryContext) throws IOException
-    {
-        if (scoredRowIdIterator == null || !scoredRowIdIterator.hasNext())
-            return OrderIterator.empty();
-
-        IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
-                                                                        metadata.maxKey,
-                                                                        metadata.minSSTableRowId,
-                                                                        metadata.maxSSTableRowId,
-                                                                        metadata.segmentRowIdOffset,
-                                                                        queryContext,
-                                                                        null);
-        return new PostingListOrderIterator(scoredRowIdIterator, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
     }
 }

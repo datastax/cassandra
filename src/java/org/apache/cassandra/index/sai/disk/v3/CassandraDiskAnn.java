@@ -22,10 +22,9 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
-import java.util.PrimitiveIterator;
+import java.util.function.IntConsumer;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
-import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 
 import io.github.jbellis.jvector.disk.CachingGraphIndex;
@@ -45,18 +44,15 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
+import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
-import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
-import org.apache.cassandra.index.sai.utils.ScoredRowId;
-import org.apache.cassandra.index.sai.utils.ScoredRowIdIterator;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.CloseableIterator;
 
 public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 {
@@ -112,54 +108,22 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     }
 
     /**
-     * @return Row IDs associated with the topK vectors near the query
-     *
-     * @param queryVector the query vector
-     * @param topK the number of results to look for in the index (>= limit)
-     * @param limit the maximum number of results to return
-     * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
-     * @param context unused (vestige from HNSW, retained in signature to allow calling both easily)
-     */
-    @Override
-    public VectorPostingList search(float[] queryVector, int topK, int limit, Bits acceptBits, QueryContext context)
-    {
-        return search(queryVector, topK, 0, limit, acceptBits, context);
-    }
-
-    /**
      * @return Row IDs associated with the topK vectors near the query. If a threshold is specified, only vectors with
      * a similarity score >= threshold will be returned.
      * @param queryVector the query vector
      * @param topK the number of results to look for in the index (>= limit)
      * @param threshold the minimum similarity score to accept
-     * @param limit the maximum number of results to return
      * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
      * @param context unused (vestige from HNSW, retained in signature to allow calling both easily)
+     * @param nodesVisitedConsumer a consumer that will be called with the number of nodes visited during the search
      * @return
      */
     @Override
-    public VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits acceptBits, QueryContext context)
+    public NodeScoreToScoredRowIdIterator search(float[] queryVector, int topK, float threshold, Bits acceptBits, QueryContext context,
+                                                 IntConsumer nodesVisitedConsumer)
     {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
-        var searcher = new GraphSearcher.Builder<>(view.get()).build();
-        var result = searchInternal(searcher, queryVector, topK, threshold, acceptBits, context);
-        return annRowIdsToPostings(result, limit);
-    }
-
-    @Override
-    public ScoredRowIdIterator searchWithScores(float[] queryVector, int topK, Bits bits, QueryContext context)
-    {
-        CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
-
-        var searcher = new GraphSearcher.Builder<>(view.get()).build();
-        var result = searchInternal(searcher, queryVector, topK, 0, bits, context);
-        return new ScoredRowIdIteratorDiskAnn(result, () -> resumeSearch(searcher, topK));
-    }
-
-    private SearchResult searchInternal(GraphSearcher<float[]> searcher, float[] queryVector, int topK, float threshold,
-                                        Bits acceptBits, QueryContext context)
-    {
         // Retrieve the view reference once.
         var threadLocalView = view.get();
         NodeSimilarity.ScoreFunction scoreFunction;
@@ -175,20 +139,20 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, similarityFunction);
             reranker = i -> similarityFunction.compare(queryVector, threadLocalView.getVector(i));
         }
-        var result = searcher.search(scoreFunction,
-                                     reranker,
-                                     topK,
-                                     threshold,
-                                     ordinalsMap.ignoringDeleted(acceptBits));
-        context.addAnnNodesVisited(result.getVisitedCount());
+        var searcher = new GraphSearcher.Builder<>(threadLocalView).build();
+        var result = searcher.search(scoreFunction, reranker, topK, threshold, ordinalsMap.ignoringDeleted(acceptBits));
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-        return result;
+        // Threshold based searches do not support resuming the search.
+        Supplier<SearchResult> reSearcher = threshold == 0 ? () -> resumeSearch(searcher, topK) : null;
+        var nodeScores = new NodeScoreIterator(result, reSearcher, nodesVisitedConsumer);
+        return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
     }
 
     private SearchResult resumeSearch(GraphSearcher<float[]> searcher, int topK)
     {
         var nextTopK = searcher.resume(topK);
-        Tracing.trace("DiskANN resumed search and visited {} nodes to return {} results", nextTopK.getVisitedCount(), nextTopK.getNodes().length);
+        Tracing.trace("DiskANN resumed search and visited {} nodes to return {} results",
+                      nextTopK.getVisitedCount(), nextTopK.getNodes().length);
         return nextTopK;
     }
 
@@ -198,129 +162,52 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         return compressedVectors;
     }
 
-    private class RowIdIterator implements PrimitiveIterator.OfInt, AutoCloseable
-    {
-        private final Iterator<NodeScore> it;
-        private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
-
-        private OfInt segmentRowIdIterator = IntStream.empty().iterator();
-
-        public RowIdIterator(NodeScore[] results)
-        {
-            this.it = Arrays.stream(results).iterator();
-        }
-
-        @Override
-        public boolean hasNext() {
-            while (!segmentRowIdIterator.hasNext() && it.hasNext()) {
-                try
-                {
-                    NodeScore result = it.next();
-                    var ordinal = result.node;
-                    int[] rowIds = rowIdsView.getSegmentRowIdsMatching(ordinal);
-                    segmentRowIdIterator = Arrays.stream(rowIds).iterator();
-                }
-                catch (IOException e)
-                {
-                    throw new RuntimeException(e);
-                }
-            }
-            return segmentRowIdIterator.hasNext();
-        }
-
-        @Override
-        public int nextInt() {
-            if (!hasNext())
-                throw new NoSuchElementException();
-            return segmentRowIdIterator.nextInt();
-        }
-
-        @Override
-        public void close()
-        {
-            rowIdsView.close();
-        }
-    }
-
     /**
-     * An iterator over {@link ScoredRowId}. This iterator is backed by a {@link SearchResult} and resumes the search
+     * An iterator over {@link NodeScore}. This iterator is backed by a {@link SearchResult} and resumes the search
      * when the backing {@link SearchResult} is exhausted.
      */
-    private class ScoredRowIdIteratorDiskAnn implements ScoredRowIdIterator
+    private static class NodeScoreIterator implements CloseableIterator<NodeScore>
     {
         private final Supplier<SearchResult> resumeSearch;
-        private Iterator<NodeScore> it;
-        private final int visitedCount;
-        private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
+        private final IntConsumer nodesVisitedConsumer;
+        private Iterator<NodeScore> nodeScores;
+        private int cumulativeNodesVisited;
 
-        private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
-        private float currentScore = -1f;
-
-        public ScoredRowIdIteratorDiskAnn(SearchResult result, Supplier<SearchResult> resumeSearch)
+        public NodeScoreIterator(SearchResult result,
+                                 Supplier<SearchResult> resumeSearch,
+                                 IntConsumer nodesVisitedConsumer)
         {
-            this.it = Arrays.stream(result.getNodes()).iterator();
-            this.visitedCount = result.getVisitedCount();
+            this.nodeScores = Arrays.stream(result.getNodes()).iterator();
+            this.cumulativeNodesVisited = result.getVisitedCount();
             this.resumeSearch = resumeSearch;
+            this.nodesVisitedConsumer = nodesVisitedConsumer;
         }
 
         @Override
         public boolean hasNext() {
-            while (true)
-            {
-                if (segmentRowIdIterator.hasNext())
-                    return true;
+            if (nodeScores.hasNext())
+                return true;
 
-                if (it.hasNext())
-                {
-                    try
-                    {
-                        NodeScore result = it.next();
-                        currentScore = result.score;
-                        var ordinal = result.node;
-                        int[] rowIds = rowIdsView.getSegmentRowIdsMatching(ordinal);
-                        segmentRowIdIterator = Arrays.stream(rowIds).iterator();
-                        assert segmentRowIdIterator.hasNext() : "No row IDs found for ordinal " + ordinal;
-                        return true;
-                    }
-                    catch (IOException e)
-                    {
-                        throw new RuntimeException(e);
-                    }
-                }
+            if (resumeSearch == null)
+                return false;
 
-                var searchResult = resumeSearch.get();
-                it = Arrays.stream(searchResult.getNodes()).iterator();
-                // We've exhausted the graph
-                if (!it.hasNext())
-                    return false;
-            }
+            var searchResult = resumeSearch.get();
+            cumulativeNodesVisited += searchResult.getVisitedCount();
+            nodeScores = Arrays.stream(searchResult.getNodes()).iterator();
+            return nodeScores.hasNext();
         }
 
         @Override
-        public ScoredRowId next() {
+        public NodeScore next() {
             if (!hasNext())
                 throw new NoSuchElementException();
-            return new ScoredRowId(segmentRowIdIterator.nextInt(), currentScore);
-        }
-
-        @Override
-        public int getVisitedCount()
-        {
-            return visitedCount;
+            return nodeScores.next();
         }
 
         @Override
         public void close()
         {
-            rowIdsView.close();
-        }
-    }
-
-    private VectorPostingList annRowIdsToPostings(SearchResult results, int limit)
-    {
-        try (var iterator = new RowIdIterator(results.getNodes()))
-        {
-            return new VectorPostingList(iterator, limit, results.getVisitedCount());
+            nodesVisitedConsumer.accept(cumulativeNodesVisited);
         }
     }
 

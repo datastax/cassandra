@@ -19,7 +19,10 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashSet;
+import java.util.NoSuchElementException;
+import java.util.PrimitiveIterator;
 import java.util.Set;
 
 import com.google.common.base.Preconditions;
@@ -29,8 +32,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.DiskBinarySearch;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
-import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
-import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
 import io.github.jbellis.jvector.util.Bits;
 
 public class OnDiskOrdinalsMap
@@ -94,12 +95,42 @@ public class OnDiskOrdinalsMap
         return BitsUtil.bitsIgnoringDeleted(acceptBits, deletedOrdinals);
     }
 
+
+    /**
+     * Singleton int iterator used to prevent unnecessary object creation
+     */
+    private static class SingletonIntIterator implements PrimitiveIterator.OfInt
+    {
+        private final int value;
+        private boolean hasNext = true;
+
+        public SingletonIntIterator(int value)
+        {
+            this.value = value;
+        }
+
+        @Override
+        public boolean hasNext()
+        {
+            return hasNext;
+        }
+
+        @Override
+        public int nextInt()
+        {
+            if (!hasNext)
+                throw new NoSuchElementException();
+            hasNext = false;
+            return value;
+        }
+    }
+
     private static class OrdinalsMatchingRowIdsView implements RowIdsView {
 
         @Override
-        public int[] getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
+        public PrimitiveIterator.OfInt getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
         {
-            return new int[] { vectorOrdinal };
+            return new SingletonIntIterator(vectorOrdinal);
         }
 
         @Override
@@ -114,7 +145,7 @@ public class OnDiskOrdinalsMap
         RandomAccessReader reader = fh.createReader();
 
         @Override
-        public int[] getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
+        public PrimitiveIterator.OfInt getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
         {
             Preconditions.checkArgument(vectorOrdinal < size, "vectorOrdinal %s is out of bounds %s", vectorOrdinal, size);
 
@@ -140,12 +171,17 @@ public class OnDiskOrdinalsMap
                                                          vectorOrdinal, ordToRowOffset), e);
             }
             var postingsSize = reader.readInt();
+
+            // Optimize for the most common case
+            if (postingsSize == 1)
+                return new SingletonIntIterator(reader.readInt());
+
             var rowIds = new int[postingsSize];
             for (var i = 0; i < rowIds.length; i++)
             {
                 rowIds[i] = reader.readInt();
             }
-            return rowIds;
+            return Arrays.stream(rowIds).iterator();
         }
 
         @Override

@@ -16,15 +16,36 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.vector;
+package org.apache.cassandra.index.sai.disk;
 
-import java.io.IOException;
-import java.util.PrimitiveIterator;
+import java.util.PriorityQueue;
 
-public interface RowIdsView extends AutoCloseable
+import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
+import org.apache.cassandra.utils.CloseableIterator;
+
+/**
+ * An iterator over {@link ScoredRowId} sorted by score descending backed by a {@link PriorityQueue}.
+ */
+public class PQScoredRowIdIterator implements CloseableIterator<ScoredRowId>
 {
-    PrimitiveIterator.OfInt getSegmentRowIdsMatching(int vectorOrdinal) throws IOException;
+    private final PriorityQueue<ScoredRowId> scoredRowIdIterator;
+    public PQScoredRowIdIterator(PriorityQueue<ScoredRowId> scoredRowIds)
+    {
+        scoredRowIdIterator = scoredRowIds;
+    }
 
     @Override
-    void close();
+    public void close() {}
+
+    @Override
+    public boolean hasNext()
+    {
+        return scoredRowIdIterator.peek() != null;
+    }
+
+    @Override
+    public ScoredRowId next()
+    {
+        return scoredRowIdIterator.poll();
+    }
 }

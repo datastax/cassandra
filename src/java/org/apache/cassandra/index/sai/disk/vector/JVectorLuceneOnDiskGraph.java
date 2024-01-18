@@ -19,7 +19,7 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
-import java.util.Iterator;
+import java.util.function.IntConsumer;
 
 import org.slf4j.Logger;
 
@@ -29,9 +29,6 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
-import org.apache.cassandra.index.sai.utils.ScoredRowIdIterator;
-import org.apache.cassandra.utils.Pair;
 
 /**
  * A common interface between Lucene and JVector graph indexes
@@ -62,14 +59,7 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
     /**
      * See CassandraDiskANN::search
      */
-    public abstract VectorPostingList search(float[] queryVector, int topK, int limit, Bits bits, QueryContext context);
-
-    /**
-     * See CassandraDiskANN::search
-     */
-    public abstract VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits bits, QueryContext context);
-
-    public abstract ScoredRowIdIterator searchWithScores(float[] queryVector, int topK, Bits bits, QueryContext context);
+    public abstract NodeScoreToScoredRowIdIterator search(float[] queryVector, int topK, float threshold, Bits bits, QueryContext context, IntConsumer nodesVisited);
 
     public abstract void close() throws IOException;
 
