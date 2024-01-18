@@ -92,6 +92,5 @@ public class Context
     public static Context from(TableMetadata table)
     {
         return new Context(table.keyspace, table.name, table.id.toString());
-
     }
 }
