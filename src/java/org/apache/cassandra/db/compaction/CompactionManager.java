@@ -1833,25 +1833,23 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
                         pendingRepair);
             return fullSSTables.size() + transSSTables.size() + unrepairedSSTables.size();
         }
-        catch (Throwable e)
+        catch (CompactionInterruptedException e)
         {
-            if (e instanceof CompactionInterruptedException)
+            if (isCancelled.getAsBoolean())
             {
-                if (isCancelled.getAsBoolean())
-                {
-                    logger.info("Anticompaction has been canceled for session {}", pendingRepair);
-                    logger.trace(e.getMessage(), e);
-                }
-                else
-                {
-                    logger.info("Anticompaction for session {} has been stopped by request.", pendingRepair);
-                }
+                logger.info("Anticompaction has been canceled for session {}", pendingRepair);
+                logger.trace(e.getMessage(), e);
             }
             else
             {
-                JVMStabilityInspector.inspectThrowable(e);
-                logger.error("Error anticompacting " + txn + " for " + pendingRepair, e);
+                logger.info("Anticompaction for session {} has been stopped by request.", pendingRepair);
             }
+            throw e;
+        }
+        catch (Throwable e)
+        {
+            JVMStabilityInspector.inspectThrowable(e);
+            logger.error("Error anticompacting " + txn + " for " + pendingRepair, e);
             throw e;
         }
     }
@@ -1883,6 +1881,12 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
             public OperationProgress getProgress()
             {
                 return compaction.getProgress();
+            }
+
+            @Override
+            public void stop()
+            {
+                compaction.stop();
             }
 
             @Override
