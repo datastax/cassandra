@@ -435,46 +435,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             {
                 queryContext.addPartitionsRead(1);
                 queryContext.checkpoint();
-                return applyIndexFilter(key, partition, filterTree, queryContext);
+                var staticRow = partition.staticRow();
+                List<Unfiltered> clusters = applyIndexFilter(key, partition, staticRow, filterTree, queryContext);
+                if (clusters == null)
+                    return null;
+                return new PartitionIterator(partition, staticRow, Iterators.filter(clusters.iterator(), u -> !((Row)u).isStatic()));
             }
-        }
-
-        private UnfilteredRowIterator applyIndexFilter(PrimaryKey key, UnfilteredRowIterator partition, FilterTree tree, QueryContext queryContext)
-        {
-            Row staticRow = partition.staticRow();
-            List<Unfiltered> clusters = new ArrayList<>();
-
-            while (partition.hasNext())
-            {
-                Unfiltered row = partition.next();
-
-                queryContext.addRowsFiltered(1);
-                if (tree.isSatisfiedBy(key.partitionKey(), row, staticRow))
-                {
-                    clusters.add(row);
-                }
-            }
-
-            if (clusters.isEmpty())
-            {
-                queryContext.addRowsFiltered(1);
-                if (tree.isSatisfiedBy(key.partitionKey(), staticRow, staticRow))
-                {
-                    clusters.add(staticRow);
-                }
-            }
-
-            /*
-             * If {@code clusters} is empty, which means either all clustering row and static row pairs failed,
-             *       or static row and static row pair failed. In both cases, we should not return any partition.
-             * If {@code clusters} is not empty, which means either there are some clustering row and static row pairs match the filters,
-             *       or static row and static row pair matches the filters. In both cases, we should return a partition with static row,
-             *       and remove the static row marker from the {@code clusters} for the latter case.
-             */
-            if (clusters.isEmpty())
-                return null;
-
-            return new PartitionIterator(partition, staticRow, Iterators.filter(clusters.iterator(), u -> !((Row)u).isStatic()));
         }
 
         private static class PartitionIterator extends AbstractUnfilteredRowIterator
@@ -622,52 +588,13 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             {
                 queryContext.addPartitionsRead(1);
                 queryContext.checkpoint();
-                return applyIndexFilter(key, partition, filterTree, queryContext);
+                var staticRow = partition.staticRow();
+                List<Unfiltered> clusters = applyIndexFilter(key, partition, staticRow, filterTree, queryContext);
+                if (clusters == null)
+                    return null;
+                assert clusters.size() == 1 : "Ordering results in just one row";
+                return new PrimaryKeyIterator(key, partition, staticRow, clusters.get(0));
             }
-        }
-
-        private UnfilteredRowIterator applyIndexFilter(ScoredPrimaryKey key, UnfilteredRowIterator partition, FilterTree tree, QueryContext queryContext)
-        {
-            Row staticRow = partition.staticRow();
-            List<Unfiltered> clusters = new ArrayList<>();
-
-            while (partition.hasNext())
-            {
-                Unfiltered row = partition.next();
-
-                queryContext.addRowsFiltered(1);
-                if (tree.isSatisfiedBy(key.partitionKey(), row, staticRow))
-                {
-                    clusters.add(row);
-                }
-            }
-
-            if (clusters.isEmpty())
-            {
-                queryContext.addRowsFiltered(1);
-                if (tree.isSatisfiedBy(key.partitionKey(), staticRow, staticRow))
-                {
-                    clusters.add(staticRow);
-                }
-            }
-
-            /*
-             * If {@code clusters} is empty, which means either all clustering row and static row pairs failed,
-             *       or static row and static row pair failed. In both cases, we should not return any partition.
-             * If {@code clusters} is not empty, which means either there are some clustering row and static row pairs match the filters,
-             *       or static row and static row pair matches the filters. In both cases, we should return a partition with static row,
-             *       and remove the static row marker from the {@code clusters} for the latter case.
-             */
-            if (clusters.isEmpty())
-            {
-                // shadowed by expired TTL or row tombstone or range tombstone
-                queryContext.addShadowed(1);
-                return null;
-            }
-
-            assert clusters.size() == 1 : "Ordering results in just one row";
-            // TODO what about static clusters? There is a filtering thing above
-            return new PrimaryKeyIterator(key, partition, staticRow, clusters.get(0));
         }
 
         /**
@@ -729,6 +656,48 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             FileUtils.closeQuietly(scoredPrimaryKeyIterator);
             controller.finish();
         }
+    }
+
+    private static List<Unfiltered> applyIndexFilter(PrimaryKey key, UnfilteredRowIterator partition, Row staticRow,
+                                                     FilterTree tree, QueryContext queryContext)
+    {
+        List<Unfiltered> clusters = new ArrayList<>();
+
+        while (partition.hasNext())
+        {
+            Unfiltered row = partition.next();
+
+            queryContext.addRowsFiltered(1);
+            if (tree.isSatisfiedBy(key.partitionKey(), row, staticRow))
+            {
+                clusters.add(row);
+            }
+        }
+
+        if (clusters.isEmpty())
+        {
+            queryContext.addRowsFiltered(1);
+            if (tree.isSatisfiedBy(key.partitionKey(), staticRow, staticRow))
+            {
+                clusters.add(staticRow);
+            }
+        }
+
+        /*
+         * If {@code clusters} is empty, which means either all clustering row and static row pairs failed,
+         *       or static row and static row pair failed. In both cases, we should not return any partition.
+         * If {@code clusters} is not empty, which means either there are some clustering row and static row pairs match the filters,
+         *       or static row and static row pair matches the filters. In both cases, we should return a partition with static row,
+         *       and remove the static row marker from the {@code clusters} for the latter case.
+         */
+        if (clusters.isEmpty())
+        {
+            // shadowed by expired TTL or row tombstone or range tombstone
+            queryContext.addShadowed(1);
+            return null;
+        }
+
+        return clusters;
     }
 
     /**
