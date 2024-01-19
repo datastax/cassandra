@@ -195,7 +195,8 @@ public class VectorTopKProcessor
             // FilteredPartitions does not implement ParallelizablePartitionIterator.
             // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
             int rowsMatched = 0;
-            while (retriever.hasNext() && rowsMatched < limit)
+            // Check rowsMatched first to prevent fetching one more partition than needed.
+            while (rowsMatched < limit && retriever.hasNext())
             {
                 // have to close to move to the next partition, otherwise hasNext() fails
                 try (var partitionRowIterator = retriever.next())
