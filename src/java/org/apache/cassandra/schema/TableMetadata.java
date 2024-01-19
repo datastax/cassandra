@@ -461,28 +461,74 @@ public class TableMetadata implements SchemaElement
         return !columnName.hasRemaining();
     }
 
+    public void validateTableStructureCompatibility(TableMetadata previous)
+    {
+        if (isIndex())
+            return;
+
+        validateTableName(previous);
+        validateTableType(previous);
+        validatePartitionKeyColumnTypes(previous);
+        validateClusteringColumns(previous);
+        validateRegularAndStaticColumns(previous);
+    }
+
     void validateCompatibility(TableMetadata previous)
     {
         if (isIndex())
             return;
 
+        validateKeyspaceName(previous);
+        validateTableName(previous);
+        validateTableId(previous);
+        validateTableType(previous);
+        validatePartitionKeyColumns(previous);
+        validateClusteringColumns(previous);
+        validateRegularAndStaticColumns(previous);
+
+    }
+
+    private void validateKeyspaceName(TableMetadata previous)
+    {
         if (!previous.keyspace.equals(keyspace))
             except("Keyspace mismatch (found %s; expected %s)", keyspace, previous.keyspace);
+    }
 
+    private void validateTableName(TableMetadata previous)
+    {
         if (!previous.name.equals(name))
             except("Table mismatch (found %s; expected %s)", name, previous.name);
+    }
 
+    private void validateTableId(TableMetadata previous)
+    {
         if (!previous.id.equals(id))
             except("Table ID mismatch (found %s; expected %s)", id, previous.id);
+    }
 
+    private void validateTableType(TableMetadata previous)
+    {
         if (!previous.flags.equals(flags) && (!Flag.isCQLTable(flags) || Flag.isCQLTable(previous.flags)))
             except("Table type mismatch (found %s; expected %s)", flags, previous.flags);
+    }
 
+    private void validatePartitionKeyColumnTypes(TableMetadata previous)
+    {
+        if (!partitionKeyType.isCompatibleWith(previous.partitionKeyType))
+        {
+            except("Partition keys of different types (found %s; expected %s)",
+                    partitionKeyType,
+                    previous.partitionKeyType);
+        }
+    }
+
+    private void validatePartitionKeyColumns(TableMetadata previous)
+    {
         if (previous.partitionKeyColumns.size() != partitionKeyColumns.size())
         {
             except("Partition keys of different length (found %s; expected %s)",
-                   partitionKeyColumns.size(),
-                   previous.partitionKeyColumns.size());
+                    partitionKeyColumns.size(),
+                    previous.partitionKeyColumns.size());
         }
 
         for (int i = 0; i < partitionKeyColumns.size(); i++)
@@ -490,16 +536,19 @@ public class TableMetadata implements SchemaElement
             if (!partitionKeyColumns.get(i).type.isCompatibleWith(previous.partitionKeyColumns.get(i).type))
             {
                 except("Partition key column mismatch (found %s; expected %s)",
-                       partitionKeyColumns.get(i).type,
-                       previous.partitionKeyColumns.get(i).type);
+                        partitionKeyColumns.get(i).type,
+                        previous.partitionKeyColumns.get(i).type);
             }
         }
+    }
 
+    private void validateClusteringColumns(TableMetadata previous)
+    {
         if (previous.clusteringColumns.size() != clusteringColumns.size())
         {
             except("Clustering columns of different length (found %s; expected %s)",
-                   clusteringColumns.size(),
-                   previous.clusteringColumns.size());
+                    clusteringColumns.size(),
+                    previous.clusteringColumns.size());
         }
 
         for (int i = 0; i < clusteringColumns.size(); i++)
@@ -507,11 +556,14 @@ public class TableMetadata implements SchemaElement
             if (!clusteringColumns.get(i).type.isCompatibleWith(previous.clusteringColumns.get(i).type))
             {
                 except("Clustering column mismatch (found %s; expected %s)",
-                       clusteringColumns.get(i).type,
-                       previous.clusteringColumns.get(i).type);
+                        clusteringColumns.get(i).type,
+                        previous.clusteringColumns.get(i).type);
             }
         }
+    }
 
+    private void validateRegularAndStaticColumns(TableMetadata previous)
+    {
         for (ColumnMetadata previousColumn : previous.regularAndStaticColumns)
         {
             ColumnMetadata column = getColumn(previousColumn.name);
