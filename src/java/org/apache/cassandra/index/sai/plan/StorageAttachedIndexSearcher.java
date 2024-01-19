@@ -620,6 +620,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
         public static class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
         {
+            private boolean consumed = false;
             private final Unfiltered row;
             public final ScoredPrimaryKey scoredPrimaryKey;
 
@@ -640,6 +641,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             @Override
             protected Unfiltered computeNext()
             {
+                if (consumed)
+                    return endOfData();
+                consumed = true;
                 return row;
             }
         }

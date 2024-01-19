@@ -304,6 +304,7 @@ public class VectorTopKProcessor
             return pr;
 
         Unfiltered unfiltered = partitionRowIterator.next();
+        assert !partitionRowIterator.hasNext() : "Only one row should be returned from vector search";
         // Always include tombstones for coordinator. It relies on ReadCommand#withMetricsRecording to throw
         // TombstoneOverwhelmingException to prevent OOM.
         if (unfiltered.isRangeTombstoneMarker())
