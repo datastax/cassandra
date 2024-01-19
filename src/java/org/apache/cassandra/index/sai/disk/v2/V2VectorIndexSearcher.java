@@ -46,7 +46,7 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
-import org.apache.cassandra.index.sai.disk.vector.CompressedVectorRowIdIterator;
+import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.EmptyScoreRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OverqueryUtils;
@@ -221,13 +221,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 throw new RuntimeException(e);
             }
             // We can make a more accurate cost estimate now
-            final CostEstimate finalCostEstimate = estimateCost(topK, bits.cardinality());
+            var betterCostEstimate = estimateCost(topK, bits.cardinality());
 
             if (!hasMatches)
                 return EmptyScoreRowIdIterator.instance();
 
             return graph.search(queryVector, topK, threshold, bits, context, visited -> {
-                finalCostEstimate.updateStatistics(visited);
+                betterCostEstimate.updateStatistics(visited);
                 context.addAnnNodesVisited(visited);
             });
         }
@@ -259,14 +259,15 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
     /**
      * Materialize the compressed vectors for the given segment row ids, put them into a priority queue ordered by
-     * approximate similarity score, and then pass to the {@link CompressedVectorRowIdIterator} to lazily resolve the
+     * approximate similarity score, and then pass to the {@link BruteForceRowIdIterator} to lazily resolve the
      * full resolution ordering as needed.
      */
     private CloseableIterator<ScoredRowId> bruteForceWithCV(CompressedVectors cv, float[] queryVector,
                                                             IntArrayList segmentRowIds, int limit, int topK,
                                                             float threshold) throws IOException
     {
-        var approximateScores = new PriorityQueue<CompressedVectorRowIdIterator.ApproximateScore>(segmentRowIds.size());
+        var approximateScores = new PriorityQueue<BruteForceRowIdIterator.RowWithApproximateScore>(segmentRowIds.size(),
+                                                                                                   (a, b) -> Float.compare(b.getApproximateScore(), a.getApproximateScore()));
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         var scoreFunction = cv.approximateScoreFunctionFor(queryVector, similarityFunction);
 
@@ -280,11 +281,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     continue;
 
                 var score = scoreFunction.similarityTo(ordinal);
-                approximateScores.add(new CompressedVectorRowIdIterator.ApproximateScore(segmentRowId, ordinal, score));
+                approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
             }
         }
-        return new CompressedVectorRowIdIterator(queryVector, approximateScores, this::getVectorForOrdinal,
-                                                 similarityFunction, limit, topK, threshold);
+        return new BruteForceRowIdIterator(queryVector, approximateScores, this::getVectorForOrdinal,
+                                           similarityFunction, limit, topK, threshold);
     }
 
     private float[] getVectorForOrdinal(int ordinal)

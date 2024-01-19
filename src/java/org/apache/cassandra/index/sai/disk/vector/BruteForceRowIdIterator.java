@@ -28,35 +28,33 @@ import org.apache.cassandra.utils.CloseableIterator;
 /**
  * An iterator over {@link ScoredRowId} that lazily orders a {@link PriorityQueue} of approximately scored rows.
  * The class works by:
- * 1. Taking a priority queue of {@link ApproximateScore} ordered by approximate similarity score.
+ * 1. Taking a priority queue of {@link RowWithApproximateScore} ordered by approximate similarity score.
  * 2. Polling the topK results from the approximate score queue
  * 3. Materialize and score the full resolution vector for each row from step 2.
  * 4. Add to the full resolution row {@link ScoredRowId} to the priority queue.
  * 5. Return rows from the {@link ScoredRowId} priority queue until the limit is reached.
- * 6. When the limit is reached, if the {@link ApproximateScore} queue is not empty, get the next (topK - limit) rows
- *    from the approximate score queue and repeat 3-6 until the {@link ApproximateScore} queue is empty.
+ * 6. When the limit is reached, if the {@link RowWithApproximateScore} queue is not empty, get the next (topK - limit) rows
+ *    from the approximate score queue and repeat 3-6 until the {@link RowWithApproximateScore} queue is empty.
  * 7. Return the remaining rows from the {@link ScoredRowId} queue.
  */
-public class CompressedVectorRowIdIterator implements CloseableIterator<ScoredRowId>
+public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
 {
-    public static class ApproximateScore implements Comparable<ApproximateScore>
+    public static class RowWithApproximateScore
     {
         private final int rowId;
         private final int ordinal;
         private final float appoximateScore;
 
-        public ApproximateScore(int rowId, int ordinal, float appoximateScore)
+        public RowWithApproximateScore(int rowId, int ordinal, float appoximateScore)
         {
             this.rowId = rowId;
             this.ordinal = ordinal;
             this.appoximateScore = appoximateScore;
         }
 
-        @Override
-        public int compareTo(ApproximateScore o)
+        public float getApproximateScore()
         {
-            // We always want scores in descending order
-            return Float.compare(o.appoximateScore, appoximateScore);
+            return appoximateScore;
         }
     }
 
@@ -65,37 +63,37 @@ public class CompressedVectorRowIdIterator implements CloseableIterator<ScoredRo
     // sstables the query hits and the relative scores of vectors from those sstables, we may not need to return
     // more than the first handful of scores.
     // Priority queue with compressed vector scores
-    private final PriorityQueue<ApproximateScore> cvScoreQueue;
+    private final PriorityQueue<RowWithApproximateScore> approximateScoreQueue;
     // Priority queue with full resolution scores
-    private final PriorityQueue<ScoredRowId> scoredRowIdQueue;
+    private final PriorityQueue<ScoredRowId> exactScoreQueue;
     private final IntFunction<float[]> vectorForOrdinal;
-    private final VectorSimilarityFunction similarityFunction;
+    private final VectorSimilarityFunction exactSimilarityFunction;
     private final int topK;
     private final int limit;
     private final float threshold;
 
     /**
      * @param queryVector The query vector
-     * @param cvScoreQueue A priority queue of rows and their ordinal ordered by their approximate similarity scores
+     * @param approximateScoreQueue A priority queue of rows and their ordinal ordered by their approximate similarity scores
      * @param vectorForOrdinal A function that returns the full resolution vector for a given ordinal
-     * @param similarityFunction The similarity function to compare full resolution vectors
+     * @param exactSimilarityFunction The similarity function to compare full resolution vectors
      * @param limit The query limit
      * @param topK The number of vectors to resolve and score before returning results
      * @param threshold The minimum similarity score to return
      */
-    public CompressedVectorRowIdIterator(float[] queryVector,
-                                         PriorityQueue<ApproximateScore> cvScoreQueue,
-                                         IntFunction<float[]> vectorForOrdinal,
-                                         VectorSimilarityFunction similarityFunction,
-                                         int limit,
-                                         int topK,
-                                         float threshold)
+    public BruteForceRowIdIterator(float[] queryVector,
+                                   PriorityQueue<RowWithApproximateScore> approximateScoreQueue,
+                                   IntFunction<float[]> vectorForOrdinal,
+                                   VectorSimilarityFunction exactSimilarityFunction,
+                                   int limit,
+                                   int topK,
+                                   float threshold)
     {
         this.queryVector = queryVector;
-        this.cvScoreQueue = cvScoreQueue;
-        this.scoredRowIdQueue = new PriorityQueue<>(topK, (a, b) -> Float.compare(b.score, a.score));
+        this.approximateScoreQueue = approximateScoreQueue;
+        this.exactScoreQueue = new PriorityQueue<>(topK, (a, b) -> Float.compare(b.score, a.score));
         this.vectorForOrdinal = vectorForOrdinal;
-        this.similarityFunction = similarityFunction;
+        this.exactSimilarityFunction = exactSimilarityFunction;
         assert topK >= limit : "topK must be greater than or equal to limit. Found: " + topK + " < " + limit;
         this.limit = limit;
         this.topK = topK;
@@ -109,35 +107,36 @@ public class CompressedVectorRowIdIterator implements CloseableIterator<ScoredRo
         // The priority queue is only valid for the first limit results. After that, we need to
         // get the next `limit` results from the compressed vector graph, compute the full resolution scores,
         // and add to the priority queue.
-        if (!scoredRowIdQueue.isEmpty() && !needsRefill())
+        if (!exactScoreQueue.isEmpty() && !needsRefill())
             return true;
 
-        while (!cvScoreQueue.isEmpty() && scoredRowIdQueue.size() <= topK)
+        while (!approximateScoreQueue.isEmpty() && exactScoreQueue.size() <= topK)
         {
-            ApproximateScore rowOrdinalScore = cvScoreQueue.poll();
+            RowWithApproximateScore rowOrdinalScore = approximateScoreQueue.poll();
+            System.out.println("xxx " + rowOrdinalScore.appoximateScore);
             float[] vector = vectorForOrdinal.apply(rowOrdinalScore.ordinal);
             assert vector != null : "Vector for ordinal " + rowOrdinalScore.ordinal + " is null";
-            float score = similarityFunction.compare(queryVector, vector);
+            float score = exactSimilarityFunction.compare(queryVector, vector);
             if (score >= threshold)
-                scoredRowIdQueue.add(new ScoredRowId(rowOrdinalScore.rowId, score));
+                exactScoreQueue.add(new ScoredRowId(rowOrdinalScore.rowId, score));
         }
 
-        return !scoredRowIdQueue.isEmpty();
+        return !exactScoreQueue.isEmpty();
     }
 
     @Override
     public ScoredRowId next()
     {
-        // Don't call hastNext() because it might unnecessarily trigger unnecessary reads from disk
-        if (scoredRowIdQueue.isEmpty() || needsRefill())
+        // Don't call hastNext() because it might unnecessarily trigger reads from disk
+        if (exactScoreQueue.isEmpty() || needsRefill())
             throw new NoSuchElementException();
 
-        return scoredRowIdQueue.poll();
+        return exactScoreQueue.poll();
     }
 
     private boolean needsRefill()
     {
-        return scoredRowIdQueue.size() < topK - limit && !cvScoreQueue.isEmpty();
+        return exactScoreQueue.size() < topK - limit && !approximateScoreQueue.isEmpty();
     }
 
     @Override

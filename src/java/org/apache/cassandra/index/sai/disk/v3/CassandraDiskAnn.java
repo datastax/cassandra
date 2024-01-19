@@ -118,7 +118,11 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
      * a similarity score >= threshold will be returned.
      */
     @Override
-    public NodeScoreToScoredRowIdIterator search(float[] queryVector, int topK, float threshold, Bits acceptBits, QueryContext context,
+    public NodeScoreToScoredRowIdIterator search(float[] queryVector,
+                                                 int topK,
+                                                 float threshold,
+                                                 Bits acceptBits,
+                                                 QueryContext context,
                                                  IntConsumer nodesVisitedConsumer)
     {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
@@ -141,7 +145,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         var searcher = new GraphSearcher.Builder<>(threadLocalView).build();
         var result = searcher.search(scoreFunction, reranker, topK, threshold, ordinalsMap.ignoringDeleted(acceptBits));
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-        // Threshold based searches do not support resuming the search.
+        // Threshold based searches are comprehensive and do not need to resume the search.
         Supplier<SearchResult> reSearcher = threshold <= 0 ? () -> resumeSearch(searcher, topK) : null;
         var nodeScores = new NodeScoreIterator(result, reSearcher, nodesVisitedConsumer);
         return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());

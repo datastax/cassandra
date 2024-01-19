@@ -203,7 +203,11 @@ public class VectorMemtableIndex implements MemtableIndex
         return graph.keysFromOrdinal(nodeScore.node).stream().map(k -> new ScoredPrimaryKey(k, nodeScore.score)).iterator();
     }
 
-    private <T> Iterator<T> searchInternal(QueryContext context, float[] queryVector, AbstractBounds<PartitionPosition> keyRange, int limit, float threshold,
+    private <T> Iterator<T> searchInternal(QueryContext context,
+                                           float[] queryVector,
+                                           AbstractBounds<PartitionPosition> keyRange,
+                                           int limit,
+                                           float threshold,
                                            Function<NavigableSet<PrimaryKey>, Iterator<T>> bruteForceFunction,
                                            Function<SearchResult.NodeScore, Iterator<T>> nodeScoreToT)
     {
