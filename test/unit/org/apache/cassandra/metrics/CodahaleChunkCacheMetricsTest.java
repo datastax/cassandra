@@ -20,6 +20,7 @@ package org.apache.cassandra.metrics;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -53,7 +54,7 @@ public class CodahaleChunkCacheMetricsTest
         mockChunkCache = Mockito.mock(ChunkCache.class);
 
         // Make sure to not use micrometer metrics
-        System.setProperty("cassandra.use_micrometer_metrics", "false");
+        CassandraRelevantProperties.USE_MICROMETER.setBoolean(false);
 
         chunkCacheMetrics = ChunkCacheMetrics.create(mockChunkCache);
         assertTrue(chunkCacheMetrics instanceof CodahaleChunkCacheMetrics);

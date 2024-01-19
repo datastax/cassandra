@@ -156,13 +156,6 @@ import static com.google.common.collect.Iterables.concat;
 import static org.apache.commons.lang3.StringUtils.join;
 
 import static org.apache.cassandra.db.ConsistencyLevel.SERIAL;
-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.casReadMetrics;
-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.casWriteMetrics;
-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.readMetrics;
-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.readMetricsForLevel;
-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.viewWriteMetrics;
-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.writeMetrics;
-import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.writeMetricsForLevel;
 import static org.apache.cassandra.net.Message.out;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.Verb.BATCH_STORE_REQ;
@@ -417,8 +410,8 @@ public class StorageProxy implements StorageProxyMBean
         }
         catch (ReadAbortException e)
         {
-            casWriteMetrics.markAbort(e);
-            writeMetricsForLevel(consistencyForPaxos).markAbort(e);
+            metrics.casWriteMetrics.markAbort(e);
+            metrics.writeMetricsForLevel(consistencyForPaxos).markAbort(e);
             throw e;
         }
         catch (WriteFailureException | ReadFailureException e)
@@ -471,7 +464,7 @@ public class StorageProxy implements StorageProxyMBean
      *     {@link ConsistencyLevel#LOCAL_SERIAL}).
      * @param consistencyForReplayCommits the consistency for the commit phase of "replayed" in-progress operations.
      * @param consistencyForCommit the consistency for the commit phase of _this_ operation update.
-     * @param queryState the query state.
+     * @param clientState the client state.
      * @param queryStartNanoTime the nano time for the start of the query this is part of. This is the base time for
      *     timeouts.
      * @param casMetrics the metrics to update for this operation.
@@ -723,10 +716,11 @@ public class StorageProxy implements StorageProxyMBean
             }
         }
 
+        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(toPrepare.update.metadata().keyspace);
         if (hasLocalRequest)
-            writeMetrics.localRequests.mark();
+            metrics.writeMetrics.localRequests.mark();
         else
-            writeMetrics.remoteRequests.mark();
+            metrics.writeMetrics.remoteRequests.mark();
 
         callback.await();
         return callback;
@@ -1110,7 +1104,7 @@ public class StorageProxy implements StorageProxyMBean
         }
         finally
         {
-            metrics.viewWriteMetrics.addNano(System.nanoTime() - startTime);
+            metrics.viewWriteMetrics.addNano(nanoTime() - startTime);
         }
     }
 
@@ -1381,10 +1375,11 @@ public class StorageProxy implements StorageProxyMBean
 
         ReplicaPlan.ForWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, tk, ReplicaPlans.writeNormal);
 
+        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspaceName);
         if (replicaPlan.lookup(FBUtilities.getBroadcastAddressAndPort()) != null)
-            writeMetrics.localRequests.mark();
+            metrics.writeMetrics.localRequests.mark();
         else
-            writeMetrics.remoteRequests.mark();
+            metrics.writeMetrics.remoteRequests.mark();
 
         AbstractReplicationStrategy rs = replicaPlan.replicationStrategy();
         AbstractWriteResponseHandler<IMutation> responseHandler = rs.getWriteResponseHandler(replicaPlan, callback, writeType, mutation.hintOnFailure(), queryStartNanoTime);
@@ -1406,10 +1401,11 @@ public class StorageProxy implements StorageProxyMBean
 
         ReplicaPlan.ForWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, tk, ReplicaPlans.writeNormal);
 
+        ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspace.getName());
         if (replicaPlan.lookup(FBUtilities.getBroadcastAddressAndPort()) != null)
-            writeMetrics.localRequests.mark();
+            metrics.writeMetrics.localRequests.mark();
         else
-            writeMetrics.remoteRequests.mark();
+            metrics.writeMetrics.remoteRequests.mark();
 
         AbstractReplicationStrategy rs = replicaPlan.replicationStrategy();
         AbstractWriteResponseHandler<IMutation> writeHandler = rs.getWriteResponseHandler(replicaPlan, null, writeType, mutation, queryStartNanoTime);
@@ -1742,7 +1738,8 @@ public class StorageProxy implements StorageProxyMBean
             // This host isn't a replica, so mark the request as being remote. If this host is a
             // replica, applyCounterMutationOnCoordinator() in the branch above will call performWrite(), and
             // there we'll mark a local request against the metrics.
-            writeMetrics.remoteRequests.mark();
+            ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspaceName);
+            metrics.writeMetrics.remoteRequests.mark();
 
             // Forward the actual update to the chosen leader replica
             AbstractWriteResponseHandler<IMutation> responseHandler = new WriteResponseHandler<>(ReplicaPlans.forForwardingCounterWrite(keyspace, tk, replica),
@@ -2034,7 +2031,7 @@ public class StorageProxy implements StorageProxyMBean
         }
         catch (ReadAbortException e)
         {
-            recordReadRegularAbort(consistencyLevel, e);
+            recordReadRegularAbort(consistencyLevel, e, metrics);
             throw e;
         }
         catch (ReadFailureException e)
@@ -2054,10 +2051,10 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    public static void recordReadRegularAbort(ConsistencyLevel consistencyLevel, Throwable cause)
+    public static void recordReadRegularAbort(ConsistencyLevel consistencyLevel, Throwable cause, ClientRequestsMetrics metrics)
     {
-        readMetrics.markAbort(cause);
-        readMetricsForLevel(consistencyLevel).markAbort(cause);
+        metrics.readMetrics.markAbort(cause);
+        metrics.readMetricsForLevel(consistencyLevel).markAbort(cause);
     }
 
     public static PartitionIterator concatAndBlockOnRepair(List<PartitionIterator> iterators, List<ReadRepair<?, ?>> repairs)
@@ -2110,12 +2107,14 @@ public class StorageProxy implements StorageProxyMBean
         // for type of speculation we'll use in this read
         for (int i=0; i<cmdCount; i++)
         {
-            reads[i] = AbstractReadExecutor.getReadExecutor(commands.get(i), consistencyLevel, queryStartNanoTime);
+            SinglePartitionReadCommand command = commands.get(i);
+            reads[i] = AbstractReadExecutor.getReadExecutor(command, consistencyLevel, queryStartNanoTime);
 
+            ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(command.metadata().keyspace);
             if (reads[i].hasLocalRead())
-                readMetrics.localRequests.mark();
+                metrics.readMetrics.localRequests.mark();
             else
-                readMetrics.remoteRequests.mark();
+                metrics.readMetrics.remoteRequests.mark();
         }
 
         // sends a data request to the closest replica, and a digest request to the others. If we have a speculating

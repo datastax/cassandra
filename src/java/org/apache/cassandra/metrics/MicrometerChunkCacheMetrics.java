@@ -33,6 +33,8 @@ import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MovingAverage;
 
+import static org.apache.cassandra.utils.Clock.Global.*;
+
 /**
  * Micrometer implementation for the chunk cache metrics.
  */
@@ -65,7 +67,7 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     {
         this.cache = cache;
         this.hitRate = ExpMovingAverage.decayBy1000();
-        this.hitRateUpdateTime = new AtomicLong(System.nanoTime());
+        this.hitRateUpdateTime = new AtomicLong(nanoTime());
 
         this.missLatency = timer(CHUNK_CACHE_MISS_LATENCY);
         this.misses = counter(CHUNK_CACHE_MISSES);
@@ -102,9 +104,9 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     private void updateHitRate()
     {
         long lastUpdate = hitRateUpdateTime.get();
-        if ((System.nanoTime() - lastUpdate) >= hitRateUpdateInterval)
+        if ((nanoTime() - lastUpdate) >= hitRateUpdateInterval)
         {
-            if (hitRateUpdateTime.compareAndSet(lastUpdate, System.nanoTime()))
+            if (hitRateUpdateTime.compareAndSet(lastUpdate, nanoTime()))
             {
                 double numRequests = requests.count();
                 if (numRequests > 0)
