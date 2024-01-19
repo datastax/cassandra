@@ -48,6 +48,14 @@ public interface PostingList extends Closeable
     long size();
 
     /**
+     * @return {@code true} if this posting list contains no postings
+     */
+    default boolean isEmpty()
+    {
+        return size() == 0;
+    }
+
+    /**
      * Advances to the first row ID beyond the current that is greater than or equal to the
      * target, and returns that row ID. Exhausts the iterator and returns {@link #END_OF_STREAM} if
      * the target is greater than the highest row ID.
@@ -169,12 +177,21 @@ public interface PostingList extends Closeable
     }
 
     /**
+     * Returns a wrapper for this posting list that runs the specified {@link Closeable} when this posting list is closed,
+     * unless this posting list is empty, in which case the specified {@link Closeable} will be run immediately.
+     *
      * @param onClose what to do on close
-     * @return a wrapper for this posting list that replaces the {@link #close()} method by a call to {@code onClose}.
+     * @return a posting list that makes sure that {@code onClose} is run by the time it is closed.
      */
-    default PostingList onClose(Closeable onClose)
+    default PostingList onClose(Closeable onClose) throws IOException
     {
-        return onClose == null ? this : new PostingListWithOnClose(this, onClose);
+        if (isEmpty())
+        {
+            onClose.close();
+            return EMPTY;
+        }
+
+        return new PostingListWithOnClose(this, onClose);
     }
 
     class PostingListWithOnClose implements PostingList

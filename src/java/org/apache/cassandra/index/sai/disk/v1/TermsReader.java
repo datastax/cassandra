@@ -270,10 +270,9 @@ public class TermsReader implements Closeable
             assert reader.hasNext();
             ArrayList<PostingList.PeekablePostingList> postingLists = new ArrayList<>();
 
-            // index inputs will be closed once the merged posting list is closed, or immediately if it is empty
+            // index inputs will be closed with the onClose method of the returned merged posting list
             IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile);
             IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
-            Closeable onClose = () -> FileUtils.close(postingsInput, postingsSummaryInput);
 
             do
             {
@@ -297,9 +296,8 @@ public class TermsReader implements Closeable
                 }
             } while (reader.hasNext());
 
-            return postingLists.isEmpty()
-                   ? PostingList.EMPTY.onClose(onClose)
-                   : MergePostingList.merge(postingLists, onClose);
+            return MergePostingList.merge(postingLists)
+                                   .onClose(() -> FileUtils.close(postingsInput, postingsSummaryInput));
         }
     }
 
