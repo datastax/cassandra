@@ -65,6 +65,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.SequentialWriter;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ObjectSizes;
@@ -126,6 +127,16 @@ public class CassandraOnHeapGraph<T>
         assert term != null && term.remaining() != 0;
 
         var vector = serializer.deserializeFloatArray(term);
+        // Validate the vector.  Almost always, this is called at insert time (which sets invalid behavior to FAIL,
+        // resulting in the insert being aborted if the vector is invalid), or while writing out an sstable
+        // from flush or compaction (which sets invalid behavior to IGNORE, since we can't just rip existing data out of
+        // the table).
+        //
+        // However, it's also possible for this to be called during commitlog replay if the node previously crashed
+        // AFTER processing CREATE INDEX, but BEFORE flushing active memtables.  Commitlog replay will then follow
+        // the normal insert code path, (which would set behavior to FAIL) so we special-case it here; see VECTOR-269.
+        if (!StorageService.instance.isInitialized())
+            behavior = InvalidVectorBehavior.IGNORE; // we're replaying the commitlog so force IGNORE
         if (behavior == InvalidVectorBehavior.IGNORE)
         {
             try
@@ -134,7 +145,10 @@ public class CassandraOnHeapGraph<T>
             }
             catch (InvalidRequestException e)
             {
-                logger.trace("Ignoring invalid vector during index build against existing data: {}", e);
+                if (StorageService.instance.isInitialized())
+                    logger.trace("Ignoring invalid vector during index build against existing data: {}", (Object) e);
+                else
+                    logger.trace("Ignoring invalid vector during commitlog replay: {}", (Object) e);
                 return 0;
             }
         }
