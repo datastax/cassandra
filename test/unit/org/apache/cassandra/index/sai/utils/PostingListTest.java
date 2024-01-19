@@ -24,6 +24,8 @@ import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
 
+import static org.junit.Assert.assertEquals;
+
 
 public class PostingListTest extends SAIRandomizedTester
 {

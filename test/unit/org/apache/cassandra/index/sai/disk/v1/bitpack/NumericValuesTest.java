@@ -30,6 +30,8 @@ import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.cassandra.io.util.FileHandle;
 
+import static org.junit.Assert.assertEquals;
+
 public class NumericValuesTest extends SAIRandomizedTester
 {
     @Test

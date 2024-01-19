@@ -48,6 +48,8 @@ import static org.apache.lucene.index.PointValues.Relation.CELL_INSIDE_QUERY;
 import static org.apache.lucene.index.PointValues.Relation.CELL_OUTSIDE_QUERY;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThat;
 
 public class BKDReaderTest extends SAIRandomizedTester
 {
@@ -185,7 +187,7 @@ public class BKDReaderTest extends SAIRandomizedTester
 
     private void doTestInts1D() throws IOException
     {
-        final int numRows = between(100, 400);
+        final int numRows = (int) between(100, 400);
         final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
 
         byte[] scratch = new byte[4];
@@ -259,7 +261,7 @@ public class BKDReaderTest extends SAIRandomizedTester
 
     private void doTestAdvance(boolean crypto) throws IOException
     {
-        final int numRows = between(1000, 2000);
+        final int numRows = (int) between(1000, 2000);
         final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
 
         byte[] scratch = new byte[4];

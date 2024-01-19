@@ -33,6 +33,10 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
 import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
+
+
 public class MergePostingListTest extends SAIRandomizedTester
 {
     @Test

@@ -121,7 +121,7 @@ public class AbstractKeyRangeIteratorTester extends SAIRandomizedTester
                 ri.skipTo(LongIterator.fromToken(totalOrdering[count]));
 
             // skip a few elements
-            if (nextDouble() < 0.1)
+            if (randomDouble() < 0.1)
             {
                 int n = nextInt(1, 3);
                 if (count + n < totalOrdering.length)

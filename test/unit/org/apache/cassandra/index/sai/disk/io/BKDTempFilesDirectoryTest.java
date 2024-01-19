@@ -29,7 +29,7 @@ import org.apache.lucene.store.FilterDirectory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexOutput;
 
-import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertTrue;
 
 public class BKDTempFilesDirectoryTest extends SAIRandomizedTester
 {

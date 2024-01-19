@@ -26,6 +26,9 @@ import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.lucene.util.Counter;
 import org.apache.lucene.util.FixedBitSet;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
 public class RAMPostingSlicesTest extends SAIRandomizedTester
 {
     @Test

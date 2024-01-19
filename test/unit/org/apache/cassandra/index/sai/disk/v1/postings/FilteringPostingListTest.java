@@ -27,6 +27,8 @@ import org.apache.cassandra.index.sai.utils.ArrayPostingList;
 import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.lucene.util.FixedBitSet;
 
+import static org.junit.Assert.assertEquals;
+
 public class FilteringPostingListTest extends SAIRandomizedTester
 {
     @Test

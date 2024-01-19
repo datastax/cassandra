@@ -26,6 +26,8 @@ import org.apache.lucene.util.LongValues;
 import org.apache.lucene.util.packed.DirectReader;
 import org.apache.lucene.util.packed.DirectWriter;
 
+import static org.junit.Assert.assertEquals;
+
 public class LeafOrderMapTest extends SAIRandomizedTester
 {
     @Test

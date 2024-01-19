@@ -42,6 +42,8 @@ import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
 
 import static org.apache.cassandra.index.sai.metrics.QueryEventListeners.NO_OP_POSTINGS_LISTENER;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class OneDimBKDPostingsWriterTest extends SAIRandomizedTester
 {

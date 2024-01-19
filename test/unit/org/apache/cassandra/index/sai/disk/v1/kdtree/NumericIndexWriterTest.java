@@ -48,6 +48,8 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.Counter;
 import org.apache.lucene.util.NumericUtils;
 
+import static org.junit.Assert.assertEquals;
+
 public class NumericIndexWriterTest extends SAIRandomizedTester
 {
     private IndexDescriptor indexDescriptor;

@@ -41,6 +41,8 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 
+import static org.junit.Assert.*;
+
 public class KDTreeIndexSearcherTest extends SAIRandomizedTester
 {
     private static final short EQ_TEST_LOWER_BOUND_INCLUSIVE = 0;

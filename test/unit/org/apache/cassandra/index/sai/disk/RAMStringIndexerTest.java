@@ -32,6 +32,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.BytesRef;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.string;
+import static org.junit.Assert.assertEquals;
 
 public class RAMStringIndexerTest extends SAIRandomizedTester
 {
@@ -74,8 +75,8 @@ public class RAMStringIndexerTest extends SAIRandomizedTester
     public void testLargeSegment() throws IOException
     {
         final RAMStringIndexer indexer = new RAMStringIndexer(UTF8Type.instance);
-        final int numTerms = between(1 << 10, 1 << 13);
-        final int numPostings = between(1 << 5, 1 << 10);
+        final int numTerms = (int) between(1 << 10, 1 << 13);
+        final int numPostings = (int) between(1 << 5, 1 << 10);
 
         for (int id = 0; id < numTerms; ++id)
         {

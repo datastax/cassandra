@@ -38,6 +38,9 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.lucene.store.IndexInput;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
 public class PostingsTest extends SAIRandomizedTester
 {
     @Rule
@@ -112,7 +115,7 @@ public class PostingsTest extends SAIRandomizedTester
     {
         final int numPostingLists = 1 << between(1, 5);
         final int blockSize = 1 << between(5, 10);
-        final int numPostings = between(1 << 11, 1 << 15);
+        final int numPostings = (int) between(1 << 11, 1 << 15);
         final ArrayPostingList[] expected = new ArrayPostingList[numPostingLists];
         final long[] postingPointers = new long[numPostingLists];
 
