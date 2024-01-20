@@ -27,6 +27,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -35,13 +36,15 @@ import org.apache.cassandra.utils.Pair;
  * The PKs are currently returned in {@link PrimaryKey} order, but that contract may change.
  */
 @NotThreadSafe
-public class OrderingFilterRangeIterator implements Iterator<Pair<List<ScoredPrimaryKeyIterator>, Set<SSTableIndex>>>, AutoCloseable
+public class OrderingFilterRangeIterator implements Iterator<Pair<List<CloseableIterator<ScoredPrimaryKey>>, Set<SSTableIndex>>>, AutoCloseable
 {
     private final RangeIterator input;
     private final int chunkSize;
-    private final Function<List<PrimaryKey>, Pair<List<ScoredPrimaryKeyIterator>, Set<SSTableIndex>>> nextRangeFunction;
+    private final Function<List<PrimaryKey>, Pair<List<CloseableIterator<ScoredPrimaryKey>>, Set<SSTableIndex>>> nextRangeFunction;
 
-    public OrderingFilterRangeIterator(RangeIterator input, int chunkSize, Function<List<PrimaryKey>, Pair<List<ScoredPrimaryKeyIterator>, Set<SSTableIndex>>> nextRangeFunction)
+    public OrderingFilterRangeIterator(RangeIterator input,
+                                       int chunkSize,
+                                       Function<List<PrimaryKey>, Pair<List<CloseableIterator<ScoredPrimaryKey>>, Set<SSTableIndex>>> nextRangeFunction)
     {
         this.input = input;
         this.chunkSize = chunkSize;
@@ -55,7 +58,7 @@ public class OrderingFilterRangeIterator implements Iterator<Pair<List<ScoredPri
     }
 
     @Override
-    public Pair<List<ScoredPrimaryKeyIterator>, Set<SSTableIndex>> next()
+    public Pair<List<CloseableIterator<ScoredPrimaryKey>>, Set<SSTableIndex>> next()
     {
         List<PrimaryKey> nextKeys = new ArrayList<>(chunkSize);
         do

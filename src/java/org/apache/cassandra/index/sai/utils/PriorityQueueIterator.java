@@ -18,13 +18,15 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.Iterator;
 import java.util.PriorityQueue;
 
+import org.apache.cassandra.utils.CloseableIterator;
+
 /**
- * An iterator that returns elements from a priority queue in order.
+ * An iterator that returns elements from a priority queue in order. This is different from
+ * {@link PriorityQueue#iterator()} which returns elements in undefined order.
  */
-public class PriorityQueueIterator<T> implements Iterator<T>
+public class PriorityQueueIterator<T> implements CloseableIterator<T>
 {
     private final PriorityQueue<T> pq;
 
@@ -43,5 +45,10 @@ public class PriorityQueueIterator<T> implements Iterator<T>
     public T next()
     {
         return pq.poll();
+    }
+
+    @Override
+    public void close()
+    {
     }
 }

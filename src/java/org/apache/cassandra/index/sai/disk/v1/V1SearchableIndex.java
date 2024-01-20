@@ -38,10 +38,11 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.CELL_COUNT;
@@ -181,12 +182,12 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public List<ScoredPrimaryKeyIterator> orderBy(Expression expression,
-                                                  AbstractBounds<PartitionPosition> keyRange,
-                                                  QueryContext context,
-                                                  int limit) throws IOException
+    public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
+                                                             AbstractBounds<PartitionPosition> keyRange,
+                                                             QueryContext context,
+                                                             int limit) throws IOException
     {
-        var iterators = new ArrayList<ScoredPrimaryKeyIterator>(segments.size());
+        var iterators = new ArrayList<CloseableIterator<ScoredPrimaryKey>>(segments.size());
         for (Segment segment : segments)
         {
             if (segment.intersects(keyRange))
@@ -199,9 +200,9 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public List<ScoredPrimaryKeyIterator> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
-        List<ScoredPrimaryKeyIterator> results = new ArrayList<>(segments.size());
+        List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>(segments.size());
         for (Segment segment : segments)
             results.add(segment.orderResultsBy(context, keys, exp, limit));
 

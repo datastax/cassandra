@@ -53,7 +53,7 @@ import org.apache.cassandra.index.sai.disk.vector.OverqueryUtils;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.ScoredRowIdPrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -134,7 +134,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public ScoredPrimaryKeyIterator orderBy(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    public CloseableIterator<ScoredPrimaryKey> orderBy(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
@@ -233,10 +233,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         }
     }
 
-    protected ScoredPrimaryKeyIterator toScoreOrderedIterator(CloseableIterator<ScoredRowId> scoredRowIdIterator, QueryContext queryContext) throws IOException
+    protected CloseableIterator<ScoredPrimaryKey> toScoreOrderedIterator(CloseableIterator<ScoredRowId> scoredRowIdIterator, QueryContext queryContext) throws IOException
     {
         if (scoredRowIdIterator == null || !scoredRowIdIterator.hasNext())
-            return ScoredPrimaryKeyIterator.empty();
+            return CloseableIterator.emptyIterator();
 
         IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
                                                                         metadata.maxKey,
@@ -429,14 +429,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public ScoredPrimaryKeyIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public CloseableIterator<ScoredPrimaryKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         // create a sublist of the keys within this segment's bounds
         int minIndex = findBoundaryIndex(keys, true);
         int maxIndex = findBoundaryIndex(keys, false);
         List<PrimaryKey> keysInRange = keys.subList(minIndex, maxIndex);
         if (keysInRange.isEmpty())
-            return ScoredPrimaryKeyIterator.empty();
+            return CloseableIterator.emptyIterator();
 
         int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
         // Convert PKs to segment row ids and then to ordinals, skipping any that don't exist in this segment
@@ -448,7 +448,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; expected nodes visited is {} for index with {} nodes, LIMIT {}",
                             numRows, keysInRange.size(), cost.expectedNodesVisited, graph.size(), limit);
         if (numRows == 0)
-            return ScoredPrimaryKeyIterator.empty();
+            return CloseableIterator.emptyIterator();
 
         if (cost.shouldUseBruteForce())
         {

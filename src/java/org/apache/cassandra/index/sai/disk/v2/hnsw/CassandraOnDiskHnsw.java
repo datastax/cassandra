@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai.disk.v2.hnsw;
 
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.function.Function;
 import java.util.function.IntConsumer;
@@ -44,7 +43,7 @@ import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
-import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
+import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -104,7 +103,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
      * @return Row IDs associated with the topK vectors near the query
      */
     @Override
-    public NodeScoreToScoredRowIdIterator search(float[] queryVector, int topK, float threshold, Bits acceptBits, QueryContext context, IntConsumer nodesVisited)
+    public CloseableIterator<ScoredRowId> search(float[] queryVector, int topK, float threshold, Bits acceptBits, QueryContext context, IntConsumer nodesVisited)
     {
         if (threshold > 0)
             throw new InvalidRequestException("Geo queries are not supported for legacy SAI indexes -- drop the index and recreate it to enable these");
@@ -125,7 +124,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
             // Since we do not resume search for HNSW, we call this eagerly.
             nodesVisited.accept(queue.visitedCount());
             Tracing.trace("HNSW search visited {} nodes to return {} results", queue.visitedCount(), queue.size());
-            var scores = new NodeScoresIterator(queue);
+            var scores = new ReorderingNodeScoresIterator(queue);
             return new NodeScoreToScoredRowIdIterator(scores, ordinalsMap.getRowIdsView());
         }
         catch (IOException e)
@@ -134,12 +133,15 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         }
     }
 
-    static class NodeScoresIterator implements CloseableIterator<SearchResult.NodeScore>
+    /**
+     * An iterator that reorders the results from HNSW to descending score order.
+     */
+    static class ReorderingNodeScoresIterator implements CloseableIterator<SearchResult.NodeScore>
     {
         private final SearchResult.NodeScore[] scores;
         private int index;
 
-        public NodeScoresIterator(NeighborQueue queue)
+        public ReorderingNodeScoresIterator(NeighborQueue queue)
         {
             scores = new SearchResult.NodeScore[queue.size()];
             // We start at the last element since the queue is sorted in ascending order

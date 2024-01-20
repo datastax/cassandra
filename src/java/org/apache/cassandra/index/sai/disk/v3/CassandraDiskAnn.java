@@ -20,10 +20,7 @@ package org.apache.cassandra.index.sai.disk.v3;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Iterator;
-import java.util.NoSuchElementException;
 import java.util.function.IntConsumer;
-import java.util.function.Supplier;
 import java.util.logging.Logger;
 import javax.annotation.Nullable;
 
@@ -32,8 +29,6 @@ import io.github.jbellis.jvector.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.NodeSimilarity;
-import io.github.jbellis.jvector.graph.SearchResult;
-import io.github.jbellis.jvector.graph.SearchResult.NodeScore;
 import io.github.jbellis.jvector.pq.BQVectors;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.pq.PQVectors;
@@ -44,11 +39,13 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.vector.AutoResumingNodeScoreIterator;
 import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
+import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.tracing.Tracing;
@@ -118,7 +115,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
      * a similarity score >= threshold will be returned.
      */
     @Override
-    public NodeScoreToScoredRowIdIterator search(float[] queryVector,
+    public CloseableIterator<ScoredRowId> search(float[] queryVector,
                                                  int topK,
                                                  float threshold,
                                                  Bits acceptBits,
@@ -146,72 +143,15 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         var result = searcher.search(scoreFunction, reranker, topK, threshold, ordinalsMap.ignoringDeleted(acceptBits));
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         // Threshold based searches are comprehensive and do not need to resume the search.
-        Supplier<SearchResult> reSearcher = threshold <= 0 ? () -> resumeSearch(searcher, topK) : null;
-        var nodeScores = new NodeScoreIterator(result, reSearcher, nodesVisitedConsumer);
+        var nodeScores = threshold > 0 ? CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator())
+                                       : new AutoResumingNodeScoreIterator(searcher, result, nodesVisitedConsumer, topK, false);
         return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
-    }
-
-    private SearchResult resumeSearch(GraphSearcher<float[]> searcher, int topK)
-    {
-        var nextTopK = searcher.resume(topK);
-        Tracing.trace("DiskANN resumed search and visited {} nodes to return {} results",
-                      nextTopK.getVisitedCount(), nextTopK.getNodes().length);
-        return nextTopK;
     }
 
     @Override
     public CompressedVectors getCompressedVectors()
     {
         return compressedVectors;
-    }
-
-    /**
-     * An iterator over {@link NodeScore}. This iterator is backed by a {@link SearchResult} and resumes the search
-     * when the backing {@link SearchResult} is exhausted.
-     */
-    private static class NodeScoreIterator implements CloseableIterator<NodeScore>
-    {
-        private final Supplier<SearchResult> resumeSearch;
-        private final IntConsumer nodesVisitedConsumer;
-        private Iterator<NodeScore> nodeScores;
-        private int cumulativeNodesVisited;
-
-        public NodeScoreIterator(SearchResult result,
-                                 Supplier<SearchResult> resumeSearch,
-                                 IntConsumer nodesVisitedConsumer)
-        {
-            this.nodeScores = Arrays.stream(result.getNodes()).iterator();
-            this.cumulativeNodesVisited = result.getVisitedCount();
-            this.resumeSearch = resumeSearch;
-            this.nodesVisitedConsumer = nodesVisitedConsumer;
-        }
-
-        @Override
-        public boolean hasNext() {
-            if (nodeScores.hasNext())
-                return true;
-
-            if (resumeSearch == null)
-                return false;
-
-            var searchResult = resumeSearch.get();
-            cumulativeNodesVisited += searchResult.getVisitedCount();
-            nodeScores = Arrays.stream(searchResult.getNodes()).iterator();
-            return nodeScores.hasNext();
-        }
-
-        @Override
-        public NodeScore next() {
-            if (!hasNext())
-                throw new NoSuchElementException();
-            return nodeScores.next();
-        }
-
-        @Override
-        public void close()
-        {
-            nodesVisitedConsumer.accept(cumulativeNodesVisited);
-        }
     }
 
     @Override

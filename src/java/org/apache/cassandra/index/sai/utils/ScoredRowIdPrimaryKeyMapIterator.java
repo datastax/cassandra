@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import java.util.NoSuchElementException;
+
 import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
@@ -28,7 +30,7 @@ import org.apache.cassandra.utils.CloseableIterator;
  * An iterator over scored primary keys ordered by the score descending
  * Not skippable.
  */
-public class ScoredRowIdPrimaryKeyMapIterator extends ScoredPrimaryKeyIterator
+public class ScoredRowIdPrimaryKeyMapIterator implements CloseableIterator<ScoredPrimaryKey>
 {
     private final PrimaryKeyMap primaryKeyMap;
     private final CloseableIterator<ScoredRowId> scoredRowIdIterator;
@@ -44,20 +46,25 @@ public class ScoredRowIdPrimaryKeyMapIterator extends ScoredPrimaryKeyIterator
     }
 
     @Override
+    public boolean hasNext()
+    {
+        return scoredRowIdIterator.hasNext();
+    }
+
+    @Override
+    public ScoredPrimaryKey next()
+    {
+        if (!hasNext())
+            throw new NoSuchElementException();
+        var scoredRowId = scoredRowIdIterator.next();
+        var primaryKey = primaryKeyMap.primaryKeyFromRowId(searcherContext.getSegmentRowIdOffset() + scoredRowId.getSegmentRowId());
+        return new ScoredPrimaryKey(primaryKey, scoredRowId.getScore());
+    }
+
+    @Override
     public void close()
     {
         FileUtils.closeQuietly(primaryKeyMap);
         FileUtils.closeQuietly(scoredRowIdIterator);
-    }
-
-    @Override
-    protected ScoredPrimaryKey computeNext()
-    {
-        if (!scoredRowIdIterator.hasNext())
-            return endOfData();
-
-        var scoredRowId = scoredRowIdIterator.next();
-        var primaryKey = primaryKeyMap.primaryKeyFromRowId(searcherContext.getSegmentRowIdOffset() + scoredRowId.getSegmentRowId());
-        return new ScoredPrimaryKey(primaryKey, scoredRowId.getScore());
     }
 }

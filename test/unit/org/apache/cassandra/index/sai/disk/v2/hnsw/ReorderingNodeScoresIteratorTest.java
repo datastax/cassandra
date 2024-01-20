@@ -30,7 +30,7 @@ import static org.junit.Assert.assertTrue;
 /**
  * Basic tests to improve coverage for code that isn't exercised in end to end testing
  */
-public class NodeScoresIteratorTest
+public class ReorderingNodeScoresIteratorTest
 {
     @Test
     public void ensureCorrectOrderTest()
@@ -48,7 +48,7 @@ public class NodeScoresIteratorTest
         // Peek at the top node and verify it is the one with the lowest score
         assertEquals(1, queue.topNode());
 
-        var nodeScoresIterator = Iterators.peekingIterator(new CassandraOnDiskHnsw.NodeScoresIterator(queue));
+        var nodeScoresIterator = Iterators.peekingIterator(new CassandraOnDiskHnsw.ReorderingNodeScoresIterator(queue));
 
         // Ensure correct ordering
         assertTrue(nodeScoresIterator.hasNext());
@@ -76,7 +76,7 @@ public class NodeScoresIteratorTest
         // handles the ordering
         var queue = new NeighborQueue(1, false);
 
-        var nodeScoresIterator = Iterators.peekingIterator(new CassandraOnDiskHnsw.NodeScoresIterator(queue));
+        var nodeScoresIterator = Iterators.peekingIterator(new CassandraOnDiskHnsw.ReorderingNodeScoresIterator(queue));
 
         assertFalse(nodeScoresIterator.hasNext());
     }

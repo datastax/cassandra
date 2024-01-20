@@ -58,7 +58,6 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -66,6 +65,7 @@ import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.CloseableIterator;
 
 public class StorageAttachedIndexSearcher implements Index.Searcher
 {
@@ -138,11 +138,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     }
 
     /**
-     * Converts expressions into a {@link ScoredPrimaryKeyIterator} that contains a superset of the keys that
-     * satisfy the query. The {@link ScoredPrimaryKeyIterator} is sorted by score, so the top k keys can be
+     * Converts expressions into an iterator over {@link ScoredPrimaryKey} that contains a superset of the keys that
+     * satisfy the query. The {@link ScoredPrimaryKey} iterator is sorted by score, so the top k keys can be
      * retrieved by iterating the iterator until a sufficient number of valid rows are found.
      */
-    private ScoredPrimaryKeyIterator buildScoredPrimaryKeyIterator()
+    private CloseableIterator<ScoredPrimaryKey> buildScoredPrimaryKeyIterator()
     {
         return controller.buildScoredPrimaryKeyIterator();
     }
@@ -485,7 +485,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     {
         private final List<AbstractBounds<PartitionPosition>> keyRanges;
         private final boolean coversFullRing;
-        private final ScoredPrimaryKeyIterator scoredPrimaryKeyIterator;
+        private final CloseableIterator<ScoredPrimaryKey> scoredPrimaryKeyIterator;
         private final FilterTree filterTree;
         private final QueryController controller;
         private final ReadExecutionController executionController;
@@ -494,7 +494,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private HashSet<PrimaryKey> keysSeen;
         private HashSet<PrimaryKey> updatedKeys;
 
-        private ScoreOrderedResultRetriever(ScoredPrimaryKeyIterator scoredPrimaryKeyIterator,
+        private ScoreOrderedResultRetriever(CloseableIterator<ScoredPrimaryKey> scoredPrimaryKeyIterator,
                                             FilterTree filterTree,
                                             QueryController controller,
                                             ReadExecutionController executionController,

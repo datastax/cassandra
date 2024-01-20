@@ -26,6 +26,8 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
+import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
@@ -51,14 +53,13 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
-import org.apache.cassandra.index.sai.utils.WrappedScoredPrimaryKeyIterator;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -167,13 +168,12 @@ public class VectorMemtableIndex implements MemtableIndex
         float[] qv = expr.lower.value.vector;
         float threshold = expr.getEuclideanSearchThreshold();
 
-        var pkIterator = searchInternal(context, qv, keyRange, graph.size(), threshold,
-                                        (keys) -> this.filterPrimaryKeys(qv, threshold, keys),
-                                        this::nodeScoreToPrimaryKey);
-
         PriorityQueue<PrimaryKey> keyQueue = new PriorityQueue<>();
-        while (pkIterator.hasNext())
-            keyQueue.add(pkIterator.next());
+        try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), threshold))
+        {
+            while (pkIterator.hasNext())
+                keyQueue.add(pkIterator.next());
+        }
 
         if (keyQueue.isEmpty())
             return RangeIterator.empty();
@@ -181,35 +181,20 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public ScoredPrimaryKeyIterator orderBy(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public CloseableIterator<ScoredPrimaryKey> orderBy(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         assert expr.getOp() == Expression.Op.ANN : "Only ANN is supported for vector search, received " + expr.getOp();
 
         float[] qv = expr.lower.value.vector;
 
-        var result = searchInternal(context, qv, keyRange, limit, 0,
-                                    (keys) -> orderPrimaryKeys(qv, keys),
-                                    this::nodeScoreToScoredPrimaryKey);
-        return new WrappedScoredPrimaryKeyIterator(result);
+        return searchInternal(context, qv, keyRange, limit, 0);
     }
 
-    private Iterator<PrimaryKey> nodeScoreToPrimaryKey(SearchResult.NodeScore nodeScore)
-    {
-        return graph.keysFromOrdinal(nodeScore.node).stream().iterator();
-    }
-
-    private Iterator<ScoredPrimaryKey> nodeScoreToScoredPrimaryKey(SearchResult.NodeScore nodeScore)
-    {
-        return graph.keysFromOrdinal(nodeScore.node).stream().map(k -> new ScoredPrimaryKey(k, nodeScore.score)).iterator();
-    }
-
-    private <T> Iterator<T> searchInternal(QueryContext context,
-                                           float[] queryVector,
-                                           AbstractBounds<PartitionPosition> keyRange,
-                                           int limit,
-                                           float threshold,
-                                           Function<NavigableSet<PrimaryKey>, Iterator<T>> bruteForceFunction,
-                                           Function<SearchResult.NodeScore, Iterator<T>> nodeScoreToT)
+    private CloseableIterator<ScoredPrimaryKey> searchInternal(QueryContext context,
+                                                               float[] queryVector,
+                                                               AbstractBounds<PartitionPosition> keyRange,
+                                                               int limit,
+                                                               float threshold)
     {
         Bits bits;
         if (RangeUtil.coversFullRing(keyRange))
@@ -232,30 +217,34 @@ public class VectorMemtableIndex implements MemtableIndex
                                                              : primaryKeys.subSet(left, leftInclusive, right, rightInclusive);
 
             if (resultKeys.isEmpty())
-                return Collections.emptyIterator();
+                return CloseableIterator.emptyIterator();
 
             int bruteForceRows = maxBruteForceRows(limit, resultKeys.size(), graph.size());
             logger.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
                          resultKeys.size(), bruteForceRows, graph.size(), limit);
             Tracing.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
                           resultKeys.size(), bruteForceRows, graph.size(), limit);
-            // do brute force for vectorFromOrdinal
             if (resultKeys.size() <= bruteForceRows)
-                return bruteForceFunction.apply(resultKeys);
+                // When we have a threshold, we only need to filter the results, not order them.
+                if (threshold > 0)
+                    return filterByBruteForce(queryVector, threshold, resultKeys);
+                else
+                    return orderByBruteForce(queryVector, resultKeys);
             else
                 bits = new KeyRangeFilteringBits(keyRange);
         }
 
-        return graph.search(context, queryVector, limit, threshold, bits, nodeScoreToT);
+        var nodeScoreIterator = graph.search(context, queryVector, limit, threshold, bits);
+        return new NodeScoreToScoredPrimaryKeyIterator(nodeScoreIterator);
     }
 
 
     @Override
-    public ScoredPrimaryKeyIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
+    public CloseableIterator<ScoredPrimaryKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
     {
         if (minimumKey == null)
             // This case implies maximumKey is empty too.
-            return ScoredPrimaryKeyIterator.empty();
+            return CloseableIterator.emptyIterator();
 
         float[] qv = exp.lower.value.vector;
         List<PrimaryKey> keysInRange = keys.stream()
@@ -271,34 +260,45 @@ public class VectorMemtableIndex implements MemtableIndex
         if (keysInRange.size() <= maxBruteForceRows)
         {
             if (keysInRange.isEmpty())
-                return ScoredPrimaryKeyIterator.empty();
-            return new WrappedScoredPrimaryKeyIterator(orderPrimaryKeys(qv, keysInRange));
+                return CloseableIterator.emptyIterator();
+            return orderByBruteForce(qv, keysInRange);
         }
 
         var bits = new KeyFilteringBits(keysInRange);
-        var result = graph.search(context, qv, limit, 0, bits, this::nodeScoreToScoredPrimaryKey);
-        return new WrappedScoredPrimaryKeyIterator(result);
+        var nodeScoreIterator = graph.search(context, qv, limit, 0, bits);
+        return new NodeScoreToScoredPrimaryKeyIterator(nodeScoreIterator);
     }
 
-    private Iterator<PrimaryKey> filterPrimaryKeys(float[] queryVector, float threshold, NavigableSet<PrimaryKey> keys)
+    /**
+     * Filter the keys in the provided set by comparing their vectors to the query vector and returning only those
+     * that have a similarity score >= the provided threshold.
+     * @param queryVector the query vector
+     * @param threshold the minimum similarity score to accept
+     * @param keys the keys to filter
+     * @return an iterator over the keys that pass the filter
+     */
+    private CloseableIterator<ScoredPrimaryKey> filterByBruteForce(float[] queryVector, float threshold, NavigableSet<PrimaryKey> keys)
     {
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
-        // Keys are already ordered in ascending PK order
-        return keys.stream()
-                   .filter(k -> {
-                       float[] vector = graph.vectorForKey(k);
-                       if (vector == null)
-                           return false;
-                       return similarityFunction.compare(queryVector, vector) >= threshold;
-                   })
-                   .iterator();
+        // Keys are already ordered in ascending PK order, so keep them that way.
+        var iter = keys.stream()
+                       .map(k -> {
+                           float[] vector = graph.vectorForKey(k);
+                           if (vector == null)
+                               return null;
+                           float score = similarityFunction.compare(queryVector, vector);
+                           return score >= threshold ? new ScoredPrimaryKey(k, score) : null;
+                       })
+                       .filter(Objects::nonNull)
+                       .iterator();
+        return CloseableIterator.wrap(iter);
     }
 
-    private Iterator<ScoredPrimaryKey> orderPrimaryKeys(float[] queryVector, Collection<PrimaryKey> keys)
+    private CloseableIterator<ScoredPrimaryKey> orderByBruteForce(float[] queryVector, Collection<PrimaryKey> keys)
     {
         // search() errors out when an empty graph is passed to it
         if (keys.isEmpty())
-            return Collections.emptyIterator();
+            return CloseableIterator.emptyIterator();
 
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
 
@@ -492,6 +492,54 @@ public class VectorMemtableIndex implements MemtableIndex
         public int length()
         {
             return results.size();
+        }
+    }
+
+    /**
+     * An iterator over {@link ScoredPrimaryKey} sorted by score descending. The iterator converts ordinals (node ids)
+     * to {@link PrimaryKey}s and pairs them with the score given by the index.
+     */
+    private class NodeScoreToScoredPrimaryKeyIterator implements CloseableIterator<ScoredPrimaryKey>
+    {
+        private final Iterator<SearchResult.NodeScore> nodeScores;
+        private Iterator<ScoredPrimaryKey> primaryKeysForNode = Collections.emptyIterator();
+
+        NodeScoreToScoredPrimaryKeyIterator(Iterator<SearchResult.NodeScore> nodeScores)
+        {
+            this.nodeScores = nodeScores;
+        }
+
+        @Override
+        public boolean hasNext()
+        {
+            if (primaryKeysForNode.hasNext())
+                return true;
+
+            while (nodeScores.hasNext())
+            {
+                SearchResult.NodeScore nodeScore = nodeScores.next();
+                primaryKeysForNode = graph.keysFromOrdinal(nodeScore.node)
+                                          .stream()
+                                          .map(pk -> new ScoredPrimaryKey(pk, nodeScore.score))
+                                          .iterator();
+                if (primaryKeysForNode.hasNext())
+                    return true;
+            }
+
+            return false;
+        }
+
+        @Override
+        public ScoredPrimaryKey next()
+        {
+            if (!hasNext())
+                throw new NoSuchElementException();
+            return primaryKeysForNode.next();
+        }
+
+        @Override
+        public void close()
+        {
         }
     }
 }

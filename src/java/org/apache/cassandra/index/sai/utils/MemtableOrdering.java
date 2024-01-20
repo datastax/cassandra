@@ -22,6 +22,7 @@ import java.util.List;
 
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.utils.CloseableIterator;
 
 /***
  * Analogue of SegmentOrdering, but for memtables.
@@ -34,7 +35,7 @@ public interface MemtableOrdering
      *
      * Assumes that the given  spans the same rows as the implementing index's segment.
      */
-    default ScoredPrimaryKeyIterator orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
+    default CloseableIterator<ScoredPrimaryKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit)
     {
         throw new UnsupportedOperationException();
     }

@@ -38,7 +38,6 @@ public class NodeScoreToScoredRowIdIterator implements CloseableIterator<ScoredR
     private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
     private float currentScore;
 
-
     public NodeScoreToScoredRowIdIterator(CloseableIterator<SearchResult.NodeScore> nodeScores, RowIdsView rowIdsView)
     {
         this.nodeScores = nodeScores;
@@ -50,30 +49,30 @@ public class NodeScoreToScoredRowIdIterator implements CloseableIterator<ScoredR
     {
         try
         {
-            // nodeScores.hasNext() can trigger a deeper search of the vector graph, so only call it
-            // when necessary.
-            while (!segmentRowIdIterator.hasNext() && nodeScores.hasNext())
+            if (segmentRowIdIterator.hasNext())
+                return true;
+
+            while (nodeScores.hasNext())
             {
                 SearchResult.NodeScore result = nodeScores.next();
                 currentScore = result.score;
                 var ordinal = result.node;
                 segmentRowIdIterator = rowIdsView.getSegmentRowIdsMatching(ordinal);
+                if (segmentRowIdIterator.hasNext())
+                    return true;
             }
+            return false;
         }
         catch (IOException e)
         {
             throw new RuntimeException(e);
         }
-        return segmentRowIdIterator.hasNext();
     }
 
     @Override
     public ScoredRowId next()
     {
-        // We only verify that segmentRowIdIterator hasNext because we are about to call next on it.
-        // We do not call this.hasNext() because that could unnecessarily trigger a deeper search of the vector graph.
-        // The expected usage pattern is to call hasNext() before calling next().
-        if (!segmentRowIdIterator.hasNext())
+        if (!hasNext())
             throw new NoSuchElementException();
         return new ScoredRowId(segmentRowIdIterator.nextInt(), currentScore);
     }

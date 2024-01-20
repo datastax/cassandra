@@ -31,10 +31,11 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.MemtableOrdering;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -75,7 +76,7 @@ public interface MemtableIndex extends MemtableOrdering
     }
 
     RangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit);
-    default ScoredPrimaryKeyIterator orderBy(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
+    default CloseableIterator<ScoredPrimaryKey> orderBy(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         throw new UnsupportedOperationException();
     }

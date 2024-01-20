@@ -64,13 +64,13 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.OrderingFilterRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.MergeScoredPrimaryKeyIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
@@ -78,6 +78,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
@@ -269,7 +270,7 @@ public class QueryController
                              .rangeIterator(this);
     }
 
-    public ScoredPrimaryKeyIterator buildScoredPrimaryKeyIterator()
+    public CloseableIterator<ScoredPrimaryKey> buildScoredPrimaryKeyIterator()
     {
         var filterOperation = filterOperation();
         var orderings = filterOperation.expressions()
@@ -420,7 +421,7 @@ public class QueryController
     }
 
     // This is an ANN only query
-    public ScoredPrimaryKeyIterator getTopKRows(RowFilter.Expression expression)
+    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RowFilter.Expression expression)
     {
         assert expression.operator() == Operator.ANN;
         var planExpression = new Expression(getContext(expression))
@@ -431,16 +432,16 @@ public class QueryController
         logger.debug("getTopKRows using limit = {}", limit);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        List<ScoredPrimaryKeyIterator> memtableResults = getContext(expression).orderMemtable(queryContext, planExpression, mergeRange, limit);
+        var memtableResults = getContext(expression).orderMemtable(queryContext, planExpression, mergeRange, limit);
 
         var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
 
         try
         {
-            List<ScoredPrimaryKeyIterator> sstableResults = queryView.view.values()
-                                                                          .stream()
-                                                                          .flatMap(e -> orderBy(e, limit).stream())
-                                                                          .collect(Collectors.toList());
+            var sstableResults = queryView.view.values()
+                                               .stream()
+                                               .flatMap(e -> orderBy(e, limit).stream())
+                                               .collect(Collectors.toList());
             sstableResults.addAll(memtableResults);
             return new MergeScoredPrimaryKeyIterator(sstableResults, queryView.referencedIndexes);
         }
@@ -453,9 +454,9 @@ public class QueryController
     }
 
     // This is a hybrid query. We apply all other predicates before ordering and limiting.
-    public ScoredPrimaryKeyIterator getTopKRows(RangeIterator source, RowFilter.Expression expression)
+    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RangeIterator source, RowFilter.Expression expression)
     {
-        List<ScoredPrimaryKeyIterator> scoredPrimaryKeyIterators = new ArrayList<>();
+        List<CloseableIterator<ScoredPrimaryKey>> scoredPrimaryKeyIterators = new ArrayList<>();
         List<SSTableIndex> indexesToRelease = new ArrayList<>();
         try (var iter = new OrderingFilterRangeIterator(source, ORDER_CHUNK_SIZE, list -> this.getTopKRows(list, expression)))
         {
@@ -469,7 +470,7 @@ public class QueryController
         return new MergeScoredPrimaryKeyIterator(scoredPrimaryKeyIterators, indexesToRelease);
     }
 
-    private Pair<List<ScoredPrimaryKeyIterator>, Set<SSTableIndex>> getTopKRows(List<PrimaryKey> sourceKeys, RowFilter.Expression expression)
+    private Pair<List<CloseableIterator<ScoredPrimaryKey>>, Set<SSTableIndex>> getTopKRows(List<PrimaryKey> sourceKeys, RowFilter.Expression expression)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
 
@@ -483,16 +484,16 @@ public class QueryController
         queryContext.setSoftLimit(limit);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
-        List<ScoredPrimaryKeyIterator> memtableResults = this.getContext(expression)
-                                                             .orderResultsBy(queryContext, sourceKeys, planExpression, limit);
+        var memtableResults = this.getContext(expression)
+                                  .orderResultsBy(queryContext, sourceKeys, planExpression, limit);
         var queryView = new QueryViewBuilder(Collections.singleton(planExpression), mergeRange).build();
 
         try
         {
-            List<ScoredPrimaryKeyIterator> sstableScoredPrimaryKeyIterators = queryView.view.values()
-                                                                                            .stream()
-                                                                                            .flatMap(e -> orderResultsBy(sourceKeys, e, limit).stream())
-                                                                                            .collect(Collectors.toList());
+            var sstableScoredPrimaryKeyIterators = queryView.view.values()
+                                                                 .stream()
+                                                                 .flatMap(e -> orderResultsBy(sourceKeys, e, limit).stream())
+                                                                 .collect(Collectors.toList());
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
             if (sstableScoredPrimaryKeyIterators.isEmpty())
             {
@@ -513,7 +514,7 @@ public class QueryController
 
     }
 
-    private List<ScoredPrimaryKeyIterator> orderResultsBy(List<PrimaryKey> keys, List<QueryViewBuilder.IndexExpression> annIndexExpressions, int limit)
+    private List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(List<PrimaryKey> keys, List<QueryViewBuilder.IndexExpression> annIndexExpressions, int limit)
     {
         assert annIndexExpressions.size() == 1 : "only one index is expected in ANN expression, found " + annIndexExpressions.size() + " in " + annIndexExpressions;
         QueryViewBuilder.IndexExpression annIndexExpression = annIndexExpressions.get(0);
@@ -531,7 +532,7 @@ public class QueryController
     /**
      * Create row id iterator from different indexes' on-disk searcher of the same sstable
      */
-    private List<ScoredPrimaryKeyIterator> orderBy(List<QueryViewBuilder.IndexExpression> indexExpressions, int limit)
+    private List<CloseableIterator<ScoredPrimaryKey>> orderBy(List<QueryViewBuilder.IndexExpression> indexExpressions, int limit)
     {
         return indexExpressions
                .stream()

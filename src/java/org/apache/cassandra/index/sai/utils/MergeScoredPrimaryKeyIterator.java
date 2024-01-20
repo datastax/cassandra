@@ -20,48 +20,64 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
+
+import com.google.common.collect.Iterators;
+import com.google.common.collect.PeekingIterator;
 
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.CloseableIterator;
 
 /**
- * An {@link ScoredPrimaryKeyIterator} that merges multiple iterators into a single iterator by taking the
+ * An iterator over {@link ScoredPrimaryKey} that merges multiple iterators into a single iterator by taking the
  * scores of the top element of each iterator and returning the {@link ScoredPrimaryKey} with the
  * highest score.
  */
-public class MergeScoredPrimaryKeyIterator extends ScoredPrimaryKeyIterator
+public class MergeScoredPrimaryKeyIterator implements CloseableIterator<ScoredPrimaryKey>
 {
-    private final PriorityQueue<ScoredPrimaryKeyIterator> pq;
-    private final List<ScoredPrimaryKeyIterator> iteratorsToBeClosed;
+    private final PriorityQueue<PeekingIterator<ScoredPrimaryKey>> pq;
+    private final List<CloseableIterator<ScoredPrimaryKey>> iteratorsToBeClosed;
     private final Collection<SSTableIndex> indexesToBeClosed;
 
-    public MergeScoredPrimaryKeyIterator(List<ScoredPrimaryKeyIterator> iterators, Collection<SSTableIndex> referencedIndexes)
+    public MergeScoredPrimaryKeyIterator(List<CloseableIterator<ScoredPrimaryKey>> iterators, Collection<SSTableIndex> referencedIndexes)
     {
         int size = !iterators.isEmpty() ? iterators.size() : 1;
         this.pq = new PriorityQueue<>(size, (o1, o2) -> Float.compare(o2.peek().score, o1.peek().score));
-        for (ScoredPrimaryKeyIterator iterator : iterators)
+        for (CloseableIterator<ScoredPrimaryKey> iterator : iterators)
             if (iterator.hasNext())
-                pq.add(iterator);
+                pq.add(Iterators.peekingIterator(iterator));
         iteratorsToBeClosed = iterators;
         indexesToBeClosed = referencedIndexes;
     }
     @Override
-    protected ScoredPrimaryKey computeNext()
+    public boolean hasNext()
     {
-        if (pq.isEmpty())
-            return endOfData();
+        return !pq.isEmpty();
+    }
+
+    @Override
+    public ScoredPrimaryKey next()
+    {
+        if (!hasNext())
+            throw new NoSuchElementException();
+
+        // Get the iterator with the highest score
         var nextIter = pq.poll();
-        var next = nextIter.next();
+        assert nextIter != null;
+        var nextKey = nextIter.next();
+        // If the iterator has more elements, add it back to the queue
         if (nextIter.hasNext())
             pq.add(nextIter);
-        return next;
+
+        return nextKey;
     }
 
     @Override
     public void close()
     {
-        for (ScoredPrimaryKeyIterator iterator : iteratorsToBeClosed)
+        for (CloseableIterator<ScoredPrimaryKey> iterator : iteratorsToBeClosed)
             FileUtils.closeQuietly(iterator);
         for (SSTableIndex index : indexesToBeClosed)
             index.release();

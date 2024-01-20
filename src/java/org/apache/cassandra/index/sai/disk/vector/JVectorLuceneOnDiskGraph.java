@@ -29,6 +29,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.utils.CloseableIterator;
 
 /**
  * A common interface between Lucene and JVector graph indexes
@@ -59,7 +60,7 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
     /**
      * See CassandraDiskANN::search
      */
-    public abstract NodeScoreToScoredRowIdIterator search(float[] queryVector, int topK, float threshold, Bits bits, QueryContext context, IntConsumer nodesVisited);
+    public abstract CloseableIterator<ScoredRowId> search(float[] queryVector, int topK, float threshold, Bits bits, QueryContext context, IntConsumer nodesVisited);
 
     public abstract void close() throws IOException;
 
