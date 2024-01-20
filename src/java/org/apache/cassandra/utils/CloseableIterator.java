@@ -20,7 +20,6 @@ package org.apache.cassandra.utils;
 import java.util.Collections;
 import java.util.Iterator;
 
-import com.google.common.collect.PeekingIterator;
 
 // so we can instantiate anonymous classes implementing both interfaces
 public interface CloseableIterator<T> extends Iterator<T>, AutoCloseable
