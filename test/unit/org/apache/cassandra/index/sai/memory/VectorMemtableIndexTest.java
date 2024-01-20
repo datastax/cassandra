@@ -57,6 +57,7 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.locator.TokenMetadata;
@@ -141,11 +142,15 @@ public class VectorMemtableIndexTest extends SAITester
             Set<Integer> foundKeys = new HashSet<>();
             int limit = getRandom().nextIntBetween(1, 100);
 
-            try (RangeIterator iterator = memtableIndex.search(new QueryContext(), expression, keyRange, limit))
+            try (var iterator = memtableIndex.orderBy(new QueryContext(), expression, keyRange, limit))
             {
+                ScoredPrimaryKey lastKey = null;
                 while (iterator.hasNext())
                 {
-                    PrimaryKey primaryKey = iterator.next();
+                    ScoredPrimaryKey primaryKey = iterator.next();
+                    if (lastKey != null)
+                        assertTrue( "Returned keys are not ordered by score", lastKey.score >= primaryKey.score);
+                    lastKey = primaryKey;
                     int key = Int32Type.instance.compose(primaryKey.partitionKey().getKey());
                     assertFalse(foundKeys.contains(key));
 
