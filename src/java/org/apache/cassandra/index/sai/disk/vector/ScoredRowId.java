@@ -18,7 +18,7 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-public class ScoredRowId implements Comparable<ScoredRowId>
+public class ScoredRowId
 {
     final int segmentRowId;
     final float score;
@@ -37,11 +37,5 @@ public class ScoredRowId implements Comparable<ScoredRowId>
     public int getSegmentRowId()
     {
         return segmentRowId;
-    }
-
-    @Override
-    public int compareTo(ScoredRowId o)
-    {
-        return Float.compare(o.score, score);
     }
 }

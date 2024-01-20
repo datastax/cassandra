@@ -104,16 +104,16 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
     @Override
     public boolean hasNext()
     {
-        // The priority queue is only valid for the first limit results. After that, we need to
-        // get the next `limit` results from the compressed vector graph, compute the full resolution scores,
-        // and add to the priority queue.
-        if (!exactScoreQueue.isEmpty() && !needsRefill())
+        // The exactScoreQueue is only valid for the first limit results (until the approximateScoreQueue is exhausted).
+        // When the exactScoreQueue drops below the (topK - limit) threshold, attempt to refill the exactScoreQueue
+        // with full resolution scores.
+        if (exactScoreQueue.size() >= topK - limit)
             return true;
 
+        // Refill the exactScoreQueue until we either reach topK exact scores or the approximate score queue is empty.
         while (!approximateScoreQueue.isEmpty() && exactScoreQueue.size() <= topK)
         {
             RowWithApproximateScore rowOrdinalScore = approximateScoreQueue.poll();
-            System.out.println("xxx " + rowOrdinalScore.appoximateScore);
             float[] vector = vectorForOrdinal.apply(rowOrdinalScore.ordinal);
             assert vector != null : "Vector for ordinal " + rowOrdinalScore.ordinal + " is null";
             float score = exactSimilarityFunction.compare(queryVector, vector);
@@ -127,16 +127,10 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
     @Override
     public ScoredRowId next()
     {
-        // Don't call hastNext() because it might unnecessarily trigger reads from disk
-        if (exactScoreQueue.isEmpty() || needsRefill())
+        if (!hasNext())
             throw new NoSuchElementException();
 
         return exactScoreQueue.poll();
-    }
-
-    private boolean needsRefill()
-    {
-        return exactScoreQueue.size() < topK - limit && !approximateScoreQueue.isEmpty();
     }
 
     @Override
