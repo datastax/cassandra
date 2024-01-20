@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.metrics;
 
-import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;

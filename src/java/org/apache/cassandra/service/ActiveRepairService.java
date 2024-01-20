@@ -868,12 +868,9 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
 
         if (session == null)
         {
-            switch (message.verb())
+            if (message.verb() == VALIDATION_RSP || message.verb() == SYNC_RSP)
             {
-                case VALIDATION_RSP:
-                case SYNC_RSP:
                     ctx.messaging().send(message.emptyResponse(), message.from());
-                    break;
             }
             if (payload instanceof ValidationResponse)
             {

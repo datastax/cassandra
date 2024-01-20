@@ -890,45 +890,21 @@ public class RepairJobTest
                     messageCapture.add(message);
                 }
 
-                switch (message.verb())
+                if (message.verb() == SNAPSHOT_MSG)
                 {
-                    case SNAPSHOT_MSG:
-                        MessagingService.instance().callbacks.removeAndRespond(message.id(), to, message.emptyResponse());
-                        break;
-                    case VALIDATION_REQ:
-                        MerkleTrees tree = mockTrees.get(to);
-                        session.validationComplete(sessionJobDesc, Message.builder(Verb.VALIDATION_RSP, tree != null ? new ValidationResponse(sessionJobDesc, tree) : new ValidationResponse(sessionJobDesc)).from(to).build());
-                        break;
-                    case SYNC_REQ:
-                        SyncRequest syncRequest = (SyncRequest) message.payload;
-                        session.syncComplete(sessionJobDesc, Message.builder(Verb.SYNC_RSP, new SyncResponse(sessionJobDesc, new SyncNodePair(syncRequest.src, syncRequest.dst), true, Collections.emptyList())).from(to).build());
-                        break;
-                    default:
-                        break;
+                    MessagingService.instance().callbacks.removeAndRespond(message.id(), to, message.emptyResponse());
+                }
+                else if (message.verb() == VALIDATION_REQ)
+                {
+                    MerkleTrees tree = mockTrees.get(to);
+                    session.validationComplete(sessionJobDesc, Message.builder(Verb.VALIDATION_RSP, tree != null ? new ValidationResponse(sessionJobDesc, tree) : new ValidationResponse(sessionJobDesc)).from(to).build());
+                }
+                else if (message.verb() == SYNC_REQ)
+                {
+                    SyncRequest syncRequest = (SyncRequest) message.payload;
+                    session.syncComplete(sessionJobDesc, Message.builder(Verb.SYNC_RSP, new SyncResponse(sessionJobDesc, new SyncNodePair(syncRequest.src, syncRequest.dst), true, Collections.emptyList())).from(to).build());
                 }
                 return false;
-
-            // So different Thread's messages don't overwrite each other.
-            synchronized (MESSAGE_LOCK)
-            {
-                messageCapture.add(message);
-            }
-
-            if (message.verb() == SNAPSHOT_MSG)
-            {
-                MessagingService.instance().callbacks.removeAndRespond(message.id(), to, message.emptyResponse());
-            }
-            else if (message.verb() == VALIDATION_REQ)
-            {
-                session.validationComplete(sessionJobDesc, to, mockTrees.get(to));
-            }
-            else if (message.verb() == SYNC_REQ)
-            {
-                SyncRequest syncRequest = (SyncRequest) message.payload;
-                session.syncComplete(sessionJobDesc, new SyncNodePair(syncRequest.src, syncRequest.dst),
-                                     true, Collections.emptyList());
-            }
-            return false;
         });
     }
 }

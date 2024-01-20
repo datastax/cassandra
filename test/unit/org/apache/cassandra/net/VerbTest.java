@@ -20,17 +20,11 @@ package org.apache.cassandra.net;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.junit.Test;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.MutationVerbHandler;
 
 import static org.junit.Assert.assertEquals;

@@ -17,12 +17,10 @@
  */
 package org.apache.cassandra.metrics;
 
-import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Maps;
 
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.Timer;
