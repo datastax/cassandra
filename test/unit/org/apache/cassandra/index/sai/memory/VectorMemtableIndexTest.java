@@ -54,8 +54,6 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.vector.OverqueryUtils;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.inject.Injections;
@@ -142,14 +140,19 @@ public class VectorMemtableIndexTest extends SAITester
             Set<Integer> foundKeys = new HashSet<>();
             int limit = getRandom().nextIntBetween(1, 100);
 
+            long expectedNumResults = Math.min(OverqueryUtils.topKFor(limit, null), keysInRange.size());
+
             try (var iterator = memtableIndex.orderBy(new QueryContext(), expression, keyRange, limit))
             {
                 ScoredPrimaryKey lastKey = null;
-                while (iterator.hasNext())
+                while (iterator.hasNext() && expectedNumResults > foundKeys.size())
                 {
                     ScoredPrimaryKey primaryKey = iterator.next();
                     if (lastKey != null)
-                        assertTrue( "Returned keys are not ordered by score", lastKey.score >= primaryKey.score);
+                        // This assertion only holds true as long as we query at most the expectedNumResults.
+                        // Once we query deeper, we might get a key with a lower score than the last key.
+                        // This is a direct consequence of the approximate part of ANN.
+                        assertTrue("Returned keys are not ordered by score", lastKey.score >= primaryKey.score);
                     lastKey = primaryKey;
                     int key = Int32Type.instance.compose(primaryKey.partitionKey().getKey());
                     assertFalse(foundKeys.contains(key));
@@ -158,13 +161,18 @@ public class VectorMemtableIndexTest extends SAITester
                     assertTrue(rowMap.containsKey(key));
                     foundKeys.add(key);
                 }
+                // with -Dcassandra.test.random.seed=260652334768666, there is one missing key
+                if (RangeUtil.coversFullRing(keyRange))
+                {
+                    assertEquals("Missing key in full ring: " + Sets.difference(keysInRange, foundKeys), expectedNumResults, foundKeys.size());
+                    assertTrue("Iterator should not be exhausted since it can resume search", iterator.hasNext());
+                }
+                else
+                {
+                    // if skip ANN, returned keys maybe larger than limit
+                    assertTrue("Missing key in subrange: " + Sets.difference(keysInRange, foundKeys), expectedNumResults <= foundKeys.size());
+                }
             }
-            // with -Dcassandra.test.random.seed=260652334768666, there is one missing key
-            long expectedResult = Math.min(OverqueryUtils.topKFor(limit, null), keysInRange.size());
-            if (RangeUtil.coversFullRing(keyRange))
-                assertEquals("Missing key in full ring: " + Sets.difference(keysInRange, foundKeys), expectedResult, foundKeys.size());
-            else // if skip ANN, returned keys maybe larger than limit
-                assertTrue("Missing key in subrange: " + Sets.difference(keysInRange, foundKeys), expectedResult <= foundKeys.size());
         }
     }
 
