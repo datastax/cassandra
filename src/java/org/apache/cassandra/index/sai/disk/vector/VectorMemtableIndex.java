@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -27,7 +28,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.NoSuchElementException;
-import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
@@ -272,48 +272,43 @@ public class VectorMemtableIndex implements MemtableIndex
     /**
      * Filter the keys in the provided set by comparing their vectors to the query vector and returning only those
      * that have a similarity score >= the provided threshold.
+     * NOTE: because the threshold is not used for ordering, the result is returned in PK order, not score order.
      * @param queryVector the query vector
      * @param threshold the minimum similarity score to accept
      * @param keys the keys to filter
-     * @return an iterator over the keys that pass the filter
+     * @return an iterator over the keys that pass the filter in PK order
      */
     private CloseableIterator<ScoredPrimaryKey> filterByBruteForce(float[] queryVector, float threshold, NavigableSet<PrimaryKey> keys)
     {
-        var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
-        // Keys are already ordered in ascending PK order, so keep them that way.
-        var iter = keys.stream()
-                       .map(k -> {
-                           float[] vector = graph.vectorForKey(k);
-                           if (vector == null)
-                               return null;
-                           float score = similarityFunction.compare(queryVector, vector);
-                           return score >= threshold ? new ScoredPrimaryKey(k, score) : null;
-                       })
-                       .filter(Objects::nonNull)
-                       .iterator();
-        return CloseableIterator.wrap(iter);
+        // Keys are already ordered in ascending PK order, so just use an ArrayList to collect the results.
+        var results = new ArrayList<ScoredPrimaryKey>(keys.size());
+        scoreKeysAndAddToCollector(queryVector, keys, threshold, results);
+        return CloseableIterator.wrap(results.iterator());
     }
 
     private CloseableIterator<ScoredPrimaryKey> orderByBruteForce(float[] queryVector, Collection<PrimaryKey> keys)
     {
-        // search() errors out when an empty graph is passed to it
-        if (keys.isEmpty())
-            return CloseableIterator.emptyIterator();
-
-        var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
-
         // Use a priority queue because we often don't need to consume the entire iterator
         var scoredPrimaryKeys = new PriorityQueue<ScoredPrimaryKey>(keys.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
+        scoreKeysAndAddToCollector(queryVector, keys, 0, scoredPrimaryKeys);
+        return new PriorityQueueIterator<>(scoredPrimaryKeys);
+    }
+
+    private void scoreKeysAndAddToCollector(float[] queryVector,
+                                            Collection<PrimaryKey> keys,
+                                            float threshold,
+                                            Collection<ScoredPrimaryKey> collector)
+    {
+        var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         for (var key : keys)
         {
             float[] vector = graph.vectorForKey(key);
             if (vector == null)
                 continue;
             var score = similarityFunction.compare(queryVector, vector);
-            scoredPrimaryKeys.add(new ScoredPrimaryKey(key, score));
+            if (score >= threshold)
+                collector.add(new ScoredPrimaryKey(key, score));
         }
-
-        return new PriorityQueueIterator<>(scoredPrimaryKeys);
     }
 
     private int maxBruteForceRows(int limit, int nPermittedOrdinals, int graphSize)

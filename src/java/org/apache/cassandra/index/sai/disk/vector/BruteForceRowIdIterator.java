@@ -70,7 +70,6 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
     private final VectorSimilarityFunction exactSimilarityFunction;
     private final int topK;
     private final int limit;
-    private final float threshold;
 
     /**
      * @param queryVector The query vector
@@ -79,15 +78,13 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
      * @param exactSimilarityFunction The similarity function to compare full resolution vectors
      * @param limit The query limit
      * @param topK The number of vectors to resolve and score before returning results
-     * @param threshold The minimum similarity score to return
      */
     public BruteForceRowIdIterator(float[] queryVector,
                                    PriorityQueue<RowWithApproximateScore> approximateScoreQueue,
                                    IntFunction<float[]> vectorForOrdinal,
                                    VectorSimilarityFunction exactSimilarityFunction,
                                    int limit,
-                                   int topK,
-                                   float threshold)
+                                   int topK)
     {
         this.queryVector = queryVector;
         this.approximateScoreQueue = approximateScoreQueue;
@@ -97,7 +94,6 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
         assert topK >= limit : "topK must be greater than or equal to limit. Found: " + topK + " < " + limit;
         this.limit = limit;
         this.topK = topK;
-        this.threshold = threshold;
     }
 
 
@@ -117,8 +113,7 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
             float[] vector = vectorForOrdinal.apply(rowOrdinalScore.ordinal);
             assert vector != null : "Vector for ordinal " + rowOrdinalScore.ordinal + " is null";
             float score = exactSimilarityFunction.compare(queryVector, vector);
-            if (score >= threshold)
-                exactScoreQueue.add(new ScoredRowId(rowOrdinalScore.rowId, score));
+            exactScoreQueue.add(new ScoredRowId(rowOrdinalScore.rowId, score));
         }
 
         return !exactScoreQueue.isEmpty();
