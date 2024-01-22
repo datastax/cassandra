@@ -78,7 +78,7 @@ public interface CompactionStrategy extends CompactionObserver
     /**
      * @param gcBefore throw away tombstones older than this
      *
-     * @return a compaction task that should be run to compact this columnfamilystore
+     * @return a compaction task that should be run to compact this table
      * as much as possible.  Null if nothing to do.
      *
      * Is responsible for marking its sstables as compaction-pending.
@@ -96,7 +96,7 @@ public interface CompactionStrategy extends CompactionObserver
      * Is responsible for marking its sstables as compaction-pending.
      */
     @SuppressWarnings("resource")
-    CompactionTasks getUserDefinedTasks(Collection<SSTableReader> sstables, long gcBefore);
+    CompactionTasks getUserDefinedTasks(Collection<? extends CompactionSSTable> sstables, long gcBefore);
 
     /**
      * Get the estimated remaining compactions.
@@ -106,7 +106,7 @@ public interface CompactionStrategy extends CompactionObserver
     int getEstimatedRemainingTasks();
 
     int getEstimatedRemainingTasks(int additionalSSTables, long additionalBytes, boolean isIncremental);
-    
+
     /**
      * Create a compaction task for the sstables in the transaction.
      *
@@ -151,7 +151,7 @@ public interface CompactionStrategy extends CompactionObserver
      * @return sstable count for each bucket in TWCS. null unless time window compaction is used.
      */
     int[] getSSTableCountPerTWCSBucket();
-    
+
     /**
      * @return the level fanout size if applicable to this strategy. Otherwise return the default LCS fanout size.
      */
@@ -178,12 +178,14 @@ public interface CompactionStrategy extends CompactionObserver
     /**
      * Returns the sstables managed by the strategy
      */
-    Set<SSTableReader> getSSTables();
+    Set<? extends CompactionSSTable> getSSTables();
 
     /**
      * Group sstables that can be anti-compacted togetehr.
+     * @param sstablesToGroup
+     * @return
      */
-    Collection<Collection<SSTableReader>> groupSSTablesForAntiCompaction(Collection<SSTableReader> sstablesToGroup);
+    Collection<Collection<CompactionSSTable>> groupSSTablesForAntiCompaction(Collection<? extends CompactionSSTable> sstablesToGroup);
 
     /**
      * Create an sstable writer that is suitable for the strategy.
