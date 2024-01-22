@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 
 import org.apache.cassandra.utils.CloseableIterator;
@@ -44,6 +45,8 @@ public class PriorityQueueIterator<T> implements CloseableIterator<T>
     @Override
     public T next()
     {
+        if (!hasNext())
+            throw new NoSuchElementException();
         return pq.poll();
     }
 

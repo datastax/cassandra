@@ -37,10 +37,14 @@ public class VectorPostingList implements PostingList
     {
         segmentRowIds = new LongHeap(32);
         int n = 0;
-        while (source.hasNext())
+        // Once the source is consumed, we have to close it.
+        try (source)
         {
-            segmentRowIds.push(source.next().getSegmentRowId());
-            n++;
+            while (source.hasNext())
+            {
+                segmentRowIds.push(source.next().getSegmentRowId());
+                n++;
+            }
         }
         this.size = n;
     }
