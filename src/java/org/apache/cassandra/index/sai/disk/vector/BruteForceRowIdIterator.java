@@ -103,7 +103,7 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
         // The exactScoreQueue is only valid for the first limit results (until the approximateScoreQueue is exhausted).
         // When the exactScoreQueue drops below the (topK - limit) threshold, attempt to refill the exactScoreQueue
         // with full resolution scores.
-        if (exactScoreQueue.size() >= topK - limit)
+        if (exactScoreQueue.size() >= topK - limit && !exactScoreQueue.isEmpty())
             return true;
 
         // Refill the exactScoreQueue until we either reach topK exact scores or the approximate score queue is empty.
