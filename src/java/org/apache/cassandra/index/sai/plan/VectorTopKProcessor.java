@@ -133,9 +133,21 @@ public class VectorTopKProcessor
 
     /**
      * Filter given partitions and keep the rows with highest scores. In case of {@link UnfilteredPartitionIterator},
-     * all tombstones will be kept.
+     * all tombstones will be kept. Caller must close the supplied iterator.
      */
     public <U extends Unfiltered, R extends BaseRowIterator<U>, P extends BasePartitionIterator<R>> BasePartitionIterator<?> filter(P partitions)
+    {
+        // filterInternal consumes the partitions iterator and creates a new one. Use a try-with-resources block
+        // to ensure the original iterator is closed. We do not expect exceptions from filterInternal, but if they
+        // happen, we want to make sure the original iterator is closed to prevent leaking resources, which could
+        // compound the effect of an exception.
+        try (partitions)
+        {
+            return filterInternal(partitions);
+        }
+    }
+
+    private <U extends Unfiltered, R extends BaseRowIterator<U>, P extends BasePartitionIterator<R>> BasePartitionIterator<?> filterInternal(P partitions)
     {
         // priority queue ordered by score in descending order
         PriorityQueue<Triple<PartitionInfo, Row, Float>> topK =
@@ -202,8 +214,6 @@ public class VectorTopKProcessor
                 }
             }
         }
-
-        partitions.close();
 
         // reorder rows in partition/clustering order
         final int numResults = min(topK.size(), limit);
