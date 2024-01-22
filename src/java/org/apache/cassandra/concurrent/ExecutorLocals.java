@@ -19,20 +19,21 @@
 package org.apache.cassandra.concurrent;
 
 import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.WithResources;
 
 /*
- * This class only knows about Tracing and ClientWarn, so if any different executor locals are added, it must be
+ * This class only knows about fixed locals, so if any different executor locals are added, it must be
  * updated.
  *
  * We don't enumerate the ExecutorLocal.all array each time because it would be much slower.
  */
 public class ExecutorLocals implements WithResources, Closeable
 {
-    private static final ExecutorLocals none = new ExecutorLocals(null, null);
+    private static final ExecutorLocals none = new ExecutorLocals(null, null, null);
     private static final FastThreadLocal<ExecutorLocals> locals = new FastThreadLocal<ExecutorLocals>()
     {
         @Override
@@ -44,20 +45,22 @@ public class ExecutorLocals implements WithResources, Closeable
 
     public static class Impl
     {
-        public static void set(TraceState traceState, ClientWarn.State clientWarnState)
+        public static void set(TraceState traceState, ClientWarn.State clientWarnState, RequestSensors sensors)
         {
-            if (traceState == null && clientWarnState == null) locals.set(none);
-            else locals.set(new ExecutorLocals(traceState, clientWarnState));
+            if (traceState == null && clientWarnState == null && sensors == null) locals.set(none);
+            else locals.set(new ExecutorLocals(traceState, clientWarnState, sensors));
         }
     }
 
     public final TraceState traceState;
     public final ClientWarn.State clientWarnState;
+    public final RequestSensors sensors;
 
-    protected ExecutorLocals(TraceState traceState, ClientWarn.State clientWarnState)
+    protected ExecutorLocals(TraceState traceState, ClientWarn.State clientWarnState, RequestSensors sensors)
     {
         this.traceState = traceState;
         this.clientWarnState = clientWarnState;
+        this.sensors = sensors;
     }
 
     /**
@@ -81,8 +84,15 @@ public class ExecutorLocals implements WithResources, Closeable
     public static ExecutorLocals create(TraceState traceState)
     {
         ExecutorLocals current = locals.get();
-        return current.traceState == traceState ? current : new ExecutorLocals(traceState, current.clientWarnState);
+        return current.traceState == traceState ? current : new ExecutorLocals(traceState, current.clientWarnState, current.sensors);
     }
+
+    public static ExecutorLocals create(RequestSensors sensors)
+    {
+        ExecutorLocals current = locals.get();
+        return current.sensors == sensors ? current : new ExecutorLocals(current.traceState, current.clientWarnState, sensors);
+    }
+
     public static void clear()
     {
         locals.set(none);
