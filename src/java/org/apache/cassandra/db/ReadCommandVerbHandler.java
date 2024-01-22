@@ -32,7 +32,11 @@ import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.NoSpamLogger;
 
@@ -92,6 +96,11 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         validateTransientStatus(message);
         MessageParams.reset();
+
+        // Initialize the sensor and set ExecutorLocals
+        RequestSensors sensors = new RequestSensors(Context.from(command));
+        sensors.registerSensor(Type.READ_BYTES);
+        RequestTracker.instance.set(sensors);
 
         long timeout = message.expiresAtNanos() - message.createdAtNanos();
         command.setMonitoringTime(message.createdAtNanos(), message.isCrossNode(), timeout, DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
