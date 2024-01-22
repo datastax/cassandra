@@ -37,8 +37,8 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 
 public class LeveledGenerationsTest extends CQLTester
@@ -163,21 +163,21 @@ public class LeveledGenerationsTest extends CQLTester
         {}
     }
 
-    private void assertIter(Iterator<SSTableReader> iter, long first, long last, int expectedCount)
+    private void assertIter(Iterator<? extends CompactionSSTable> iter, long first, long last, int expectedCount)
     {
-        List<SSTableReader> drained = Lists.newArrayList(iter);
+        List<CompactionSSTable> drained = Lists.newArrayList(iter);
         assertEquals(expectedCount, drained.size());
         assertEquals(dk(first).getToken(), first(drained).getFirst().getToken());
         assertEquals(dk(last).getToken(), last(drained).getFirst().getToken()); // we sort by first token, so this is the first token of the last sstable in iter
     }
 
-    private SSTableReader last(Iterable<SSTableReader> iter)
+    private CompactionSSTable last(Iterable<CompactionSSTable> iter)
     {
         return Iterables.getLast(iter);
     }
-    private SSTableReader first(Iterable<SSTableReader> iter)
+    private CompactionSSTable first(Iterable<CompactionSSTable> iter)
     {
-        SSTableReader first = Iterables.getFirst(iter, null);
+        CompactionSSTable first = Iterables.getFirst(iter, null);
         if (first == null)
             throw new RuntimeException();
         return first;
