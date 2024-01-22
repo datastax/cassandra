@@ -19,16 +19,17 @@ package org.apache.cassandra.db.compaction.writers;
 
 import java.util.Set;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.db.SerializationHeader;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.compaction.CompactionRealm;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.LeveledManifest;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 
@@ -43,27 +44,27 @@ public class MajorLeveledCompactionWriter extends CompactionAwareWriter
     private final long keysPerSSTable;
     private final int levelFanoutSize;
 
-    public MajorLeveledCompactionWriter(ColumnFamilyStore cfs,
+    public MajorLeveledCompactionWriter(CompactionRealm realm,
                                         Directories directories,
                                         LifecycleTransaction txn,
                                         Set<SSTableReader> nonExpiredSSTables,
                                         long maxSSTableSize)
     {
-        this(cfs, directories, txn, nonExpiredSSTables, maxSSTableSize, false);
+        this(realm, directories, txn, nonExpiredSSTables, maxSSTableSize, false);
     }
 
     @SuppressWarnings({ "resource", "RedundantSuppression" })
-    public MajorLeveledCompactionWriter(ColumnFamilyStore cfs,
+    public MajorLeveledCompactionWriter(CompactionRealm realm,
                                         Directories directories,
                                         LifecycleTransaction txn,
                                         Set<SSTableReader> nonExpiredSSTables,
                                         long maxSSTableSize,
                                         boolean keepOriginals)
     {
-        super(cfs, directories, txn, nonExpiredSSTables, keepOriginals);
+        super(realm, directories, txn, nonExpiredSSTables, keepOriginals);
         this.maxSSTableSize = maxSSTableSize;
-        this.levelFanoutSize = cfs.getLevelFanoutSize();
-        long estimatedSSTables = Math.max(1, SSTableReader.getTotalBytes(nonExpiredSSTables) / maxSSTableSize);
+        this.levelFanoutSize = realm.getLevelFanoutSize();
+        long estimatedSSTables = Math.max(1, CompactionSSTable.getTotalBytes(nonExpiredSSTables) / maxSSTableSize);
         keysPerSSTable = estimatedTotalKeys / estimatedSSTables;
     }
 
@@ -105,18 +106,18 @@ public class MajorLeveledCompactionWriter extends CompactionAwareWriter
     @SuppressWarnings("resource")
     protected SSTableWriter sstableWriter(Directories.DataDirectory directory, PartitionPosition diskBoundary)
     {
-        Descriptor descriptor = cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
+        Descriptor descriptor = realm.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
         return descriptor.getFormat().getWriterFactory().builder(descriptor)
                          .setKeyCount(keysPerSSTable)
                          .setRepairedAt(minRepairedAt)
                          .setPendingRepair(pendingRepair)
                          .setTransientSSTable(isTransient)
-                         .setTableMetadataRef(cfs.metadata)
-                         .setMetadataCollector(new MetadataCollector(txn.originals(), cfs.metadata().comparator, currentLevel))
-                         .setSerializationHeader(SerializationHeader.make(cfs.metadata(), txn.originals()))
-                         .addDefaultComponents(cfs.indexManager.listIndexGroups())
-                         .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
-                         .build(txn, cfs);
+                         .setTableMetadataRef(realm.metadataRef())
+                         .setMetadataCollector(new MetadataCollector(txn.originals(), realm.metadata().comparator, currentLevel))
+                         .setSerializationHeader(SerializationHeader.make(realm.metadata(), txn.originals()))
+                         .addDefaultComponents(realm.getIndexManager().listIndexGroups())
+                         .setSecondaryIndexGroups(realm.getIndexManager().listIndexGroups())
+                         .build(txn, realm);
     }
 
     @Override

@@ -51,7 +51,6 @@ import org.apache.cassandra.notifications.MemtableSwitchedNotification;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
 import org.apache.cassandra.notifications.SSTableListChangedNotification;
-import org.apache.cassandra.notifications.SSTableMetadataChanged;
 import org.apache.cassandra.notifications.SSTableRepairStatusChanged;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.MockSchema;
@@ -382,10 +381,6 @@ public class TrackerTest
         Memtable memtable = MockSchema.memtable(cfs);
         tracker.notifyRenewed(memtable);
         Assert.assertEquals(memtable, ((MemtableRenewedNotification) listener.received.get(0)).renewed);
-        listener.received.clear();
-        tracker.notifySSTableMetadataChanged(r1, r1.getSSTableMetadata());
-        Assert.assertEquals(((SSTableMetadataChanged)listener.received.get(0)).sstable, r1);
-        Assert.assertEquals(r1.getSSTableMetadata(), ((SSTableMetadataChanged)listener.received.get(0)).oldMetadata);
         listener.received.clear();
         tracker.unsubscribe(listener);
         MockListener failListener = new MockListener(true);

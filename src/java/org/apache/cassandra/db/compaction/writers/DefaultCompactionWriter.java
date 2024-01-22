@@ -20,19 +20,19 @@ package org.apache.cassandra.db.compaction.writers;
 
 import java.util.Set;
 
-import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
-import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 
 /**
  * The default compaction writer - creates one output file in L0
@@ -42,15 +42,15 @@ public class DefaultCompactionWriter extends CompactionAwareWriter
     protected static final Logger logger = LoggerFactory.getLogger(DefaultCompactionWriter.class);
     private final int sstableLevel;
 
-    public DefaultCompactionWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
+    public DefaultCompactionWriter(CompactionRealm realm, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
     {
-        this(cfs, directories, txn, nonExpiredSSTables, false, 0);
+        this(realm, directories, txn, nonExpiredSSTables, false, 0);
     }
 
     @SuppressWarnings({ "resource", "RedundantSuppression" })
-    public DefaultCompactionWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables, boolean keepOriginals, int sstableLevel)
+    public DefaultCompactionWriter(CompactionRealm realm, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables, boolean keepOriginals, int sstableLevel)
     {
-        super(cfs, directories, txn, nonExpiredSSTables, keepOriginals);
+        super(realm, directories, txn, nonExpiredSSTables, keepOriginals);
         this.sstableLevel = sstableLevel;
     }
 
@@ -64,18 +64,18 @@ public class DefaultCompactionWriter extends CompactionAwareWriter
     @Override
     protected SSTableWriter sstableWriter(Directories.DataDirectory directory, PartitionPosition diskBoundary)
     {
-        Descriptor descriptor = cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
+        Descriptor descriptor = realm.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
         return descriptor.getFormat().getWriterFactory().builder(descriptor)
                          .setKeyCount(estimatedTotalKeys)
                          .setRepairedAt(minRepairedAt)
                          .setPendingRepair(pendingRepair)
                          .setTransientSSTable(isTransient)
-                         .setTableMetadataRef(cfs.metadata)
-                         .setMetadataCollector(new MetadataCollector(txn.originals(), cfs.metadata().comparator, sstableLevel))
-                         .setSerializationHeader(SerializationHeader.make(cfs.metadata(), nonExpiredSSTables))
-                         .addDefaultComponents(cfs.indexManager.listIndexGroups())
-                         .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
-                         .build(txn, cfs);
+                         .setTableMetadataRef(realm.metadataRef())
+                         .setMetadataCollector(new MetadataCollector(txn.originals(), realm.metadata().comparator, sstableLevel))
+                         .setSerializationHeader(SerializationHeader.make(realm.metadata(), nonExpiredSSTables))
+                         .addDefaultComponents(realm.getIndexManager().listIndexGroups())
+                         .setSecondaryIndexGroups(realm.getIndexManager().listIndexGroups())
+                         .build(txn, realm);
     }
 
     protected long sstableKeyCount()

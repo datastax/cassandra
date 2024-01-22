@@ -26,12 +26,12 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.CompactionTask;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -54,7 +54,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
 {
     protected static final Logger logger = LoggerFactory.getLogger(CompactionAwareWriter.class);
 
-    protected final ColumnFamilyStore cfs;
+    protected final CompactionRealm realm;
     protected final Directories directories;
     protected final Set<SSTableReader> nonExpiredSSTables;
     protected final long estimatedTotalKeys;
@@ -70,24 +70,24 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
     private int locationIndex;
     protected Directories.DataDirectory currentDirectory;
 
-    public CompactionAwareWriter(ColumnFamilyStore cfs,
+    public CompactionAwareWriter(CompactionRealm realm,
                                  Directories directories,
                                  LifecycleTransaction txn,
                                  Set<SSTableReader> nonExpiredSSTables,
                                  boolean keepOriginals)
     {
-        this.cfs = cfs;
+        this.realm = realm;
         this.directories = directories;
         this.nonExpiredSSTables = nonExpiredSSTables;
         this.txn = txn;
 
         estimatedTotalKeys = SSTableReader.getApproximateKeyCount(nonExpiredSSTables);
         maxAge = CompactionTask.getMaxDataAge(nonExpiredSSTables);
-        sstableWriter = SSTableRewriter.construct(cfs, txn, keepOriginals, maxAge);
+        sstableWriter = SSTableRewriter.construct(realm, txn, keepOriginals, maxAge);
         minRepairedAt = CompactionTask.getMinRepairedAt(nonExpiredSSTables);
         pendingRepair = CompactionTask.getPendingRepair(nonExpiredSSTables);
         isTransient = CompactionTask.getIsTransient(nonExpiredSSTables);
-        DiskBoundaries db = cfs.getDiskBoundaries();
+        DiskBoundaries db = realm.getDiskBoundaries();
         diskBoundaries = db.getPositions();
         locations = db.directories;
         locationIndex = -1;
@@ -223,18 +223,18 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
     @SuppressWarnings("resource")
     protected SSTableWriter sstableWriter(Directories.DataDirectory directory, PartitionPosition diskBoundary)
     {
-        Descriptor descriptor = cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
+        Descriptor descriptor = realm.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
         return descriptor.getFormat().getWriterFactory().builder(descriptor)
                          .setKeyCount(estimatedTotalKeys)
                          .setRepairedAt(minRepairedAt)
                          .setPendingRepair(pendingRepair)
                          .setTransientSSTable(isTransient)
-                         .setTableMetadataRef(cfs.metadata)
-                         .setMetadataCollector(new MetadataCollector(txn.originals(), cfs.metadata().comparator))
-                         .setSerializationHeader(SerializationHeader.make(cfs.metadata(), nonExpiredSSTables))
-                         .addDefaultComponents(cfs.indexManager.listIndexGroups())
-                         .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
-                         .build(txn, cfs);
+                         .setTableMetadataRef(realm.metadataRef())
+                         .setMetadataCollector(new MetadataCollector(txn.originals(), realm.metadata().comparator))
+                         .setSerializationHeader(SerializationHeader.make(realm.metadata(), nonExpiredSSTables))
+                         .addDefaultComponents(realm.getIndexManager().listIndexGroups())
+                         .setSecondaryIndexGroups(realm.getIndexManager().listIndexGroups())
+                         .build(txn, realm);
     }
 
     /**
@@ -290,7 +290,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
 
     protected long getExpectedWriteSize()
     {
-        return cfs.getExpectedCompactedFileSize(nonExpiredSSTables, txn.opType());
+        return realm.getExpectedCompactedFileSize(nonExpiredSSTables, txn.opType());
     }
 
     /**
@@ -302,14 +302,14 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
     protected SSTableWriter.Builder<?, ?> newWriterBuilder(Descriptor descriptor)
     {
         return descriptor.getFormat().getWriterFactory().builder(descriptor)
-                         .setTableMetadataRef(cfs.metadata)
+                         .setTableMetadataRef(realm.metadataRef())
                          .setTransientSSTable(isTransient)
                          .setRepairedAt(minRepairedAt)
                          .setPendingRepair(pendingRepair)
-                         .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
-                         .addDefaultComponents(cfs.indexManager.listIndexGroups());
+                         .setSecondaryIndexGroups(realm.getIndexManager().listIndexGroups())
+                         .addDefaultComponents(realm.getIndexManager().listIndexGroups());
     }
-    
+
     public long bytesWritten()
     {
         return sstableWriter.bytesWritten();
