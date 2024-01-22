@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.index.sai.disk.v1.postings;
 
-
-import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -41,13 +39,12 @@ public class MergePostingList implements PostingList
     final ArrayList<PeekablePostingList> postingLists;
     // (Intersection code just calls advance(long), so don't create this until we need it)
     PriorityQueue<PeekablePostingList> pq;
-    final Closeable onClose;
     final long size;
     private long lastRowId = -1;
 
-    private MergePostingList(ArrayList<PeekablePostingList> postingLists, Closeable onClose)
+    private MergePostingList(ArrayList<PeekablePostingList> postingLists)
     {
-        this.onClose = onClose;
+        checkArgument(!postingLists.isEmpty());
         this.postingLists = postingLists;
         long totalPostings = 0;
         for (PostingList postingList : postingLists)
@@ -57,15 +54,15 @@ public class MergePostingList implements PostingList
         this.size = totalPostings;
     }
 
-    public static PostingList merge(ArrayList<PeekablePostingList> postings, Closeable onClose)
-    {
-        checkArgument(!postings.isEmpty());
-        return postings.size() > 1 ? new MergePostingList(postings, onClose) : postings.iterator().next();
-    }
-
     public static PostingList merge(ArrayList<PeekablePostingList> postings)
     {
-        return merge(postings, () -> FileUtils.close(postings));
+        if (postings.isEmpty())
+            return PostingList.EMPTY;
+
+        if (postings.size() == 1)
+            return postings.get(0);
+
+        return new MergePostingList(postings);
     }
 
     @Override
@@ -162,6 +159,6 @@ public class MergePostingList implements PostingList
     @Override
     public void close() throws IOException
     {
-        onClose.close();
+        FileUtils.close(postingLists);
     }
 }
