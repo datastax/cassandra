@@ -592,10 +592,10 @@ public class QueryProcessor implements QueryHandler
         CQLStatement statement = parseStatement(query, queryState.getClientState());
         statement.validate(queryState.getClientState());
 
-        return executeInternalWithPaging(statement, pageSize, values);
+        return executeInternalWithPaging(statement, PageSize.inRows(pageSize), values);
     }
 
-    private static UntypedResultSet executeInternalWithPaging(CQLStatement statement, int pageSize, Object... values)
+    private static UntypedResultSet executeInternalWithPaging(CQLStatement statement, PageSize pageSize, Object... values)
     {
         if (!(statement instanceof SelectStatement))
             throw new IllegalArgumentException("Only SELECTs can be paged");

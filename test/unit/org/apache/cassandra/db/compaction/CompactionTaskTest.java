@@ -287,19 +287,19 @@ public class CompactionTaskTest
             CompactionTask task = new CompactionTask(gcGraceCfs, txn, FBUtilities.nowInSeconds() + 2, false, null)
             {
                 @Override
-                public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs,
+                public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm,
                                                                       Directories directories,
                                                                       LifecycleTransaction transaction,
                                                                       Set<SSTableReader> nonExpiredSSTables)
                 {
-                    return new MaxSSTableSizeWriter(cfs, directories, transaction, nonExpiredSSTables,
+                    return new MaxSSTableSizeWriter(realm, directories, transaction, nonExpiredSSTables,
                                                     maxSSTableSize, 0);
                 }
             };
 
             try (CompactionController compactionController = task.getCompactionController(txn.originals()))
             {
-                Set<SSTableReader> fullyExpiredSSTables = compactionController.getFullyExpiredSSTables();
+                Set<CompactionSSTable> fullyExpiredSSTables = compactionController.getFullyExpiredSSTables();
                 Assert.assertEquals(2, fullyExpiredSSTables.size());
                 task.execute(null);
             }
