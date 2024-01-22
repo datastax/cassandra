@@ -48,7 +48,6 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
-import org.apache.cassandra.index.sai.disk.vector.EmptyScoreRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OverqueryUtils;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
@@ -181,11 +180,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             long minSSTableRowId = primaryKeyMap.ceiling(firstPrimaryKey);
             // If we didn't find the first key, we won't find the last primary key either
             if (minSSTableRowId < 0)
-                return EmptyScoreRowIdIterator.instance();
+                return CloseableIterator.emptyIterator();
             long maxSSTableRowId = getMaxSSTableRowId(primaryKeyMap, keyRange.right);
 
             if (minSSTableRowId > maxSSTableRowId)
-                return EmptyScoreRowIdIterator.instance();
+                return CloseableIterator.emptyIterator();
 
             // if it covers entire segment, skip bit set
             if (minSSTableRowId <= metadata.minSSTableRowId && maxSSTableRowId >= metadata.maxSSTableRowId)
@@ -237,7 +236,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             var betterCostEstimate = estimateCost(topK, bits.cardinality());
 
             if (!hasMatches)
-                return EmptyScoreRowIdIterator.instance();
+                return CloseableIterator.emptyIterator();
 
             return graph.search(queryVector, topK, threshold, bits, context, visited -> {
                 betterCostEstimate.updateStatistics(visited);
