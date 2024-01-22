@@ -18,25 +18,37 @@
 package org.apache.cassandra.db.compaction;
 
 import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
-
-import org.apache.cassandra.db.lifecycle.SSTableSet;
-import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.ScannerList;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.Util;
 import org.apache.cassandra.UpdateBuilder;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.Util;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.ScannerList;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -113,18 +125,18 @@ public class LongLeveledCompactionStrategyTest
         int levels = manifest.getLevelCount();
         for (int level = 0; level < levels; level++)
         {
-            Set<SSTableReader> sstables = manifest.getLevel(level);
+            Set<CompactionSSTable> sstables = manifest.getLevel(level);
             // score check
-            assert (double) SSTableReader.getTotalBytes(sstables) / manifest.maxBytesForLevel(level, 1 * 1024 * 1024) < 1.00;
+            assert (double) CompactionSSTable.getTotalBytes(sstables) / manifest.maxBytesForLevel(level, 1 * 1024 * 1024) < 1.00;
             // overlap check for levels greater than 0
-            for (SSTableReader sstable : sstables)
+            for (CompactionSSTable sstable : sstables)
             {
                 // level check
                 assert level == sstable.getSSTableLevel();
 
                 if (level > 0)
                 {// overlap check for levels greater than 0
-                    Set<SSTableReader> overlaps = LeveledManifest.overlapping(sstable.getFirst().getToken(), sstable.getLast().getToken(), sstables);
+                    Set<CompactionSSTable> overlaps = LeveledManifest.overlapping(sstable.getFirst().getToken(), sstable.getLast().getToken(), sstables);
                     assert overlaps.size() == 1 && overlaps.contains(sstable);
                 }
             }

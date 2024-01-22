@@ -63,7 +63,6 @@ import org.apache.cassandra.exceptions.CasWriteTimeoutException;
 import org.apache.cassandra.exceptions.CasWriteUnknownResultException;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.notifications.SSTableMetadataChanged;
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
@@ -339,7 +338,7 @@ public class CasWriteTest extends TestBaseImpl
                 {
                     StatsMetadata oldMetadata = s.getSSTableMetadata();
                     s.mutateLevelAndReload(3);
-                    cfs.getCompactionStrategyContainer().handleNotification(new SSTableMetadataChanged(s, oldMetadata), null);
+//                    cfs.getCompactionStrategyContainer().handleNotification(new SSTableMetadataChanged(s, oldMetadata), null);
                 }
                 catch (Throwable t)
                 {

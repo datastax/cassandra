@@ -117,8 +117,8 @@ public class BigTableScrubber extends SortedTableScrubber<BigTableReader> implem
             try
             {
                 ByteBuffer raw = ByteBufferUtil.readWithShortLength(dataFile);
-                if (!cfs.metadata.getLocal().isIndex())
-                    cfs.metadata.getLocal().partitionKeyType.validate(raw);
+                if (!realm.metadataRef().getLocal().isIndex())
+                    realm.metadataRef().getLocal().partitionKeyType.validate(raw);
                 key = sstable.decorateKey(raw);
             }
             catch (Throwable th)
@@ -181,8 +181,8 @@ public class BigTableScrubber extends SortedTableScrubber<BigTableReader> implem
                     key = sstable.decorateKey(currentIndexKey);
                     try
                     {
-                        if (!cfs.metadata.getLocal().isIndex())
-                            cfs.metadata.getLocal().partitionKeyType.validate(key.getKey());
+                        if (!realm.metadataRef().getLocal().isIndex())
+                            realm.metadataRef().getLocal().partitionKeyType.validate(key.getKey());
                         dataFile.seek(dataStartFromIndex);
 
                         if (tryAppend(prevKey, key, writer))
