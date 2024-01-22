@@ -20,12 +20,14 @@ package org.apache.cassandra.concurrent;
 
 import java.util.Arrays;
 
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 
 /*
- * This class only knows about Tracing and ClientWarn, so if any different executor locals are added, it must be
+ * This class only knows about fixed locals, so if any different executor locals are added, it must be
  * updated.
  *
  * We don't enumerate the ExecutorLocal.all array each time because it would be much slower.
@@ -34,19 +36,22 @@ public class ExecutorLocals
 {
     private static final ExecutorLocal<TraceState> tracing = Tracing.instance;
     private static final ExecutorLocal<ClientWarn.State> clientWarn = ClientWarn.instance;
+    private static final ExecutorLocal<RequestSensors> requestTracker = RequestTracker.instance;
 
     public final TraceState traceState;
     public final ClientWarn.State clientWarnState;
+    public final RequestSensors sensors;
 
-    private ExecutorLocals(TraceState traceState, ClientWarn.State clientWarnState)
+    private ExecutorLocals(TraceState traceState, ClientWarn.State clientWarnState, RequestSensors sensors)
     {
         this.traceState = traceState;
         this.clientWarnState = clientWarnState;
+        this.sensors = sensors;
     }
 
     static
     {
-        assert Arrays.equals(ExecutorLocal.all, new ExecutorLocal[]{ tracing, clientWarn })
+        assert Arrays.equals(ExecutorLocal.all, new ExecutorLocal[]{ tracing, clientWarn, requestTracker })
         : "ExecutorLocals has not been updated to reflect new ExecutorLocal.all";
     }
 
@@ -62,28 +67,39 @@ public class ExecutorLocals
     {
         TraceState traceState = tracing.get();
         ClientWarn.State clientWarnState = clientWarn.get();
-        if (traceState == null && clientWarnState == null)
+        RequestSensors sensors = requestTracker.get();
+        if (traceState == null && clientWarnState == null && sensors == null)
             return null;
         else
-            return new ExecutorLocals(traceState, clientWarnState);
+            return new ExecutorLocals(traceState, clientWarnState, sensors);
     }
 
-    public static ExecutorLocals create(TraceState traceState, ClientWarn.State clientWarnState)
+    public static ExecutorLocals create(TraceState traceState, ClientWarn.State clientWarnState, RequestSensors sensors)
     {
-        return new ExecutorLocals(traceState, clientWarnState);
+        return new ExecutorLocals(traceState, clientWarnState, sensors);
     }
 
     public static ExecutorLocals create(TraceState traceState)
     {
         ClientWarn.State clientWarnState = clientWarn.get();
-        return new ExecutorLocals(traceState, clientWarnState);
+        RequestSensors sensors = requestTracker.get();
+        return new ExecutorLocals(traceState, clientWarnState, sensors);
+    }
+
+    public static ExecutorLocals create(RequestSensors sensors)
+    {
+        TraceState traceState = tracing.get();
+        ClientWarn.State clientWarnState = clientWarn.get();
+        return new ExecutorLocals(traceState, clientWarnState, sensors);
     }
 
     public static void set(ExecutorLocals locals)
     {
         TraceState traceState = locals == null ? null : locals.traceState;
         ClientWarn.State clientWarnState = locals == null ? null : locals.clientWarnState;
+        RequestSensors sensors = locals == null ? null : locals.sensors;
         tracing.set(traceState);
         clientWarn.set(clientWarnState);
+        requestTracker.set(sensors);
     }
 }
