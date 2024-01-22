@@ -22,7 +22,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-
 import javax.management.openmbean.ArrayType;
 import javax.management.openmbean.CompositeData;
 import javax.management.openmbean.CompositeDataSupport;
@@ -34,7 +33,7 @@ import javax.management.openmbean.SimpleType;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.utils.TimeUUID;
 
 public class CleanupSummary
@@ -74,9 +73,9 @@ public class CleanupSummary
         this.unsuccessful = unsuccessful;
     }
 
-    public CleanupSummary(ColumnFamilyStore cfs, Set<TimeUUID> successful, Set<TimeUUID> unsuccessful)
+    public CleanupSummary(CompactionRealm cfs, Set<TimeUUID> successful, Set<TimeUUID> unsuccessful)
     {
-        this(cfs.getKeyspaceName(), cfs.name, successful, unsuccessful);
+        this(cfs.getKeyspaceName(), cfs.getTableName(), successful, unsuccessful);
     }
 
     public static CleanupSummary add(CleanupSummary l, CleanupSummary r)
