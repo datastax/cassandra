@@ -17,35 +17,33 @@
  */
 package org.apache.cassandra.db.compaction;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-
-import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.utils.TimeUUID;
-
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-
-import static org.apache.cassandra.db.ColumnFamilyStore.nonSuspectAndNotInPredicate;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.utils.TimeUUID;
 
 abstract class AbstractCompactionStrategy implements CompactionStrategy
 {
@@ -54,8 +52,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     protected static final Logger logger = LoggerFactory.getLogger(AbstractCompactionStrategy.class);
 
     protected final CompactionStrategyOptions options;
-    protected final ColumnFamilyStore cfs;
-    protected final Tracker dataTracker;
+    protected final CompactionRealm realm;
 
     protected final CompactionLogger compactionLogger;
     protected final Directories directories;
@@ -79,11 +76,10 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     protected AbstractCompactionStrategy(CompactionStrategyFactory factory, BackgroundCompactions backgroundCompactions, Map<String, String> options)
     {
         assert factory != null;
-        this.cfs = factory.getCfs();
-        this.dataTracker = cfs.getTracker();
+        this.realm = factory.getRealm();
         this.compactionLogger = factory.getCompactionLogger();
         this.options = new CompactionStrategyOptions(getClass(), options, false);
-        this.directories = cfs.getDirectories();
+        this.directories = realm.getDirectories();
         this.backgroundCompactions = backgroundCompactions;
     }
 
@@ -167,10 +163,10 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     @SuppressWarnings("resource")
     public synchronized CompactionTasks getMaximalTasks(long gcBefore, boolean splitOutput)
     {
-        Iterable<SSTableReader> filteredSSTables = Iterables.filter(getSSTables(), sstable -> !sstable.isMarkedSuspect());
+        Iterable<? extends CompactionSSTable> filteredSSTables = Iterables.filter(getSSTables(), sstable -> !sstable.isMarkedSuspect());
         if (Iterables.isEmpty(filteredSSTables))
             return CompactionTasks.empty();
-        LifecycleTransaction txn = dataTracker.tryModify(filteredSSTables, OperationType.COMPACTION);
+        LifecycleTransaction txn = realm.tryModify(filteredSSTables, OperationType.COMPACTION);
         if (txn == null)
             return CompactionTasks.empty();
         return CompactionTasks.create(Collections.singleton(createCompactionTask(gcBefore, txn, true, splitOutput)));
@@ -187,11 +183,11 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
      */
     @Override
     @SuppressWarnings("resource")
-    public synchronized CompactionTasks getUserDefinedTasks(Collection<SSTableReader> sstables, long gcBefore)
+    public synchronized CompactionTasks getUserDefinedTasks(Collection<? extends CompactionSSTable> sstables, long gcBefore)
     {
         assert !sstables.isEmpty(); // checked for by CM.submitUserDefined
 
-        LifecycleTransaction modifier = dataTracker.tryModify(sstables, OperationType.COMPACTION);
+        LifecycleTransaction modifier = realm.tryModify(sstables, OperationType.COMPACTION);
         if (modifier == null)
         {
             logger.trace("Unable to mark {} for compaction; probably a background compaction got to it first.  You can disable background compactions temporarily if this is a problem", sstables);
@@ -216,7 +212,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
      */
     protected AbstractCompactionTask createCompactionTask(final long gcBefore, LifecycleTransaction txn, boolean isMaximal, boolean splitOutput)
     {
-        return new CompactionTask(cfs, txn, gcBefore, false, this);
+        return new CompactionTask(realm, txn, gcBefore, false, this);
     }
 
     /**
@@ -231,7 +227,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     @Override
     public AbstractCompactionTask createCompactionTask(LifecycleTransaction txn, final long gcBefore, long maxSSTableBytes)
     {
-        return new CompactionTask(cfs, txn, gcBefore, false, this);
+        return new CompactionTask(realm, txn, gcBefore, false, this);
     }
 
     /**
@@ -248,7 +244,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
      */
     int getEstimatedRemainingTasks(int additionalSSTables, long additionalBytes)
     {
-        return getEstimatedRemainingTasks() + (int)Math.ceil((double)additionalSSTables / cfs.getMaximumCompactionThreshold());
+        return getEstimatedRemainingTasks() + (int)Math.ceil((double)additionalSSTables / realm.getMaximumCompactionThreshold());
     }
 
     @Override
@@ -278,9 +274,9 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
         return ImmutableList.of(backgroundCompactions.getStatistics(this));
     }
 
-    public static Iterable<SSTableReader> nonSuspectAndNotIn(Iterable<SSTableReader> sstables, Set<SSTableReader> compacting)
+    public static Iterable<CompactionSSTable> nonSuspectAndNotIn(Iterable<CompactionSSTable> sstables, Set<? extends CompactionSSTable> compacting)
     {
-        return Iterables.filter(sstables, nonSuspectAndNotInPredicate(compacting));
+        return Iterables.filter(sstables, x -> !x.isMarkedSuspect() && !compacting.contains(x));
     }
 
     @Override
@@ -294,7 +290,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     {
         return new long[0];
     }
-    
+
     @Override
     public boolean isLeveledCompaction()
     {
@@ -306,7 +302,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     {
         return new int[0];
     }
-    
+
     @Override
     public int getLevelFanoutSize()
     {
@@ -323,17 +319,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     @Override
     public ScannerList getScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges)
     {
-        ArrayList<ISSTableScanner> scanners = new ArrayList<>();
-        try
-        {
-            for (SSTableReader sstable : sstables)
-                scanners.add(sstable.getScanner(ranges));
-        }
-        catch (Throwable t)
-        {
-            ISSTableScanner.closeAllAndPropagate(scanners, t);
-        }
-        return new ScannerList(scanners);
+        return ScannerList.of(sstables, ranges);
     }
 
     @Override
@@ -352,18 +338,20 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
      * anti-compaction to determine which SSTables should be anitcompacted
      * as a group. If a given compaction strategy creates sstables which
      * cannot be merged due to some constraint it must override this method.
+     * @param sstablesToGroup
+     * @return
      */
     @Override
-    public Collection<Collection<SSTableReader>> groupSSTablesForAntiCompaction(Collection<SSTableReader> sstablesToGroup)
+    public Collection<Collection<CompactionSSTable>> groupSSTablesForAntiCompaction(Collection<? extends CompactionSSTable> sstablesToGroup)
     {
         int groupSize = 2;
-        List<SSTableReader> sortedSSTablesToGroup = new ArrayList<>(sstablesToGroup);
-        Collections.sort(sortedSSTablesToGroup, SSTableReader.firstKeyComparator);
+        List<CompactionSSTable> sortedSSTablesToGroup = new ArrayList<>(sstablesToGroup);
+        Collections.sort(sortedSSTablesToGroup, CompactionSSTable.firstKeyComparator);
 
-        Collection<Collection<SSTableReader>> groupedSSTables = new ArrayList<>();
-        Collection<SSTableReader> currGroup = new ArrayList<>(groupSize);
+        Collection<Collection<CompactionSSTable>> groupedSSTables = new ArrayList<>();
+        Collection<CompactionSSTable> currGroup = new ArrayList<>(groupSize);
 
-        for (SSTableReader sstable : sortedSSTablesToGroup)
+        for (CompactionSSTable sstable : sortedSSTablesToGroup)
         {
             currGroup.add(sstable);
             if (currGroup.size() == groupSize)
@@ -388,17 +376,17 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
                                                        Collection<Index.Group> indexGroups,
                                                        LifecycleNewTracker lifecycleNewTracker)
     {
-        return SimpleSSTableMultiWriter.create(descriptor, 
-                                               keyCount, 
-                                               repairedAt, 
-                                               pendingRepair, 
-                                               isTransient, 
-                                               cfs.metadata, 
-                                               meta, 
-                                               header, 
-                                               indexGroups, 
-                                               lifecycleNewTracker, 
-                                               cfs);
+        return SimpleSSTableMultiWriter.create(descriptor,
+                                               keyCount,
+                                               repairedAt,
+                                               pendingRepair,
+                                               isTransient,
+                                               realm.metadataRef(),
+                                               meta,
+                                               header,
+                                               indexGroups,
+                                               lifecycleNewTracker,
+                                               realm);
     }
 
     @Override

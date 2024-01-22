@@ -39,11 +39,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -85,7 +85,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
 {
     private final static Logger logger = LoggerFactory.getLogger(SortedTableScrubber.class);
 
-    protected final ColumnFamilyStore cfs;
+    protected final CompactionRealm realm;
     protected final LifecycleTransaction transaction;
     protected final File destination;
     protected final IScrubber.Options options;
@@ -108,33 +108,33 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     protected int emptyPartitions;
 
 
-    protected SortedTableScrubber(ColumnFamilyStore cfs,
+    protected SortedTableScrubber(CompactionRealm realm,
                                   LifecycleTransaction transaction,
                                   OutputHandler outputHandler,
                                   Options options)
     {
         this.sstable = (R) transaction.onlyOne();
         Preconditions.checkNotNull(sstable.metadata());
-        assert sstable.metadata().keyspace.equals(cfs.getKeyspaceName());
-        if (!sstable.descriptor.cfname.equals(cfs.metadata().name))
+        assert sstable.metadata().keyspace.equals(realm.getKeyspaceName());
+        if (!sstable.descriptor.cfname.equals(realm.metadata().name))
         {
-            logger.warn("Descriptor points to a different table {} than metadata {}", sstable.descriptor.cfname, cfs.metadata().name);
+            logger.warn("Descriptor points to a different table {} than metadata {}", sstable.descriptor.cfname, realm.metadata().name);
         }
         try
         {
-            sstable.metadata().validateCompatibility(cfs.metadata());
+            sstable.metadata().validateCompatibility(realm.metadata());
         }
         catch (ConfigurationException ex)
         {
-            logger.warn("Descriptor points to a different table {} than metadata {}", sstable.descriptor.cfname, cfs.metadata().name);
+            logger.warn("Descriptor points to a different table {} than metadata {}", sstable.descriptor.cfname, realm.metadata().name);
         }
 
-        this.cfs = cfs;
+        this.realm = realm;
         this.transaction = transaction;
         this.outputHandler = outputHandler;
         this.options = options;
-        this.destination = cfs.getDirectories().getLocationForDisk(cfs.getDiskBoundaries().getCorrectDiskForSSTable(sstable));
-        this.isCommutative = cfs.metadata().isCounter();
+        this.destination = realm.getDirectories().getLocationForDisk(realm.getDiskBoundaries().getCorrectDiskForSSTable(sstable));
+        this.isCommutative = realm.metadata().isCounter();
 
         List<SSTableReader> toScrub = Collections.singletonList(sstable);
 
@@ -147,7 +147,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         {
             approximateKeyCount = 0;
         }
-        this.expectedBloomFilterSize = Math.max(cfs.metadata().params.minIndexInterval, approximateKeyCount);
+        this.expectedBloomFilterSize = Math.max(realm.metadata().params.minIndexInterval, approximateKeyCount);
 
         // loop through each partition, deserializing to check for damage.
         // We'll also loop through the index at the same time, using the position from the index to recover if the
@@ -185,11 +185,11 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     {
         List<SSTableReader> finished = new ArrayList<>();
         outputHandler.output("Scrubbing %s (%s)", sstable, FBUtilities.prettyPrintMemory(dataFile.length()));
-        try (SSTableRewriter writer = SSTableRewriter.construct(cfs, transaction, false, sstable.maxDataAge);
+        try (SSTableRewriter writer = SSTableRewriter.construct(realm, transaction, false, sstable.maxDataAge);
              Refs<SSTableReader> refs = Refs.ref(Collections.singleton(sstable)))
         {
             StatsMetadata metadata = sstable.getSSTableMetadata();
-            writer.switchWriter(CompactionManager.createWriter(cfs, destination, expectedBloomFilterSize, metadata.repairedAt, metadata.pendingRepair, metadata.isTransient, sstable, transaction));
+            writer.switchWriter(CompactionManager.createWriter(realm, destination, expectedBloomFilterSize, metadata.repairedAt, metadata.pendingRepair, metadata.isTransient, sstable, transaction));
 
             scrubInternal(writer);
 
@@ -239,7 +239,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         // out of order partitions/rows, but no bad partition found - we can keep our repairedAt time
         long repairedAt = badPartitions > 0 ? ActiveRepairService.UNREPAIRED_SSTABLE : sstable.getSSTableMetadata().repairedAt;
         SSTableReader newInOrderSstable;
-        try (SSTableWriter inOrderWriter = CompactionManager.createWriter(cfs, destination, expectedBloomFilterSize, repairedAt, metadata.pendingRepair, metadata.isTransient, sstable, transaction))
+        try (SSTableWriter inOrderWriter = CompactionManager.createWriter(realm, destination, expectedBloomFilterSize, repairedAt, metadata.pendingRepair, metadata.isTransient, sstable, transaction))
         {
             for (Partition partition : outOfOrder)
                 inOrderWriter.append(partition.unfilteredIterator());
@@ -276,7 +276,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
 
         try
         {
-            return cfs.metadata().partitionKeyType.getString(key.getKey());
+            return realm.metadata().partitionKeyType.getString(key.getKey());
         }
         catch (Exception e)
         {
@@ -289,7 +289,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         // OrderCheckerIterator will check, at iteration time, that the rows are in the proper order. If it detects
         // that one row is out of order, it will stop returning them. The remaining rows will be sorted and added
         // to the outOfOrder set that will be later written to a new SSTable.
-        try (OrderCheckerIterator sstableIterator = new OrderCheckerIterator(getIterator(key), cfs.metadata().comparator);
+        try (OrderCheckerIterator sstableIterator = new OrderCheckerIterator(getIterator(key), realm.metadata().comparator);
              UnfilteredRowIterator iterator = withValidation(sstableIterator, dataFile.getPath()))
         {
             if (prevKey != null && prevKey.compareTo(key) > 0)

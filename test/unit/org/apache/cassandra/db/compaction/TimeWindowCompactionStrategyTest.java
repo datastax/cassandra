@@ -33,14 +33,6 @@ import com.google.common.collect.Iterables;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import static java.util.concurrent.TimeUnit.HOURS;
-import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.getBucketAggregates;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -53,10 +45,17 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.MockSchema;
 
+import static java.util.concurrent.TimeUnit.HOURS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION;
+import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.getBucketAggregates;
 import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.getWindowBoundsInMillis;
 import static org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy.validateOptions;
 import static org.apache.cassandra.utils.FBUtilities.nowInSeconds;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class TimeWindowCompactionStrategyTest extends SchemaLoader
 {
@@ -202,8 +201,8 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
 
         Util.flush(cfs);
 
-        TreeMap<Long, List<SSTableReader>> buckets = new TreeMap<>(Long::compare);
-        List<SSTableReader> sstrs = new ArrayList<>(cfs.getLiveSSTables());
+        TreeMap<Long, List<CompactionSSTable>> buckets = new TreeMap<>(Long::compare);
+        List<CompactionSSTable> sstrs = new ArrayList<>(cfs.getLiveSSTables());
 
         // We'll put 3 sstables into the newest bucket
         for (int i = 0; i < 3; i++)
@@ -398,9 +397,9 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         CompactionStrategyContainer compactionStrategyContainer = cfs.getCompactionStrategyContainer();
         assert compactionStrategyContainer instanceof CompactionStrategyManager;
         CompactionStrategyManager compactionStrategyManager = (CompactionStrategyManager) compactionStrategyContainer;
-        Collection<Collection<SSTableReader>> groups = compactionStrategyManager.getCompactionStrategyFor(sstables.get(0)).groupSSTablesForAntiCompaction(sstables);
+        Collection<Collection<CompactionSSTable>> groups = compactionStrategyManager.getCompactionStrategyFor(sstables.get(0)).groupSSTablesForAntiCompaction(sstables);
         assertTrue(groups.size() > 0);
-        for (Collection<SSTableReader> group : groups)
+        for (Collection<CompactionSSTable> group : groups)
             assertEquals(1, group.size());
     }
 

@@ -28,14 +28,14 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.Config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Gauge;
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.CompactionStrategy;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -44,7 +44,12 @@ import org.apache.cassandra.metrics.MetricNameFactory;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.MonotonicClock;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.*;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_ADAPTIVE_ENABLED;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_DATASET_SIZE_OPTION_GB;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_MAX_SPACE_OVERHEAD_OPTION;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_MIN_SSTABLE_SIZE_OPTION_MB;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_NUM_SHARDS_OPTION;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_SURVIVAL_FACTOR;
 
 /**
 * The controller provides compaction parameters to the unified compaction strategy
@@ -497,7 +502,7 @@ public abstract class Controller
         return calculator.getWriteCostForQueries(writeAmplification(length, W));
     }
 
-    public static Controller fromOptions(ColumnFamilyStore cfs, Map<String, String> options)
+    public static Controller fromOptions(CompactionRealm realm, Map<String, String> options)
     {
         boolean adaptive = options.containsKey(ADAPTIVE_OPTION) ? Boolean.parseBoolean(options.get(ADAPTIVE_OPTION)) : DEFAULT_ADAPTIVE;
         long dataSetSizeMb = (options.containsKey(DATASET_SIZE_OPTION_GB) ? Long.parseLong(options.get(DATASET_SIZE_OPTION_GB)) : DEFAULT_DATASET_SIZE_GB) << 10;
@@ -515,7 +520,7 @@ public abstract class Controller
                 ? Boolean.parseBoolean(options.get(ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_OPTION))
                 : DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION;
 
-        Environment env = new RealEnvironment(cfs);
+        Environment env = new RealEnvironment(realm);
 
         return adaptive
                ? AdaptiveController.fromOptions(env,
