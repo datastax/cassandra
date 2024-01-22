@@ -29,6 +29,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import io.netty.util.HashedWheelTimer;
 import io.netty.util.Timeout;
 import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.TraceState;
 
@@ -71,10 +72,11 @@ public class Timer
     {
         ClientWarn.State clientWarnState = executorLocals == null ? null : executorLocals.clientWarnState;
         TraceState traceState = executorLocals == null ? null : executorLocals.traceState;
+        RequestSensors sensors = executorLocals == null ? null : executorLocals.sensors;
         CompletableFuture<Void> result = new CompletableFuture<>();
         Timeout handle = timer.newTimeout(ignored ->
                                           {
-                                              ExecutorLocals.set(ExecutorLocals.create(traceState, clientWarnState));
+                                              ExecutorLocals.set(ExecutorLocals.create(traceState, clientWarnState, sensors));
                                               try
                                               {
                                                   task.run();

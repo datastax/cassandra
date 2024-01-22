@@ -79,6 +79,7 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.sensors.read.TrackingRowIterator;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static com.google.common.collect.Iterables.any;
@@ -406,8 +407,9 @@ public abstract class ReadCommand extends AbstractReadQuery
             Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
         }
 
-        UnfilteredPartitionIterator iterator = (null == searcher) ? queryStorage(cfs, executionController)
+        UnfilteredPartitionIterator iterator = (null == searcher) ? Transformation.apply(queryStorage(cfs, executionController), new TrackingRowIterator())
                                                                   : searchStorage(searcher, executionController);
+
         iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
 
         try
