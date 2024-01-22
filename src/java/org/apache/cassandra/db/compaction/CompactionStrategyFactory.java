@@ -21,10 +21,8 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Map;
-
 import javax.annotation.Nullable;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.schema.CompactionParams;
 
 /**
@@ -32,13 +30,13 @@ import org.apache.cassandra.schema.CompactionParams;
  */
 public class CompactionStrategyFactory
 {
-    private final ColumnFamilyStore cfs;
+    private final CompactionRealm realm;
     private final CompactionLogger compactionLogger;
 
-    public CompactionStrategyFactory(ColumnFamilyStore cfs)
+    public CompactionStrategyFactory(CompactionRealm realm)
     {
-        this.cfs = cfs;
-        this.compactionLogger = new CompactionLogger(cfs.metadata());
+        this.realm = realm;
+        this.compactionLogger = new CompactionLogger(realm.metadata());
     }
 
     /**
@@ -72,9 +70,6 @@ public class CompactionStrategyFactory
             ret = createStrategyContainer(containerClass, current, compactionParams, reason);
         }
         
-        if (ret != current)
-            cfs.getTracker().subscribe(ret);
-
         return ret;
     }
 
@@ -147,9 +142,9 @@ public class CompactionStrategyFactory
         return compactionLogger;
     }
 
-    ColumnFamilyStore getCfs()
+    CompactionRealm getRealm()
     {
-        return cfs;
+        return realm;
     }
 
     /**

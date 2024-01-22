@@ -38,10 +38,10 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.StorageMetrics;
@@ -54,7 +54,6 @@ import org.apache.cassandra.notifications.MemtableSwitchedNotification;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
 import org.apache.cassandra.notifications.SSTableListChangedNotification;
-import org.apache.cassandra.notifications.SSTableMetadataChanged;
 import org.apache.cassandra.notifications.SSTableRepairStatusChanged;
 import org.apache.cassandra.notifications.TruncationNotification;
 import org.apache.cassandra.utils.Pair;
@@ -438,7 +437,7 @@ public class Tracker
         return view.get().select(SSTableSet.NONCOMPACTING);
     }
 
-    public Iterable<? extends SSTableReader> getNoncompacting(Iterable<? extends SSTableReader> candidates)
+    public <S extends CompactionSSTable> Iterable<S> getNoncompacting(Iterable<S> candidates)
     {
         return view.get().getNoncompacting(candidates);
     }
@@ -511,14 +510,6 @@ public class Tracker
         INotification notification = new SSTableRepairStatusChanged(repairStatusesChanged);
         for (INotificationConsumer subscriber : subscribers)
             subscriber.handleNotification(notification, this);
-    }
-
-    public void notifySSTableMetadataChanged(SSTableReader levelChanged, StatsMetadata oldMetadata)
-    {
-        INotification notification = new SSTableMetadataChanged(levelChanged, oldMetadata);
-        for (INotificationConsumer subscriber : subscribers)
-            subscriber.handleNotification(notification, this);
-
     }
 
     public void notifyDeleting(SSTableReader deleting)

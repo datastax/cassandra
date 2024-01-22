@@ -31,7 +31,6 @@ import com.google.common.collect.Ordering;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.AbstractCompactionController;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -39,7 +38,6 @@ import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.db.transform.DuplicateRowChecker;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.PurgeFunction;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -52,6 +50,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.db.rows.WrappingUnfilteredRowIterator;
+import org.apache.cassandra.db.transform.DuplicateRowChecker;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.transactions.CompactionTransaction;
@@ -66,12 +65,12 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.paxos.PaxosRepairHistory;
 import org.apache.cassandra.service.paxos.uncommitted.PaxosRows;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static org.apache.cassandra.config.Config.PaxosStatePurging.legacy;
 import static org.apache.cassandra.config.DatabaseDescriptor.paxosStatePurging;
-import org.apache.cassandra.utils.Throwables;
 
 /**
  * Merge multiple iterators over the content of sstable into a "compacted" iterator.
@@ -120,8 +119,8 @@ public class CompactionIterator implements UnfilteredPartitionIterator
     public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, long nowInSec, TimeUUID compactionId)
     {
         this(type, scanners, controller, nowInSec, compactionId, null);
-    }   
-    
+    }
+
     @SuppressWarnings("resource") // We make sure to close mergedIterator in close() and CompactionIterator is itself an AutoCloseable
     public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, long nowInSec, TimeUUID compactionId, TopPartitionTracker.Collector topPartitionCollector)
     {
@@ -144,12 +143,12 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         op = createOperation();
 
         UnfilteredPartitionIterator merged = scanners.isEmpty()
-                                           ? EmptyIterators.unfilteredPartition(controller.cfs.metadata())
+                                           ? EmptyIterators.unfilteredPartition(controller.realm.metadata())
                                            : UnfilteredPartitionIterators.merge(scanners, listener());
         if (topPartitionCollector != null) // need to count tombstones before they are purged
             merged = Transformation.apply(merged, new TopPartitionTracker.TombstoneCounter(topPartitionCollector, nowInSec));
         merged = Transformation.apply(merged, new GarbageSkipper(controller));
-        Transformation<UnfilteredRowIterator> purger = isPaxos(controller.cfs) && paxosStatePurging() != legacy
+        Transformation<UnfilteredRowIterator> purger = isPaxos(controller.realm) && paxosStatePurging() != legacy
                                                        ? new PaxosPurger(nowInSec)
                                                        : new Purger(controller, nowInSec);
         merged = Transformation.apply(merged, purger);
@@ -164,7 +163,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
             @Override
             public OperationProgress getProgress()
             {
-                return new AbstractTableOperation.OperationProgress(controller.cfs.metadata(), type, bytesRead(), totalBytes, compactionId, sstables);
+                return new AbstractTableOperation.OperationProgress(controller.realm.metadata(), type, bytesRead(), totalBytes, compactionId, sstables);
             }
 
             @Override
@@ -188,7 +187,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
 
     public TableMetadata metadata()
     {
-        return controller.cfs.metadata();
+        return controller.realm.metadata();
     }
 
     public long bytesRead()
@@ -244,7 +243,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
             private boolean rowProcessingNeeded()
             {
                 return (type == OperationType.COMPACTION || type == OperationType.MAJOR_COMPACTION)
-                       && controller.cfs.indexManager.handles(IndexTransaction.Type.COMPACTION);
+                       && controller.realm.getIndexManager().handles(IndexTransaction.Type.COMPACTION);
             }
 
             @Override
@@ -314,7 +313,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
 
     private CompactionTransaction getIndexTransaction(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
     {
-        if (type != OperationType.COMPACTION || !controller.cfs.indexManager.handles(IndexTransaction.Type.COMPACTION))
+        if (type != OperationType.COMPACTION || !controller.realm.getIndexManager().handles(IndexTransaction.Type.COMPACTION))
             return null;
 
         Columns statics = Columns.NONE;
@@ -340,7 +339,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         // * Indexer::commit
         // A new OpOrder.Group is opened in an ARM block wrapping the commits
         // TODO: this should probably be done asynchronously and batched.
-        return controller.cfs.indexManager.newCompactionTransaction(partitionKey, regularAndStaticColumns, versions.size(), nowInSec);
+        return controller.realm.getIndexManager().newCompactionTransaction(partitionKey, regularAndStaticColumns, versions.size(), nowInSec);
     }
 
     private void updateBytesRead()
@@ -396,8 +395,8 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         private Purger(AbstractCompactionController controller, long nowInSec)
         {
             super(nowInSec, controller.gcBefore, controller.compactingRepaired() ? Long.MAX_VALUE : Integer.MIN_VALUE,
-                  controller.cfs.onlyPurgeRepairedTombstones(),
-                  controller.cfs.metadata.get().enforceStrictLiveness());
+                  controller.realm.onlyPurgeRepairedTombstones(),
+                  controller.realm.metadata().enforceStrictLiveness());
             this.controller = controller;
         }
 
@@ -405,7 +404,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         protected void onEmptyPartitionPostPurge(DecoratedKey key)
         {
             if (type == OperationType.COMPACTION)
-                controller.cfs.invalidateCachedPartition(key);
+                controller.realm.invalidateCachedPartition(key);
         }
 
         @Override
@@ -431,7 +430,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         @Override
         protected boolean shouldIgnoreGcGrace()
         {
-            return controller.cfs.shouldIgnoreGcGraceForKey(currentKey);
+            return controller.realm.shouldIgnoreGcGraceForKey(currentKey);
         }
 
         /*
@@ -702,7 +701,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         protected void onEmptyPartitionPostPurge(DecoratedKey key)
         {
             if (type == OperationType.COMPACTION)
-                controller.cfs.invalidateCachedPartition(key);
+                controller.realm.invalidateCachedPartition(key);
         }
 
         protected void updateProgress()
@@ -795,8 +794,8 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         }
     }
 
-    private static boolean isPaxos(ColumnFamilyStore cfs)
+    private static boolean isPaxos(CompactionRealm realm)
     {
-        return cfs.name.equals(SystemKeyspace.PAXOS) && cfs.getKeyspaceName().equals(SchemaConstants.SYSTEM_KEYSPACE_NAME);
+        return realm.getTableName().equals(SystemKeyspace.PAXOS) && realm.getKeyspaceName().equals(SchemaConstants.SYSTEM_KEYSPACE_NAME);
     }
 }

@@ -41,12 +41,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Ordering;
-import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
-import org.apache.cassandra.io.sstable.metadata.MetadataType;
-import org.apache.cassandra.io.util.*;
-import org.apache.cassandra.utils.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,12 +52,16 @@ import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringBoundOrBoundary;
+import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
@@ -72,8 +71,8 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.rows.UnfilteredSource;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
+import org.apache.cassandra.db.rows.UnfilteredSource;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
@@ -91,16 +90,32 @@ import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.KeyReader;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
-import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.ChannelProxy;
+import org.apache.cassandra.io.util.CheckedFunction;
+import org.apache.cassandra.io.util.DataIntegrityMetadata;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.utils.EstimatedHistogram;
+import org.apache.cassandra.utils.ExecutorUtils;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.NativeLibrary;
+import org.apache.cassandra.utils.OutputHandler;
+import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -146,7 +161,7 @@ import static org.apache.cassandra.utils.concurrent.SharedCloseable.sharedCopyOr
  * <p>
  * TODO: fill in details about Tracker and lifecycle interactions for tools, and for compaction strategies
  */
-public abstract class SSTableReader extends SSTable implements UnfilteredSource, SelfRefCounted<SSTableReader>
+public abstract class SSTableReader extends SSTable implements UnfilteredSource, SelfRefCounted<SSTableReader>, CompactionSSTable
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableReader.class);
 
@@ -179,15 +194,6 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     {
     }
     public final UniqueIdentifier instanceId = new UniqueIdentifier();
-
-    public static final Comparator<SSTableReader> firstKeyComparator = (o1, o2) -> o1.getFirst().compareTo(o2.getFirst());
-    public static final Ordering<SSTableReader> firstKeyOrdering = Ordering.from(firstKeyComparator);
-    public static final Comparator<SSTableReader> lastKeyComparator = (o1, o2) -> o1.getLast().compareTo(o2.getLast());
-
-    public static final Comparator<SSTableReader> idComparator = Comparator.comparing(t -> t.descriptor.id, SSTableIdFactory.COMPARATOR);
-    public static final Comparator<SSTableReader> idReverseComparator = idComparator.reversed();
-
-    public static final Comparator<SSTableReader> sizeComparator = (o1, o2) -> Longs.compare(o1.onDiskLength(), o2.onDiskLength());
 
     /**
      * maxDataAge is a timestamp in local server time (e.g. Global.currentTimeMilli) which represents an upper bound
@@ -551,12 +557,20 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         return this.descriptor.hashCode();
     }
 
+    @Override
     public String getFilename()
     {
         return dfile.path();
     }
 
-    public void setupOnline() {
+    @Override
+    public Descriptor getDescriptor()
+    {
+        return descriptor;
+    }
+
+    public void setupOnline()
+    {
         owner().ifPresent(o -> setCrcCheckChance(o.getCrcCheckChance()));
     }
 
@@ -656,6 +670,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      *
      * @return the last two hours read rate per estimated key
      */
+    @Override
     public double hotness()
     {
         // system tables don't have read meters, just use 0.0 for the hotness
@@ -736,6 +751,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     /**
      * Calculates an estimate of the number of keys in the sstable represented by this reader.
      */
+    @Override
     public abstract long estimatedKeys();
 
     /**
@@ -821,7 +837,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      * @param op          The Operator defining matching keys: the nearest key to the target matching the operator wins.
      * @param updateStats true if updating stats and cache
      * @param listener    a listener used to handle internal events
-     * @return The index entry corresponding to the key, or null if the key is not present
+     * @return The index entry corresponding to the key, or -1 if the key is not present
      */
     protected long getPosition(PartitionPosition key,
                                Operator op,
@@ -875,6 +891,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      * Returns the length in bytes of the (uncompressed) data for this SSTable. For compressed files, this is not
      * the same thing as the on disk size (see {@link #onDiskLength()}).
      */
+    @Override
     public long uncompressedLength()
     {
         return dfile.dataLength();
@@ -897,6 +914,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      * The length in bytes of the on disk size for this SSTable. For compressed files, this is not the same thing
      * as the data length (see {@link #uncompressedLength()}).
      */
+    @Override
     public long onDiskLength()
     {
         return dfile.onDiskLength;
@@ -941,6 +959,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         }
     }
 
+    @Override
     public boolean isMarkedCompacted()
     {
         return tidy.global.obsoletion != null;
@@ -960,9 +979,16 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         isSuspect.getAndSet(false);
     }
 
+    @Override
     public boolean isMarkedSuspect()
     {
         return isSuspect.get();
+    }
+
+    @Override
+    public boolean isSuitableForCompaction()
+    {
+        return !isMarkedSuspect() && openReason != SSTableReader.OpenReason.EARLY;
     }
 
     /**
@@ -1053,6 +1079,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         }
     }
 
+    @Override
     public boolean isRepaired()
     {
         return sstableMetadata.repairedAt != ActiveRepairService.UNREPAIRED_SSTABLE;
@@ -1173,21 +1200,25 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         }
     }
 
+    @Override
     public boolean isPendingRepair()
     {
         return sstableMetadata.pendingRepair != ActiveRepairService.NO_PENDING_REPAIR;
     }
 
+    @Override
     public TimeUUID getPendingRepair()
     {
         return sstableMetadata.pendingRepair;
     }
 
+    @Override
     public long getRepairedAt()
     {
         return sstableMetadata.repairedAt;
     }
 
+    @Override
     public boolean isTransient()
     {
         return sstableMetadata.isTransient;
@@ -1216,6 +1247,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
         final static class Equals extends Operator
         {
+            @Override
             public int apply(int comparison)
             {
                 return -comparison;
@@ -1224,6 +1256,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
         final static class GreaterThanOrEqualTo extends Operator
         {
+            @Override
             public int apply(int comparison)
             {
                 return comparison >= 0 ? 0 : 1;
@@ -1232,6 +1265,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
         final static class GreaterThan extends Operator
         {
+            @Override
             public int apply(int comparison)
             {
                 return comparison > 0 ? 0 : 1;
@@ -1249,6 +1283,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         return sstableMetadata.estimatedCellPerPartitionCount;
     }
 
+    @Override
     public double getEstimatedDroppableTombstoneRatio(long gcBefore)
     {
         return sstableMetadata.getEstimatedDroppableTombstoneRatio(gcBefore);
@@ -1264,21 +1299,25 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         return sstableMetadata.compressionRatio;
     }
 
+    @Override
     public long getMinTimestamp()
     {
         return sstableMetadata.minTimestamp;
     }
 
+    @Override
     public long getMaxTimestamp()
     {
         return sstableMetadata.maxTimestamp;
     }
 
+    @Override
     public long getMinLocalDeletionTime()
     {
         return sstableMetadata.minLocalDeletionTime;
     }
 
+    @Override
     public long getMaxLocalDeletionTime()
     {
         return sstableMetadata.maxLocalDeletionTime;
@@ -1291,6 +1330,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      * cell tombstone, no range tombstone maker and no expiring columns), but having it return {@code true} doesn't
      * guarantee it contains any as it may simply have non-expired cells.
      */
+    @Override
     public boolean mayHaveTombstones()
     {
         // A sstable is guaranteed to have no tombstones if minLocalDeletionTime is still set to its default,
@@ -1325,6 +1365,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
                : (sstableMetadata.totalRows == 0 ? 0 : (int) (sstableMetadata.totalColumnsSet / sstableMetadata.totalRows));
     }
 
+    @Override
     public int getSSTableLevel()
     {
         return sstableMetadata.sstableLevel;
@@ -1333,12 +1374,21 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     /**
      * Mutate sstable level with a lock to avoid racing with entire-sstable-streaming and then reload sstable metadata
      */
+    @Override
     public void mutateLevelAndReload(int newLevel) throws IOException
     {
-        synchronized (tidy.global)
+        try
         {
-            descriptor.getMetadataSerializer().mutateLevel(descriptor, newLevel);
-            reloadSSTableMetadata();
+            synchronized (tidy.global)
+            {
+                descriptor.getMetadataSerializer().mutateLevel(descriptor, newLevel);
+                reloadSSTableMetadata();
+            }
+        }
+        catch (IOException e)
+        {
+            markSuspect();
+            throw e;
         }
     }
 
@@ -1420,16 +1470,19 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         return sstableMetadata.encodingStats;
     }
 
+    @Override
     public Ref<SSTableReader> tryRef()
     {
         return selfRef.tryRef();
     }
 
+    @Override
     public Ref<SSTableReader> selfRef()
     {
         return selfRef;
     }
 
+    @Override
     public Ref<SSTableReader> ref()
     {
         return selfRef.ref();
@@ -1463,12 +1516,6 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
                 ((SharedCloseable) c).addTo(identities);
         });
     }
-
-    /**
-     * The method verifies whether the sstable may contain the provided key. The method does approximation using
-     * Bloom filter if it is present and if it is not, performs accurate check in the index.
-     */
-    public abstract boolean mayContainAssumingKeyIsInRange(DecoratedKey key);
 
     /**
      * One instance per SSTableReader we create.
@@ -1538,6 +1585,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
             ScheduledExecutors.nonPeriodicTasks.execute(new Runnable()
             {
+                @Override
                 public void run()
                 {
                     if (logger.isTraceEnabled())
@@ -1667,6 +1715,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
             }
         }
 
+        @Override
         public void tidy()
         {
             lookup.remove(desc);
@@ -1679,6 +1728,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
                 NativeLibrary.trySkipCache(desc.fileFor(c).absolutePath(), 0, 0);
         }
 
+        @Override
         public String name()
         {
             return desc.toString();
