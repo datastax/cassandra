@@ -414,25 +414,19 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             FileUtils.closeQuietly(bkdInput, postingsInput, postingsSummaryInput);
         }
 
-        protected PostingList mergePostings(ArrayList<PostingList.PeekablePostingList> postingLists)
+        protected PostingList mergePostings(ArrayList<PostingList.PeekablePostingList> postingLists) throws IOException
         {
             final long elapsedMicros = queryExecutionTimer.stop().elapsed(TimeUnit.MICROSECONDS);
 
             listener.onIntersectionComplete(elapsedMicros, TimeUnit.MICROSECONDS);
             listener.postingListsHit(postingLists.size());
 
-            if (postingLists.isEmpty())
-            {
-                FileUtils.closeQuietly(postingsInput, postingsSummaryInput);
-                return null;
-            }
-            else
-            {
-                if (logger.isTraceEnabled())
-                    logger.trace(indexContext.logMessage("[{}] Intersection completed in {} microseconds. {} leaf and internal posting lists hit."),
-                                 indexFile.path(), elapsedMicros, postingLists.size());
-                return MergePostingList.merge(postingLists, () -> FileUtils.close(postingsInput, postingsSummaryInput));
-            }
+            if (!postingLists.isEmpty() && logger.isTraceEnabled())
+                logger.trace(indexContext.logMessage("[{}] Intersection completed in {} microseconds. {} leaf and internal posting lists hit."),
+                             indexFile.path(), elapsedMicros, postingLists.size());
+
+            return MergePostingList.merge(postingLists)
+                                   .onClose(() -> FileUtils.close(postingsInput, postingsSummaryInput));
         }
 
         public void collectPostingLists(Collection<PostingList.PeekablePostingList> postingLists) throws IOException
