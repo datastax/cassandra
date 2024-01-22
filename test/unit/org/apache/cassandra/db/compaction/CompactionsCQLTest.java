@@ -27,7 +27,6 @@ import java.util.Random;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
-
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -59,9 +58,9 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.NonThrowingCloseable;
 import org.assertj.core.api.Assertions;
-import org.apache.cassandra.service.StorageService;
 
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.junit.Assert.assertEquals;
@@ -697,12 +696,12 @@ public class CompactionsCQLTest extends CQLTester
         }
 
         @Override
-        public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs,
+        public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm,
                                                               Directories directories,
                                                               LifecycleTransaction txn,
                                                               Set<SSTableReader> nonExpiredSSTables)
         {
-            return new MaxSSTableSizeWriter(cfs, directories, txn, nonExpiredSSTables, 1 << 20, 1)
+            return new MaxSSTableSizeWriter(realm, directories, txn, nonExpiredSSTables, 1 << 20, 1)
             {
                 int switchCount = 0;
                 public void switchCompactionWriter(Directories.DataDirectory directory)

@@ -34,7 +34,6 @@ import java.util.stream.Stream;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import org.apache.cassandra.utils.TimeUUID;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -56,6 +55,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.TimeUUID;
 import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
@@ -223,7 +223,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
-        IPartitioner partitioner = cfs.getPartitioner();
+        IPartitioner partitioner = realm.getPartitioner();
         DecoratedKey first = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
         DecoratedKey last = new BufferDecoratedKey(partitioner.getMaximumToken(), ByteBuffer.allocate(0));
 
@@ -692,7 +692,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
     private List<PartitionPosition> makeBoundaries(int numShards, int numDisks)
     {
-        IPartitioner partitioner = cfs.getPartitioner();
+        IPartitioner partitioner = realm.getPartitioner();
         assert numShards >= 1;
         assert numDisks >= 1;
 
@@ -1065,7 +1065,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         List<Splitter.WeightedRange> ranges = new ArrayList<>();
         for (int i = 0; i < rangeBounds.length; i += 2)
             ranges.add(new Splitter.WeightedRange(1.0, new Range<>(getToken(rangeBounds[i + 0]), getToken(rangeBounds[i + 1]))));
-        SortedLocalRanges sortedRanges = SortedLocalRanges.forTesting(cfs, ranges);
+        SortedLocalRanges sortedRanges = SortedLocalRanges.forTesting(realm, ranges);
 
         List<PartitionPosition> diskBoundaries = sortedRanges.split(numDisks);
 
@@ -1116,7 +1116,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
-        IPartitioner partitioner = cfs.getPartitioner();
+        IPartitioner partitioner = realm.getPartitioner();
 
         List<SSTableReader> sstables = createSStables(partitioner);
 
@@ -1240,7 +1240,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         strategy.startup();
 
-        List<SSTableReader> sstables = createSStables(cfs.getPartitioner());
+        List<SSTableReader> sstables = createSStables(realm.getPartitioner());
         // Tracker#addSSTables also tries to backup SSTables, so we use addInitialSSTables and notify explicitly
         dataTracker.addInitialSSTables(sstables);
 
@@ -1291,8 +1291,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         strategy.startup();
 
         TimeUUID pendingRepair = TimeUUID.Generator.nextTimeUUID();
-        List<SSTableReader> expiredSSTables = createSStables(cfs.getPartitioner(), 1000, pendingRepair);
-        List<SSTableReader> nonExpiredSSTables = createSStables(cfs.getPartitioner(), 0, pendingRepair);
+        List<SSTableReader> expiredSSTables = createSStables(realm.getPartitioner(), 1000, pendingRepair);
+        List<SSTableReader> nonExpiredSSTables = createSStables(realm.getPartitioner(), 0, pendingRepair);
         List<SSTableReader> allSSTables = Stream.concat(expiredSSTables.stream(), nonExpiredSSTables.stream())
                                                 .collect(Collectors.toList());
         dataTracker.addInitialSSTables(allSSTables);
@@ -1309,12 +1309,12 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             {
                 assertFalse(pick.hasExpiredOnly());
                 assertEquals(pick.sstables.size() / 2, pick.expired.size());
-                Set<SSTableReader> nonExpired = pick.sstables.stream()
-                                                             .filter(sstable -> !pick.expired.contains(sstable))
-                                                             .collect(Collectors.toSet());
+                Set<CompactionSSTable> nonExpired = pick.sstables.stream()
+                                                                 .filter(sstable -> !pick.expired.contains(sstable))
+                                                                 .collect(Collectors.toSet());
                 assertEquals(pick.sstables.size() / 2, nonExpired.size());
                 long expectedTotSize = nonExpired.stream()
-                                                 .mapToLong(SSTableReader::onDiskLength)
+                                                 .mapToLong(CompactionSSTable::onDiskLength)
                                                  .sum();
                 assertEquals(expectedTotSize, pick.totSizeInBytes);
                 assertEquals(expectedTotSize / nonExpired.size(), pick.avgSizeInBytes);
@@ -1350,7 +1350,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         strategy.startup();
 
-        List<SSTableReader> sstables = createSStables(cfs.getPartitioner(),
+        List<SSTableReader> sstables = createSStables(realm.getPartitioner(),
                                                       mapFromPair(Pair.create(4 * ONE_MB, 91)));
         dataTracker.addInitialSSTables(sstables);
 
