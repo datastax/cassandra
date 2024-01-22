@@ -20,16 +20,16 @@ package org.apache.cassandra.db.compaction.writers;
 import java.util.Arrays;
 import java.util.Set;
 
-import org.apache.cassandra.io.sstable.Descriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -51,16 +51,16 @@ public class SplittingSizeTieredCompactionWriter extends CompactionAwareWriter
     private long currentBytesToWrite;
     private int currentRatioIndex = 0;
 
-    public SplittingSizeTieredCompactionWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
+    public SplittingSizeTieredCompactionWriter(CompactionRealm realm, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables)
     {
-        this(cfs, directories, txn, nonExpiredSSTables, DEFAULT_SMALLEST_SSTABLE_BYTES);
+        this(realm, directories, txn, nonExpiredSSTables, DEFAULT_SMALLEST_SSTABLE_BYTES);
     }
 
-    public SplittingSizeTieredCompactionWriter(ColumnFamilyStore cfs, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables, long smallestSSTable)
+    public SplittingSizeTieredCompactionWriter(CompactionRealm realm, Directories directories, LifecycleTransaction txn, Set<SSTableReader> nonExpiredSSTables, long smallestSSTable)
     {
-        super(cfs, directories, txn, nonExpiredSSTables, false);
+        super(realm, directories, txn, nonExpiredSSTables, false);
         this.allSSTables = txn.originals();
-        totalSize = cfs.getExpectedCompactedFileSize(nonExpiredSSTables, txn.opType());
+        totalSize = realm.getExpectedCompactedFileSize(nonExpiredSSTables, txn.opType());
         double[] potentialRatios = new double[20];
         double currentRatio = 1;
         for (int i = 0; i < potentialRatios.length; i++)
@@ -102,18 +102,18 @@ public class SplittingSizeTieredCompactionWriter extends CompactionAwareWriter
         long currentPartitionsToWrite = Math.round(ratios[currentRatioIndex] * estimatedTotalKeys);
         logger.trace("Switching writer, currentPartitionsToWrite = {}", currentPartitionsToWrite);
 
-        Descriptor descriptor = cfs.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
+        Descriptor descriptor = realm.newSSTableDescriptor(getDirectories().getLocationForDisk(directory));
         return descriptor.getFormat().getWriterFactory().builder(descriptor)
                          .setKeyCount(currentPartitionsToWrite)
                          .setRepairedAt(minRepairedAt)
                          .setPendingRepair(pendingRepair)
                          .setTransientSSTable(isTransient)
-                         .setTableMetadataRef(cfs.metadata)
-                         .setMetadataCollector(new MetadataCollector(allSSTables, cfs.metadata().comparator))
-                         .setSerializationHeader(SerializationHeader.make(cfs.metadata(), nonExpiredSSTables))
-                         .addDefaultComponents(cfs.indexManager.listIndexGroups())
-                         .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
-                         .build(txn, cfs);
+                         .setTableMetadataRef(realm.metadataRef())
+                         .setMetadataCollector(new MetadataCollector(allSSTables, realm.metadata().comparator))
+                         .setSerializationHeader(SerializationHeader.make(realm.metadata(), nonExpiredSSTables))
+                         .addDefaultComponents(realm.getIndexManager().listIndexGroups())
+                         .setSecondaryIndexGroups(realm.getIndexManager().listIndexGroups())
+                         .build(txn, realm);
     }
 
     @Override

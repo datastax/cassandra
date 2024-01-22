@@ -17,22 +17,23 @@
  */
 package org.apache.cassandra.db.compaction;
 
-import java.util.*;
+import java.util.Set;
 import java.util.function.LongPredicate;
 
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.compaction.writers.MaxSSTableSizeWriter;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 public class SSTableSplitter 
 {
     private final AbstractCompactionTask task;
 
-    public SSTableSplitter(ColumnFamilyStore cfs, LifecycleTransaction transaction, int sstableSizeInMB)
+    public SSTableSplitter(CompactionRealm realm, LifecycleTransaction transaction, int sstableSizeInMB)
     {
-        this.task = new SplittingCompactionTask(cfs, transaction, sstableSizeInMB);
+        this.task = new SplittingCompactionTask(realm, transaction, sstableSizeInMB);
     }
 
     public void split()
@@ -44,9 +45,9 @@ public class SSTableSplitter
     {
         private final int sstableSizeInMiB;
 
-        public SplittingCompactionTask(ColumnFamilyStore cfs, LifecycleTransaction transaction, int sstableSizeInMB)
+        public SplittingCompactionTask(CompactionRealm realm, LifecycleTransaction transaction, int sstableSizeInMB)
         {
-            super(cfs, transaction, CompactionManager.NO_GC, false, null);
+            super(realm, transaction, CompactionManager.NO_GC, false, null);
             this.sstableSizeInMiB = sstableSizeInMB;
 
             if (sstableSizeInMB <= 0)
@@ -56,16 +57,16 @@ public class SSTableSplitter
         @Override
         protected CompactionController getCompactionController(Set<SSTableReader> toCompact)
         {
-            return new SplitController(cfs);
+            return new SplitController(realm);
         }
 
         @Override
-        public CompactionAwareWriter getCompactionAwareWriter(ColumnFamilyStore cfs,
+        public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm,
                                                               Directories directories,
                                                               LifecycleTransaction txn,
                                                               Set<SSTableReader> nonExpiredSSTables)
         {
-            return new MaxSSTableSizeWriter(cfs, directories, txn, nonExpiredSSTables, sstableSizeInMiB * 1024L * 1024L, 0, false);
+            return new MaxSSTableSizeWriter(realm, directories, txn, nonExpiredSSTables, sstableSizeInMiB * 1024L * 1024L, 0, false);
         }
 
         @Override
@@ -77,7 +78,7 @@ public class SSTableSplitter
 
     public static class SplitController extends CompactionController
     {
-        public SplitController(ColumnFamilyStore cfs)
+        public SplitController(CompactionRealm cfs)
         {
             super(cfs, CompactionManager.NO_GC);
         }
