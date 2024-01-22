@@ -35,12 +35,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 import javax.inject.Inject;
 
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.RateLimiter;
-import org.apache.cassandra.utils.*;
 import org.apache.commons.math3.distribution.AbstractIntegerDistribution;
 import org.apache.commons.math3.distribution.UniformIntegerDistribution;
 import org.apache.commons.math3.distribution.ZipfDistribution;
@@ -59,7 +57,6 @@ import io.airlift.airline.Command;
 import io.airlift.airline.HelpOption;
 import io.airlift.airline.Option;
 import io.airlift.airline.SingleCommand;
-
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.db.BufferDecoratedKey;
@@ -68,17 +65,23 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.compaction.unified.AdaptiveController;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.CostsCalculator;
-import org.apache.cassandra.db.compaction.unified.StaticController;
 import org.apache.cassandra.db.compaction.unified.Environment;
+import org.apache.cassandra.db.compaction.unified.StaticController;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.PageAware;
+import org.apache.cassandra.utils.ExpMovingAverage;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MonotonicClock;
+import org.apache.cassandra.utils.MovingAverage;
+import org.apache.cassandra.utils.TimeUUID;
 import org.mockito.Mockito;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.LOG_DIR;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.Mockito.when;
 
 /**
@@ -579,14 +582,14 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         }
 
         @Override
-        public double compactionLatencyPerKbInNanos()
+        public double compactionTimePerKbInNanos()
         {
             // this is slightly incorrect, we would need to measure the size of compacted sstables
             return TimeUnit.MICROSECONDS.toNanos(compactionTimeMicros);
         }
 
         @Override
-        public double flushLatencyPerKbInNanos()
+        public double flushTimePerKbInNanos()
         {
             return TimeUnit.MICROSECONDS.toNanos(flushTimeMicros);
         }
@@ -610,8 +613,8 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         {
             return String.format("Read latency: %d us / partition, flush latency: %d us / KiB, compaction latency: %d us / KiB, bfpr: %f, measured WA: %.2f, flush size %s",
                                  TimeUnit.NANOSECONDS.toMicros((long) sstablePartitionReadLatencyNanos()),
-                                 TimeUnit.NANOSECONDS.toMicros((long) flushLatencyPerKbInNanos()),
-                                 TimeUnit.NANOSECONDS.toMicros((long) compactionLatencyPerKbInNanos()),
+                                 TimeUnit.NANOSECONDS.toMicros((long) flushTimePerKbInNanos()),
+                                 TimeUnit.NANOSECONDS.toMicros((long) compactionTimePerKbInNanos()),
                                  bloomFilterFpRatio(),
                                  WA(),
                                  FBUtilities.prettyPrintMemory((long)flushSize()));
