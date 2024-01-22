@@ -32,17 +32,16 @@ import java.util.function.LongPredicate;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionController;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.LocalPartitioner;
@@ -69,7 +68,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
 {
     private final static Logger logger = LoggerFactory.getLogger(SortedTableVerifier.class);
 
-    protected final ColumnFamilyStore cfs;
+    protected final CompactionRealm realm;
     protected final R sstable;
 
     protected final ReadWriteLock fileAccessLock;
@@ -88,9 +87,9 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
 
     protected final OutputHandler outputHandler;
 
-    public SortedTableVerifier(ColumnFamilyStore cfs, R sstable, OutputHandler outputHandler, boolean isOffline, Options options)
+    public SortedTableVerifier(CompactionRealm realm, R sstable, OutputHandler outputHandler, boolean isOffline, Options options)
     {
-        this.cfs = cfs;
+        this.realm = realm;
         this.sstable = sstable;
         this.outputHandler = outputHandler;
 
@@ -128,8 +127,8 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
         {
             try
             {
-                sstable.mutateRepairedAndReload(ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getPendingRepair(), sstable.isTransient());
-                cfs.getTracker().notifySSTableRepairedStatusChanged(ImmutableList.of(sstable));
+                // note that it additionally uses a lock and verification
+                realm.mutateRepairedWithLock(Collections.singleton(sstable), ActiveRepairService.UNREPAIRED_SSTABLE, sstable.getPendingRepair(), sstable.isTransient());
             }
             catch (IOException ioe)
             {
@@ -153,7 +152,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
 
         verifyBloomFilter();
 
-        if (options.checkOwnsTokens && !isOffline && !(cfs.getPartitioner() instanceof LocalPartitioner))
+        if (options.checkOwnsTokens && !isOffline && !(realm.getPartitioner() instanceof LocalPartitioner))
         {
             if (verifyOwnedRanges() == 0)
                 return;
@@ -219,7 +218,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
         outputHandler.debug("Checking that all tokens are owned by the current node");
         try (KeyIterator iter = sstable.keyIterator())
         {
-            ownedRanges = Range.normalize(tokenLookup.apply(cfs.metadata.keyspace));
+            ownedRanges = Range.normalize(tokenLookup.apply(realm.getKeyspaceName()));
             if (ownedRanges.isEmpty())
                 return 0;
             RangeOwnHelper rangeOwnHelper = new RangeOwnHelper(ownedRanges);
@@ -269,13 +268,14 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
     {
         outputHandler.output("Extended Verify requested, proceeding to inspect values");
 
-        try (VerifyController verifyController = new VerifyController(cfs);
+        try (VerifyController verifyController = new VerifyController(realm);
              KeyReader indexIterator = sstable.keyReader())
         {
             if (indexIterator.dataPosition() != 0)
                 markAndThrow(new RuntimeException("First row position from index != 0: " + indexIterator.dataPosition()));
 
-            List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(cfs.metadata().keyspace));
+            List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(
+            realm.metadata().keyspace));
             RangeOwnHelper rangeOwnHelper = new RangeOwnHelper(ownedRanges);
             DecoratedKey prevKey = null;
 
@@ -298,7 +298,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
                     markAndThrow(th);
                 }
 
-                if (options.checkOwnsTokens && ownedRanges.size() > 0 && !(cfs.getPartitioner() instanceof LocalPartitioner))
+                if (options.checkOwnsTokens && !ownedRanges.isEmpty() && !(realm.getPartitioner() instanceof LocalPartitioner))
                 {
                     try
                     {
@@ -515,7 +515,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
 
     protected static class VerifyController extends CompactionController
     {
-        public VerifyController(ColumnFamilyStore cfs)
+        public VerifyController(CompactionRealm cfs)
         {
             super(cfs, Integer.MAX_VALUE);
         }
