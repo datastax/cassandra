@@ -24,7 +24,6 @@ import com.google.common.collect.AbstractIterator;
 
 import io.github.jbellis.jvector.graph.NodeSimilarity;
 
-import static java.lang.Math.min;
 
 /**
  * An iterator over {@link ScoredRowId} that lazily consumes from a {@link PriorityQueue} of {@link RowWithApproximateScore}.
