@@ -19,9 +19,10 @@
 package org.apache.cassandra.index.sai.disk.v1.postings;
 
 import java.io.IOException;
-import java.util.PrimitiveIterator;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.util.LongHeap;
 
 /**
@@ -31,15 +32,20 @@ public class VectorPostingList implements PostingList
 {
     private final LongHeap segmentRowIds;
     private final int size;
-    private final int visitedCount;
 
-    public VectorPostingList(PrimitiveIterator.OfInt source, int limit, int visitedCount)
+    public VectorPostingList(CloseableIterator<ScoredRowId> source)
     {
-        this.visitedCount = visitedCount;
-        segmentRowIds = new LongHeap(Math.max(limit, 1));
+        segmentRowIds = new LongHeap(32);
         int n = 0;
-        while (source.hasNext() && n++ < limit)
-            segmentRowIds.push(source.nextInt());
+        // Once the source is consumed, we have to close it.
+        try (source)
+        {
+            while (source.hasNext())
+            {
+                segmentRowIds.push(source.next().getSegmentRowId());
+                n++;
+            }
+        }
         this.size = n;
     }
 
@@ -66,10 +72,5 @@ public class VectorPostingList implements PostingList
             rowId = nextPosting();
         } while (rowId < targetRowID);
         return rowId;
-    }
-
-    public int getVisitedCount()
-    {
-        return visitedCount;
     }
 }

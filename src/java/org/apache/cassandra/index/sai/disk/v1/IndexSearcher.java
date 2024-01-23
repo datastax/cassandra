@@ -30,8 +30,10 @@ import org.apache.cassandra.index.sai.disk.PostingListRangeIterator;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.utils.CloseableIterator;
 
 /**
  * Abstract reader for individual segments of an on-disk index.
@@ -76,6 +78,20 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
      * @return {@link RangeIterator} that matches given expression
      */
     public abstract RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit) throws IOException;
+
+    /**
+     * Order the on-disk index synchronously and produce an iterator in score order
+     *
+     * @param expression   to filter on disk index
+     * @param keyRange     key range specific in read command, used by ANN index
+     * @param queryContext to track per sstable cache and per query metrics
+     * @param limit        the num of rows to returned, used by ANN index
+     * @return an iterator of {@link ScoredPrimaryKey} in score order
+     */
+    public CloseableIterator<ScoredPrimaryKey> orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
+    {
+        throw new UnsupportedOperationException();
+    }
 
     protected RangeIterator toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext) throws IOException
     {
