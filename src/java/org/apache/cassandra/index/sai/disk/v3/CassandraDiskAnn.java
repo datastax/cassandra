@@ -20,11 +20,8 @@ package org.apache.cassandra.index.sai.disk.v3;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Iterator;
-import java.util.NoSuchElementException;
-import java.util.PrimitiveIterator;
+import java.util.function.IntConsumer;
 import java.util.logging.Logger;
-import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 
 import io.github.jbellis.jvector.disk.CachingGraphIndex;
@@ -32,8 +29,6 @@ import io.github.jbellis.jvector.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.NodeSimilarity;
-import io.github.jbellis.jvector.graph.SearchResult;
-import io.github.jbellis.jvector.graph.SearchResult.NodeScore;
 import io.github.jbellis.jvector.pq.BQVectors;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.pq.PQVectors;
@@ -44,16 +39,18 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
+import org.apache.cassandra.index.sai.disk.vector.AutoResumingNodeScoreIterator;
+import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
-import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
+import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.CloseableIterator;
 
 public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 {
@@ -62,6 +59,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final CachingGraphIndex graph;
+    private final ThreadLocal<GraphIndex.View<float[]>> view;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
@@ -75,6 +73,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         SegmentMetadata.ComponentMetadata termsMetadata = getComponentMetadata(IndexComponent.TERMS_DATA);
         graphHandle = indexFiles.termsData();
         graph = new CachingGraphIndex(new OnDiskGraphIndex<>(graphHandle::createReader, termsMetadata.offset));
+        view = ThreadLocal.withInitial(graph::getView);
 
         long pqSegmentOffset = getComponentMetadata(IndexComponent.PQ).offset;
         try (FileHandle pqFile = indexFiles.pq();
@@ -107,117 +106,53 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     }
 
     /**
-     * @return Row IDs associated with the topK vectors near the query
-     *
-     * @param queryVector the query vector
-     * @param topK the number of results to look for in the index (>= limit)
-     * @param limit the maximum number of results to return
-     * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
-     * @param context unused (vestige from HNSW, retained in signature to allow calling both easily)
-     */
-    @Override
-    public VectorPostingList search(float[] queryVector, int topK, int limit, Bits acceptBits, QueryContext context)
-    {
-        return search(queryVector, topK, 0, limit, acceptBits, context);
-    }
-
-    /**
-     * @return Row IDs associated with the topK vectors near the query. If a threshold is specified, only vectors with
-     * a similarity score >= threshold will be returned.
      * @param queryVector the query vector
      * @param topK the number of results to look for in the index (>= limit)
      * @param threshold the minimum similarity score to accept
-     * @param limit the maximum number of results to return
      * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
      * @param context unused (vestige from HNSW, retained in signature to allow calling both easily)
-     * @return
+     * @param nodesVisitedConsumer a consumer that will be called with the number of nodes visited during the search
+     * @return Row IDs associated with the topK vectors near the query. If a threshold is specified, only vectors with
+     * a similarity score >= threshold will be returned.
      */
     @Override
-    public VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits acceptBits, QueryContext context)
+    public CloseableIterator<ScoredRowId> search(float[] queryVector,
+                                                 int topK,
+                                                 float threshold,
+                                                 Bits acceptBits,
+                                                 QueryContext context,
+                                                 IntConsumer nodesVisitedConsumer)
     {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
-        GraphIndex.View<float[]> view = graph.getView();
-        GraphSearcher<float[]> searcher = new GraphSearcher.Builder<>(view).build();
+        // Retrieve the view reference once.
+        var threadLocalView = view.get();
         NodeSimilarity.ScoreFunction scoreFunction;
         NodeSimilarity.Reranker reranker;
         if (compressedVectors == null)
         {
             scoreFunction = (NodeSimilarity.ExactScoreFunction)
-                            i -> similarityFunction.compare(queryVector, view.getVector(i));
+                            i -> similarityFunction.compare(queryVector, threadLocalView.getVector(i));
             reranker = null;
         }
         else
         {
             scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, similarityFunction);
-            reranker = i -> similarityFunction.compare(queryVector, view.getVector(i));
+            reranker = i -> similarityFunction.compare(queryVector, threadLocalView.getVector(i));
         }
-        var result = searcher.search(scoreFunction,
-                                     reranker,
-                                     topK,
-                                     threshold,
-                                     ordinalsMap.ignoringDeleted(acceptBits));
-        context.addAnnNodesVisited(result.getVisitedCount());
+        var searcher = new GraphSearcher.Builder<>(threadLocalView).build();
+        var result = searcher.search(scoreFunction, reranker, topK, threshold, ordinalsMap.ignoringDeleted(acceptBits));
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-        return annRowIdsToPostings(result, limit);
+        // Threshold based searches are comprehensive and do not need to resume the search.
+        var nodeScores = threshold > 0 ? CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator())
+                                       : new AutoResumingNodeScoreIterator(searcher, result, nodesVisitedConsumer, topK, false);
+        return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
     }
 
     @Override
     public CompressedVectors getCompressedVectors()
     {
         return compressedVectors;
-    }
-
-    private class RowIdIterator implements PrimitiveIterator.OfInt, AutoCloseable
-    {
-        private final Iterator<NodeScore> it;
-        private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
-
-        private OfInt segmentRowIdIterator = IntStream.empty().iterator();
-
-        public RowIdIterator(NodeScore[] results)
-        {
-            this.it = Arrays.stream(results).iterator();
-        }
-
-        @Override
-        public boolean hasNext() {
-            while (!segmentRowIdIterator.hasNext() && it.hasNext()) {
-                try
-                {
-                    NodeScore result = it.next();
-                    int ordinal = result.node;
-                    int[] rowIds = rowIdsView.getSegmentRowIdsMatching(ordinal);
-                    segmentRowIdIterator = Arrays.stream(rowIds).iterator();
-                }
-                catch (IOException e)
-                {
-                    throw new RuntimeException(e);
-                }
-            }
-            return segmentRowIdIterator.hasNext();
-        }
-
-        @Override
-        public int nextInt() {
-            if (!hasNext())
-                throw new NoSuchElementException();
-            return segmentRowIdIterator.nextInt();
-        }
-
-        @Override
-        public void close()
-        {
-            rowIdsView.close();
-        }
-    }
-
-    private VectorPostingList annRowIdsToPostings(SearchResult results, int limit)
-    {
-        try (RowIdIterator iterator = new RowIdIterator(results.getNodes()))
-        {
-            return new VectorPostingList(iterator, limit, results.getVisitedCount());
-        }
     }
 
     @Override
@@ -232,5 +167,11 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     public OrdinalsView getOrdinalsView()
     {
         return ordinalsMap.getOrdinalsView();
+    }
+
+    @Override
+    public float[] getVectorForOrdinal(int ordinal)
+    {
+        return view.get().getVector(ordinal);
     }
 }
