@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.sensors;
 
-import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -37,7 +36,6 @@ import java.util.function.Predicate;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -111,6 +109,11 @@ public class SensorsRegistry implements SchemaChangeListener
         logger.debug("Listener {} unregistered", listener);
     }
 
+    public Optional<Sensor> getSensor(Context context, Type type)
+    {
+        return Optional.ofNullable(identity.get(Pair.create(context, type)));
+    }
+
     public Optional<Sensor> getOrCreateSensor(Context context, Type type)
     {
         updateLock.readLock().lock();
@@ -160,14 +163,12 @@ public class SensorsRegistry implements SchemaChangeListener
         return Optional.ofNullable(byKeyspace.get(keyspace)).orElseGet(() -> ImmutableSet.of());
     }
 
-    public Optional<Double> aggregateSensorValueBy(String keyspace, Type type)
+    public Optional<Sensor> getSensorsByKeyspaceAndType(String keyspace, Type type)
     {
-        return Optional.ofNullable(byKeyspace.get(keyspace))
-                .orElseGet(() -> ImmutableSet.of())
+        return getSensorsByKeyspace(keyspace)
                 .stream()
                 .filter(s -> s.getType().equals(type))
-                .map(Sensor::getValue)
-                .reduce(Double::sum);
+                .findFirst();
     }
 
     public Set<Sensor> getSensorsByTableId(String tableId)

@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db;
 
-import java.nio.ByteBuffer;
 import java.util.Optional;
 
 import org.slf4j.Logger;
@@ -85,12 +84,12 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         Tracing.trace("Enqueuing response to {}", message.from());
 
-        Optional<Sensor> readBytesSensor = RequestTracker.instance.get().getSensor(Type.READ_BYTES);
+        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(Type.READ_BYTES);
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
-        readBytesSensor.map(s -> SensorsCustomParams.doubleAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES, bytes));
+        readRequestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_REQUEST, bytes));
 
-        Optional<Double> aggregareReadBytes = SensorsRegistry.instance.aggregateSensorValueBy(cfs.getKeyspaceName(), Type.READ_BYTES);
-        aggregareReadBytes.map(SensorsCustomParams::doubleAsBytes).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_TOTAL, bytes));
+        Optional<Sensor> aggregareReadBytes = SensorsRegistry.instance.getSensor(Context.from(command), Type.READ_BYTES);
+        aggregareReadBytes.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_TABLE, bytes));
 
         MessagingService.instance().send(reply.build(), message.from());
     }

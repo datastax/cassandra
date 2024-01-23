@@ -30,7 +30,7 @@ public class SensorsCustomParamsTest
     public void testDoubleAsBytes()
     {
         double d = Double.MAX_VALUE;
-        byte[] bytes = SensorsCustomParams.doubleAsBytes(d);
+        byte[] bytes = SensorsCustomParams.sensorValueAsBytes(d);
         ByteBuffer bb = ByteBuffer.wrap(bytes);
         assertEquals(Double.MAX_VALUE, bb.getDouble(), 0.0);
     }

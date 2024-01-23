@@ -19,7 +19,6 @@ package org.apache.cassandra.net;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
@@ -34,7 +33,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -50,7 +48,6 @@ import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
-
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
 import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
@@ -244,21 +241,6 @@ public class Message<T>
                                .withCreatedAt(createdAtNanos)
                                .withFlags(flags)
                                .withParams(buildParams(paramType, paramValue));
-    }
-
-    private static <T> Message<T> outWithCustomParam(long id, Verb verb, long expiresAtNanos, T payload, int flags, String paramName, byte[] paramValue)
-    {
-        if (payload == null || paramName == null || paramValue == null)
-            throw new IllegalArgumentException();
-
-        InetAddressAndPort from = FBUtilities.getBroadcastAddressAndPort();
-        long createdAtNanos = approxTime.now();
-        if (expiresAtNanos == 0)
-            expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
-        Map<String,byte[]> customParams  = new HashMap<>();
-
-        customParams.put(paramName, paramValue);
-        return new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, buildParams(ParamType.CUSTOM_MAP, customParams)), payload);
     }
 
     public static <T> Message<T> internalResponse(Verb verb, T payload)

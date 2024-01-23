@@ -21,22 +21,21 @@ package org.apache.cassandra.net;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.sensors.Sensor;
-import org.apache.cassandra.sensors.Type;
 
 /**
- * A utility class that contians the defintion of custom params added to the {@link Message} header to prpagate {@link Sensor} values from
- * writer to cooridnater and necessary methods to encode sensor values as appropriate for the internode mesage format.
+ * A utility class that contains the definition of custom params added to the {@link Message} header to propagate {@link Sensor} values from
+ * writer to coordinator and necessary methods to encode sensor values as appropriate for the internode message format.
  */
 public final class SensorsCustomParams
 {
     /**
-     * The per-request read bytes value for a given keyspace.
+     * The per-request read bytes value for a given keyspace and table.
      */
-    public static final String READ_BYTES = Type.READ_BYTES.name();
+    public static final String READ_BYTES_REQUEST = "READ_BYTES_REQUEST";
     /**
-     * The aggregated read bytes value for a given keyspace, across all requests.
+     * The total read bytes value for a given keyspace and table, across all requests. This is a monotonically increasing value.
      */
-    public static final String READ_BYTES_TOTAL = String.format("%s_TOTAL", READ_BYTES);
+    public static final String READ_BYTES_TABLE = "READ_BYTES_TABLE";
 
     private SensorsCustomParams()
     {
@@ -45,11 +44,11 @@ public final class SensorsCustomParams
     /**
      * Utility method to encode senors value as byte buffer in the big endian order.
      */
-    public static byte[] doubleAsBytes(double value)
+    public static byte[] sensorValueAsBytes(double value)
     {
-        ByteBuffer readBytesBuffer = ByteBuffer.allocate(Double.BYTES);
-        readBytesBuffer.putDouble(value);
+        ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);
+        buffer.putDouble(value);
 
-        return readBytesBuffer.array();
+        return buffer.array();
     }
 }

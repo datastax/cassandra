@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.sensors;
 
-import java.nio.ByteBuffer;
 import java.util.Objects;
 
 import com.google.common.annotations.VisibleForTesting;
