@@ -205,7 +205,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 for (long i = minSSTableRowId; i <= maxSSTableRowId; i++)
                     segmentRowIds.add(metadata.toSegmentRowId(i));
 
-                // When we have a threshold, we only need to filter the results, not order them.
+                // When we have a threshold, we only need to filter the results, not order them, because it means we're
+                // evaluating a boolean predicate in the SAI pipeline that wants to collate by PK
                 if (threshold > 0)
                     return filterByBruteForce(queryVector, segmentRowIds, threshold);
                 else
@@ -321,7 +322,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private CloseableIterator<ScoredRowId> orderByBruteForce(float[] queryVector, IntArrayList segmentRowIds) throws IOException
     {
         PriorityQueue<ScoredRowId> scoredRowIds = new PriorityQueue<>(segmentRowIds.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
-        addScoreRowIdsToCollector(queryVector, segmentRowIds, 0, scoredRowIds);
+        addScoredRowIdsToCollector(queryVector, segmentRowIds, 0, scoredRowIds);
         return new PriorityQueueIterator<>(scoredRowIds);
     }
 
@@ -335,14 +336,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                                               float threshold) throws IOException
     {
         var results = new ArrayList<ScoredRowId>(segmentRowIds.size());
-        addScoreRowIdsToCollector(queryVector, segmentRowIds, threshold, results);
+        addScoredRowIdsToCollector(queryVector, segmentRowIds, threshold, results);
         return CloseableIterator.wrap(results.iterator());
     }
 
-    private void addScoreRowIdsToCollector(float[] queryVector,
-                                           IntArrayList segmentRowIds,
-                                           float threshold,
-                                           Collection<ScoredRowId> collector) throws IOException
+    private void addScoredRowIdsToCollector(float[] queryVector,
+                                            IntArrayList segmentRowIds,
+                                            float threshold,
+                                            Collection<ScoredRowId> collector) throws IOException
     {
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         try (var ordinalsView = graph.getOrdinalsView())

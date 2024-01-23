@@ -33,18 +33,18 @@ import org.apache.cassandra.utils.Pair;
 /**
  * An iterator that consumes a chunk of {@link PrimaryKey}s from the {@link RangeIterator}, passes them to the
  * {@link Function} to filter the chunk of {@link PrimaryKey}s and then pass the results to next consumer.
- * The PKs are currently returned in {@link PrimaryKey} order, but that contract may change.
+ * The PKs are currently returned in score order.
  */
 @NotThreadSafe
-public class OrderingFilterRangeIterator implements Iterator<Pair<List<CloseableIterator<ScoredPrimaryKey>>, Set<SSTableIndex>>>, AutoCloseable
+public class OrderingFilterRangeIterator<T> implements Iterator<T>, AutoCloseable
 {
     private final RangeIterator input;
     private final int chunkSize;
-    private final Function<List<PrimaryKey>, Pair<List<CloseableIterator<ScoredPrimaryKey>>, Set<SSTableIndex>>> nextRangeFunction;
+    private final Function<List<PrimaryKey>, T> nextRangeFunction;
 
     public OrderingFilterRangeIterator(RangeIterator input,
                                        int chunkSize,
-                                       Function<List<PrimaryKey>, Pair<List<CloseableIterator<ScoredPrimaryKey>>, Set<SSTableIndex>>> nextRangeFunction)
+                                       Function<List<PrimaryKey>, T> nextRangeFunction)
     {
         this.input = input;
         this.chunkSize = chunkSize;
@@ -58,7 +58,7 @@ public class OrderingFilterRangeIterator implements Iterator<Pair<List<Closeable
     }
 
     @Override
-    public Pair<List<CloseableIterator<ScoredPrimaryKey>>, Set<SSTableIndex>> next()
+    public T next()
     {
         List<PrimaryKey> nextKeys = new ArrayList<>(chunkSize);
         do

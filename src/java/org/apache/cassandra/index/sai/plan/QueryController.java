@@ -454,19 +454,19 @@ public class QueryController
     {
         List<CloseableIterator<ScoredPrimaryKey>> scoredPrimaryKeyIterators = new ArrayList<>();
         List<SSTableIndex> indexesToRelease = new ArrayList<>();
-        try (var iter = new OrderingFilterRangeIterator(source, ORDER_CHUNK_SIZE, list -> this.getTopKRows(list, expression)))
+        try (var iter = new OrderingFilterRangeIterator<>(source, ORDER_CHUNK_SIZE, list -> this.getTopKRows(list, expression)))
         {
             while (iter.hasNext())
             {
                 var next = iter.next();
-                scoredPrimaryKeyIterators.addAll(next.left());
-                indexesToRelease.addAll(next.right());
+                scoredPrimaryKeyIterators.addAll(next.iterators);
+                indexesToRelease.addAll(next.referencedIndexes);
             }
         }
         return new MergeScoredPrimaryKeyIterator(scoredPrimaryKeyIterators, indexesToRelease);
     }
 
-    private Pair<List<CloseableIterator<ScoredPrimaryKey>>, Set<SSTableIndex>> getTopKRows(List<PrimaryKey> sourceKeys, RowFilter.Expression expression)
+    private IteratorsAndIndexes getTopKRows(List<PrimaryKey> sourceKeys, RowFilter.Expression expression)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
 
@@ -494,9 +494,9 @@ public class QueryController
                 // but still needs to be released.
                 // VSTODO Maybe we can remove empty indexes from the view.
                 queryView.referencedIndexes.forEach(SSTableIndex::release);
-                return Pair.create(Collections.emptyList(), Collections.emptySet());
+                return new IteratorsAndIndexes(Collections.emptyList(), Collections.emptySet());
             }
-            return Pair.create(sstableScoredPrimaryKeyIterators, queryView.referencedIndexes);
+            return new IteratorsAndIndexes(sstableScoredPrimaryKeyIterators, queryView.referencedIndexes);
         }
         catch (Throwable t)
         {
@@ -806,5 +806,17 @@ public class QueryController
         long totalRows = memtableRows + sstableRows;
         queryContext.setTotalAvailableRows(totalRows);
         return totalRows;
+    }
+
+    private static class IteratorsAndIndexes
+    {
+        final List<CloseableIterator<ScoredPrimaryKey>> iterators;
+        final Set<SSTableIndex> referencedIndexes;
+
+        IteratorsAndIndexes(List<CloseableIterator<ScoredPrimaryKey>> iterators, Set<SSTableIndex> indexes)
+        {
+            this.iterators = iterators;
+            this.referencedIndexes = indexes;
+        }
     }
 }

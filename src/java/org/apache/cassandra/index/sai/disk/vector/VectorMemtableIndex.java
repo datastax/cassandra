@@ -225,7 +225,8 @@ public class VectorMemtableIndex implements MemtableIndex
             Tracing.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
                           resultKeys.size(), bruteForceRows, graph.size(), limit);
             if (resultKeys.size() <= bruteForceRows)
-                // When we have a threshold, we only need to filter the results, not order them.
+                // When we have a threshold, we only need to filter the results, not order them, because it means we're
+                // evaluating a boolean predicate in the SAI pipeline that wants to collate by PK
                 if (threshold > 0)
                     return filterByBruteForce(queryVector, threshold, resultKeys);
                 else
