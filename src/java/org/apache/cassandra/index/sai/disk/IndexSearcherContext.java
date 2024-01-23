@@ -58,6 +58,11 @@ public class IndexSearcherContext
         this.maxPartitionOffset = Long.MAX_VALUE;
     }
 
+    public long getSegmentRowIdOffset()
+    {
+        return segmentRowIdOffset;
+    }
+
     long count()
     {
         return postingList.size();

@@ -55,19 +55,6 @@ public class TermIterator extends RangeIterator
         this.context = queryContext;
     }
 
-    public static TermIterator build(List<RangeIterator> sstableIntersections, RangeIterator memtableResults, Set<SSTableIndex> referencedIndexes, QueryContext queryContext)
-    {
-        var sstablesHit = referencedIndexes
-                                    .stream()
-                                    .map(SSTableIndex::getSSTable).collect(Collectors.toSet()).size();
-        queryContext.addSstablesHit(sstablesHit);
-        queryContext.checkpoint();
-        RangeIterator union = RangeUnionIterator.builder(sstableIntersections.size() + 1)
-                                                .add(sstableIntersections)
-                                                .add(memtableResults)
-                                                .build();
-        return new TermIterator(union, referencedIndexes, queryContext);
-    }
 
     @SuppressWarnings("resource")
     public static TermIterator build(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)

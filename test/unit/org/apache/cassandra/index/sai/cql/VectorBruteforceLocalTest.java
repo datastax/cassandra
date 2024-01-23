@@ -22,7 +22,7 @@ import org.junit.Before;
 
 /**
  * Like VectorLocalTest but without limit on globalBruteForceRows
- * to excercise nRows <= maxBruteForceRows branch in bitsOrPostingListForKeyRange
+ * to exercise the brute force path in V2VectorIndexSearcher.
  */
 public class VectorBruteforceLocalTest extends VectorLocalTest
 {

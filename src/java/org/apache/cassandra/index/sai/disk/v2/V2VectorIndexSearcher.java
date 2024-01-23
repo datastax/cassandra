@@ -20,17 +20,17 @@ package org.apache.cassandra.index.sai.disk.v2;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import javax.annotation.Nullable;
+import java.util.PriorityQueue;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.graph.SearchResult;
+import io.github.jbellis.jvector.graph.NodeSimilarity;
+import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseFixedBitSet;
 import org.agrona.collections.IntArrayList;
@@ -38,6 +38,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
@@ -45,13 +46,17 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
+import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OverqueryUtils;
+import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.ArrayPostingList;
-import org.apache.cassandra.index.sai.utils.CollectionRangeIterator;
+import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.ScoredRowIdPrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -60,6 +65,8 @@ import org.apache.cassandra.metrics.LinearFit;
 import org.apache.cassandra.metrics.PairedSlidingWindowReservoir;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.Pair;
 
 import static java.lang.Math.ceil;
 import static java.lang.Math.min;
@@ -119,36 +126,54 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
 
-        if (exp.getOp() != Expression.Op.ANN && exp.getOp() != Expression.Op.BOUNDED_ANN)
+        if (exp.getOp() != Expression.Op.BOUNDED_ANN)
+            throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during BOUNDED_ANN index query: " + exp));
+
+        float[] queryVector = exp.lower.value.vector;
+
+        var result = searchInternal(keyRange, context, queryVector, graph.size(), graph.size(), exp.getEuclideanSearchThreshold());
+        return new VectorPostingList(result);
+    }
+
+    @Override
+    public CloseableIterator<ScoredPrimaryKey> orderBy(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    {
+        if (logger.isTraceEnabled())
+            logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
+
+        if (exp.getOp() != Expression.Op.ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + exp));
 
-        if (exp.getEuclideanSearchThreshold() > 0)
-            limit = 100000;
         int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
         float[] queryVector = exp.lower.value.vector;
 
-        BitsOrPostingList bitsOrPostingList = bitsOrPostingListForKeyRange(context, keyRange, queryVector, topK);
-        if (bitsOrPostingList.skipANN())
-            return bitsOrPostingList.postingList();
-
-        var vectorPostings = graph.search(queryVector, topK, exp.getEuclideanSearchThreshold(), limit, bitsOrPostingList.getBits(), context);
-        bitsOrPostingList.updateStatistics(vectorPostings.getVisitedCount());
-        return vectorPostings;
+        var result = searchInternal(keyRange, context, queryVector, limit, topK, 0);
+        return toScoreOrderedIterator(result, context);
     }
 
     /**
-     * Return bit set if needs to search HNSW; otherwise return posting list to bypass HNSW
+     * Return bit set to configure a graph search; otherwise return posting list or ScoredRowIdIterator to bypass
+     * graph search and use brute force to order matching rows.
+     * @param keyRange the key range to search
+     * @param context the query context
+     * @param queryVector the query vector
+     * @param limit the limit for the query
+     * @param topK the amplified limit for the query to get more accurate results
+     * @param threshold the threshold for the query. When the threshold is greater than 0 and brute force logic is used,
+     *                  the results will be filtered by the threshold.
      */
-    private BitsOrPostingList bitsOrPostingListForKeyRange(QueryContext context,
-                                                           AbstractBounds<PartitionPosition> keyRange,
-                                                           float[] queryVector,
-                                                           int topK) throws IOException
+    private CloseableIterator<ScoredRowId> searchInternal(AbstractBounds<PartitionPosition> keyRange,
+                                                          QueryContext context,
+                                                          float[] queryVector,
+                                                          int limit,
+                                                          int topK,
+                                                          float threshold) throws IOException
     {
         try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
         {
             // not restricted
             if (RangeUtil.coversFullRing(keyRange))
-                return BitsOrPostingList.ALL_BITS;
+                return graph.search(queryVector, topK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
 
             PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
 
@@ -156,35 +181,37 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             long minSSTableRowId = primaryKeyMap.ceiling(firstPrimaryKey);
             // If we didn't find the first key, we won't find the last primary key either
             if (minSSTableRowId < 0)
-                return new BitsOrPostingList(PostingList.EMPTY);
+                return CloseableIterator.emptyIterator();
             long maxSSTableRowId = getMaxSSTableRowId(primaryKeyMap, keyRange.right);
 
             if (minSSTableRowId > maxSSTableRowId)
-                return new BitsOrPostingList(PostingList.EMPTY);
+                return CloseableIterator.emptyIterator();
 
             // if it covers entire segment, skip bit set
             if (minSSTableRowId <= metadata.minSSTableRowId && maxSSTableRowId >= metadata.maxSSTableRowId)
-                return BitsOrPostingList.ALL_BITS;
+                return graph.search(queryVector, topK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
 
             minSSTableRowId = Math.max(minSSTableRowId, metadata.minSSTableRowId);
             maxSSTableRowId = min(maxSSTableRowId, metadata.maxSSTableRowId);
 
             // Upper-bound cost based on maximum possible rows included
             int nRows = Math.toIntExact(maxSSTableRowId - minSSTableRowId + 1);
-            var cost = estimateCost(topK, nRows);
+            var initialCostEstimate = estimateCost(topK, nRows);
             Tracing.logAndTrace(logger, "Search range covers {} rows; expected nodes visited is {} for sstable index with {} nodes, LIMIT {}",
-                                nRows, cost.expectedNodesVisited, graph.size(), topK);
+                                nRows, initialCostEstimate.expectedNodesVisited, graph.size(), topK);
             // if we have a small number of results then let TopK processor do exact NN computation
-            if (cost.shouldUseBruteForce())
+            if (initialCostEstimate.shouldUseBruteForce())
             {
                 var segmentRowIds = new IntArrayList(nRows, 0);
                 for (long i = minSSTableRowId; i <= maxSSTableRowId; i++)
-                {
-                    if (context.shouldInclude(i, primaryKeyMap))
-                        segmentRowIds.add(metadata.toSegmentRowId(i));
-                }
-                var postings = findTopApproximatePostings(queryVector, segmentRowIds, topK);
-                return new BitsOrPostingList(new ArrayPostingList(postings));
+                    segmentRowIds.add(metadata.toSegmentRowId(i));
+
+                // When we have a threshold, we only need to filter the results, not order them, because it means we're
+                // evaluating a boolean predicate in the SAI pipeline that wants to collate by PK
+                if (threshold > 0)
+                    return filterByBruteForce(queryVector, segmentRowIds, threshold);
+                else
+                    return orderByBruteForce(queryVector, segmentRowIds, limit, topK);
             }
 
             // create a bitset of ordinals corresponding to the rows in the given key range
@@ -194,15 +221,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             {
                 for (long sstableRowId = minSSTableRowId; sstableRowId <= maxSSTableRowId; sstableRowId++)
                 {
-                    if (context.shouldInclude(sstableRowId, primaryKeyMap))
+                    int segmentRowId = metadata.toSegmentRowId(sstableRowId);
+                    int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
+                    if (ordinal >= 0)
                     {
-                        int segmentRowId = metadata.toSegmentRowId(sstableRowId);
-                        int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                        if (ordinal >= 0)
-                        {
-                            bits.set(ordinal);
-                            hasMatches = true;
-                        }
+                        bits.set(ordinal);
+                        hasMatches = true;
                     }
                 }
             }
@@ -211,25 +235,58 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 throw new RuntimeException(e);
             }
             // We can make a more accurate cost estimate now
-            cost = estimateCost(topK, bits.cardinality());
+            var betterCostEstimate = estimateCost(topK, bits.cardinality());
 
             if (!hasMatches)
-                return new BitsOrPostingList(PostingList.EMPTY);
+                return CloseableIterator.emptyIterator();
 
-            return new BitsOrPostingList(bits, cost);
+            return graph.search(queryVector, topK, threshold, bits, context, visited -> {
+                betterCostEstimate.updateStatistics(visited);
+                context.addAnnNodesVisited(visited);
+            });
         }
     }
 
-    private int[] findTopApproximatePostings(float[] queryVector, IntArrayList segmentRowIds, int topK) throws IOException
+    protected CloseableIterator<ScoredPrimaryKey> toScoreOrderedIterator(CloseableIterator<ScoredRowId> scoredRowIdIterator, QueryContext queryContext) throws IOException
     {
-        var cv = graph.getCompressedVectors();
-        if (cv == null || segmentRowIds.size() <= topK)
-            return segmentRowIds.toIntArray();
+        if (scoredRowIdIterator == null || !scoredRowIdIterator.hasNext())
+            return CloseableIterator.emptyIterator();
 
+        IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
+                                                                        metadata.maxKey,
+                                                                        metadata.minSSTableRowId,
+                                                                        metadata.maxSSTableRowId,
+                                                                        metadata.segmentRowIdOffset,
+                                                                        queryContext,
+                                                                        null);
+        return new ScoredRowIdPrimaryKeyMapIterator(scoredRowIdIterator,
+                                                    primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(),
+                                                    searcherContext);
+    }
+
+    private CloseableIterator<ScoredRowId> orderByBruteForce(float[] queryVector, IntArrayList segmentRowIds, int limit, int topK) throws IOException
+    {
+        if (graph.getCompressedVectors() != null)
+            return orderByBruteForce(graph.getCompressedVectors(), queryVector, segmentRowIds, limit, topK);
+        return orderByBruteForce(queryVector, segmentRowIds);
+    }
+
+    /**
+     * Materialize the compressed vectors for the given segment row ids, put them into a priority queue ordered by
+     * approximate similarity score, and then pass to the {@link BruteForceRowIdIterator} to lazily resolve the
+     * full resolution ordering as needed.
+     */
+    private CloseableIterator<ScoredRowId> orderByBruteForce(CompressedVectors cv,
+                                                             float[] queryVector,
+                                                             IntArrayList segmentRowIds,
+                                                             int limit,
+                                                             int topK) throws IOException
+    {
+        var approximateScores = new PriorityQueue<BruteForceRowIdIterator.RowWithApproximateScore>(segmentRowIds.size(),
+                                                                                                   (a, b) -> Float.compare(b.getApproximateScore(), a.getApproximateScore()));
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         var scoreFunction = cv.approximateScoreFunctionFor(queryVector, similarityFunction);
 
-        ArrayList<SearchResult.NodeScore> pairs = new ArrayList<>(segmentRowIds.size());
         try (var ordinalsView = graph.getOrdinalsView())
         {
             for (int i = 0; i < segmentRowIds.size(); i++)
@@ -240,20 +297,73 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                     continue;
 
                 var score = scoreFunction.similarityTo(ordinal);
-                pairs.add(new SearchResult.NodeScore(segmentRowId, score));
+                approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
             }
         }
-        // sort descending
-        pairs.sort((a, b) -> Float.compare(b.score, a.score));
-        int end = Math.min(pairs.size(), topK) - 1;
-        int[] postings = new int[end + 1];
-        // top K ascending
-        for (int i = end; i >= 0; i--)
-            postings[end - i] = pairs.get(i).node;
-        // Rows are sorted now so that we get the PrimaryKeys in order for correct deduplication in the
-        // RangeUnionIterator, where we merge the results from all sstables.
-        Arrays.sort(postings);
-        return postings;
+        NodeSimilarity.Reranker reranker = o -> similarityFunction.compare(queryVector, getVectorForOrdinal(o));
+        return CloseableIterator.wrap(new BruteForceRowIdIterator(approximateScores, reranker, limit, topK));
+    }
+
+    private float[] getVectorForOrdinal(int ordinal)
+    {
+        try
+        {
+            return graph.getVectorForOrdinal(ordinal);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Produces a correct ranking of the rows in the given segment. Because this graph does not have compressed
+     * vectors, read all vectors and put them into a priority queue to rank them lazily. It is assumed that the whole
+     * PQ will often not be needed.
+     */
+    private CloseableIterator<ScoredRowId> orderByBruteForce(float[] queryVector, IntArrayList segmentRowIds) throws IOException
+    {
+        PriorityQueue<ScoredRowId> scoredRowIds = new PriorityQueue<>(segmentRowIds.size(), (a, b) -> Float.compare(b.getScore(), a.getScore()));
+        addScoredRowIdsToCollector(queryVector, segmentRowIds, 0, scoredRowIds);
+        return new PriorityQueueIterator<>(scoredRowIds);
+    }
+
+    /**
+     * Materialize the full resolution vector for each row id, compute the similarity score, filter
+     * out rows that do not meet the threshold, and then return them in an iterator.
+     * NOTE: because the threshold is not used for ordering, the result is returned in PK order, not score order.
+     */
+    private CloseableIterator<ScoredRowId> filterByBruteForce(float[] queryVector,
+                                                              IntArrayList segmentRowIds,
+                                                              float threshold) throws IOException
+    {
+        var results = new ArrayList<ScoredRowId>(segmentRowIds.size());
+        addScoredRowIdsToCollector(queryVector, segmentRowIds, threshold, results);
+        return CloseableIterator.wrap(results.iterator());
+    }
+
+    private void addScoredRowIdsToCollector(float[] queryVector,
+                                            IntArrayList segmentRowIds,
+                                            float threshold,
+                                            Collection<ScoredRowId> collector) throws IOException
+    {
+        var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
+        try (var ordinalsView = graph.getOrdinalsView())
+        {
+            for (int i = 0; i < segmentRowIds.size(); i++)
+            {
+                int segmentRowId = segmentRowIds.getInt(i);
+                int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
+                if (ordinal < 0)
+                    continue;
+
+                float[] vector = graph.getVectorForOrdinal(ordinal);
+                assert vector != null : "Vector for ordinal " + ordinal + " is null";
+                var score = similarityFunction.compare(queryVector, vector);
+                if (score >= threshold)
+                    collector.add(new ScoredRowId(segmentRowId, score));
+            }
+        }
     }
 
     private long getMaxSSTableRowId(PrimaryKeyMap primaryKeyMap, PartitionPosition right)
@@ -357,22 +467,41 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public CloseableIterator<ScoredPrimaryKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         // create a sublist of the keys within this segment's bounds
         int minIndex = findBoundaryIndex(keys, true);
         int maxIndex = findBoundaryIndex(keys, false);
         List<PrimaryKey> keysInRange = keys.subList(minIndex, maxIndex);
         if (keysInRange.isEmpty())
-            return RangeIterator.empty();
-
-        if (keysInRange.size() <= limit)
-        {
-            Tracing.logAndTrace(logger, "Only {} keys in sstable range out of limit {}", keysInRange.size(), limit);
-            return new CollectionRangeIterator(metadata.minKey, metadata.maxKey, keysInRange);
-        }
+            return CloseableIterator.emptyIterator();
 
         int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
+        // Convert PKs to segment row ids and then to ordinals, skipping any that don't exist in this segment
+        var bitsAndRows = flatmapPrimaryKeysToBitsAndRows(keysInRange);
+        var bits = bitsAndRows.left;
+        var rowIds = bitsAndRows.right;
+        var numRows = rowIds.size();
+        final CostEstimate cost = estimateCost(topK, numRows);
+        Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; expected nodes visited is {} for index with {} nodes, LIMIT {}",
+                            numRows, keysInRange.size(), cost.expectedNodesVisited, graph.size(), limit);
+        if (numRows == 0)
+            return CloseableIterator.emptyIterator();
+
+        if (cost.shouldUseBruteForce())
+        {
+            // brute force using the in-memory compressed vectors to cut down the number of results returned
+            var queryVector = exp.lower.value.vector;
+            return toScoreOrderedIterator(this.orderByBruteForce(queryVector, rowIds, limit, topK), context);
+        }
+        // else ask the index to perform a search limited to the bits we created
+        float[] queryVector = exp.lower.value.vector;
+        var results = graph.search(queryVector, topK, 0, bits, context, cost::updateStatistics);
+        return toScoreOrderedIterator(results, context);
+    }
+
+    private Pair<SparseFixedBitSet, IntArrayList> flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange) throws IOException
+    {
         // if we are brute forcing the similarity search, we want to build a list of segment row ids,
         // but if not, we want to build a bitset of ordinals corresponding to the rows.
         // We won't know which path to take until we have an accurate key count.
@@ -467,27 +596,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 }
             }
         }
-
-        var numRows = rowIds.size();
-        var cost = estimateCost(topK, numRows);
-        Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; expected nodes visited is {} for index with {} nodes, LIMIT {}",
-                            numRows, keysInRange.size(), cost.expectedNodesVisited, graph.size(), limit);
-        if (numRows == 0)
-            return RangeIterator.empty();
-
-        if (cost.shouldUseBruteForce())
-        {
-            // brute force using the in-memory compressed vectors to cut down the number of results returned
-            var queryVector = exp.lower.value.vector;
-            var postings = findTopApproximatePostings(queryVector, rowIds, topK);
-            return toPrimaryKeyIterator(new ArrayPostingList(postings), context);
-        }
-        // else ask the index to perform a search limited to the bits we created
-        float[] queryVector = exp.lower.value.vector;
-        var results = graph.search(queryVector, topK, limit, bits, context);
-        cost.updateStatistics(results.getVisitedCount());
-
-        return toPrimaryKeyIterator(results, context);
+        return Pair.create(bits, rowIds);
     }
 
     public static double logBase2(double number) {
@@ -511,51 +620,5 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     public void close() throws IOException
     {
         graph.close();
-    }
-
-    private static class BitsOrPostingList
-    {
-        public static final BitsOrPostingList ALL_BITS = new BitsOrPostingList(Bits.ALL, null);
-        private final Bits bits;
-        private final CostEstimate cost;
-        private final PostingList postingList;
-
-        public BitsOrPostingList(Bits bits, CostEstimate cost)
-        {
-            this.bits = bits;
-            this.cost = cost;
-            this.postingList = null;
-        }
-
-        public BitsOrPostingList(PostingList postingList)
-        {
-            this.postingList = Preconditions.checkNotNull(postingList);
-            this.bits = null;
-            this.cost = null;
-        }
-
-        @Nullable
-        public Bits getBits()
-        {
-            Preconditions.checkState(!skipANN());
-            return bits;
-        }
-
-        public PostingList postingList()
-        {
-            Preconditions.checkState(skipANN());
-            return postingList;
-        }
-
-        public boolean skipANN()
-        {
-            return postingList != null;
-        }
-
-        public void updateStatistics(int visitedCount)
-        {
-            if (cost != null)
-                cost.updateStatistics(visitedCount);
-        }
     }
 }
