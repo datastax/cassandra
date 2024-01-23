@@ -18,26 +18,31 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
-import java.util.function.IntFunction;
 
-import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
-import org.apache.cassandra.utils.CloseableIterator;
+import com.google.common.collect.AbstractIterator;
+
+import io.github.jbellis.jvector.graph.NodeSimilarity;
+
+import static java.lang.Math.min;
 
 /**
- * An iterator over {@link ScoredRowId} that lazily orders a {@link PriorityQueue} of approximately scored rows.
- * The class works by:
- * 1. Taking a priority queue of {@link RowWithApproximateScore} ordered by approximate similarity score.
- * 2. Polling the topK results from the approximate score queue
- * 3. Materialize and score the full resolution vector for each row from step 2.
- * 4. Add to the full resolution row {@link ScoredRowId} to the priority queue.
- * 5. Return rows from the {@link ScoredRowId} priority queue until the limit is reached.
- * 6. When the limit is reached, if the {@link RowWithApproximateScore} queue is not empty, get the next (topK - limit) rows
- *    from the approximate score queue and repeat 3-6 until the {@link RowWithApproximateScore} queue is empty.
- * 7. Return the remaining rows from the {@link ScoredRowId} queue.
+ * An iterator over {@link ScoredRowId} that lazily consumes from a {@link PriorityQueue} of {@link RowWithApproximateScore}.
+ * <p>
+ * The idea is that we maintain the same level of accuracy as we would get from a graph search, by re-ranking the top `k``
+ * best approximate scores at a time with the full resolution vectors to return the top `limit`.
+ * <p>
+ * For example, suppose that limit=3 and k=5 and we have ten elements.  After our first re-ranking batch, we have
+ *   ABDEF?????
+ * We will return A, B, and D; if more elements are requested, we will re-rank another 5 (so three more, including
+ * the two remaining from the first batch).  Here we uncover C, G, and H, and order them appropriately:
+ *      CEFGH??
+ * This illustrates that, also like a graph search, we only guarantee ordering of results within a re-ranking batch,
+ * not globally.
+ * <p>
+ * As an implementation detail, we use a PriorityQueue to maintain state rather than a List and sorting.
  */
-public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
+public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
 {
     public static class RowWithApproximateScore
     {
@@ -58,7 +63,6 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
         }
     }
 
-    private final float[] queryVector;
     // We use two PriorityQueues because we do not need an eager ordering of these results. Depending on how many
     // sstables the query hits and the relative scores of vectors from those sstables, we may not need to return
     // more than the first handful of scores.
@@ -66,68 +70,43 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
     private final PriorityQueue<RowWithApproximateScore> approximateScoreQueue;
     // Priority queue with full resolution scores
     private final PriorityQueue<ScoredRowId> exactScoreQueue;
-    private final IntFunction<float[]> vectorForOrdinal;
-    private final VectorSimilarityFunction exactSimilarityFunction;
+    private final NodeSimilarity.Reranker reranker;
     private final int topK;
     private final int limit;
+    private int rerankedCount;
 
     /**
-     * @param queryVector The query vector
      * @param approximateScoreQueue A priority queue of rows and their ordinal ordered by their approximate similarity scores
-     * @param vectorForOrdinal A function that returns the full resolution vector for a given ordinal
-     * @param exactSimilarityFunction The similarity function to compare full resolution vectors
+     * @param reranker A function that takes a graph ordinal and returns the exact similarity score
      * @param limit The query limit
      * @param topK The number of vectors to resolve and score before returning results
      */
-    public BruteForceRowIdIterator(float[] queryVector,
-                                   PriorityQueue<RowWithApproximateScore> approximateScoreQueue,
-                                   IntFunction<float[]> vectorForOrdinal,
-                                   VectorSimilarityFunction exactSimilarityFunction,
+    public BruteForceRowIdIterator(PriorityQueue<RowWithApproximateScore> approximateScoreQueue,
+                                   NodeSimilarity.Reranker reranker,
                                    int limit,
                                    int topK)
     {
-        this.queryVector = queryVector;
         this.approximateScoreQueue = approximateScoreQueue;
         this.exactScoreQueue = new PriorityQueue<>(topK, (a, b) -> Float.compare(b.score, a.score));
-        this.vectorForOrdinal = vectorForOrdinal;
-        this.exactSimilarityFunction = exactSimilarityFunction;
+        this.reranker = reranker;
         assert topK >= limit : "topK must be greater than or equal to limit. Found: " + topK + " < " + limit;
         this.limit = limit;
         this.topK = topK;
+        this.rerankedCount = topK; // placeholder to kick off computeNext
     }
 
-
     @Override
-    public boolean hasNext()
-    {
-        // The exactScoreQueue is only valid for the first limit results (until the approximateScoreQueue is exhausted).
-        // When the exactScoreQueue drops below the (topK - limit) threshold, attempt to refill the exactScoreQueue
-        // with full resolution scores.
-        if (exactScoreQueue.size() >= topK - limit && !exactScoreQueue.isEmpty())
-            return true;
-
-        // Refill the exactScoreQueue until we either reach topK exact scores or the approximate score queue is empty.
-        while (!approximateScoreQueue.isEmpty() && exactScoreQueue.size() <= topK)
-        {
-            RowWithApproximateScore rowOrdinalScore = approximateScoreQueue.poll();
-            float[] vector = vectorForOrdinal.apply(rowOrdinalScore.ordinal);
-            assert vector != null : "Vector for ordinal " + rowOrdinalScore.ordinal + " is null";
-            float score = exactSimilarityFunction.compare(queryVector, vector);
-            exactScoreQueue.add(new ScoredRowId(rowOrdinalScore.rowId, score));
+    protected ScoredRowId computeNext() {
+        int consumed = rerankedCount - exactScoreQueue.size();
+        if (consumed >= limit) {
+            // Refill the exactScoreQueue until it reaches topK exact scores, or the approximate score queue is empty
+            while (!approximateScoreQueue.isEmpty() && exactScoreQueue.size() < topK) {
+                RowWithApproximateScore rowOrdinalScore = approximateScoreQueue.poll();
+                float score = reranker.similarityTo(rowOrdinalScore.ordinal);
+                exactScoreQueue.add(new ScoredRowId(rowOrdinalScore.rowId, score));
+            }
+            rerankedCount = exactScoreQueue.size();
         }
-
-        return !exactScoreQueue.isEmpty();
+        return exactScoreQueue.isEmpty() ? endOfData() : exactScoreQueue.poll();
     }
-
-    @Override
-    public ScoredRowId next()
-    {
-        if (!hasNext())
-            throw new NoSuchElementException();
-
-        return exactScoreQueue.poll();
-    }
-
-    @Override
-    public void close() {}
 }

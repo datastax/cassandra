@@ -29,6 +29,7 @@ import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.graph.NodeSimilarity;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseFixedBitSet;
@@ -299,7 +300,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
             }
         }
-        return new BruteForceRowIdIterator(queryVector, approximateScores, this::getVectorForOrdinal, similarityFunction, limit, topK);
+        NodeSimilarity.Reranker reranker = o -> similarityFunction.compare(queryVector, getVectorForOrdinal(o));
+        return CloseableIterator.wrap(new BruteForceRowIdIterator(approximateScores, reranker, limit, topK));
     }
 
     private float[] getVectorForOrdinal(int ordinal)

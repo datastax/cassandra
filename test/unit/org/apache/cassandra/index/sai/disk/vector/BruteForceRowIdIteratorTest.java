@@ -23,6 +23,7 @@ import java.util.PriorityQueue;
 
 import org.junit.Test;
 
+import io.github.jbellis.jvector.graph.NodeSimilarity;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
 import static org.junit.Assert.assertFalse;
@@ -39,16 +40,10 @@ public class BruteForceRowIdIteratorTest
         var limit = 10;
 
         // Should work for an empty pq
-        try (var iter = new BruteForceRowIdIterator(queryVector,
-                                                    pq,
-                                                    this::identityMapper,
-                                                    VectorSimilarityFunction.COSINE,
-                                                    limit,
-                                                    topK))
-        {
-            assertFalse(iter.hasNext());
-            assertThrows(NoSuchElementException.class, iter::next);
-        }
+        NodeSimilarity.Reranker reranker = o -> VectorSimilarityFunction.COSINE.compare(queryVector, identityMapper(o));
+        var iter = new BruteForceRowIdIterator(pq, reranker, limit, topK);
+        assertFalse(iter.hasNext());
+        assertThrows(NoSuchElementException.class, iter::next);
     }
 
     private float[] identityMapper(int rowId)
