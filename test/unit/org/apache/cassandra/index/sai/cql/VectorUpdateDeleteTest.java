@@ -780,6 +780,126 @@ public class VectorUpdateDeleteTest extends VectorTester
         }
     }
 
+    @Test
+    public void shadowedPrimaryKeysRequireDeeperSearch() throws Throwable
+    {
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 2>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+        disableCompaction(KEYSPACE);
+
+        // Choose a row count that will essentially force us to re-query the index that still has more rows to search.
+        int baseRowCount = 1000;
+        // Create 1000 rows so that each row has a slightly less similar score.
+        for (int i = 0; i < baseRowCount - 10; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, i));
+
+        for (int i = baseRowCount -10; i < baseRowCount; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, -i));
+
+        flush();
+
+        // Create 10 rows with the worst scores, but they won't be shadowed.
+        for (int i = baseRowCount; i < baseRowCount + 10; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(-1, baseRowCount * -1));
+
+        // Delete all but the last 10 rows
+        for (int i = 0; i < baseRowCount - 10; i++)
+            execute("DELETE FROM %s WHERE pk = ?", i);
+
+        beforeAndAfterFlush(() -> {
+            // ANN Only
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 1.0] LIMIT 3"),
+                       row(baseRowCount - 10), row(baseRowCount - 9), row(baseRowCount - 8));
+            // Hyrbid
+            assertRows(execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 1.0] LIMIT 3"),
+                       row(baseRowCount - 10), row(baseRowCount - 9), row(baseRowCount - 8));
+        });
+    }
+
+    @Test
+    public void testUpdateVectorToWorseAndBetterPositions() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, val vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])");
+        execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 3.0])");
+
+        flush();
+        execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 4.0])");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 1"), row(1));
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 2"), row(1), row(0));
+        });
+
+        // And now update pk 1 to show that we can get 0 too
+        execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 5.0])");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 1"), row(0));
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 2"), row(0), row(1));
+        });
+
+        // And now update both PKs so that the stream of ranked rows is PKs: 0, 1, [1], 0, 1, [0], where the numbers
+        // wrapped in brackets are the "real" scores of the vectors. This test makes sure that we correctly remove
+        // PrimaryKeys from the updatedKeys map so that we don't accidentally duplicate PKs.
+        execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 3.5])");
+        execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 6.0])");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 1"), row(1));
+            assertRows(execute("SELECT pk FROM %s ORDER BY val ann of [1.0, 2.0] LIMIT 2"), row(1), row(0));
+        });
+    }
+
+    @Test
+    public void testBruteForceRangeQueryWithUpdatedVectors1536D() throws Throwable
+    {
+        testBruteForceRangeQueryWithUpdatedVectors(1536);
+    }
+
+    @Test
+    public void testBruteForceRangeQueryWithUpdatedVectors2D() throws Throwable
+    {
+        testBruteForceRangeQueryWithUpdatedVectors(2);
+    }
+
+    private void testBruteForceRangeQueryWithUpdatedVectors(int vectorDimension) throws Throwable
+    {
+        setMaxBruteForceRows(0);
+        createTable("CREATE TABLE %s (pk int, val vector<float, " + vectorDimension + ">, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        // Insert 100 vectors
+        for (int i = 0; i < 100; i++)
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, randomVector(vectorDimension));
+
+        // Update those vectors so some ordinals are changed
+        for (int i = 0; i < 100; i++)
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, randomVector(vectorDimension));
+
+        // Delete the first 50 PKs.
+        for (int i = 0; i < 50; i++)
+            execute("DELETE FROM %s WHERE pk = ?", i);
+
+        // All of the above inserts and deletes are performed on the same index to verify internal index behavior
+        // for both memtables and sstables.
+        beforeAndAfterFlush(() -> {
+            // Query for the first 10 vectors, we don't care which.
+            // Use a range query to hit the right brute force code path
+            var results = execute("SELECT pk FROM %s WHERE token(pk) < 0 ORDER BY val ann of ? LIMIT 10",
+                                  randomVector(vectorDimension));
+            assertThat(results).hasSize(10);
+            // Make sure we don't get any of the deleted PKs
+            assertThat(results).allSatisfy(row -> assertThat(row.getInt("pk")).isGreaterThanOrEqualTo(50));
+        });
+    }
+
     private static void setChunkSize(final int selectivityLimit) throws Exception
     {
         Field selectivity = QueryController.class.getDeclaredField("ORDER_CHUNK_SIZE");
