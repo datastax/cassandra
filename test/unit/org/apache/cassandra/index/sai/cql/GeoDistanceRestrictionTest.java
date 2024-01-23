@@ -277,6 +277,10 @@ public class GeoDistanceRestrictionTest extends VectorTester
         // Delete a row
         execute("DELETE FROM %s WHERE pk = 2");
 
+        // VSTODO this test was passing before because PK 4 comes before PK 0 in token order. However, the ORDER BY
+        // does not use haversine distnace, it uses euclidean (for now), and the new code results in PK 0 in the
+        // top 3. Leaving this test as is since the underlying functionallity was not really working correctly and
+        // we plan to fix with a new haversine distance similarity function.
         beforeAndAfterFlush(() -> {
             // GEO_DISTANCE gets all rows and then the limit gets the top 3
             assertRows(execute("select pk from %s WHERE geo_distance(v,[5,5]) <= 1000000 ORDER BY v ANN of [5,5] limit 3"),

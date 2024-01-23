@@ -79,7 +79,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
 
     @Override
     public RangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
-{
+    {
         PostingList postingList = searchPosting(exp, context);
         return toPrimaryKeyIterator(postingList, context);
     }

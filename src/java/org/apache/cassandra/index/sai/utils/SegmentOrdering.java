@@ -25,32 +25,36 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.utils.CloseableIterator;
 
 /**
- * A {@link SegmentOrdering} orders and limits a list of {@link PrimaryKey}s.
+ * A {@link SegmentOrdering} orders an index and produces a stream of {@link ScoredPrimaryKey}s.
+ *
+ * The limit can be used to lazily order the {@link PrimaryKey}s. Due to the possiblity for
+ * shadowed or updated keys, a {@link SegmentOrdering} should be able to order the whole index
+ * until exhausted.
  *
  * When using {@link SegmentOrdering} there are several steps to
- * build the list of Primary Keys to be ordered and limited:
+ * build the list of Primary Keys to be ordered:
  *
  * 1. Find all primary keys that match each non-ordering query predicate.
  * 2. Union and intersect the results of step 1 to build a single {@link RangeIterator}
  *    ordered by {@link PrimaryKey}.
- * 3. Filter out any shadowed primary keys.
- * 4. Fan the primary keys from step 3 out to each sstable segment to order and limit each
- *    list of primary keys.
+ * 3. Fan the primary keys from step 2 out to each sstable segment to order the list of primary keys.
  *
- * SegmentOrdering handles the fourth step.
+ * SegmentOrdering handles the third step.
  *
  * Note: a segment ordering is only used when a query has both ordering and non-ordering predicates.
  * Where a query has only ordering predicates, the ordering is handled by the
- * {@link IndexSearcher#search(Expression, AbstractBounds, QueryContext, boolean, int)}.
+ * {@link IndexSearcher#orderBy(Expression, AbstractBounds, QueryContext, int)}.
  */
 public interface SegmentOrdering
 {
     /**
-     * Order and limit a list of primary keys to the top results.
+     * Order a list of primary keys to the top results. The limit is a hint indicating the minimum number of
+     * results the query requested.
      */
-    default RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    default CloseableIterator<ScoredPrimaryKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
         throw new UnsupportedOperationException();
     }

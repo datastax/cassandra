@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.List;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -28,9 +29,11 @@ import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.CloseableIterator;
 
 /**
  * This is used to abstract the index search between on-disk versions.
@@ -41,7 +44,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
  * used during query time to help coordinate queries and is also returned
  * by the virtual tables.
  */
-public interface SearchableIndex extends Closeable, SegmentOrdering
+public interface SearchableIndex extends Closeable
 {
     public long indexFileCacheSize();
 
@@ -63,6 +66,16 @@ public interface SearchableIndex extends Closeable, SegmentOrdering
                                 AbstractBounds<PartitionPosition> keyRange,
                                 QueryContext context,
                                 boolean defer, int limit) throws IOException;
+
+    public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
+                                                             AbstractBounds<PartitionPosition> keyRange,
+                                                             QueryContext context,
+                                                             int limit) throws IOException;
+
+    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context,
+                                                                    List<PrimaryKey> keys,
+                                                                    Expression exp,
+                                                                    int limit) throws IOException;
 
     public void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable);
 }

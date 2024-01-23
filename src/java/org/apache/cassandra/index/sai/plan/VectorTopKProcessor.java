@@ -66,6 +66,7 @@ import org.apache.cassandra.index.sai.utils.InMemoryPartitionIterator;
 import org.apache.cassandra.index.sai.utils.InMemoryUnfilteredPartitionIterator;
 import org.apache.cassandra.index.sai.utils.PartitionInfo;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.FBUtilities;
@@ -200,6 +201,26 @@ public class VectorTopKProcessor
                 for (Unfiltered uf: pr.tombstones)
                     addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
             }
+        } else if (partitions instanceof StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) {
+            var retriever = (StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) partitions;
+            // FilteredPartitions does not implement ParallelizablePartitionIterator.
+            // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
+            int rowsMatched = 0;
+            // Check rowsMatched first to prevent fetching one more partition than needed.
+            while (rowsMatched < limit && retriever.hasNext())
+            {
+                // have to close to move to the next partition, otherwise hasNext() fails
+                try (var partitionRowIterator = retriever.next())
+                {
+                    var iter = (StorageAttachedIndexSearcher.ScoreOrderedResultRetriever.PrimaryKeyIterator) partitionRowIterator;
+                    PartitionResults pr = processPartition(iter, iter.scoredPrimaryKey, retriever);
+                    rowsMatched += pr.rows.size();
+                    for (var row : pr.rows)
+                        addUnfiltered(unfilteredByPartition, row.getLeft(), row.getMiddle());
+                    for (var uf : pr.tombstones)
+                        addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
+                }
+            }
         } else {
             // FilteredPartitions does not implement ParallelizablePartitionIterator.
             // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
@@ -273,6 +294,38 @@ public class VectorTopKProcessor
             float rowScore = getScoreForRow(null, row);
             pr.addRow(Triple.of(partitionInfo, row, keyAndStaticScore + rowScore));
         }
+
+        return pr;
+    }
+
+    /**
+     * Processes a single partition, calculating scores for rows and extracting tombstones.
+     */
+    private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator, ScoredPrimaryKey key,
+                                              StorageAttachedIndexSearcher.ScoreOrderedResultRetriever retriever) {
+        Row staticRow = partitionRowIterator.staticRow();
+        PartitionInfo partitionInfo = PartitionInfo.create(partitionRowIterator);
+        // VSTODO vector columns shouldn't be static, so can we remove this?
+        float keyAndStaticScore = getScoreForRow(key.partitionKey(), staticRow);
+        var pr = new PartitionResults(partitionInfo);
+
+        if (!partitionRowIterator.hasNext())
+            return pr;
+
+        Unfiltered unfiltered = partitionRowIterator.next();
+        assert !partitionRowIterator.hasNext() : "Only one row should be returned from vector search";
+        // Always include tombstones for coordinator. It relies on ReadCommand#withMetricsRecording to throw
+        // TombstoneOverwhelmingException to prevent OOM.
+        if (unfiltered.isRangeTombstoneMarker())
+        {
+            pr.addTombstone(unfiltered);
+            return pr;
+        }
+
+        Row row = (Row) unfiltered;
+        float rowScore = keyAndStaticScore + getScoreForRow(null, row);
+        if (retriever.shouldInclude(key, rowScore))
+            pr.addRow(Triple.of(partitionInfo, row, rowScore));
 
         return pr;
     }
