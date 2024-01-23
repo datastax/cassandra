@@ -280,21 +280,14 @@ public class QueryController
             // If we only have one expression, we just use the ANN index to order and limit.
             return getTopKRows(orderings.get(0));
 
-        // We already decided we need to do first sort then filter, so no need to open the index iterator:
-        if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER)
-        {
-            assert queryContext.postFilterSelectivityEstimate() != null;
-            return getTopKRows(orderings.get(0));
-        }
-
         var whereClauseIter = buildIterator();
 
-        if (queryContext.filterSortOrder() == null)
-        {
-            QueryContext.FilterSortOrder order = decideFilterSortOrder(filterOperation, whereClauseIter);
-            queryContext.setFilterSortOrder(order);
-        }
-        
+        // A query is no longer re-run, so this method is always called before initializing the query context's
+        // filter sort order.
+        assert queryContext.filterSortOrder() == null;
+        QueryContext.FilterSortOrder order = decideFilterSortOrder(filterOperation, whereClauseIter);
+        queryContext.setFilterSortOrder(order);
+
         if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER)
         {
             queryContext.setPostFilterSelectivityEstimate(estimateSelectivity(whereClauseIter));
