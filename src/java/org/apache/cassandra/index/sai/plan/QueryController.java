@@ -447,7 +447,7 @@ public class QueryController
     {
         List<CloseableIterator<ScoredPrimaryKey>> scoredPrimaryKeyIterators = new ArrayList<>();
         List<SSTableIndex> indexesToRelease = new ArrayList<>();
-        try (var iter = new OrderingFilterRangeIterator<>(source, ORDER_CHUNK_SIZE, list -> this.getTopKRows(list, expression)))
+        try (var iter = new OrderingFilterRangeIterator<>(source, ORDER_CHUNK_SIZE, queryContext, list -> this.getTopKRows(list, expression)))
         {
             while (iter.hasNext())
             {
