@@ -633,6 +633,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         try
         {
             sampleReadLatencyNanos = metadata().params.speculativeRetry.calculateThreshold(metric.coordinatorReadLatency.tableOrKeyspaceTimer().getSnapshot(), sampleReadLatencyNanos);
+            logger.info("ZUPA: Updated sample read latency threshold to {} for table {}", sampleReadLatencyNanos, metadata().name);
             additionalWriteLatencyNanos = metadata().params.additionalWritePolicy.calculateThreshold(metric.coordinatorWriteLatency.tableOrKeyspaceTimer().getSnapshot(), additionalWriteLatencyNanos);
         }
         catch (Throwable e)

@@ -54,6 +54,7 @@ import org.apache.cassandra.service.reads.repair.ReadRepair;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 import static com.google.common.collect.Iterables.all;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -70,6 +71,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 public abstract class AbstractReadExecutor
 {
     private static final Logger logger = LoggerFactory.getLogger(AbstractReadExecutor.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1L, SECONDS);
 
     private static volatile Map<InetAddressAndPort, AtomicInteger> dataReadMetrics = new ConcurrentHashMap<>();
     private static volatile Map<InetAddressAndPort, AtomicInteger> digestReadMetrics = new ConcurrentHashMap<>();
@@ -105,17 +107,17 @@ public abstract class AbstractReadExecutor
         oldDataMetrics.entrySet()
                       .stream()
                       .sorted(Map.Entry.comparingByKey())
-                      .forEach(entry -> logger.debug("ZUPA: data reads from Node {}: {}", entry.getKey(), entry.getValue()));
+                      .forEach(entry -> logger.info("ZUPA: data reads from Node {}: {}", entry.getKey(), entry.getValue()));
 
         oldDigestMetrics.entrySet()
                       .stream()
                       .sorted(Map.Entry.comparingByKey())
-                      .forEach(entry -> logger.debug("ZUPA: digest reads from Node {}: {}", entry.getKey(), entry.getValue()));
+                      .forEach(entry -> logger.info("ZUPA: digest reads from Node {}: {}", entry.getKey(), entry.getValue()));
 
         oldSpeculativeMetrics.entrySet()
                       .stream()
                       .sorted(Map.Entry.comparingByKey())
-                      .forEach(entry -> logger.debug("ZUPA: speculative reads from Node {}: {}", entry.getKey(), entry.getValue()));
+                      .forEach(entry -> logger.info("ZUPA: speculative reads from Node {}: {}", entry.getKey(), entry.getValue()));
     }
 
     AbstractReadExecutor(ColumnFamilyStore cfs,
@@ -349,6 +351,7 @@ public abstract class AbstractReadExecutor
 
         public void maybeTryAdditionalReplicas()
         {
+            long waitStart = System.nanoTime();
             if (shouldSpeculateAndMaybeWait())
             {
                 //Handle speculation stats first in case the callback fires immediately
@@ -361,6 +364,7 @@ public abstract class AbstractReadExecutor
                 if (handler.resolver.isDataPresent())
                 {
                     extraReplica = replicaPlan.firstUncontactedCandidate(replica -> true);
+                    noSpamLogger.info("ZUPA: Triggering speculative retry for digest read on {} after {} ns", extraReplica, System.nanoTime() - waitStart);
 
                     // we should only use a SpeculatingReadExecutor if we have an extra replica to speculate against
                     assert extraReplica != null;
@@ -380,6 +384,7 @@ public abstract class AbstractReadExecutor
                         // unique per endpoint, and we have no full nodes left to speculate against
                         return;
                     }
+                    noSpamLogger.info("ZUPA: Triggering speculative retry for data read on {} after {} ns", extraReplica, System.nanoTime() - waitStart);
                 }
 
                 // we must update the plan to include this new node, else when we come to read-repair, we may not include this
