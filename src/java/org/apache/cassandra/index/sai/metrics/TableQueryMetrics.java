@@ -162,6 +162,7 @@ public class TableQueryMetrics extends AbstractMetrics
             final long segmentsHit = queryContext.segmentsHit();
             final long partitionsRead = queryContext.partitionsRead();
             final long rowsFiltered = queryContext.rowsFiltered();
+            final long rowsPreFiltered = queryContext.rowsFiltered();
 
             sstablesHit.update(ssTablesHit);
             this.segmentsHit.update(segmentsHit);
@@ -173,16 +174,31 @@ public class TableQueryMetrics extends AbstractMetrics
             totalRowsFiltered.inc(rowsFiltered);
 
             if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER)
-                sortThenFilterQueriesCompleted.inc();
-            else if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.FILTER_THEN_SORT)
-                filterThenSortQueriesCompleted.inc();
-
-            if (Tracing.isTracing())
             {
-                Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, and took {} microseconds.",
-                              pluralize(ssTablesHit, "SSTable index", "es"), pluralize(segmentsHit, "segment", "s"),
-                              pluralize(rowsFiltered, "row", "s"), pluralize(partitionsRead, "partition", "s"),
-                              queryLatencyMicros);
+                sortThenFilterQueriesCompleted.inc();
+                if (Tracing.isTracing())
+                {
+                    Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, and took {} microseconds.",
+                                  pluralize(ssTablesHit, "SSTable index", "es"),
+                                  pluralize(segmentsHit, "segment", "s"),
+                                  pluralize(rowsFiltered, "row", "s"),
+                                  pluralize(partitionsRead, "partition", "s"),
+                                  queryLatencyMicros);
+                }
+            }
+            else if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.FILTER_THEN_SORT)
+            {
+                filterThenSortQueriesCompleted.inc();
+                if (Tracing.isTracing())
+                {
+                    Tracing.trace("Index query accessed memtable indexes, {}, and {}, selected {} before ranking, post-filtered {} in {}, and took {} microseconds.",
+                                  pluralize(ssTablesHit, "SSTable index", "es"),
+                                  pluralize(segmentsHit, "segment", "s"),
+                                  pluralize(rowsPreFiltered, "row", "s"),
+                                  pluralize(rowsFiltered, "row", "s"),
+                                  pluralize(partitionsRead, "partition", "s"),
+                                  queryLatencyMicros);
+                }
             }
 
             if (queryContext.trieSegmentsHit() > 0)

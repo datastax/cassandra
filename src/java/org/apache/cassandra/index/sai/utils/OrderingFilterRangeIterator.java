@@ -25,6 +25,7 @@ import java.util.Set;
 import java.util.function.Function;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -39,15 +40,18 @@ import org.apache.cassandra.utils.Pair;
 public class OrderingFilterRangeIterator<T> implements Iterator<T>, AutoCloseable
 {
     private final RangeIterator input;
+    private final QueryContext context;
     private final int chunkSize;
     private final Function<List<PrimaryKey>, T> nextRangeFunction;
 
     public OrderingFilterRangeIterator(RangeIterator input,
                                        int chunkSize,
+                                       QueryContext context,
                                        Function<List<PrimaryKey>, T> nextRangeFunction)
     {
         this.input = input;
         this.chunkSize = chunkSize;
+        this.context = context;
         this.nextRangeFunction = nextRangeFunction;
     }
 
@@ -66,6 +70,7 @@ public class OrderingFilterRangeIterator<T> implements Iterator<T>, AutoCloseabl
             nextKeys.add(input.next());
         }
         while (nextKeys.size() < chunkSize && input.hasNext());
+        context.addRowsFiltered(nextKeys.size());
         return nextRangeFunction.apply(nextKeys);
     }
 

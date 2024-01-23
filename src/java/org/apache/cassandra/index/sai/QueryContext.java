@@ -42,6 +42,7 @@ public class QueryContext
     private final LongAdder sstablesHit = new LongAdder();
     private final LongAdder segmentsHit = new LongAdder();
     private final LongAdder partitionsRead = new LongAdder();
+    private final LongAdder rowsPreFiltered = new LongAdder();
     private final LongAdder rowsFiltered = new LongAdder();
     private final LongAdder trieSegmentsHit = new LongAdder();
 
@@ -102,6 +103,10 @@ public class QueryContext
     public void addRowsFiltered(long val)
     {
         rowsFiltered.add(val);
+    }
+    public void addRowsPreFiltered(long val)
+    {
+        rowsPreFiltered.add(val);
     }
     public void addTrieSegmentsHit(long val)
     {
@@ -171,6 +176,10 @@ public class QueryContext
     public long rowsFiltered()
     {
         return rowsFiltered.longValue();
+    }
+    public long rowsPreFiltered()
+    {
+        return rowsPreFiltered.longValue();
     }
     public long trieSegmentsHit()
     {
