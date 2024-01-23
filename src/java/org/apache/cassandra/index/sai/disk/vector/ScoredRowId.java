@@ -18,13 +18,24 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-import java.io.IOException;
-import java.util.PrimitiveIterator;
-
-public interface RowIdsView extends AutoCloseable
+public class ScoredRowId
 {
-    PrimitiveIterator.OfInt getSegmentRowIdsMatching(int vectorOrdinal) throws IOException;
+    final int segmentRowId;
+    final float score;
 
-    @Override
-    void close();
+    public ScoredRowId(int segmentRowId, float score)
+    {
+        this.segmentRowId = segmentRowId;
+        this.score = score;
+    }
+
+    public float getScore()
+    {
+        return score;
+    }
+
+    public int getSegmentRowId()
+    {
+        return segmentRowId;
+    }
 }
