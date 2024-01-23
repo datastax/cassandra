@@ -16,15 +16,42 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.vector;
+package org.apache.cassandra.index.sai.utils;
 
-import java.io.IOException;
-import java.util.PrimitiveIterator;
+import java.util.NoSuchElementException;
+import java.util.PriorityQueue;
 
-public interface RowIdsView extends AutoCloseable
+import org.apache.cassandra.utils.CloseableIterator;
+
+/**
+ * An iterator that returns elements from a priority queue in order. This is different from
+ * {@link PriorityQueue#iterator()} which returns elements in undefined order.
+ */
+public class PriorityQueueIterator<T> implements CloseableIterator<T>
 {
-    PrimitiveIterator.OfInt getSegmentRowIdsMatching(int vectorOrdinal) throws IOException;
+    private final PriorityQueue<T> pq;
+
+    public PriorityQueueIterator(PriorityQueue<T> pq)
+    {
+        this.pq = pq;
+    }
 
     @Override
-    void close();
+    public boolean hasNext()
+    {
+        return !pq.isEmpty();
+    }
+
+    @Override
+    public T next()
+    {
+        if (!hasNext())
+            throw new NoSuchElementException();
+        return pq.poll();
+    }
+
+    @Override
+    public void close()
+    {
+    }
 }
