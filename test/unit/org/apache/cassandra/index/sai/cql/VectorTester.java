@@ -56,20 +56,15 @@ public class VectorTester extends SAITester
 
     static void setMaxBruteForceRows(int n) throws Throwable
     {
-        var limitToTopResults = InvokePointBuilder.newInvokePoint()
+        var shouldUseBruteForce = InvokePointBuilder.newInvokePoint()
                                                   .onClass("org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher")
-                                                  .onMethod("limitToTopResults")
+                                                  .onMethod("shouldUseBruteForce")
                                                   .atEntry();
-        var bitsOrPostingListForKeyRange = InvokePointBuilder.newInvokePoint()
-                                                             .onClass("org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher")
-                                                             .onMethod("bitsOrPostingListForKeyRange")
-                                                             .atEntry();
         var ab = ActionBuilder.newActionBuilder()
                               .actions()
                               .doAction("$this.globalBruteForceRows = " + n);
         var changeBruteForceThreshold = Injections.newCustom("force_non_bruteforce_queries")
-                                                  .add(limitToTopResults)
-                                                  .add(bitsOrPostingListForKeyRange)
+                                                  .add(shouldUseBruteForce)
                                                   .add(ab)
                                                   .build();
         Injections.inject(changeBruteForceThreshold);

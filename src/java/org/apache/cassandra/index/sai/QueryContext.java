@@ -18,22 +18,15 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.util.Collection;
-import java.util.NavigableSet;
-import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import io.github.jbellis.jvector.util.Bits;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
@@ -52,8 +45,8 @@ public class QueryContext
     private final LongAdder sstablesHit = new LongAdder();
     private final LongAdder segmentsHit = new LongAdder();
     private final LongAdder partitionsRead = new LongAdder();
+    private final LongAdder rowsPreFiltered = new LongAdder();
     private final LongAdder rowsFiltered = new LongAdder();
-    private final LongAdder rowsMatched = new LongAdder();
     private final LongAdder trieSegmentsHit = new LongAdder();
 
     private final LongAdder bkdPostingListsHit = new LongAdder();
@@ -69,8 +62,7 @@ public class QueryContext
 
     private final LongAdder annNodesVisited = new LongAdder();
 
-    private final LongAdder shadowedKeysLoopCount = new LongAdder();
-    private final NavigableSet<PrimaryKey> shadowedPrimaryKeys = new ConcurrentSkipListSet<>();
+    private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
 
     // Total count of rows in all sstables and memtables.
     private Long totalAvailableRows = null;
@@ -81,9 +73,6 @@ public class QueryContext
 
     // Estimates the probability of a row picked by the index to be accepted by the post filter.
     private float postFilterSelectivityEstimate = 1.0f;
-
-    // Last used soft limit for vector search.
-    private int softLimit = -1;
 
     @VisibleForTesting
     public QueryContext()
@@ -118,13 +107,9 @@ public class QueryContext
     {
         rowsFiltered.add(val);
     }
-    public void addRowsMatched(long val)
+    public void addRowsPreFiltered(long val)
     {
-        rowsMatched.add(val);
-    }
-    public void resetRowsMatched()
-    {
-        rowsMatched.reset();
+        rowsPreFiltered.add(val);
     }
     public void addTrieSegmentsHit(long val)
     {
@@ -163,11 +148,6 @@ public class QueryContext
         annNodesVisited.add(val);
     }
 
-    public void addShadowedKeysLoopCount(long val)
-    {
-        shadowedKeysLoopCount.add(val);
-    }
-
     public void setTotalAvailableRows(long totalAvailableRows)
     {
         this.totalAvailableRows = totalAvailableRows;
@@ -181,11 +161,6 @@ public class QueryContext
     public void setFilterSortOrder(FilterSortOrder filterSortOrder)
     {
         this.filterSortOrder = filterSortOrder;
-    }
-
-    public void setSoftLimit(int softLimit)
-    {
-        this.softLimit = softLimit;
     }
 
     // getters
@@ -205,9 +180,9 @@ public class QueryContext
     {
         return rowsFiltered.longValue();
     }
-    public long rowsMatched()
+    public long rowsPreFiltered()
     {
-        return rowsMatched.longValue();
+        return rowsPreFiltered.longValue();
     }
     public long trieSegmentsHit()
     {
@@ -261,11 +236,6 @@ public class QueryContext
         return postFilterSelectivityEstimate;
     }
 
-    public int softLimit()
-    {
-        return softLimit;
-    }
-
     public void checkpoint()
     {
         if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
@@ -275,67 +245,17 @@ public class QueryContext
         }
     }
 
-    public long shadowedKeysLoopCount()
+    public void addShadowed(long count)
     {
-        return shadowedKeysLoopCount.longValue();
-    }
-
-    public void recordShadowedPrimaryKey(PrimaryKey primaryKey)
-    {
-        boolean isNewKey = shadowedPrimaryKeys.add(primaryKey);
-        assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query. " + primaryKey;
-    }
-
-    // Returns true if the row ID will be included or false if the row ID will be shadowed
-    public boolean shouldInclude(long sstableRowId, PrimaryKeyMap primaryKeyMap)
-    {
-        return !shadowedPrimaryKeys.contains(primaryKeyMap.primaryKeyFromRowId(sstableRowId));
-    }
-
-    public boolean shouldInclude(PrimaryKey pk)
-    {
-        return !shadowedPrimaryKeys.contains(pk);
+        shadowedPrimaryKeyCount.add(count);
     }
 
     /**
      * @return shadowed primary keys, in ascending order
      */
-    public NavigableSet<PrimaryKey> getShadowedPrimaryKeys()
+    public long getShadowedPrimaryKeyCount()
     {
-        return shadowedPrimaryKeys;
-    }
-
-    public Bits bitsetForShadowedPrimaryKeys(CassandraOnHeapGraph<PrimaryKey> graph)
-    {
-        if (getShadowedPrimaryKeys().isEmpty())
-            return Bits.ALL;
-
-        return new IgnoredKeysBits(graph, getShadowedPrimaryKeys());
-    }
-
-    private static class IgnoredKeysBits implements Bits
-    {
-        private final CassandraOnHeapGraph<PrimaryKey> graph;
-        private final NavigableSet<PrimaryKey> ignored;
-
-        public IgnoredKeysBits(CassandraOnHeapGraph<PrimaryKey> graph, NavigableSet<PrimaryKey> ignored)
-        {
-            this.graph = graph;
-            this.ignored = ignored;
-        }
-
-        @Override
-        public boolean get(int ordinal)
-        {
-            Collection<PrimaryKey> keys = graph.keysFromOrdinal(ordinal);
-            return keys.stream().anyMatch(k -> !ignored.contains(k));
-        }
-
-        @Override
-        public int length()
-        {
-            return graph.size();
-        }
+        return shadowedPrimaryKeyCount.longValue();
     }
 
     /**

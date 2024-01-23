@@ -24,7 +24,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -34,6 +33,7 @@ import java.util.stream.IntStream;
 
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
+import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.cliffc.high_scale_lib.NonBlockingHashMapLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +52,7 @@ import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.pq.ProductQuantization;
 import io.github.jbellis.jvector.pq.VectorCompressor;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.VectorEncoding;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -59,6 +60,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
@@ -66,10 +68,12 @@ import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.lucene.util.StringHelper;
 
@@ -83,14 +87,16 @@ public class CassandraOnHeapGraph<T>
     private final VectorSimilarityFunction similarityFunction;
     private final ConcurrentMap<float[], VectorPostings<T>> postingsMap;
     private final NonBlockingHashMapLong<VectorPostings<T>> postingsByOrdinal;
+    private final NonBlockingHashMap<T, float[]> vectorsByKey;
     private final AtomicInteger nextOrdinal = new AtomicInteger();
     private volatile boolean hasDeletions;
 
     /**
      * @param termComparator the vector type -- passed as AbstractType for caller's convenience
      * @param indexWriterConfig
+     * @param forSearching if true, vectorsByKey will be initialized and populated with vectors as they are added
      */
-    public CassandraOnHeapGraph(AbstractType<?> termComparator, IndexWriterConfig indexWriterConfig)
+    public CassandraOnHeapGraph(AbstractType<?> termComparator, IndexWriterConfig indexWriterConfig, boolean forSearching)
     {
         serializer = (VectorType.VectorSerializer)termComparator.getSerializer();
         vectorValues = new ConcurrentVectorValues(((VectorType<?>) termComparator).dimension);
@@ -101,6 +107,7 @@ public class CassandraOnHeapGraph<T>
         // is thus a better option than hash-based (which has to look at all elements to compute the hash).
         postingsMap = new ConcurrentSkipListMap<>(Arrays::compare);
         postingsByOrdinal = new NonBlockingHashMapLong<>();
+        vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
 
         builder = new GraphIndexBuilder<>(vectorValues,
                                           VectorEncoding.FLOAT32,
@@ -160,7 +167,18 @@ public class CassandraOnHeapGraph<T>
             validateIndexable(vector, similarityFunction);
         }
 
-        long bytesUsed = 0L;
+        var bytesUsed = 0L;
+
+        // Store a cached reference to the vector for brute force computations later. There is a small race
+        // condition here: if inserts for the same PrimaryKey add different vectors, vectorsByKey might
+        // become out of sync with the graph.
+        if (vectorsByKey != null)
+        {
+            vectorsByKey.put(key, vector);
+            // The size of the entries themselves are counted below, so just count the two extra references
+            bytesUsed += RamUsageEstimator.NUM_BYTES_OBJECT_REF * 2L;
+        }
+
         VectorPostings<T> postings = postingsMap.get(vector);
         // if the vector is already in the graph, all that happens is that the postings list is updated
         // otherwise, we add the vector in this order:
@@ -241,6 +259,13 @@ public class CassandraOnHeapGraph<T>
         return postingsByOrdinal.get(node).getPostings();
     }
 
+    public float[] vectorForKey(T key)
+    {
+        if (vectorsByKey == null)
+            throw new IllegalStateException("vectorsByKey is not initialized");
+        return vectorsByKey.get(key);
+    }
+
     public void remove(ByteBuffer term, T key)
     {
         assert term != null && term.remaining() != 0;
@@ -257,18 +282,22 @@ public class CassandraOnHeapGraph<T>
 
         hasDeletions = true;
         postings.remove(key);
+        if (vectorsByKey != null)
+            // On updates to a row, we call add then remove, so we must pass the key's value to ensure we only remove
+            // the deleted vector from vectorsByKey
+            vectorsByKey.remove(key, vector);
     }
 
     /**
-     * @return keys (PrimaryKey or segment row id) associated with the topK vectors near the query
+     * @return an itererator over {@link ScoredPrimaryKey} in the graph's {@link SearchResult} order
      */
-    public PriorityQueue<T> search(float[] queryVector, int limit, float threshold, Bits toAccept)
+    public CloseableIterator<SearchResult.NodeScore> search(QueryContext context, float[] queryVector, int limit, float threshold, Bits toAccept)
     {
         validateIndexable(queryVector, similarityFunction);
 
         // search() errors out when an empty graph is passed to it
         if (vectorValues.size() == 0)
-            return new PriorityQueue<>();
+            return CloseableIterator.emptyIterator();
 
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
         // VSTODO re-use searcher objects
@@ -280,15 +309,10 @@ public class CassandraOnHeapGraph<T>
         var topK = OverqueryUtils.topKFor(limit, null);
         var result = searcher.search(scoreFunction, null, topK, threshold, bits);
         Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-        SearchResult.NodeScore[] a = result.getNodes();
-        PriorityQueue<T> keyQueue = new PriorityQueue<>();
-        for (int i = 0; i < a.length; i++)
-        {
-            int node = a[i].node;
-            Collection<T> keys = keysFromOrdinal(node);
-            keyQueue.addAll(keys);
-        }
-        return keyQueue;
+        context.addAnnNodesVisited(result.getVisitedCount());
+        // Threshold based searches do not support resuming the search.
+        return threshold > 0 ? CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator())
+                             : new AutoResumingNodeScoreIterator(searcher, result, context::addAnnNodesVisited, topK, true);
     }
 
     public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Function<T, Integer> postingTransformer) throws IOException

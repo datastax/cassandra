@@ -107,7 +107,6 @@ public class TableQueryMetrics extends AbstractMetrics
 
         /** Shadowed keys scan metrics **/
         private final Histogram shadowedKeysScannedHistogram;
-        private final Histogram shadowedKeysLoopsHistogram;
 
         /**
          * Trie index posting lists metrics.
@@ -138,7 +137,6 @@ public class TableQueryMetrics extends AbstractMetrics
             rowsFiltered = Metrics.histogram(createMetricName("RowsFiltered"), false);
 
             shadowedKeysScannedHistogram = Metrics.histogram(createMetricName("ShadowedKeysScannedHistogram"), false);
-            shadowedKeysLoopsHistogram = Metrics.histogram(createMetricName("ShadowedKeysLoopsHistogram"), false);
         }
 
         private void recordStringIndexCacheMetrics(QueryContext events)
@@ -170,6 +168,7 @@ public class TableQueryMetrics extends AbstractMetrics
             final long segmentsHit = queryContext.segmentsHit();
             final long partitionsRead = queryContext.partitionsRead();
             final long rowsFiltered = queryContext.rowsFiltered();
+            final long rowsPreFiltered = queryContext.rowsFiltered();
 
             sstablesHit.update(ssTablesHit);
             this.segmentsHit.update(segmentsHit);
@@ -187,10 +186,25 @@ public class TableQueryMetrics extends AbstractMetrics
 
             if (Tracing.isTracing())
             {
-                Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, and took {} microseconds.",
-                              pluralize(ssTablesHit, "SSTable index", "es"), pluralize(segmentsHit, "segment", "s"),
-                              pluralize(rowsFiltered, "row", "s"), pluralize(partitionsRead, "partition", "s"),
-                              queryLatencyMicros);
+                if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.FILTER_THEN_SORT)
+                {
+                    Tracing.trace("Index query accessed memtable indexes, {}, and {}, selected {} before ranking, post-filtered {} in {}, and took {} microseconds.",
+                                  pluralize(ssTablesHit, "SSTable index", "es"),
+                                  pluralize(segmentsHit, "segment", "s"),
+                                  pluralize(rowsPreFiltered, "row", "s"),
+                                  pluralize(rowsFiltered, "row", "s"),
+                                  pluralize(partitionsRead, "partition", "s"),
+                                  queryLatencyMicros);
+                }
+                else
+                {
+                    Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, and took {} microseconds.",
+                                  pluralize(ssTablesHit, "SSTable index", "es"),
+                                  pluralize(segmentsHit, "segment", "s"),
+                                  pluralize(rowsFiltered, "row", "s"),
+                                  pluralize(partitionsRead, "partition", "s"),
+                                  queryLatencyMicros);
+                }
             }
 
             if (queryContext.trieSegmentsHit() > 0)
@@ -200,8 +214,7 @@ public class TableQueryMetrics extends AbstractMetrics
             if (queryContext.annNodesVisited() > 0)
                 recordAnnIndexMetrics(queryContext);
 
-            shadowedKeysLoopsHistogram.update(queryContext.shadowedKeysLoopCount());
-            shadowedKeysScannedHistogram.update(queryContext.getShadowedPrimaryKeys().size());
+            shadowedKeysScannedHistogram.update(queryContext.getShadowedPrimaryKeyCount());
 
             totalQueriesCompleted.inc();
         }
