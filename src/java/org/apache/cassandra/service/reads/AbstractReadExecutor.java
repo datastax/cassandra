@@ -17,11 +17,17 @@
  */
 package org.apache.cassandra.service.reads;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
@@ -51,6 +57,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static com.google.common.collect.Iterables.all;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 /**
  * Sends a read request to the replicas needed to satisfy a given ConsistencyLevel.
@@ -64,6 +71,9 @@ public abstract class AbstractReadExecutor
 {
     private static final Logger logger = LoggerFactory.getLogger(AbstractReadExecutor.class);
 
+    private static volatile Map<InetAddressAndPort, AtomicInteger> dataReadMetrics = new ConcurrentHashMap<>();
+    private static volatile Map<InetAddressAndPort, AtomicInteger> digestReadMetrics = new ConcurrentHashMap<>();
+    private static volatile Map<InetAddressAndPort, AtomicInteger> speculativeReadMetrics = new ConcurrentHashMap<>();
     protected final ReadCommand command;
     private   final ReplicaPlan.SharedForTokenRead replicaPlan;
     protected final ReadRepair<EndpointsForToken, ReplicaPlan.ForTokenRead> readRepair;
@@ -79,8 +89,35 @@ public abstract class AbstractReadExecutor
     static
     {
         MessagingService.instance().latencySubscribers.subscribe(ReadCoordinationMetrics::updateReplicaLatency);
+        ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(AbstractReadExecutor::dumpMetrics,
+                                                                5, 5, SECONDS);
     }
-    
+
+    private static void dumpMetrics()
+    {
+        Map<InetAddressAndPort, AtomicInteger> oldDataMetrics = dataReadMetrics;
+        dataReadMetrics = new ConcurrentHashMap<>();
+        Map<InetAddressAndPort, AtomicInteger> oldDigestMetrics = digestReadMetrics;
+        digestReadMetrics = new ConcurrentHashMap<>();
+        Map<InetAddressAndPort, AtomicInteger> oldSpeculativeMetrics = speculativeReadMetrics;
+        speculativeReadMetrics = new ConcurrentHashMap<>();
+
+        oldDataMetrics.entrySet()
+                      .stream()
+                      .sorted(Map.Entry.comparingByKey())
+                      .forEach(entry -> logger.debug("ZUPA: data reads from Node {}: {}", entry.getKey(), entry.getValue()));
+
+        oldDigestMetrics.entrySet()
+                      .stream()
+                      .sorted(Map.Entry.comparingByKey())
+                      .forEach(entry -> logger.debug("ZUPA: digest reads from Node {}: {}", entry.getKey(), entry.getValue()));
+
+        oldSpeculativeMetrics.entrySet()
+                      .stream()
+                      .sorted(Map.Entry.comparingByKey())
+                      .forEach(entry -> logger.debug("ZUPA: speculative reads from Node {}: {}", entry.getKey(), entry.getValue()));
+    }
+
     AbstractReadExecutor(ColumnFamilyStore cfs,
                          ReadCommand command,
                          ReplicaPlan.ForTokenRead replicaPlan,
@@ -128,6 +165,13 @@ public abstract class AbstractReadExecutor
     protected void makeFullDataRequests(ReplicaCollection<?> replicas)
     {
         assert all(replicas, Replica::isFull);
+        for (Replica replica : replicas)
+        {
+            AtomicInteger counter = dataReadMetrics.get(replica.endpoint());
+            if (counter == null)
+                counter = dataReadMetrics.computeIfAbsent(replica.endpoint(), k -> new AtomicInteger());
+            counter.incrementAndGet();
+        }
         makeRequests(command, replicas);
     }
 
@@ -139,6 +183,13 @@ public abstract class AbstractReadExecutor
     protected void makeDigestRequests(Iterable<Replica> replicas)
     {
         assert all(replicas, Replica::isFull);
+        for (Replica replica : replicas)
+        {
+            AtomicInteger counter = digestReadMetrics.get(replica.endpoint());
+            if (counter == null)
+                counter = digestReadMetrics.computeIfAbsent(replica.endpoint(), k -> new AtomicInteger());
+            counter.incrementAndGet();
+        }
         // only send digest requests to full replicas, send data requests instead to the transient replicas
         makeRequests(command.copyAsDigestQuery(replicas), replicas);
     }
@@ -339,6 +390,12 @@ public abstract class AbstractReadExecutor
                 if (traceState != null)
                     traceState.trace("speculating read retry on {}", extraReplica);
                 logger.trace("speculating read retry on {}", extraReplica);
+
+                AtomicInteger counter = speculativeReadMetrics.get(extraReplica.endpoint());
+                if (counter == null)
+                    counter = speculativeReadMetrics.computeIfAbsent(extraReplica.endpoint(), k -> new AtomicInteger());
+                counter.incrementAndGet();
+
                 MessagingService.instance().sendWithCallback(retryCommand.createMessage(false), extraReplica.endpoint(), handler);
             }
         }
