@@ -174,27 +174,27 @@ public class TableQueryMetrics extends AbstractMetrics
             totalRowsFiltered.inc(rowsFiltered);
 
             if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER)
-            {
                 sortThenFilterQueriesCompleted.inc();
-                if (Tracing.isTracing())
-                {
-                    Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, and took {} microseconds.",
-                                  pluralize(ssTablesHit, "SSTable index", "es"),
-                                  pluralize(segmentsHit, "segment", "s"),
-                                  pluralize(rowsFiltered, "row", "s"),
-                                  pluralize(partitionsRead, "partition", "s"),
-                                  queryLatencyMicros);
-                }
-            }
             else if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.FILTER_THEN_SORT)
-            {
                 filterThenSortQueriesCompleted.inc();
-                if (Tracing.isTracing())
+
+            if (Tracing.isTracing())
+            {
+                if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.FILTER_THEN_SORT)
                 {
                     Tracing.trace("Index query accessed memtable indexes, {}, and {}, selected {} before ranking, post-filtered {} in {}, and took {} microseconds.",
                                   pluralize(ssTablesHit, "SSTable index", "es"),
                                   pluralize(segmentsHit, "segment", "s"),
                                   pluralize(rowsPreFiltered, "row", "s"),
+                                  pluralize(rowsFiltered, "row", "s"),
+                                  pluralize(partitionsRead, "partition", "s"),
+                                  queryLatencyMicros);
+                }
+                else
+                {
+                    Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, and took {} microseconds.",
+                                  pluralize(ssTablesHit, "SSTable index", "es"),
+                                  pluralize(segmentsHit, "segment", "s"),
                                   pluralize(rowsFiltered, "row", "s"),
                                   pluralize(partitionsRead, "partition", "s"),
                                   queryLatencyMicros);
