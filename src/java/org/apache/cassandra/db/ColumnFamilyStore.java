@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -63,6 +64,7 @@ import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.codahale.metrics.Snapshot;
 import org.apache.cassandra.cache.CounterCacheKey;
 import org.apache.cassandra.cache.IRowCacheEntry;
 import org.apache.cassandra.cache.RowCacheKey;
@@ -632,8 +634,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         try
         {
-            sampleReadLatencyNanos = metadata().params.speculativeRetry.calculateThreshold(metric.coordinatorReadLatency.tableOrKeyspaceTimer().getSnapshot(), sampleReadLatencyNanos);
-            logger.info("ZUPA: Updated sample read latency threshold to {} for table {}", sampleReadLatencyNanos, metadata().name);
+            Snapshot snapshot = metric.coordinatorReadLatency.tableOrKeyspaceTimer().getSnapshot();
+            sampleReadLatencyNanos = metadata().params.speculativeRetry.calculateThreshold(snapshot, sampleReadLatencyNanos);
+            if (!SchemaConstants.isSystemKeyspace(keyspace.getName()))
+            {
+                // dump snapshot into string
+                logger.info("ZUPA: Updated sample read latency threshold to {} for {}.{}", sampleReadLatencyNanos, keyspace.getName(), name);
+                logger.info("ZUPA: Snapshot: mean={}, median={}, 75th={}, 95th={}, 98th={}, 99th={}, 99.9th={}, stddev={}",
+                            snapshot.getMean(), snapshot.getMedian(), snapshot.get75thPercentile(), snapshot.get95thPercentile(),
+                            snapshot.get98thPercentile(), snapshot.get99thPercentile(), snapshot.get999thPercentile(), snapshot.getStdDev());
+            }
             additionalWriteLatencyNanos = metadata().params.additionalWritePolicy.calculateThreshold(metric.coordinatorWriteLatency.tableOrKeyspaceTimer().getSnapshot(), additionalWriteLatencyNanos);
         }
         catch (Throwable e)

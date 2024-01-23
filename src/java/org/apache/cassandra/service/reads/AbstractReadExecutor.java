@@ -364,7 +364,7 @@ public abstract class AbstractReadExecutor
                 if (handler.resolver.isDataPresent())
                 {
                     extraReplica = replicaPlan.firstUncontactedCandidate(replica -> true);
-                    noSpamLogger.info("ZUPA: Triggering speculative retry for digest read on {} after {} ns", extraReplica, System.nanoTime() - waitStart);
+                    noSpamLogger.info("ZUPA: Triggering speculative retry for {}.{} digest read on {} after {} ns", cfs.keyspace, cfs.name, extraReplica, System.nanoTime() - waitStart);
 
                     // we should only use a SpeculatingReadExecutor if we have an extra replica to speculate against
                     assert extraReplica != null;
@@ -384,7 +384,7 @@ public abstract class AbstractReadExecutor
                         // unique per endpoint, and we have no full nodes left to speculate against
                         return;
                     }
-                    noSpamLogger.info("ZUPA: Triggering speculative retry for data read on {} after {} ns", extraReplica, System.nanoTime() - waitStart);
+                    noSpamLogger.info("ZUPA: Triggering speculative retry for {}.{} data read on {} after {} ns", cfs.keyspace, cfs.name, extraReplica.endpoint(), System.nanoTime() - waitStart);
                 }
 
                 // we must update the plan to include this new node, else when we come to read-repair, we may not include this
