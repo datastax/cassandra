@@ -31,19 +31,17 @@ import static org.junit.Assert.assertThrows;
 public class BruteForceRowIdIteratorTest
 {
     @Test
-    public void testBruteForceRowIdIteratorForEmptyPQAndTopKEqualsLimit()
+    public void testBruteForceRowIdIteratorForEmptyPQ()
     {
         var queryVector = new float[] { 1f, 0f };
         var pq = new PriorityQueue<BruteForceRowIdIterator.RowWithApproximateScore>(10);
         var topK = 10;
-        var limit = 10;
 
         // Should work for an empty pq
         try (var iter = new BruteForceRowIdIterator(queryVector,
                                                     pq,
                                                     this::identityMapper,
                                                     VectorSimilarityFunction.COSINE,
-                                                    limit,
                                                     topK))
         {
             assertFalse(iter.hasNext());
