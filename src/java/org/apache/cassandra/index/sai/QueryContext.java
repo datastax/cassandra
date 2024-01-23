@@ -70,9 +70,6 @@ public class QueryContext
     // Estimates the probability of a row picked by the index to be accepted by the post filter.
     private float postFilterSelectivityEstimate = 1.0f;
 
-    // Last used soft limit for vector search.
-    private int softLimit = 0;
-
     @VisibleForTesting
     public QueryContext()
     {
@@ -158,11 +155,6 @@ public class QueryContext
         this.filterSortOrder = filterSortOrder;
     }
 
-    public void setSoftLimit(int softLimit)
-    {
-        this.softLimit = softLimit;
-    }
-
     // getters
 
     public long sstablesHit()
@@ -230,11 +222,6 @@ public class QueryContext
     public Float postFilterSelectivityEstimate()
     {
         return postFilterSelectivityEstimate;
-    }
-
-    public int softLimit()
-    {
-        return softLimit;
     }
 
     public void checkpoint()

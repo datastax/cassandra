@@ -125,12 +125,11 @@ public class QueryController
         static final float ROW_MATERIALIZE_COST = 200.0f;
     }
 
-    // for testing
-    public static boolean allowSpeculativeLimits = true;
     public static final int ORDER_CHUNK_SIZE = SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE.getInt();
 
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
+    private final int limit;
     private final QueryContext queryContext;
     private final TableQueryMetrics tableQueryMetrics;
     private final RowFilter.FilterElement filterOperation;
@@ -152,6 +151,7 @@ public class QueryController
         this.cfs = cfs;
         this.command = command;
         this.queryContext = queryContext;
+        this.limit = command.limits().count();
         this.tableQueryMetrics = tableQueryMetrics;
         this.filterOperation = filterOperation;
         this.indexFeatureSet = indexFeatureSet;
@@ -427,10 +427,6 @@ public class QueryController
         var planExpression = new Expression(getContext(expression))
                              .add(Operator.ANN, expression.getIndexValue().duplicate());
 
-        int limit = currentSoftLimitEstimate();
-        queryContext.setSoftLimit(limit);
-        logger.debug("getTopKRows using limit = {}", limit);
-
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
         var memtableResults = getContext(expression).orderMemtable(queryContext, planExpression, mergeRange, limit);
 
@@ -479,9 +475,6 @@ public class QueryController
         // Since the result is shared with multiple streams, we use an unmodifiable list.
         var planExpression = new Expression(this.getContext(expression));
         planExpression.add(Operator.ANN, expression.getIndexValue().duplicate());
-
-        int limit = currentSoftLimitEstimate();
-        queryContext.setSoftLimit(limit);
 
         // search memtable before referencing sstable indexes; otherwise we may miss newly flushed memtable index
         var memtableResults = this.getContext(expression)
@@ -556,45 +549,6 @@ public class QueryController
     public int getExactLimit()
     {
         return command.limits().count();
-    }
-
-    /**
-     * Estimate suggestion for the limit to search extra rows in case if some rows were shadowed or post-filtered.
-     */
-    int currentSoftLimitEstimate()
-    {
-        int target = getExactLimit();
-        // shadowedCount includes also the keys filtered out by the post-filter
-        int shadowedCount = (int) Math.min(queryContext.getShadowedPrimaryKeyCount(), Integer.MAX_VALUE);
-        // The worst case situation is when all shadowed rows came from one index - in this case we'd get only
-        // (softLimit - shadowedCount) good rows. But if shadow rows came from multiple indexes, this could underestimate.
-        int matchedCountLowerBound = Math.max(0, queryContext.softLimit() - shadowedCount);
-        int prevSoftLimit = Math.max(target, queryContext.softLimit());
-        float postFilterSelectivity = queryContext.postFilterSelectivityEstimate();
-
-        boolean sortBeforeFilter = queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER;
-
-        // On the first iteration we need to rely on estimates for how many keys we can expect to be accepted.
-        // For any subsequent iterations we can do better by looking how many rows were returned in the previous run.
-        // A special situation arises when we didn't receive any good rows. In this case, we should not assume the
-        // probability is simply 0 because the sample is finite. Assuming P = 0 would cause a maximum soft limit
-        // in the next round. So in that case we assume the probability of success = 0.5 / N.
-        // This naturally limits the soft limit increase in the next attempt.
-        // TODO how does this logic change now that we don't loop?
-        float keyAcceptanceProbability = (sortBeforeFilter)
-            ? postFilterSelectivity
-            : Math.max((float) matchedCountLowerBound, 0.5f) / Math.max((float) prevSoftLimit, 0.5f); // assume 0/0 = 1
-
-        int uncappedLimit = SoftLimitUtil.softLimit(target, SOFT_LIMIT_CONFIDENCE, keyAcceptanceProbability);
-
-        // Restrict the minimum value of the limit, so we have some margin for the keys we already know are shadowed.
-        int limit = Math.max(target + shadowedCount, uncappedLimit);
-
-        if (logger.isDebugEnabled())
-            logger.debug("Soft limit estimate: {} with target={} shadowed={}/{} P={}",
-                         limit, target, shadowedCount, queryContext.softLimit(), keyAcceptanceProbability);
-
-        return limit;
     }
 
     public IndexFeatureSet indexFeatureSet()
