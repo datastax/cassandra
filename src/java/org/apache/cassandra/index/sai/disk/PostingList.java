@@ -19,7 +19,6 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.utils.Throwables;
@@ -47,6 +46,14 @@ public interface PostingList extends Closeable
     long nextPosting() throws IOException;
 
     long size();
+
+    /**
+     * @return {@code true} if this posting list contains no postings
+     */
+    default boolean isEmpty()
+    {
+        return size() == 0;
+    }
 
     /**
      * Advances to the first row ID beyond the current that is greater than or equal to the
@@ -166,6 +173,61 @@ public interface PostingList extends Closeable
         public long advance(long targetRowID) throws IOException
         {
             return END_OF_STREAM;
+        }
+    }
+
+    /**
+     * Returns a wrapper for this posting list that runs the specified {@link Closeable} when this posting list is closed,
+     * unless this posting list is empty, in which case the specified {@link Closeable} will be run immediately.
+     *
+     * @param onClose what to do on close
+     * @return a posting list that makes sure that {@code onClose} is run by the time it is closed.
+     */
+    default PostingList onClose(Closeable onClose) throws IOException
+    {
+        if (isEmpty())
+        {
+            onClose.close();
+            return EMPTY;
+        }
+
+        return new PostingListWithOnClose(this, onClose);
+    }
+
+    class PostingListWithOnClose implements PostingList
+    {
+        private final PostingList delegate;
+        private final Closeable onClose;
+
+        public PostingListWithOnClose(PostingList delegate, Closeable onClose)
+        {
+            this.delegate = delegate;
+            this.onClose = onClose;
+        }
+
+        @Override
+        public long size()
+        {
+            return delegate.size();
+        }
+
+        @Override
+        public long advance(long targetRowID) throws IOException
+        {
+            return delegate.advance(targetRowID);
+        }
+
+        @Override
+        public long nextPosting() throws IOException
+        {
+            return delegate.nextPosting();
+        }
+
+        @Override
+        public void close() throws IOException
+        {
+            delegate.close();
+            onClose.close();
         }
     }
 }
