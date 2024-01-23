@@ -32,8 +32,10 @@ import org.apache.cassandra.utils.CloseableIterator;
  * 2. Polling the topK results from the approximate score queue
  * 3. Materialize and score the full resolution vector for each row from step 2.
  * 4. Add to the full resolution row {@link ScoredRowId} to the priority queue.
- * 5. Return rows from the {@link ScoredRowId} priority queue until the full resolution score queue is empty.
- * 6. When the {@link ScoredRowId} queue is empty, repeat steps 2-5 until both queues are empty.
+ * 5. Return rows from the {@link ScoredRowId} priority queue until the limit is reached.
+ * 6. When the limit is reached, if the {@link RowWithApproximateScore} queue is not empty, get the next (topK - limit) rows
+ *    from the approximate score queue and repeat 3-6 until the {@link RowWithApproximateScore} queue is empty.
+ * 7. Return the remaining rows from the {@link ScoredRowId} queue.
  */
 public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
 {
@@ -67,18 +69,21 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
     private final IntFunction<float[]> vectorForOrdinal;
     private final VectorSimilarityFunction exactSimilarityFunction;
     private final int topK;
+    private final int limit;
 
     /**
      * @param queryVector The query vector
      * @param approximateScoreQueue A priority queue of rows and their ordinal ordered by their approximate similarity scores
      * @param vectorForOrdinal A function that returns the full resolution vector for a given ordinal
      * @param exactSimilarityFunction The similarity function to compare full resolution vectors
+     * @param limit The query limit
      * @param topK The number of vectors to resolve and score before returning results
      */
     public BruteForceRowIdIterator(float[] queryVector,
                                    PriorityQueue<RowWithApproximateScore> approximateScoreQueue,
                                    IntFunction<float[]> vectorForOrdinal,
                                    VectorSimilarityFunction exactSimilarityFunction,
+                                   int limit,
                                    int topK)
     {
         this.queryVector = queryVector;
@@ -86,6 +91,8 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
         this.exactScoreQueue = new PriorityQueue<>(topK, (a, b) -> Float.compare(b.score, a.score));
         this.vectorForOrdinal = vectorForOrdinal;
         this.exactSimilarityFunction = exactSimilarityFunction;
+        assert topK >= limit : "topK must be greater than or equal to limit. Found: " + topK + " < " + limit;
+        this.limit = limit;
         this.topK = topK;
     }
 
@@ -93,7 +100,10 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
     @Override
     public boolean hasNext()
     {
-        if (!exactScoreQueue.isEmpty())
+        // The exactScoreQueue is only valid for the first limit results (until the approximateScoreQueue is exhausted).
+        // When the exactScoreQueue drops below the (topK - limit) threshold, attempt to refill the exactScoreQueue
+        // with full resolution scores.
+        if (exactScoreQueue.size() >= topK - limit && !exactScoreQueue.isEmpty())
             return true;
 
         // Refill the exactScoreQueue until we either reach topK exact scores or the approximate score queue is empty.

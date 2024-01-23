@@ -299,7 +299,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
             }
         }
-        return new BruteForceRowIdIterator(queryVector, approximateScores, this::getVectorForOrdinal, similarityFunction, topK);
+        return new BruteForceRowIdIterator(queryVector, approximateScores, this::getVectorForOrdinal, similarityFunction, limit, topK);
     }
 
     private float[] getVectorForOrdinal(int ordinal)
