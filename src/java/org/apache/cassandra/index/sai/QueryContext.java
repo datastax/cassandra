@@ -18,25 +18,14 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.io.IOException;
-import java.util.HashSet;
-import java.util.NavigableSet;
-import java.util.Set;
-import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import io.github.jbellis.jvector.util.Bits;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
-import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 /**
  * Tracks state relevant to the execution of a single query, including metrics and timeout monitoring.
@@ -53,8 +42,8 @@ public class QueryContext
     private final LongAdder sstablesHit = new LongAdder();
     private final LongAdder segmentsHit = new LongAdder();
     private final LongAdder partitionsRead = new LongAdder();
+    private final LongAdder rowsPreFiltered = new LongAdder();
     private final LongAdder rowsFiltered = new LongAdder();
-
     private final LongAdder trieSegmentsHit = new LongAdder();
 
     private final LongAdder bkdPostingListsHit = new LongAdder();
@@ -66,16 +55,21 @@ public class QueryContext
     private final LongAdder triePostingsSkips = new LongAdder();
     private final LongAdder triePostingsDecodes = new LongAdder();
 
-    private final LongAdder tokenSkippingCacheHits = new LongAdder();
-    private final LongAdder tokenSkippingLookups = new LongAdder();
-
     private final LongAdder queryTimeouts = new LongAdder();
 
-    private final LongAdder hnswVectorsAccessed = new LongAdder();
-    private final LongAdder hnswVectorCacheHits = new LongAdder();
+    private final LongAdder annNodesVisited = new LongAdder();
 
-    private final LongAdder shadowedKeysLoopCount = new LongAdder();
-    private final NavigableSet<PrimaryKey> shadowedPrimaryKeys = new ConcurrentSkipListSet<>();
+    private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
+
+    // Total count of rows in all sstables and memtables.
+    private Long totalAvailableRows = null;
+
+    // Determines the order of using indexes for filtering and sorting.
+    // Null means the query execution order hasn't been decided yet.
+    private FilterSortOrder filterSortOrder = null;
+
+    // Estimates the probability of a row picked by the index to be accepted by the post filter.
+    private float postFilterSelectivityEstimate = 1.0f;
 
     @VisibleForTesting
     public QueryContext()
@@ -110,6 +104,10 @@ public class QueryContext
     {
         rowsFiltered.add(val);
     }
+    public void addRowsPreFiltered(long val)
+    {
+        rowsPreFiltered.add(val);
+    }
     public void addTrieSegmentsHit(long val)
     {
         trieSegmentsHit.add(val);
@@ -138,30 +136,28 @@ public class QueryContext
     {
         triePostingsDecodes.add(val);
     }
-    public void addTokenSkippingCacheHits(long val)
-    {
-        tokenSkippingCacheHits.add(val);
-    }
-    public void addTokenSkippingLookups(long val)
-    {
-        tokenSkippingLookups.add(val);
-    }
     public void addQueryTimeouts(long val)
     {
         queryTimeouts.add(val);
     }
-    public void addHnswVectorsAccessed(long val)
+    public void addAnnNodesVisited(long val)
     {
-        hnswVectorsAccessed.add(val);
-    }
-    public void addHnswVectorCacheHits(long val)
-    {
-        hnswVectorCacheHits.add(val);
+        annNodesVisited.add(val);
     }
 
-    public void addShadowedKeysLoopCount(long val)
+    public void setTotalAvailableRows(long totalAvailableRows)
     {
-        shadowedKeysLoopCount.add(val);
+        this.totalAvailableRows = totalAvailableRows;
+    }
+
+    public void setPostFilterSelectivityEstimate(float postFilterSelectivityEstimate)
+    {
+        this.postFilterSelectivityEstimate = postFilterSelectivityEstimate;
+    }
+
+    public void setFilterSortOrder(FilterSortOrder filterSortOrder)
+    {
+        this.filterSortOrder = filterSortOrder;
     }
 
     // getters
@@ -180,6 +176,10 @@ public class QueryContext
     public long rowsFiltered()
     {
         return rowsFiltered.longValue();
+    }
+    public long rowsPreFiltered()
+    {
+        return rowsPreFiltered.longValue();
     }
     public long trieSegmentsHit()
     {
@@ -209,25 +209,28 @@ public class QueryContext
     {
         return triePostingsDecodes.longValue();
     }
-    public long tokenSkippingCacheHits()
-    {
-        return tokenSkippingCacheHits.longValue();
-    }
-    public long tokenSkippingLookups()
-    {
-        return tokenSkippingLookups.longValue();
-    }
     public long queryTimeouts()
     {
         return queryTimeouts.longValue();
     }
-    public long hnswVectorsAccessed()
+    public long annNodesVisited()
     {
-        return hnswVectorsAccessed.longValue();
+        return annNodesVisited.longValue();
     }
-    public long hnswVectorCacheHits()
+
+    public Long totalAvailableRows()
     {
-        return hnswVectorCacheHits.longValue();
+        return totalAvailableRows;
+    }
+
+    public FilterSortOrder filterSortOrder()
+    {
+        return filterSortOrder;
+    }
+
+    public Float postFilterSelectivityEstimate()
+    {
+        return postFilterSelectivityEstimate;
     }
 
     public void checkpoint()
@@ -239,66 +242,29 @@ public class QueryContext
         }
     }
 
-    public long shadowedKeysLoopCount()
+    public void addShadowed(long count)
     {
-        return shadowedKeysLoopCount.longValue();
-    }
-
-    public void recordShadowedPrimaryKey(PrimaryKey primaryKey)
-    {
-        boolean isNewKey = shadowedPrimaryKeys.add(primaryKey);
-        assert isNewKey : "Duplicate shadowed primary key added. Key should have been filtered out earlier in query. " + primaryKey;
-    }
-
-    // Returns true if the row ID will be included or false if the row ID will be shadowed
-    public boolean shouldInclude(long sstableRowId, PrimaryKeyMap primaryKeyMap)
-    {
-        return !shadowedPrimaryKeys.contains(primaryKeyMap.primaryKeyFromRowId(sstableRowId));
-    }
-
-    public boolean shouldInclude(PrimaryKey pk)
-    {
-        return !shadowedPrimaryKeys.contains(pk);
+        shadowedPrimaryKeyCount.add(count);
     }
 
     /**
      * @return shadowed primary keys, in ascending order
      */
-    public NavigableSet<PrimaryKey> getShadowedPrimaryKeys()
+    public long getShadowedPrimaryKeyCount()
     {
-        return shadowedPrimaryKeys;
+        return shadowedPrimaryKeyCount.longValue();
     }
 
-    public Bits bitsetForShadowedPrimaryKeys(CassandraOnHeapGraph<PrimaryKey> graph)
+    /**
+     * Determines the order of filtering and sorting operations.
+     * Currently used only by vector search.
+     */
+    public enum FilterSortOrder
     {
-        if (getShadowedPrimaryKeys().isEmpty())
-            return Bits.ALL;
+        /** First get the matching keys from the non-vector indexes, then use vector index to sort them */
+        FILTER_THEN_SORT,
 
-        return new IgnoredKeysBits(graph, getShadowedPrimaryKeys());
-    }
-
-    private static class IgnoredKeysBits implements Bits
-    {
-        private final CassandraOnHeapGraph<PrimaryKey> graph;
-        private final NavigableSet<PrimaryKey> ignored;
-
-        public IgnoredKeysBits(CassandraOnHeapGraph<PrimaryKey> graph, NavigableSet<PrimaryKey> ignored)
-        {
-            this.graph = graph;
-            this.ignored = ignored;
-        }
-
-        @Override
-        public boolean get(int ordinal)
-        {
-            var keys = graph.keysFromOrdinal(ordinal);
-            return keys.stream().anyMatch(k -> !ignored.contains(k));
-        }
-
-        @Override
-        public int length()
-        {
-            return graph.size();
-        }
+        /** First get the candidates in ANN order from the vector index, then fetch the rows and post-filter them */
+        SORT_THEN_FILTER
     }
 }

@@ -16,47 +16,42 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v1.postings;
+package org.apache.cassandra.index.sai.utils;
 
-import java.io.IOException;
+import java.util.NoSuchElementException;
+import java.util.PriorityQueue;
 
-import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.lucene.util.LongHeap;
+import org.apache.cassandra.utils.CloseableIterator;
 
-public class LongHeapPostingList implements PostingList
+/**
+ * An iterator that returns elements from a priority queue in order. This is different from
+ * {@link PriorityQueue#iterator()} which returns elements in undefined order.
+ */
+public class PriorityQueueIterator<T> implements CloseableIterator<T>
 {
-    private LongHeap heap;
-    private int size;
+    private final PriorityQueue<T> pq;
 
-    public LongHeapPostingList(LongHeap heap)
+    public PriorityQueueIterator(PriorityQueue<T> pq)
     {
-        this.heap = heap;
-        this.size = heap.size();
+        this.pq = pq;
     }
 
     @Override
-    public long nextPosting() throws IOException
+    public boolean hasNext()
     {
-        if (heap.size() == 0)
-            return PostingList.END_OF_STREAM;
-        var next = heap.pop();
-        return next;
+        return !pq.isEmpty();
     }
 
     @Override
-    public long size()
+    public T next()
     {
-        return size;
+        if (!hasNext())
+            throw new NoSuchElementException();
+        return pq.poll();
     }
 
     @Override
-    public long advance(long targetRowID) throws IOException
+    public void close()
     {
-        long rowId;
-        do
-        {
-            rowId = nextPosting();
-        } while (rowId < targetRowID);
-        return rowId;
     }
 }

@@ -41,15 +41,16 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.SegmentOrdering;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.CloseableIterator;
 
 /**
  * SSTableIndex is created for each column index on individual sstable to track per-column indexer.
  */
-public class SSTableIndex implements SegmentOrdering
+public class SSTableIndex
 {
     // sort sstable index by first key then last key
     public static final Comparator<SSTableIndex> COMPARATOR = Comparator.comparing((SSTableIndex s) -> s.getSSTable().first)
@@ -167,6 +168,14 @@ public class SSTableIndex implements SegmentOrdering
         return searchableIndex.search(expression, keyRange, context, defer, limit);
     }
 
+    public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression,
+                                                             AbstractBounds<PartitionPosition> keyRange,
+                                                             QueryContext context,
+                                                             int limit) throws IOException
+    {
+        return searchableIndex.orderBy(expression, keyRange, context, limit);
+    }
+
     public void populateSegmentView(SimpleDataSet dataSet)
     {
         searchableIndex.populateSystemView(dataSet, sstable);
@@ -250,10 +259,9 @@ public class SSTableIndex implements SegmentOrdering
         return Objects.hashCode(sstableContext, indexContext);
     }
 
-    @Override
-    public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
-        return searchableIndex.limitToTopResults(context, keys, exp, limit);
+        return searchableIndex.orderResultsBy(context, keys, exp, limit);
     }
 
     public String toString()

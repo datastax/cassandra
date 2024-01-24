@@ -21,7 +21,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
-import java.util.Iterator;
+import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -32,7 +32,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
-import org.apache.cassandra.index.sai.disk.v1.postings.LongHeapPostingList;
+import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.ScanningPostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
@@ -48,7 +48,6 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.store.IndexInput;
-import org.apache.lucene.util.LongHeap;
 
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.validate;
 
@@ -245,12 +244,11 @@ public class TermsReader implements Closeable
                     return PostingList.EMPTY;
 
                 context.checkpoint();
-                // Because postings are not sorted, we need to eagerly materialize the results and sort them.
-                LongHeap postings = materializeResults(reader);
+                PostingList postings = readAndMergePostings(reader);
 
                 listener.onTraversalComplete(System.nanoTime() - lookupStartTime, TimeUnit.NANOSECONDS);
 
-                return new LongHeapPostingList(postings);
+                return postings;
             }
             catch (Throwable e)
             {
@@ -262,43 +260,44 @@ public class TermsReader implements Closeable
         }
 
         /**
-         * Build an in-memory heap of row ids from the posting lists of the matching terms.
-         * @return an ordered {@link LongHeap} of row ids
+         * Reads the posting lists for the matching terms and merges them into a single posting list.
+         * It assumes that the posting list for each term is sorted.
+         *
+         * @return the posting lists for the terms matching the query.
          */
-        private LongHeap materializeResults(Iterator<Pair<ByteComparable,Long>> triePairs) throws IOException
+        private PostingList readAndMergePostings(TrieTermsDictionaryReader reader) throws IOException
         {
-            assert triePairs.hasNext();
-            LongHeap heap = null;
-            try (var postingsInput = IndexFileUtils.instance.openInput(postingsFile);
-                 var postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile))
+            assert reader.hasNext();
+            ArrayList<PostingList.PeekablePostingList> postingLists = new ArrayList<>();
+
+            // index inputs will be closed with the onClose method of the returned merged posting list
+            IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile);
+            IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
+
+            do
             {
-                do
+                Pair<ByteComparable, Long> nextTriePair = reader.next();
+                ByteSource mapEntry = nextTriePair.left.asComparableBytes(ByteComparable.Version.OSS41);
+                long postingsOffset = nextTriePair.right;
+                byte[] nextBytes = ByteSourceInverse.readBytes(mapEntry);
+
+                if (exp.isSatisfiedBy(ByteBuffer.wrap(nextBytes)))
                 {
-                    Pair<ByteComparable, Long> nextTriePair = triePairs.next();
-                    ByteSource mapEntry = nextTriePair.left.asComparableBytes(ByteComparable.Version.OSS41);
-                    long postingsOffset = nextTriePair.right;
-                    byte[] nextBytes = ByteSourceInverse.readBytes(mapEntry);
-                    if (exp.isSatisfiedBy(ByteBuffer.wrap(nextBytes)))
-                    {
-                        var blocksSummary = new PostingsReader.BlocksSummary(postingsSummaryInput, postingsOffset, PostingsReader.InputCloser.NOOP);
-                        @SuppressWarnings("resource")
-                        var currentReader = new PostingsReader(postingsInput,
-                                                               blocksSummary,
-                                                               listener.postingListEventListener(),
-                                                               PostingsReader.InputCloser.NOOP);
-                        if (heap == null)
-                            heap = new LongHeap((int) currentReader.size());
-                        while (true)
-                        {
-                            long nextPosting = currentReader.nextPosting();
-                            if (nextPosting == PostingList.END_OF_STREAM)
-                                break;
-                            heap.push(nextPosting);
-                        }
-                    }
-                } while (triePairs.hasNext());
-                return heap != null ? heap : new LongHeap(1);
-            }
+                    var blocksSummary = new PostingsReader.BlocksSummary(postingsSummaryInput, postingsOffset, PostingsReader.InputCloser.NOOP);
+                    var currentReader = new PostingsReader(postingsInput,
+                                                           blocksSummary,
+                                                           listener.postingListEventListener(),
+                                                           PostingsReader.InputCloser.NOOP);
+
+                    if (currentReader.size() > 0)
+                        postingLists.add(new PostingList.PeekablePostingList(currentReader));
+                    else
+                        FileUtils.close(currentReader);
+                }
+            } while (reader.hasNext());
+
+            return MergePostingList.merge(postingLists)
+                                   .onClose(() -> FileUtils.close(postingsInput, postingsSummaryInput));
         }
     }
 

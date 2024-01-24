@@ -19,10 +19,11 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
+import java.util.PrimitiveIterator;
 
 public interface RowIdsView extends AutoCloseable
 {
-    int[] getSegmentRowIdsMatching(int vectorOrdinal) throws IOException;
+    PrimitiveIterator.OfInt getSegmentRowIdsMatching(int vectorOrdinal) throws IOException;
 
     @Override
     void close();
