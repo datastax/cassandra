@@ -1,5 +1,13 @@
 # SAI Vector ANN Query Execution
 
+## Overview
+
+Vector search within SAI has taken two major forms to date. The first utilized PrimaryKey ordered iterators and was
+very sensitive to Shadowed Primary Keys as well as overwritten vectors for rows. The second utilized Score ordered
+iterators, which was able to handle these cases more gracefully.
+
+This document describes vector search using Score ordered iterators.
+
 ## Storage-Attached Index Basics
 
 * We can create indexes on columns to support searching them without requiring `ALLOW FILTERING` and without requiring
@@ -21,16 +29,21 @@ that they are part of the primary key
 
 ### Vector Only Query
 
-When a query is only limited by ANN, the query execution is very simple. The execution follows this path:
-1. Query each sstable's vector index(es) to get the top k vectors, which are represented as ordinals.
-2. Map ordinals to Primary Keys and sort into ascending Primary Key order to simplify deduplication.
-3. Merge/deduplicate the result with a `RangeUnionIterator` while maintaining PK ordering. Produces up to `3 * k` PKs.
-4. Materialize each row from storage.
-5. Compute the vector similarity score for each row to get the top k rows for the whole table.
+When a query is only limited by ANN, the query execution is scatter gather across all relevant vector indexes. The query
+results in a lazily evaluated iterator that materializes rows from storage in index score order, which can differ from
+the "global" score order in the case of updates.
+1. Eagerly query each sstable's and memtable's vector indexes producing local top k ordinals. Return them in best-first score order.
+2. Lazily map ordinals to row ids then to Primary Keys keeping them in descending (best-first) score order. 
+3. Merge the iterators while maintaining relative score order. This merge does not dedupe iterator elements.
+4. Materialize one row from storage at a time.
+5. Filter out deleted rows. Then, compute the vector similarity score. If the score is at least as good as the score computed by the index, the vector 
+   is in the global top k. If it is worse than the index's score, temporarily ignore that key. Finally, reorder into
+   Primary Key order.
+6. Return the global top k rows to the coordinator.
 
 ```mermaid
 ---
-title: "SELECT * FROM my.table ORDER BY vec ANN OF [...] LIMIT 10"
+title: "SELECT * FROM my.table ORDER BY vec ANN OF [...] LIMIT N"
 ---
 graph LR
     subgraph 1: Get topK
@@ -38,28 +51,41 @@ graph LR
       H[SSTable B\nVector Index]
       I[Memtable\nVector Index]
     end
-    subgraph "2: Map & Sort"
-        X[Ordinal -> PK]
-        Y[Ordinal -> PK]
-        Z[Ordinal -> PK]
+    subgraph "2: Map"
+        X[Ordinal -> Row ID -> Scored PK]
+        Y[Ordinal -> Row ID -> Scored PK]
+        Z[Ordinal -> Scored PK]
     end
     subgraph 3: Merge
         J
     end
-    G --top k--> X --> J[Range\nUnion\nIterator]
-    H --top k--> Y --> J
-    I --top k--> Z --> J
+    G -.-> X -.-> J[Merge\nIndex\nIterators]
+    H -.-> Y -.-> J
+    I -.-> Z -.-> J
     subgraph "4: Materialize"
         K[Unfiltered\nPartition\nIterator]
     end
-    subgraph "5: Compute Score & Filter"
+    subgraph "5: Filter, Score, Reorder"
         L[Global top k]
     end
-    J --top 3 * k--> K
-    K --> L
+    J -.-> K
+    K -.-> L
+    L ==> M[Coordinator]
+
+    subgraph Legend
+      direction LR
+      start1[ ] -.->|Score Order Iterator| stop1[ ]
+      style start1 height:0px;
+      style stop1 height:0px;
+      start2[ ] ==>|PrimaryKey Order Iterator| stop2[ ]
+      style start2 height:0px;
+      style stop2 height:0px;
+    end
 ```
 
 Notes:
+* The flow is much lazier than before. Now, we only materialize the top k rows from storage, not every top k row from
+  every sstable segment and memtable.
 * Range queries on the Primary Key that do not require an index are supported and are considered ANN only.
 * `ALLOW FILTERING` is not supported.
 
@@ -72,10 +98,13 @@ of query `SELECT * FROM my.table WHERE x = 1 AND y = 'foo' ORDER BY vec ANN OF [
 3. Intersect the results with a `RangeIntersectionIterator` to get the Primary Keys that satisfy all boolean predicates.
 4. Materialize the Primary Keys that satisfy all boolean predicates.
 5. Map resulting Primary Keys back to row ids and search each vector index for the local top k ordinals, then map those to 
-Primary Keys. **This is expensive.**
-6. Materialize each row from storage.
-7. Compute the vector similarity score for each row.
-8. Return the global top k rows.
+Primary Keys. Ultimately producing a single score ordered iterator. **This is expensive.**
+6. Materialize one row from storage at a time.
+7. Filter out deleted rows and validate the row against the logical filter. If the row does not match the WHERE clause, ignore the result. Then,
+   compute the vector similarity score. If the score is at least as good as the score computed by the index, the vector
+   is in the global top k. If it is worse than the index's score, temporarily ignore that key. Finally, reorder into
+   Primary Key order.
+8. Return the global top k rows to the coordinator.
 
 ```mermaid
 ---
@@ -100,19 +129,41 @@ graph LR
     end
     E --> F[Materialize\nALL\nPrimary Keys]
     subgraph "Steps 4 & 5: Index on Column vec"
-        F --> G1[PK -> SSTable 1\nRowIds] --> G[SSTable 1\nVector Index] --> X[Ordinal -> PK]
-        F --> H1[PK -> SSTable 2\nRowIds] --> H[SSTable 2\nVector Index] --> Y[Ordinal -> PK]
+        F --> G1[PK -> SSTable 1\nRowIds] --> G[SSTable 1\nVector Index] .-> X[Ordinal -> PK]
+        F --> H1[PK -> SSTable 2\nRowIds] --> H[SSTable 2\nVector Index] .-> Y[Ordinal -> PK]
         F --> I[Memtable\nVector Index]
-        X --top k--> J[Range\nUnion\nIterator]
-        Y --top k--> J
-        I --top k---> J
+        X -.-> J[Merge\nScored PKs\nPriority Queue]
+        Y -.-> J
+        I -..-> J
     end
     subgraph "Step 6: Materialize"
       K[Unfiltered\nPartition\nIterator]
     end
-    subgraph "Step 7: Compute Score & Filter"
+    subgraph "Step 7: Filter, Score, Reorder"
       L[Global top k]
     end
-    J --top 3 * k--> K[Unfiltered\nPartition\nIterator]
-    K --top k--> L[Global top k]
+    J -.-> K[Unfiltered\nPartition\nIterator]
+    K -.-> L[Global top k]
+    L --> Z[Coordinator]
+
+    subgraph Legend
+      direction LR
+      start1[ ] -.->|Score Order Iterator| stop1[ ]
+      style start1 height:0px;
+      style stop1 height:0px;
+      start2[ ] -->|PrimaryKey Order Iterator| stop2[ ]
+      style start2 height:0px;
+      style stop2 height:0px;
+    end
 ```
+
+### Post-fitered Boolean Predicates Combined with ANN Query
+
+Sometimes, the boolean predicates are expensive to evaluate using the pre-filtered approach described above. An
+alternate query execution path is to sort the results using ANN first, then filter the materialized rows using the
+boolean predicates. The execution of query `SELECT * FROM my.table WHERE x = 1 AND y = 'foo' ORDER BY vec ANN OF [...] LIMIT 10` 
+using a post-filtered approach follows the same path as the [Vector Only Query](#vector-only-query) with the exception
+that the "filter" in step 7 additionally applies the boolean predicates and filters out any rows that do not match.
+
+The primary cost of post-filtering is that we might materialize many rows before finding the ones that match the boolean
+predicates. As such, we have a cost based optimizer that helps determine which approach is best for a given query.
