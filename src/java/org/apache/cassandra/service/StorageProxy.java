@@ -159,6 +159,8 @@ public class StorageProxy implements StorageProxyMBean
     private static final WritePerformer counterWritePerformer;
     private static final WritePerformer counterWriteOnCoordinatorPerformer;
 
+    private static AtomicLong lastDebugTime = new AtomicLong(0);
+
     public static final StorageProxy instance = new StorageProxy();
 
     private static final Mutator mutator = MutatorProvider.instance;
@@ -1965,7 +1967,7 @@ public class StorageProxy implements StorageProxyMBean
                 throw new ReadFailureException(consistencyLevel, e.received, e.blockFor, false, e.failureReasonByEndpoint);
             }
 
-            result = fetchRows(group.queries, consistencyForReplayCommitsOrFetch, queryStartNanoTime, readTracker);
+            result = fetchRows(group.queries, consistencyForReplayCommitsOrFetch, queryStartNanoTime, readTracker, false);
         }
         catch (UnavailableException e)
         {
@@ -2010,10 +2012,25 @@ public class StorageProxy implements StorageProxyMBean
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(group.metadata().keyspace);
+
+        boolean debug = false;
+        long lastDebug = lastDebugTime.get();
+        long newDebugTime = queryStartNanoTime / 1_000_000_000L;
+        if (lastDebug != newDebugTime)
+        {
+            debug = lastDebugTime.compareAndSet(lastDebug, newDebugTime);
+        }
+
+        if (debug)
+        {
+            long now = System.nanoTime();
+            logger.info("ZUPA DEBUG: readRegularStarts; queryStartNanoTime={}, nanoTime={}, elapsed={}", queryStartNanoTime, now, now-queryStartNanoTime);
+        }
+
         long start = System.nanoTime();
         try
         {
-            PartitionIterator result = fetchRows(group.queries, consistencyLevel, queryStartNanoTime, readTracker);
+            PartitionIterator result = fetchRows(group.queries, consistencyLevel, queryStartNanoTime, readTracker, debug);
             // Note that the only difference between the command in a group must be the partition key on which
             // they applied.
             boolean enforceStrictLiveness = group.queries.get(0).metadata().enforceStrictLiveness();
@@ -2047,6 +2064,9 @@ public class StorageProxy implements StorageProxyMBean
         finally
         {
             long latency = System.nanoTime() - start;
+            if (debug) {
+                logger.info("ZUPA DEBUG: query finished; reporting latency ns={}", latency);
+            }
             metrics.readMetrics.addNano(latency);
             metrics.readMetricsForLevel(consistencyLevel).addNano(latency);
             // TODO avoid giving every command the same latency number.  Can fix this in CASSADRA-5329
@@ -2097,10 +2117,16 @@ public class StorageProxy implements StorageProxyMBean
     private static PartitionIterator fetchRows(List<SinglePartitionReadCommand> commands,
                                                ConsistencyLevel consistencyLevel,
                                                long queryStartNanoTime,
-                                               QueryInfoTracker.ReadTracker readTracker)
+                                               QueryInfoTracker.ReadTracker readTracker,
+                                               boolean debug)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
         int cmdCount = commands.size();
+
+        if (debug)
+        {
+            logger.info("ZUPA DEBUG: fetchRows with cmdCount={}", cmdCount);
+        }
 
         AbstractReadExecutor[] reads = new AbstractReadExecutor[cmdCount];
 
@@ -2108,7 +2134,7 @@ public class StorageProxy implements StorageProxyMBean
         // for type of speculation we'll use in this read
         for (int i=0; i<cmdCount; i++)
         {
-            reads[i] = AbstractReadExecutor.getReadExecutor(commands.get(i), consistencyLevel, queryStartNanoTime, readTracker);
+            reads[i] = AbstractReadExecutor.getReadExecutor(commands.get(i), consistencyLevel, queryStartNanoTime, readTracker, debug);
         }
 
         // sends a data request to the closest replica, and a digest request to the others. If we have a speculating

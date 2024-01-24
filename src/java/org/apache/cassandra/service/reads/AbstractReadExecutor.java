@@ -39,6 +39,7 @@ import org.apache.cassandra.db.transform.DuplicateRowChecker;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
@@ -87,6 +88,7 @@ public abstract class AbstractReadExecutor
     private   final int initialDataRequestCount;
     protected volatile PartitionIterator result = null;
     protected final QueryInfoTracker.ReadTracker readTracker;
+    protected final boolean debug;
 
     static
     {
@@ -125,11 +127,12 @@ public abstract class AbstractReadExecutor
                          ReplicaPlan.ForTokenRead replicaPlan,
                          int initialDataRequestCount,
                          long queryStartNanoTime,
-                         QueryInfoTracker.ReadTracker readTracker)
+                         QueryInfoTracker.ReadTracker readTracker, boolean debug)
     {
         this.command = command;
         this.replicaPlan = ReplicaPlan.shared(replicaPlan);
         this.initialDataRequestCount = initialDataRequestCount;
+        this.debug = debug;
         // the ReadRepair and DigestResolver both need to see our updated
         this.readRepair = ReadRepair.create(command, this.replicaPlan, queryStartNanoTime);
         this.digestResolver = new DigestResolver<>(command, this.replicaPlan, queryStartNanoTime, readTracker);
@@ -240,6 +243,12 @@ public abstract class AbstractReadExecutor
      */
     public void executeAsync()
     {
+        if (debug)
+        {
+            long now = System.nanoTime();
+            logger.info("ZUPA DEBUG: executeAsync at {}, elapsed {} ns", now, now - queryStartNanoTime);
+        }
+
         EndpointsForToken selected = replicaPlan().contacts();
         EndpointsForToken fullDataRequests = selected.filter(Replica::isFull, initialDataRequestCount);
         makeFullDataRequests(fullDataRequests);
@@ -253,7 +262,8 @@ public abstract class AbstractReadExecutor
     public static AbstractReadExecutor getReadExecutor(SinglePartitionReadCommand command,
                                                        ConsistencyLevel consistencyLevel,
                                                        long queryStartNanoTime,
-                                                       QueryInfoTracker.ReadTracker readTracker) throws UnavailableException
+                                                       QueryInfoTracker.ReadTracker readTracker,
+                                                       boolean debug) throws UnavailableException
     {
         Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().id);
@@ -286,7 +296,7 @@ public abstract class AbstractReadExecutor
         if (retry.equals(AlwaysSpeculativeRetryPolicy.INSTANCE))
             return new AlwaysSpeculatingReadExecutor(cfs, command, replicaPlan, queryStartNanoTime, readTracker);
         else // PERCENTILE or CUSTOM.
-            return new SpeculatingReadExecutor(cfs, command, replicaPlan, queryStartNanoTime, readTracker);
+            return new SpeculatingReadExecutor(cfs, command, replicaPlan, queryStartNanoTime, readTracker, debug);
     }
 
     /**
@@ -299,7 +309,7 @@ public abstract class AbstractReadExecutor
         if (cfs.sampleReadLatencyNanos > command.getTimeout(NANOSECONDS))
             return false;
 
-        return !handler.await(cfs.sampleReadLatencyNanos, NANOSECONDS);
+        return !handler.await(cfs.sampleReadLatencyNanos, NANOSECONDS, debug);
     }
 
     ReplicaPlan.ForTokenRead replicaPlan()
@@ -320,7 +330,7 @@ public abstract class AbstractReadExecutor
 
         public NeverSpeculatingReadExecutor(ColumnFamilyStore cfs, ReadCommand command, ReplicaPlan.ForTokenRead replicaPlan, long queryStartNanoTime, boolean logFailedSpeculation, QueryInfoTracker.ReadTracker readTracker)
         {
-            super(cfs, command, replicaPlan, 1, queryStartNanoTime, readTracker);
+            super(cfs, command, replicaPlan, 1, queryStartNanoTime, readTracker, false);
             this.logFailedSpeculation = logFailedSpeculation;
         }
 
@@ -343,17 +353,37 @@ public abstract class AbstractReadExecutor
                                        long queryStartNanoTime,
                                        QueryInfoTracker.ReadTracker readTracker)
         {
+            this(cfs, command, replicaPlan, queryStartNanoTime, readTracker, false);
+        }
+        public SpeculatingReadExecutor(ColumnFamilyStore cfs,
+                                       ReadCommand command,
+                                       ReplicaPlan.ForTokenRead replicaPlan,
+                                       long queryStartNanoTime,
+                                       QueryInfoTracker.ReadTracker readTracker,
+                                       boolean debug)
+        {
             // We're hitting additional targets for read repair (??).  Since our "extra" replica is the least-
             // preferred by the snitch, we do an extra data read to start with against a replica more
             // likely to respond; better to let RR fail than the entire query.
-            super(cfs, command, replicaPlan, replicaPlan.blockFor() < replicaPlan.contacts().size() ? 2 : 1, queryStartNanoTime, readTracker);
+            super(cfs, command, replicaPlan, replicaPlan.blockFor() < replicaPlan.contacts().size() ? 2 : 1, queryStartNanoTime, readTracker, debug);
         }
 
         public void maybeTryAdditionalReplicas()
         {
+            if (debug)
+            {
+                long now = System.nanoTime();
+                logger.info("ZUPA DEBUG: maybeTryAdditionalReplicas at {}, elapsed {} ns", now, now - queryStartNanoTime);
+            }
+
             long waitStart = System.nanoTime();
             if (shouldSpeculateAndMaybeWait())
             {
+                if (debug)
+                {
+                    long now = System.nanoTime();
+                    logger.info("ZUPA DEBUG: triggering speculation at {}, elapsed {} ns", now, now - queryStartNanoTime);
+                }
                 //Handle speculation stats first in case the callback fires immediately
                 cfs.metric.speculativeRetries.inc();
                 speculated = true;
@@ -401,6 +431,11 @@ public abstract class AbstractReadExecutor
                     counter = speculativeReadMetrics.computeIfAbsent(extraReplica.endpoint(), k -> new AtomicInteger());
                 counter.incrementAndGet();
 
+                if (debug)
+                {
+                    long now = System.nanoTime();
+                    logger.info("ZUPA DEBUG: issuing speculative read request at {}, elapsed {} ns", now, now - queryStartNanoTime);
+                }
                 MessagingService.instance().sendWithCallback(retryCommand.createMessage(false), extraReplica.endpoint(), handler);
             }
         }
@@ -425,7 +460,7 @@ public abstract class AbstractReadExecutor
         {
             // presumably, we speculate an extra data request here in case it is our data request that fails to respond,
             // and there are no more nodes to consult
-            super(cfs, command, replicaPlan, replicaPlan.contacts().size() > 1 ? 2 : 1, queryStartNanoTime, readTracker);
+            super(cfs, command, replicaPlan, replicaPlan.contacts().size() > 1 ? 2 : 1, queryStartNanoTime, readTracker, false);
         }
 
         public void maybeTryAdditionalReplicas()

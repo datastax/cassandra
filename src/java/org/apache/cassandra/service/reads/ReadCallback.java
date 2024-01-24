@@ -105,6 +105,28 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         }
     }
 
+    public boolean await(long timePastStart, TimeUnit unit, boolean debug)
+    {
+        long time = unit.toNanos(timePastStart) - (System.nanoTime() - queryStartNanoTime);
+        if (debug)
+        {
+            logger.debug("ZUPA DEBUG: Waiting for {} ns for read futures to complete; max_allowed_wait={}, now={}, queryStart={}", time, unit.toNanos(timePastStart), System.nanoTime(), queryStartNanoTime);
+        }
+        try
+        {
+            boolean result = condition.await(time, TimeUnit.NANOSECONDS);
+            if (debug)
+            {
+                logger.debug("ZUPA DEBUG: Waited; now={}, result={}", System.nanoTime(), result);
+            }
+            return result;
+        }
+        catch (InterruptedException ex)
+        {
+            throw new AssertionError(ex);
+        }
+    }
+
     public void awaitResults() throws ReadFailureException, ReadTimeoutException
     {
         boolean signaled = await(command.getTimeout(MILLISECONDS), TimeUnit.MILLISECONDS);
