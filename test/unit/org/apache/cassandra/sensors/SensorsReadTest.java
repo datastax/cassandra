@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.sensors;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -37,6 +38,9 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
@@ -290,10 +294,20 @@ public class SensorsReadTest
     {
         assertThat(capturedOutboundMessages).hasSize(1);
         Message message = capturedOutboundMessages.get(0);
+        assertResponseSensors(message, requestValue, registryValue);
 
+        // make sure messages with sensor values can be deserialized on the receiving node
+        DataOutputBuffer out = serialize(message);
+        Message deserializedMessage = deserialize(out, message.from());
+        assertResponseSensors(deserializedMessage, requestValue, registryValue);
+    }
+
+    private void assertResponseSensors(Message message, double requestValue, double registryValue)
+    {
         assertThat(message.header.customParams()).isNotNull();
         assertThat(message.header.customParams()).containsKey(READ_BYTES_REQUEST);
         assertThat(message.header.customParams()).containsKey(READ_BYTES_TABLE);
+
         double requestReadBytes = bytesToDouble(message.header.customParams().get(READ_BYTES_REQUEST));
         double tableReadBytes = bytesToDouble(message.header.customParams().get(READ_BYTES_TABLE));
         assertThat(requestReadBytes).isEqualTo(requestValue);
@@ -306,6 +320,33 @@ public class SensorsReadTest
         readBytesBuffer.put(bytes);
         readBytesBuffer.flip();
         return readBytesBuffer.getDouble();
+    }
+
+    private static DataOutputBuffer serialize(Message message)
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            int messagingVersion = MessagingService.current_version;
+            Message.serializer.serialize(message, out, messagingVersion);
+            return out;
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException("Cannot serialize message " + message, e);
+        }
+    }
+
+    private static Message deserialize(DataOutputBuffer out, InetAddressAndPort peer)
+    {
+        try (DataInputBuffer in = new DataInputBuffer(out.buffer(), false))
+        {
+            int messagingVersion = MessagingService.current_version;
+            return Message.serializer.deserialize(in, peer, messagingVersion);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException("Cannot deserialize message from " + peer, e);
+        }
     }
 
     /**
