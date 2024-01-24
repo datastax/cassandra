@@ -163,14 +163,6 @@ public class SensorsRegistry implements SchemaChangeListener
         return Optional.ofNullable(byKeyspace.get(keyspace)).orElseGet(() -> ImmutableSet.of());
     }
 
-    public Optional<Sensor> getSensorsByKeyspaceAndType(String keyspace, Type type)
-    {
-        return getSensorsByKeyspace(keyspace)
-                .stream()
-                .filter(s -> s.getType().equals(type))
-                .findFirst();
-    }
-
     public Set<Sensor> getSensorsByTableId(String tableId)
     {
         return Optional.ofNullable(byTableId.get(tableId)).orElseGet(() -> ImmutableSet.of());

@@ -297,7 +297,7 @@ public class SensorsReadTest
         double requestReadBytes = bytesToDouble(message.header.customParams().get(READ_BYTES_REQUEST));
         double tableReadBytes = bytesToDouble(message.header.customParams().get(READ_BYTES_TABLE));
         assertThat(requestReadBytes).isEqualTo(requestValue);
-        assertThat(tableReadBytes).isEqualTo(tableReadBytes);
+        assertThat(tableReadBytes).isEqualTo(registryValue);
     }
 
     private static double bytesToDouble(byte[] bytes)
