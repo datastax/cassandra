@@ -1440,7 +1440,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     public void trySkipFileCacheBefore(DecoratedKey key)
     {
         long position = getPosition(key, SSTableReader.Operator.GE);
-        NativeLibrary.trySkipCache(descriptor.fileFor(Components.DATA).absolutePath(), 0, position < 0 ? 0 : position);
+        INativeLibrary.instance.trySkipCache(getDataFile(), 0, position < 0 ? 0 : position);
     }
 
     public ChannelProxy getDataChannel()

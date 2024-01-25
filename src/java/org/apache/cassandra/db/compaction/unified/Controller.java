@@ -44,12 +44,7 @@ import org.apache.cassandra.metrics.MetricNameFactory;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.MonotonicClock;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_ADAPTIVE_ENABLED;
-import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_DATASET_SIZE_OPTION_GB;
-import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_MAX_SPACE_OVERHEAD_OPTION;
-import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_MIN_SSTABLE_SIZE_OPTION_MB;
-import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_NUM_SHARDS_OPTION;
-import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_SURVIVAL_FACTOR;
+import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 
 /**
 * The controller provides compaction parameters to the unified compaction strategy
@@ -141,8 +136,7 @@ public abstract class Controller
      *   them all in a unique shard.
      */
     final static String L0_SHARDS_ENABLED_OPTION = "l0_shards_enabled";
-    final static boolean DEFAULT_L0_SHARDS_ENABLED = System.getProperty(PREFIX + L0_SHARDS_ENABLED_OPTION) == null
-                                                     || Boolean.getBoolean(PREFIX + L0_SHARDS_ENABLED_OPTION);
+    final static boolean DEFAULT_L0_SHARDS_ENABLED = UCS_L0_SHARDS_ENABLED.getBoolean();
 
     /**
      * True if L0 data may be coming from different replicas.
@@ -577,7 +571,7 @@ public abstract class Controller
 
         // For remote storage, the sstables on L0 are created by the different replicas, and therefore it is likely
         // that there are RF identical copies, so here we adjust the survival factor for L0
-        double[] survivalFactors = System.getProperty(PREFIX + SHARED_STORAGE) == null || !Boolean.getBoolean(PREFIX + SHARED_STORAGE)
+        double[] survivalFactors = !UCS_SHARED_STORAGE.getBoolean()
                                    ? DEFAULT_SURVIVAL_FACTORS
                                    : new double[] { DEFAULT_SURVIVAL_FACTOR / realm.getKeyspaceReplicationFactor(), DEFAULT_SURVIVAL_FACTOR };
 

@@ -18,10 +18,10 @@
 package org.apache.cassandra.db.lifecycle;
 
 import java.util.List;
-import java.util.UUID;
 
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 /**
@@ -33,7 +33,7 @@ public abstract class AbstractLogTransaction extends Transactional.AbstractTrans
 {
     public abstract OperationType type();
 
-    public abstract UUID id();
+    public abstract TimeUUID id();
 
     public abstract Throwable prepareForObsoletion(Iterable<SSTableReader> readers,
                                           List<Obsoletion> obsoletions,

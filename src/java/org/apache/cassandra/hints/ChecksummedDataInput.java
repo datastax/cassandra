@@ -27,7 +27,6 @@ import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.Throwables;
-import org.apache.cassandra.utils.NativeLibrary;
 
 /**
  * A {@link RandomAccessReader} wrapper that calculates the CRC in place.

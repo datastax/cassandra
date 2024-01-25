@@ -1429,7 +1429,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         Token max = partitioner.getMaximumToken();
         ByteBuffer bb = ByteBuffer.allocate(0);
         int ttl = 0;
-        UUID pendingRepair = null;
+        TimeUUID pendingRepair = null;
         sstablesMap.forEach((size, num) -> {
             Token first = min.getPartitioner().split(min, max, 0.01 + random.nextDouble() * 0.98);
 
@@ -1446,7 +1446,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                                              pendingRepair,
                                              ttl
                 ));
-                first = first.increaseSlightly();
+                first = first.nextValidToken();
             }
         });
         return mockSSTables;

@@ -18,7 +18,6 @@
 */
 package org.apache.cassandra.db.commitlog;
 
-import org.apache.cassandra.io.util.File;
 import java.io.IOException;
 
 import com.google.common.base.Predicate;

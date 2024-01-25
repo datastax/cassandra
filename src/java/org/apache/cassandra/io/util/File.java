@@ -23,12 +23,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.channels.FileChannel;
-import java.nio.file.FileSystem;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
-import java.nio.file.Paths; // checkstyle: permit this import
+import java.nio.file.*;
 import java.util.Objects;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;

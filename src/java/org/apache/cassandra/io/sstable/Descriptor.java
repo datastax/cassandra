@@ -98,9 +98,6 @@ public class Descriptor
     private final String prefix;
     private final File baseFile;
 
-    private final String baseFileURI;
-    private final String filenamePart;
-
     /**
      * A descriptor that assumes CURRENT_VERSION.
      */
@@ -144,11 +141,6 @@ public class Descriptor
 
         // directory is unnecessary for hashCode, and for simulator consistency we do not include it
         hashCode = Objects.hashCode(version, id, ksname, cfname);
-    }
-
-    private String tmpFilenameFor(Component component)
-    {
-        return fileFor(component) + TMP_EXT;
     }
 
     public File tmpFileFor(Component component)
@@ -196,7 +188,7 @@ public class Descriptor
 
     public String baseFileUri()
     {
-        return baseFileURI;
+        return baseFile.toUri().toString();
     }
 
     public String relativeFilenameFor(Component component)
@@ -207,7 +199,9 @@ public class Descriptor
             buff.append(directory.name()).append(File.pathSeparator());
         }
 
-        return buff.append(filenamePart).append(separator).append(component.name()).toString();
+        appendFileName(buff);
+        buff.append(separator).append(component.name());
+        return buff.toString();
     }
 
     public SSTableFormat<?, ?> getFormat()

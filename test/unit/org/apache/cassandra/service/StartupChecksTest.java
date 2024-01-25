@@ -115,7 +115,7 @@ public class StartupChecksTest
 
         // and in the system directory as of CASSANDRA-17777
         new File(backupDir).deleteRecursive();
-        File dataDir = new File(DatabaseDescriptor.getAllDataFileLocations()[0]);
+        File dataDir = DatabaseDescriptor.getAllDataFileLocations()[0];
         Path systemDir = Paths.get(dataDir.absolutePath(), "system", "InvalidSystemDirectory");
         Files.createDirectories(systemDir);
         copyInvalidLegacySSTables(systemDir);

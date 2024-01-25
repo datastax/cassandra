@@ -4461,7 +4461,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Set<String> keyspaces = new HashSet<>();
         for (File dataDir : DatabaseDescriptor.getAllDataFileLocations())
         {
-            for(String keyspaceDir : dataDir.tryListNames())
+            for (String keyspaceDir : dataDir.tryListNames())
             {
                 // Only add a ks if it has been specified as a param, assuming params were actually provided.
                 if (keyspaceNames.length > 0 && !Arrays.asList(keyspaceNames).contains(keyspaceDir))

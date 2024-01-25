@@ -25,8 +25,10 @@ import java.util.stream.Collectors;
 import com.google.common.collect.ImmutableList;
 import org.junit.Test;
 
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_SHARED_STORAGE;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -67,8 +69,7 @@ public class StaticControllerTest extends ControllerTest
     @Test
     public void testSurvivalFactorForSharedStorage()
     {
-        System.setProperty("unified_compaction.shared_storage", "true");
-        try
+        try (WithProperties ignore = new WithProperties().set(UCS_SHARED_STORAGE, true))
         {
             final int rf = 3;
             when(cfs.getKeyspaceReplicationFactor()).thenReturn(rf);
@@ -83,10 +84,6 @@ public class StaticControllerTest extends ControllerTest
 
             assertThatThrownBy(() -> controller.getSurvivalFactor(-1)).isInstanceOf(IllegalArgumentException.class);
 
-        }
-        finally
-        {
-            System.clearProperty("unified_compaction.shared_storage");
         }
     }
 

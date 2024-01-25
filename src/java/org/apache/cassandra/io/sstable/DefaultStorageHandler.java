@@ -32,9 +32,9 @@ import org.apache.cassandra.service.StorageService;
  */
 public class DefaultStorageHandler extends StorageHandler
 {
-    public DefaultStorageHandler(TableMetadataRef metadata, Directories directories, Tracker dataTracker)
+    public DefaultStorageHandler(SSTable.Owner owner, TableMetadataRef metadata, Directories directories, Tracker dataTracker)
     {
-        super(metadata, directories, dataTracker);
+        super(owner, metadata, directories, dataTracker);
     }
 
     @Override
@@ -47,7 +47,7 @@ public class DefaultStorageHandler extends StorageHandler
     public Collection<SSTableReader> loadInitialSSTables()
     {
         Directories.SSTableLister sstableFiles = directories.sstableLister(Directories.OnTxnErr.IGNORE).skipTemporary(true);
-        Collection<SSTableReader> sstables = SSTableReader.openAll(sstableFiles.list().entrySet(), metadata);
+        Collection<SSTableReader> sstables = SSTableReader.openAll(owner, sstableFiles.list().entrySet(), metadata);
         dataTracker.addInitialSSTablesWithoutUpdatingSize(sstables);
         return sstables;
     }

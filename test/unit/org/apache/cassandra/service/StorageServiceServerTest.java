@@ -32,6 +32,7 @@ import java.util.UUID;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 
+import org.apache.cassandra.io.util.File;
 import org.junit.Assert;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;

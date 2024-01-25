@@ -39,7 +39,7 @@ public class DataIntegrityMetadata
         {
             this(ChecksumType.CRC32,
                  RandomAccessReader.open(crcFile),
-                 dataFile.absolutePath());
+                 dataFile);
         }
 
         public ChecksumValidator(ChecksumType checksumType, RandomAccessReader reader, File dataFile) throws IOException

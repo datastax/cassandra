@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import java.util.Random;
 
 import com.google.common.collect.ImmutableMap;
-import org.apache.cassandra.io.util.File;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;

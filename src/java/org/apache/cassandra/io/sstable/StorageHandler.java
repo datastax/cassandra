@@ -66,14 +66,16 @@ public abstract class StorageHandler
         USER_REQUESTED,
     }
 
+    protected final SSTable.Owner owner;
     protected final TableMetadataRef metadata;
     protected final Directories directories;
     protected final Tracker dataTracker;
 
-    public StorageHandler(TableMetadataRef metadata, Directories directories, Tracker dataTracker)
+    public StorageHandler(SSTable.Owner owner, TableMetadataRef metadata, Directories directories, Tracker dataTracker)
     {
         Preconditions.checkNotNull(directories, "Directories should not be null");
 
+        this.owner = owner;
         this.metadata = metadata;
         this.directories = directories;
         this.dataTracker = dataTracker;
@@ -127,18 +129,18 @@ public abstract class StorageHandler
      */
     public abstract void unload();
 
-    public static StorageHandler create(TableMetadataRef metadata, Directories directories, Tracker dataTracker)
+    public static StorageHandler create(SSTable.Owner owner, TableMetadataRef metadata, Directories directories, Tracker dataTracker)
     {
         // local keyspaces are always local so don't use the remote handler even if it has been configured
         if (remoteStorageHandler == null || Schema.isKeyspaceWithLocalStrategy(metadata.keyspace))
-            return new DefaultStorageHandler(metadata, directories, dataTracker);
+            return new DefaultStorageHandler(owner, metadata, directories, dataTracker);
 
         Class<StorageHandler> factoryClass =  FBUtilities.classForName(remoteStorageHandler, "Remote storage handler");
 
         try
         {
-            return factoryClass.getConstructor(TableMetadataRef.class, Directories.class, Tracker.class)
-                    .newInstance(metadata, directories, dataTracker);
+            return factoryClass.getConstructor(SSTable.Owner.class, TableMetadataRef.class, Directories.class, Tracker.class)
+                    .newInstance(owner, metadata, directories, dataTracker);
         }
         catch (NoSuchMethodException | IllegalAccessException | InstantiationException | InvocationTargetException e)
         {

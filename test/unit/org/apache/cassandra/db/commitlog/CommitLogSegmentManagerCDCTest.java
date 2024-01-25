@@ -495,7 +495,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
 
                 cdcMgr.awaitManagementTasksCompletion();
                 // Delete all files in cdc_raw
-                for (File f : new File(DatabaseDescriptor.getCDCLogLocation()).tryList())
+                for (File f : DatabaseDescriptor.getCDCLogLocation().tryList())
                     f.delete();
                 cdcMgr.updateCDCTotalSize();
                 // Confirm cdc update process changes flag on active segment
@@ -503,7 +503,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
             }
 
             // Clear out archived CDC files
-            for (File f : new File(DatabaseDescriptor.getCDCLogLocation()).tryList()) {
+            for (File f : DatabaseDescriptor.getCDCLogLocation().tryList()) {
                 FileUtils.deleteWithConfirm(f);
             }
         });

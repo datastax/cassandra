@@ -42,7 +42,7 @@ public class GroupComponentsTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int primary key, value int)");
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         execute("INSERT INTO %s (pk) VALUES (1)");
         flush();
 

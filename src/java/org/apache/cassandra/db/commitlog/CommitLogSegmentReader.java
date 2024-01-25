@@ -184,7 +184,7 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
             {
                 logger.warn("Skipping sync marker CRC check at position {} (end={}, calculated crc={}) of commit log {}." +
                             "Using per-mutation CRC checks to ensure correctness...",
-                            offset, end, crc.getValue(), reader.getPath());
+                            offset, end, crc.getValue(), reader.getFile());
                 return end;
             }
 

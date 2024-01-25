@@ -968,7 +968,7 @@ public abstract class CommitLogTest
             }};
 
             List<String> activeSegments = CommitLog.instance.getActiveSegmentNames();
-            File[] files = new File(CommitLog.instance.segmentManager.storageDirectory).tryList((file, name) -> activeSegments.contains(name));
+            File[] files = CommitLog.instance.segmentManager.storageDirectory.tryList((file, name) -> activeSegments.contains(name));
             ReplayListPropertyReplayer replayer = new ReplayListPropertyReplayer(CommitLog.instance, CommitLogPosition.NONE, cfPersisted, CommitLogReplayer.ReplayFilter.create());
             replayer.replayFiles(files);
 
@@ -990,7 +990,7 @@ public abstract class CommitLogTest
         List<String> activeSegments = CommitLog.instance.getActiveSegmentNames();
         assertFalse(activeSegments.isEmpty());
 
-        File directory = new File(CommitLog.instance.segmentManager.storageDirectory);
+        File directory = CommitLog.instance.segmentManager.storageDirectory;
         File firstActiveFile = Objects.requireNonNull(directory.tryList((file, name) -> activeSegments.contains(name)))[0];
         zeroFirstSyncMarkerCRC(firstActiveFile);
 

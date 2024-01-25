@@ -647,12 +647,6 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public Set<Component> getComponents()
-    {
-        return delegate.getComponents();
-    }
-
-    @Override
     public int getComponentSize()
     {
         return delegate.getComponentSize();

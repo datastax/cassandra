@@ -495,7 +495,7 @@ public class ScrubTest
             Descriptor desc = cfs.newSSTableDescriptor(tempDataDir);
 
             try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, cfs.metadata);
-                 SSTableTxnWriter writer = new SSTableTxnWriter(txn, createTestWriter(desc, keys.size(), cfs.metadata, txn)))
+                 SSTableTxnWriter writer = new SSTableTxnWriter(txn, createTestWriter(desc, keys.size(), cfs, txn)))
             {
                 for (String k : keys)
                 {

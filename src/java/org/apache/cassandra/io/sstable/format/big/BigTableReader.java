@@ -206,10 +206,10 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
         if (ifile == null)
             return null;
 
-        String path = null;
+        File path = null;
         try (FileDataInput in = ifile.createReader(sampledPosition))
         {
-            path = in.getPath();
+            path = in.getFile();
             while (!in.isEOF())
             {
                 ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);

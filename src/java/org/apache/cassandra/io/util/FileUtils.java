@@ -46,10 +46,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -210,7 +208,7 @@ public final class FileUtils
         }
     }
 
-    public static void createHardLinkWithoutConfirm(File from, File to)
+    public static void createHardLinkWithoutConfirm(String from, String to)
     {
         createHardLinkWithoutConfirm(new File(from), new File(to));
     }
@@ -231,19 +229,6 @@ public final class FileUtils
     public static void copyWithOutConfirm(String from, String to)
     {
         copyWithOutConfirm(new File(from), new File(to));
-    }
-
-    public static void copyWithOutConfirm(File from, File to)
-    {
-        try
-        {
-            Files.copy(from.toPath(), to.toPath());
-        }
-        catch (IOException e)
-        {
-            if (logger.isTraceEnabled())
-                logger.trace("Could not copy file " + from + " to " + to, e);
-        }
     }
 
     public static void copyWithOutConfirm(File from, File to)
