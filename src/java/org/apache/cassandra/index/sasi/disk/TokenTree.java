@@ -18,21 +18,26 @@
 package org.apache.cassandra.index.sasi.disk;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.LongFunction;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Iterators;
+import org.apache.commons.lang3.builder.HashCodeBuilder;
+
+import com.carrotsearch.hppc.LongHashSet;
+import com.carrotsearch.hppc.LongSet;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.sasi.utils.CombinedValue;
 import org.apache.cassandra.index.sasi.utils.MappedBuffer;
 import org.apache.cassandra.index.sasi.utils.RangeIterator;
 import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.MergeIterator;
-
-import com.carrotsearch.hppc.LongHashSet;
-import com.carrotsearch.hppc.LongSet;
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Function;
-import com.google.common.collect.Iterators;
-import org.apache.commons.lang3.builder.HashCodeBuilder;
 
 import static org.apache.cassandra.index.sasi.disk.TokenTreeBuilder.EntryType;
 
@@ -79,12 +84,12 @@ public class TokenTree
         return tokenCount;
     }
 
-    public RangeIterator<Long, Token> iterator(Function<Long, DecoratedKey> keyFetcher)
+    public RangeIterator<Long, Token> iterator(LongFunction<DecoratedKey> keyFetcher)
     {
         return new TokenTreeIterator(file.duplicate(), keyFetcher);
     }
 
-    public OnDiskToken get(final long searchToken, Function<Long, DecoratedKey> keyFetcher)
+    public OnDiskToken get(final long searchToken, LongFunction<DecoratedKey> keyFetcher)
     {
         seekToLeaf(searchToken, file);
         long leafStart = file.position();
@@ -211,7 +216,7 @@ public class TokenTree
 
     public class TokenTreeIterator extends RangeIterator<Long, Token>
     {
-        private final Function<Long, DecoratedKey> keyFetcher;
+        private final LongFunction<DecoratedKey> keyFetcher;
         private final MappedBuffer file;
 
         private long currentLeafStart;
@@ -224,7 +229,7 @@ public class TokenTree
         protected boolean firstIteration = true;
         private boolean lastLeaf;
 
-        TokenTreeIterator(MappedBuffer file, Function<Long, DecoratedKey> keyFetcher)
+        TokenTreeIterator(MappedBuffer file, LongFunction<DecoratedKey> keyFetcher)
         {
             super(treeMinToken, treeMaxToken, tokenCount);
 
@@ -352,7 +357,7 @@ public class TokenTree
         private final Set<TokenInfo> info = new HashSet<>(2);
         private final Set<DecoratedKey> loadedKeys = new TreeSet<>(DecoratedKey.comparator);
 
-        public OnDiskToken(MappedBuffer buffer, long position, short leafSize, Function<Long, DecoratedKey> keyFetcher)
+        public OnDiskToken(MappedBuffer buffer, long position, short leafSize, LongFunction<DecoratedKey> keyFetcher)
         {
             super(buffer.getLong(position + (2 * SHORT_BYTES)));
             info.add(new TokenInfo(buffer, position, leafSize, keyFetcher));
@@ -420,7 +425,7 @@ public class TokenTree
             return offsets;
         }
 
-        public static OnDiskToken getTokenAt(MappedBuffer buffer, int idx, short leafSize, Function<Long, DecoratedKey> keyFetcher)
+        public static OnDiskToken getTokenAt(MappedBuffer buffer, int idx, short leafSize, LongFunction<DecoratedKey> keyFetcher)
         {
             return new OnDiskToken(buffer, getEntryPosition(idx, buffer), leafSize, keyFetcher);
         }
@@ -435,12 +440,12 @@ public class TokenTree
     private static class TokenInfo
     {
         private final MappedBuffer buffer;
-        private final Function<Long, DecoratedKey> keyFetcher;
+        private final LongFunction<DecoratedKey> keyFetcher;
 
         private final long position;
         private final short leafSize;
 
-        public TokenInfo(MappedBuffer buffer, long position, short leafSize, Function<Long, DecoratedKey> keyFetcher)
+        public TokenInfo(MappedBuffer buffer, long position, short leafSize, LongFunction<DecoratedKey> keyFetcher)
         {
             this.keyFetcher = keyFetcher;
             this.buffer = buffer;
@@ -505,11 +510,11 @@ public class TokenTree
 
     private static class KeyIterator extends AbstractGuavaIterator<DecoratedKey>
     {
-        private final Function<Long, DecoratedKey> keyFetcher;
+        private final LongFunction<DecoratedKey> keyFetcher;
         private final long[] offsets;
         private int index = 0;
 
-        public KeyIterator(Function<Long, DecoratedKey> keyFetcher, long[] offsets)
+        public KeyIterator(LongFunction<DecoratedKey> keyFetcher, long[] offsets)
         {
             this.keyFetcher = keyFetcher;
             this.offsets = offsets;
@@ -517,7 +522,9 @@ public class TokenTree
 
         public DecoratedKey computeNext()
         {
-            return index < offsets.length ? keyFetcher.apply(offsets[index++]) : endOfData();
+            return index < offsets.length
+                   ? keyFetcher.apply(offsets[index++])
+                   : endOfData();
         }
     }
 }

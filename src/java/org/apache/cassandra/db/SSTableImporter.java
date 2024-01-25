@@ -33,8 +33,9 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
-import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IVerifier;
@@ -109,7 +110,8 @@ public class SSTableImporter
                                     String keyspace = cfs.getKeyspaceName();
                                     String table = cfs.getTableName();
 
-                                    if (!IndexComponents.isGroupIndexComplete(descriptor))
+                                    IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, cfs.metadata().partitioner, cfs.metadata().comparator);
+                                    if (!indexDescriptor.isPerSSTableBuildComplete())
                                         throw new IllegalStateException(String.format("Missing SAI index to import for SSTable %s on %s.%s",
                                                                                       descriptor.toString(),
                                                                                       keyspace,
@@ -117,7 +119,7 @@ public class SSTableImporter
 
                                     for (Index index : saiIndexGroup.getIndexes())
                                     {
-                                        if (!IndexComponents.isColumnIndexComplete(descriptor, index.getIndexMetadata().name))
+                                        if (!indexDescriptor.isPerIndexBuildComplete(new IndexContext(cfs.metadata(), index.getIndexMetadata())))
                                             throw new IllegalStateException(String.format("Missing SAI index to import for index %s on %s.%s",
                                                                                           index.getIndexMetadata().name,
                                                                                           keyspace,

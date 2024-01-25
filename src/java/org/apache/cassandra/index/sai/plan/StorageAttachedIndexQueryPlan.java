@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.index.sai.plan;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -33,6 +31,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -46,18 +45,21 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     private final RowFilter postIndexFilter;
     private final RowFilter.FilterElement filterOperation;
     private final Set<Index> indexes;
+    private final IndexFeatureSet indexFeatureSet;
 
     private StorageAttachedIndexQueryPlan(ColumnFamilyStore cfs,
                                           TableQueryMetrics queryMetrics,
                                           RowFilter postIndexFilter,
                                           RowFilter.FilterElement filterOperation,
-                                          ImmutableSet<Index> indexes)
+                                          ImmutableSet<Index> indexes,
+                                          IndexFeatureSet indexFeatureSet)
     {
         this.cfs = cfs;
         this.queryMetrics = queryMetrics;
         this.postIndexFilter = postIndexFilter;
         this.filterOperation = filterOperation;
         this.indexes = indexes;
+        this.indexFeatureSet = indexFeatureSet;
     }
 
     @Nullable
@@ -67,7 +69,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
                                                        RowFilter filter)
     {
         ImmutableSet.Builder<Index> selectedIndexesBuilder = ImmutableSet.builder();
-        List<RowFilter.Expression> acceptedExpressions = new ArrayList<>();
+        IndexFeatureSet.Accumulator accumulator = new IndexFeatureSet.Accumulator();
 
         RowFilter preIndexFilter = filter;
         RowFilter postIndexFilter = filter;
@@ -99,6 +101,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
             {
                 if (index.supportsExpression(expression.column(), expression.operator()))
                 {
+                    accumulator.accumulate(index.getIndexContext().indexFeatureSet());
                     selectedIndexesBuilder.add(index);
                 }
             }
@@ -108,7 +111,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         if (selectedIndexes.isEmpty())
             return null;
 
-        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, preIndexFilter.root(), selectedIndexes);
+        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, preIndexFilter.root(), selectedIndexes, accumulator.complete());
     }
 
     @Override
@@ -139,6 +142,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
                                                 queryMetrics,
                                                 command,
                                                 filterOperation,
+                                                indexFeatureSet,
                                                 DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
     }
 
