@@ -17,15 +17,12 @@
  */
 package org.apache.cassandra.index.sasi;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.google.common.base.Function;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sasi.conf.ColumnIndex;
 import org.apache.cassandra.index.sasi.disk.OnDiskIndex;
@@ -33,7 +30,6 @@ import org.apache.cassandra.index.sasi.disk.OnDiskIndexBuilder;
 import org.apache.cassandra.index.sasi.disk.Token;
 import org.apache.cassandra.index.sasi.plan.Expression;
 import org.apache.cassandra.index.sasi.utils.RangeIterator;
-import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
@@ -64,7 +60,7 @@ public class SSTableIndex
                 sstable.getFilename(),
                 columnIndex.getIndexName());
 
-        this.index = new OnDiskIndex(indexFile, validator, new DecoratedKeyFetcher(sstable));
+        this.index = new OnDiskIndex(indexFile, validator, sstable.openKeyFetcher(true));
     }
 
     public OnDiskIndexBuilder.Mode mode()
@@ -162,36 +158,4 @@ public class SSTableIndex
         return String.format("SSTableIndex(column: %s, SSTable: %s)", columnIndex.getColumnName(), sstable.descriptor);
     }
 
-    private static class DecoratedKeyFetcher implements Function<Long, DecoratedKey>
-    {
-        private final SSTableReader sstable;
-
-        DecoratedKeyFetcher(SSTableReader reader)
-        {
-            sstable = reader;
-        }
-
-        public DecoratedKey apply(Long offset)
-        {
-            try
-            {
-                return sstable.keyAtPositionFromSecondaryIndex(offset);
-            }
-            catch (IOException e)
-            {
-                throw new FSReadError(new IOException("Failed to read key from " + sstable.descriptor, e), sstable.getFilename());
-            }
-        }
-
-        public int hashCode()
-        {
-            return sstable.descriptor.hashCode();
-        }
-
-        public boolean equals(Object other)
-        {
-            return other instanceof DecoratedKeyFetcher
-                    && sstable.descriptor.equals(((DecoratedKeyFetcher) other).sstable.descriptor);
-        }
-    }
 }
