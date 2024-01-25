@@ -25,9 +25,8 @@ import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.bind.annotation.SuperCall;
-import org.apache.cassandra.index.sai.disk.SegmentBuilder;
-import org.apache.cassandra.index.sai.disk.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -36,6 +35,8 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.index.CorruptIndexException;
@@ -164,7 +165,7 @@ public class IndexStreamingFailureTest extends TestBaseImpl
         }
 
         @SuppressWarnings("unused")
-        public static SegmentMetadata flush(final IndexComponents indexComponents, @SuperCall Callable<SegmentMetadata> zuper) throws IOException
+        public static SegmentMetadata flush(IndexDescriptor indexDescriptor, IndexContext indexContext, @SuperCall Callable<SegmentMetadata> zuper) throws IOException
         {
             if (failFlush)
                 throw new IOException(TEST_ERROR_MESSAGE);

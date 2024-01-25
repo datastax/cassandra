@@ -76,7 +76,7 @@ public enum RequestFailureReason
         {
             if (codeMap[mappingFunction.applyAsInt(reason)] != null)
                 throw new RuntimeException("Two RequestFailureReason-s that map to the same code: " + reason.code);
-            codeMap[reason.code] = reason;
+            codeMap[mappingFunction.applyAsInt(reason)] = reason;
         }
 
         return codeMap;

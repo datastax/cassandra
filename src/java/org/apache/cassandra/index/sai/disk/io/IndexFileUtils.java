@@ -25,12 +25,14 @@ import java.util.zip.CRC32;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.store.IndexInput;
 
 public class IndexFileUtils
@@ -43,9 +45,23 @@ public class IndexFileUtils
                                                                                              .finishOnClose(true)
                                                                                              .build();
 
-    public static final IndexFileUtils instance = new IndexFileUtils(DEFAULT_WRITER_OPTION);
+    private static final IndexFileUtils instance = new IndexFileUtils(DEFAULT_WRITER_OPTION);
+    private static IndexFileUtils overrideInstance = null;
 
     private final SequentialWriterOption writerOption;
+
+    public static synchronized void setOverrideInstance(IndexFileUtils overrideInstance)
+    {
+        IndexFileUtils.overrideInstance = overrideInstance;
+    }
+
+    public static IndexFileUtils instance()
+    {
+        if (overrideInstance == null)
+            return instance;
+        else
+            return overrideInstance;
+    }
 
     @VisibleForTesting
     protected IndexFileUtils(SequentialWriterOption writerOption)
@@ -69,13 +85,30 @@ public class IndexFileUtils
     @SuppressWarnings({"resource", "RedundantSuppression"})
     public IndexInput openBlockingInput(File file)
     {
-        FileHandle fileHandle = new FileHandle.Builder(file).complete();
-        RandomAccessReader randomReader = fileHandle.createReader();
+        FileHandle.Builder builder = new FileHandle.Builder(file);
+        FileHandle fileHandle = null;
+        RandomAccessReader randomReader = null;
+        try
+        {
+            fileHandle = builder.complete();
+            randomReader = fileHandle.createReader();
 
-        return IndexInputReader.create(randomReader, fileHandle::close);
+            return IndexInputReader.create(randomReader, fileHandle::close);
+        }
+        catch (RuntimeException | Error e)
+        {
+            Throwables.closeNonNullAndAddSuppressed(e, randomReader, fileHandle);
+            throw e;
+        }
     }
 
-    static class ChecksummingWriter extends SequentialWriter
+
+    public interface ChecksumWriter
+    {
+        long getChecksum();
+    }
+
+    static class ChecksummingWriter extends SequentialWriter implements ChecksumWriter
     {
         private final CRC32 checksum = new CRC32();
 
@@ -84,9 +117,16 @@ public class IndexFileUtils
             super(file, writerOption);
         }
 
-        public long getChecksum() throws IOException
+        public long getChecksum()
         {
-            flush();
+            try
+            {
+                flush();
+            }
+            catch (IOException e)
+            {
+                throw new FSWriteError(e, getFile());
+            }
             return checksum.getValue();
         }
 

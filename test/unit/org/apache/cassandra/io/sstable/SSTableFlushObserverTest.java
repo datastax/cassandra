@@ -178,14 +178,17 @@ public class SSTableFlushObserverTest
             Assert.assertTrue(observer.isComplete);
             Assert.assertEquals(expected.size(), observer.rows.size());
 
-            for (Triple<ByteBuffer, Long, Long> e : observer.rows.keySet())
+            try (IKeyFetcher keyFetcher = reader.openKeyFetcher(true))
             {
-                ByteBuffer key = e.getLeft();
-                long indexPosition = e.getRight();
+                for (Triple<ByteBuffer, Long, Long> e : observer.rows.keySet())
+                {
+                    ByteBuffer key = e.getLeft();
+                    long indexPosition = e.getRight();
 
-                DecoratedKey indexKey = reader.keyAtPositionFromSecondaryIndex(indexPosition);
-                Assert.assertEquals(0, UTF8Type.instance.compare(key, indexKey.getKey()));
-                Assert.assertEquals(expected.get(key), observer.rows.get(e));
+                    DecoratedKey indexKey = keyFetcher.apply(indexPosition);
+                    Assert.assertEquals(0, UTF8Type.instance.compare(key, indexKey.getKey()));
+                    Assert.assertEquals(expected.get(key), observer.rows.get(e));
+                }
             }
         }
     }
