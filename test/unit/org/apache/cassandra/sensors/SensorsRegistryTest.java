@@ -94,6 +94,15 @@ public class SensorsRegistryTest
         Sensor context2Type1Sensor = SensorsRegistry.instance.getOrCreateSensor(context2, type1).get();
         Sensor context2Type2Sensor = SensorsRegistry.instance.getOrCreateSensor(context2, type2).get();
 
+        assertThat(SensorsRegistry.instance.getSensor(context1, type1)).hasValue(context1Type1Sensor);
+        assertThat(SensorsRegistry.instance.getSensor(context1, type2)).hasValue(context1Type2Sensor);
+        assertThat(SensorsRegistry.instance.getSensor(context2, type1)).hasValue(context2Type1Sensor);
+        assertThat(SensorsRegistry.instance.getSensor(context2, type2)).hasValue(context2Type2Sensor);
+
+        // get sensor should not have side effects
+        Type unRegisteredType = Type.WRITE_BYTES;
+        assertThat(SensorsRegistry.instance.getSensor(context1, unRegisteredType)).isEmpty();
+
         assertThat(SensorsRegistry.instance.getSensorsByKeyspace(KEYSPACE)).containsAll(
         ImmutableSet.of(context1Type1Sensor, context1Type2Sensor, context2Type1Sensor, context2Type2Sensor));
 
