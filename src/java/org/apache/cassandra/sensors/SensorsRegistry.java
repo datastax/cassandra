@@ -36,7 +36,6 @@ import java.util.function.Predicate;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,6 +107,11 @@ public class SensorsRegistry implements SchemaChangeListener
     {
         listeners.remove(listener);
         logger.debug("Listener {} unregistered", listener);
+    }
+
+    public Optional<Sensor> getSensor(Context context, Type type)
+    {
+        return Optional.ofNullable(identity.get(Pair.create(context, type)));
     }
 
     public Optional<Sensor> getOrCreateSensor(Context context, Type type)
