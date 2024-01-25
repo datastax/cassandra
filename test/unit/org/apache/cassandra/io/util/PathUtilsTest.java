@@ -21,6 +21,7 @@ package org.apache.cassandra.io.util;
 import java.nio.file.Path;
 import java.util.List;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -36,6 +37,7 @@ public class PathUtilsTest
     @BeforeClass
     public static void beforeClass()
     {
+        DatabaseDescriptor.daemonInitialization();
         classTestDir = FileUtils.getTempDir().resolve("PathUtilsTest");
         PathUtils.createDirectoryIfNotExists(classTestDir.toPath());
         classTestDir.deleteRecursiveOnExit();
