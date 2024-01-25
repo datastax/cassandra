@@ -20,7 +20,6 @@ package org.apache.cassandra.io.sstable;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 /**
  * Observer for events in the lifecycle of writing out an sstable.
@@ -41,7 +40,7 @@ public interface SSTableFlushObserver
      * @param keyPositionForSASI SSTable format specific key position for storage attached indexes, it can be
      *                           in data file or in some index file. It is the same position as returned by
      *                           {@link KeyReader#keyPositionForSecondaryIndex()} for the same format, and the same
-     *                           position as expected by {@link SSTableReader#keyAtPositionFromSecondaryIndex(long)}.
+     *                           position as expected by {@link IKeyFetcher#apply(long)} when created for SASI.
      */
     void startPartition(DecoratedKey key, long keyPosition, long keyPositionForSASI);
 

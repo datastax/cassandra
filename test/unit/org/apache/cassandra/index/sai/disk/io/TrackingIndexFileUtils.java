@@ -24,16 +24,16 @@ import java.util.HashMap;
 import java.util.Map;
 
 import com.google.common.base.Throwables;
+import org.junit.Assert;
 
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.lucene.store.IndexInput;
 
-import static org.junit.Assert.assertNotNull;
-
 public class TrackingIndexFileUtils extends IndexFileUtils
 {
-    private final Map<TrackedForwardingIndexInput, String> openInputs = Collections.synchronizedMap(new HashMap<>());
+    private final Map<TrackingIndexInput, String> openInputs = Collections.synchronizedMap(new HashMap<>());
 
     public TrackingIndexFileUtils(SequentialWriterOption writerOption)
     {
@@ -43,8 +43,16 @@ public class TrackingIndexFileUtils extends IndexFileUtils
     @Override
     public IndexInput openInput(FileHandle handle)
     {
-        TrackedForwardingIndexInput input = new TrackedForwardingIndexInput(super.openInput(handle));
+        TrackingIndexInput input = new TrackingIndexInput(super.openInput(handle));
         openInputs.put(input, Throwables.getStackTraceAsString(new RuntimeException("Input created")));
+        return input;
+    }
+
+    @Override
+    public IndexInput openBlockingInput(File file)
+    {
+        TrackingIndexInput input = new TrackingIndexInput(super.openBlockingInput(file));
+        openInputs.put(input, Throwables.getStackTraceAsString(new RuntimeException("Blocking input created")));
         return input;
     }
 
@@ -53,64 +61,20 @@ public class TrackingIndexFileUtils extends IndexFileUtils
         return new HashMap<>(openInputs);
     }
 
-    public class TrackedForwardingIndexInput extends IndexInput
+    public class TrackingIndexInput extends FilterIndexInput
     {
-        private final IndexInput delegate;
-
-        protected TrackedForwardingIndexInput(IndexInput delegate)
+        TrackingIndexInput(IndexInput delegate)
         {
-            super(delegate.toString());
-            this.delegate = delegate;
+            super(delegate);
         }
 
         @Override
         public void close() throws IOException
         {
-            delegate.close();
+            super.close();
             final String creationStackTrace = openInputs.remove(this);
-            assertNotNull("Closed unregistered input: " + this, creationStackTrace);
-        }
-
-        @Override
-        public long getFilePointer()
-        {
-            return delegate.getFilePointer();
-        }
-
-        @Override
-        public void seek(long pos) throws IOException
-        {
-            delegate.seek(pos);
-        }
-
-        @Override
-        public long length()
-        {
-            return delegate.length();
-        }
-
-        @Override
-        public IndexInput slice(String sliceDescription, long offset, long length) throws IOException
-        {
-            return delegate.slice(sliceDescription, offset, length);
-        }
-
-        @Override
-        public byte readByte() throws IOException
-        {
-            return delegate.readByte();
-        }
-
-        @Override
-        public void readBytes(byte[] b, int offset, int len) throws IOException
-        {
-            delegate.readBytes(b, offset, len);
-        }
-
-        @Override
-        public String toString()
-        {
-            return delegate.toString();
+            Assert.assertNotNull("Closed unregistered input: " + this, creationStackTrace);
         }
     }
+
 }

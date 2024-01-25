@@ -67,11 +67,13 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -1497,10 +1499,12 @@ public abstract class CQLSSTableWriterTest
         File[] dataFiles = dataDir.list(f -> f.name().endsWith('-' + BigFormat.Components.DATA.type.repr));
         assertNotNull(dataFiles);
 
-        Descriptor desc = Descriptor.fromFile(dataFiles[0]);
-        // no indexes built due to withBuildIndexes set to false
-        assertTrue(IndexComponents.isColumnIndexComplete(desc, "idx1"));
-        assertTrue(IndexComponents.isColumnIndexComplete(desc, "idx2"));
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(Descriptor.fromFile(dataFiles[0]),
+                                                                 Murmur3Partitioner.instance,
+                                                                 Schema.instance.getTableMetadata(keyspace, table).comparator);
+
+        assertTrue(indexDescriptor.isPerIndexBuildComplete(SAITester.createIndexContext("idx1", UTF8Type.instance)));
+        assertTrue(indexDescriptor.isPerIndexBuildComplete(SAITester.createIndexContext("idx2", UTF8Type.instance)));
 
         if (PathUtils.isDirectory(dataDir.toPath()))
             PathUtils.forEach(dataDir.toPath(), PathUtils::deleteRecursive);
@@ -1538,10 +1542,13 @@ public abstract class CQLSSTableWriterTest
         File[] dataFiles = dataDir.list(f -> f.name().endsWith('-' + BigFormat.Components.DATA.type.repr));
         assertNotNull(dataFiles);
 
-        Descriptor desc = Descriptor.fromFile(dataFiles[0]);
         // no indexes built due to withBuildIndexes set to false
-        assertFalse(IndexComponents.isColumnIndexComplete(desc, "idx1"));
-        assertFalse(IndexComponents.isColumnIndexComplete(desc, "idx2"));
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(Descriptor.fromFile(dataFiles[0]),
+                                                                 Murmur3Partitioner.instance,
+                                                                 Schema.instance.getTableMetadata(keyspace, table).comparator);
+
+        assertFalse(indexDescriptor.isPerIndexBuildComplete(SAITester.createIndexContext("idx1", UTF8Type.instance)));
+        assertFalse(indexDescriptor.isPerIndexBuildComplete(SAITester.createIndexContext("idx2", UTF8Type.instance)));
     }
 
     protected void loadSSTables(File dataDir, String ksName)
