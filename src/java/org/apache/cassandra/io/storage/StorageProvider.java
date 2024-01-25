@@ -166,6 +166,22 @@ public interface StorageProvider
      */
     FileHandle.Builder fileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component, IndexContext context);
 
+    /**
+     * Creates a new {@link FileHandle.Builder} for the given SAI component and context (for index with per-index files),
+     * that is suitable for reading the component "at flush time", that is typcally for when we need to access the
+     * component to complete the writing of another related component.
+     * <p>
+     * Other the fact that this method will be called a different time, it's requirements are the same than for
+     * {@link #fileHandleBuilderFor(IndexDescriptor, IndexComponent, IndexContext)}.
+     *
+     * @param descriptor descriptor for the index file whose handler is built.
+     * @param component index component for which to build the handler.
+     * @param context index context for which to build the handler.
+     * @return a new {@link FileHandle.Builder} for the provided SAI component with access mode and chunk cache
+     *   configured as appropriate.
+     */
+    FileHandle.Builder flushTimeFileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component, IndexContext context);
+
     class DefaultProvider implements StorageProvider
     {
         @Override
@@ -253,6 +269,14 @@ public interface StorageProvider
                              file, FBUtilities.prettyPrintMemory(file.length()));
             }
             return new FileHandle.Builder(file).mmapped(true);
+        }
+
+        @Override
+        public FileHandle.Builder flushTimeFileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component, IndexContext context)
+        {
+            // By default, no difference between accesses "at flush time" and "at query time", but subclasses may need
+            // to differenciate both.
+            return fileHandleBuilderFor(descriptor, component, context);
         }
     }
 }

@@ -376,6 +376,22 @@ public class IndexDescriptor
         }
     }
 
+    /**
+     * Opens a file handle for the provided index component similarly to {@link #createPerIndexFileHandle(IndexComponent, IndexContext)},
+     * but this method shoud be called instead of the aforemented one if the access is done "as part of flushing", that is
+     * before the full index that this is a part of has been finalized.
+     * <p>
+     * The use of this method can allow specific storage providers, typically tiered storage ones, to distinguish accesses
+     * that happen "at flush time" from other accesses, as the related file may be in different tier of storage.
+     */
+    public FileHandle createFlushTimePerIndexFileHandle(IndexComponent indexComponent, IndexContext indexContext)
+    {
+        try (final FileHandle.Builder builder = StorageProvider.instance.flushTimeFileHandleBuilderFor(this, indexComponent, indexContext))
+        {
+            return builder.complete();
+        }
+    }
+
     @Override
     public int hashCode()
     {
