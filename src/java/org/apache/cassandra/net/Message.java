@@ -210,19 +210,19 @@ public class Message<T>
 
     public static <T> Message<T> out(Verb verb, T payload, long expiresAtNanos)
     {
-        return outWithParam(nextId(), verb, expiresAtNanos, payload, 0, null, null);
+        return outWithParam(nextId(), verb, expiresAtNanos, payload, 0, null, null).build();
     }
 
     public static <T> Message<T> outWithFlag(Verb verb, T payload, MessageFlag flag)
     {
         assert !verb.isResponse();
-        return outWithParam(nextId(), verb, 0, payload, flag.addTo(0), null, null);
+        return outWithParam(nextId(), verb, 0, payload, flag.addTo(0), null, null).build();
     }
 
     public static <T> Message<T> outWithFlags(Verb verb, T payload, MessageFlag flag1, MessageFlag flag2)
     {
         assert !verb.isResponse();
-        return outWithParam(nextId(), verb, 0, payload, flag2.addTo(flag1.addTo(0)), null, null);
+        return outWithParam(nextId(), verb, 0, payload, flag2.addTo(flag1.addTo(0)), null, null).build();
     }
 
     public static <T> Message<T> outWithFlags(Verb verb, T payload, Dispatcher.RequestTime requestTime, List<MessageFlag> flags)
@@ -245,20 +245,20 @@ public class Message<T>
     @VisibleForTesting
     static <T> Message<T> outWithParam(long id, Verb verb, T payload, ParamType paramType, Object paramValue)
     {
-        return outWithParam(id, verb, 0, payload, paramType, paramValue);
+        return outWithParam(id, verb, 0, payload, paramType, paramValue).build();
     }
 
-    private static <T> Message<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, ParamType paramType, Object paramValue)
+    private static <T> Builder<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, ParamType paramType, Object paramValue)
     {
         return outWithParam(id, verb, expiresAtNanos, payload, 0, paramType, paramValue);
     }
 
-    private static <T> Message<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, int flags, ParamType paramType, Object paramValue)
+    private static <T> Builder<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, int flags, ParamType paramType, Object paramValue)
     {
         return withParam(getBroadcastAddressAndPort(), id, verb, expiresAtNanos, payload, flags, paramType, paramValue);
     }
 
-    private static <T> Message<T> withParam(InetAddressAndPort from, long id, Verb verb, long expiresAtNanos, T payload, int flags, ParamType paramType, Object paramValue)
+    private static <T> Builder<T> withParam(InetAddressAndPort from, long id, Verb verb, long expiresAtNanos, T payload, int flags, ParamType paramType, Object paramValue)
     {
         if (payload == null)
             throw new IllegalArgumentException();
@@ -266,8 +266,14 @@ public class Message<T>
         long createdAtNanos = approxTime.now();
         if (expiresAtNanos == 0)
             expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
-
-        return new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, buildParams(paramType, paramValue)), payload);
+        return new Builder<T>().ofVerb(verb)
+                               .withPayload(payload)
+                               .from(from)
+                               .withId(id)
+                               .withExpiresAt(expiresAtNanos)
+                               .withCreatedAt(createdAtNanos)
+                               .withFlags(flags)
+                               .withParams(buildParams(paramType, paramValue));
     }
 
     public static <T> Message<T> internalResponse(Verb verb, T payload)
@@ -291,6 +297,12 @@ public class Message<T>
     /** Builds a response Message with provided payload, and all the right fields inferred from request Message */
     public <T> Message<T> responseWith(T payload)
     {
+        return outWithParam(id(), verb().responseVerb, expiresAtNanos(), payload, null, null).build();
+    }
+
+    /** Builds a response Message builder with provided payload, and all the right fields inferred from request Message */
+    public <T> Builder<T> responseWithBuilder(T payload)
+    {
         return outWithParam(id(), verb().responseVerb, expiresAtNanos(), payload, null, null);
     }
 
@@ -308,7 +320,7 @@ public class Message<T>
 
     static Message<RequestFailureReason> failureResponse(long id, long expiresAtNanos, RequestFailureReason reason)
     {
-        return outWithParam(id, Verb.FAILURE_RSP, expiresAtNanos, reason, null, null);
+        return outWithParam(id, Verb.FAILURE_RSP, expiresAtNanos, reason, null, null).build();
     }
 
     public <V> Message<V> withPayload(V newPayload)
