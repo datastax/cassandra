@@ -24,6 +24,7 @@ import javax.annotation.Nullable;
 
 import com.carrotsearch.hppc.ObjectIntHashMap;
 import org.apache.cassandra.db.guardrails.Guardrails;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InOurDc;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -53,6 +54,8 @@ public enum ConsistencyLevel
     LOCAL_SERIAL(9, true),
     LOCAL_ONE   (10, true),
     NODE_LOCAL  (11, true);
+
+    public static final boolean THREE_MEANS_ALL_BUT_ONE = CassandraRelevantProperties.THREE_MEANS_ALL_BUT_ONE.getBoolean();
 
     // Used by the binary protocol
     public final int code;
@@ -90,6 +93,16 @@ public enum ConsistencyLevel
         return codeIdx[code];
     }
 
+    @Override
+    public String toString()
+    {
+        if (this == THREE && THREE_MEANS_ALL_BUT_ONE)
+        {
+            return "THREE (ALL_BUT_ONE)";
+        }
+        return super.toString();
+    }
+
     public static ConsistencyLevel fromString(String str)
     {
         return valueOf(str.toUpperCase(Locale.US));
@@ -98,6 +111,12 @@ public enum ConsistencyLevel
     public static int quorumFor(AbstractReplicationStrategy replicationStrategy)
     {
         return (replicationStrategy.getReplicationFactor().allReplicas / 2) + 1;
+    }
+
+    static int allButOneFor(AbstractReplicationStrategy replicationStrategy)
+    {
+        int rf = replicationStrategy.getReplicationFactor().fullReplicas;
+        return rf <= 1 ? rf : rf - 1;
     }
 
     public static int localQuorumFor(AbstractReplicationStrategy replicationStrategy, String dc)
@@ -149,6 +168,10 @@ public enum ConsistencyLevel
             case TWO:
                 return 2;
             case THREE:
+                if (THREE_MEANS_ALL_BUT_ONE)
+                {
+                    return allButOneFor(replicationStrategy);
+                }
                 return 3;
             case QUORUM:
             case SERIAL:

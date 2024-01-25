@@ -646,6 +646,9 @@ public enum CassandraRelevantProperties
     TEST_UTIL_ALLOW_TOOL_REINIT_FOR_TEST("org.apache.cassandra.tools.UtilALLOW_TOOL_REINIT_FOR_TEST"),
     /** Activate write survey mode. The node not becoming an active ring member, and you must use JMX StorageService->joinRing() to finalize the ring joining. */
     TEST_WRITE_SURVEY("cassandra.write_survey"),
+    // Changes the semantic of the "THREE" consistency level to mean "all but one"
+    // i.e. that all replicas except for at most one in the cluster (across all DCs) must accept the write for it to be successful.
+    THREE_MEANS_ALL_BUT_ONE("dse.consistency_level.three_means_all_but_one", "false"),
     TOLERATE_SSTABLE_SIZE("cassandra.tolerate_sstable_size"),
     TRIGGERS_DIR("cassandra.triggers_dir"),
     TRUNCATE_BALLOT_METADATA("cassandra.truncate_ballot_metadata"),
