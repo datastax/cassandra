@@ -21,7 +21,6 @@ package org.apache.cassandra.config;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-
 import javax.annotation.Nullable;
 
 import com.google.common.primitives.Ints;
@@ -478,6 +477,8 @@ public enum CassandraRelevantProperties
     SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "5"),
     SAI_MAX_STRING_TERM_SIZE("cassandra.sai.max_string_term_size_kb", "1"),
 
+    /** Latest version to be used for SAI index writing */
+    SAI_LATEST_VERSION("cassandra.sai.latest_version", "ba"),
     SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT("cassandra.test.sai.segment_build_memory_limit"),
     SCHEMA_PULL_INTERVAL_MS("cassandra.schema_pull_interval_ms", "60000"),
     SCHEMA_UPDATE_HANDLER_FACTORY_CLASS("cassandra.schema.update_handler_factory.class"),
@@ -560,6 +561,7 @@ public enum CassandraRelevantProperties
     TEST_READ_ITERATION_DELAY_MS("cassandra.test.read_iteration_delay_ms", "0"),
     TEST_REUSE_PREPARED("cassandra.test.reuse_prepared", "true"),
     TEST_ROW_CACHE_SIZE("cassandra.test.row_cache_size"),
+    TEST_SAI_DISABLE_TIMEOUT("cassandra.sai.test.disable.timeout", "false"),
     TEST_SERIALIZATION_WRITES("cassandra.test-serialization-writes"),
     TEST_SIMULATOR_DEBUG("cassandra.test.simulator.debug"),
     TEST_SIMULATOR_DETERMINISM_CHECK("cassandra.test.simulator.determinismcheck", "none"),

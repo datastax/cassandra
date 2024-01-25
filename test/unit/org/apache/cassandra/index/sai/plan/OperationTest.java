@@ -110,13 +110,13 @@ public class OperationTest extends IndexingSchemaLoader
     public void beforeTest()
     {
         ReadCommand command = PartitionRangeReadCommand.allDataRead(BACKEND.metadata(), FBUtilities.nowInSeconds());
-        controller = new QueryController(BACKEND, command, null, new QueryContext(), null);
+        controller = new QueryController(BACKEND, command, null, null, new QueryContext(), null);
 
         command = PartitionRangeReadCommand.allDataRead(CLUSTERING_BACKEND.metadata(), FBUtilities.nowInSeconds());
-        controllerClustering = new QueryController(CLUSTERING_BACKEND, command, null, new QueryContext(), null);
+        controllerClustering = new QueryController(CLUSTERING_BACKEND, command, null, null, new QueryContext(), null);
 
         command = PartitionRangeReadCommand.allDataRead(STATIC_BACKEND.metadata(), FBUtilities.nowInSeconds());
-        controllerStatic = new QueryController(STATIC_BACKEND, command, null, new QueryContext(), null);
+        controllerStatic = new QueryController(STATIC_BACKEND, command, null, null, new QueryContext(), null);
     }
 
     @After
@@ -138,7 +138,7 @@ public class OperationTest extends IndexingSchemaLoader
                                                                                               new SimpleExpression(age, Operator.NEQ, Int32Type.instance.decompose(6)),
                                                                                               new SimpleExpression(age, Operator.LTE, Int32Type.instance.decompose(10)))));
 
-        Expression expected = new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+        Expression expected = new Expression(SAITester.createIndexContext("age", Int32Type.instance))
         {{
             operation = Op.RANGE;
             lower = new Bound(Int32Type.instance.decompose(1), Int32Type.instance, false);
@@ -157,14 +157,14 @@ public class OperationTest extends IndexingSchemaLoader
                                                                   new SimpleExpression(age, Operator.GTE, Int32Type.instance.decompose(7)))));
         Assert.assertEquals(2, expressions.size());
 
-        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+        Assert.assertEquals(new Expression(SAITester.createIndexContext("age", Int32Type.instance))
                             {{
                                     operation = Op.NOT_EQ;
                                     lower = new Bound(Int32Type.instance.decompose(5), Int32Type.instance, true);
                                     upper = lower;
                             }}, expressions.get(Expression.Op.NOT_EQ));
 
-        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+        Assert.assertEquals(new Expression(SAITester.createIndexContext("age", Int32Type.instance))
                             {{
                                     operation = Op.RANGE;
                                     lower = new Bound(Int32Type.instance.decompose(7), Int32Type.instance, true);
@@ -176,12 +176,12 @@ public class OperationTest extends IndexingSchemaLoader
                                                                   new SimpleExpression(age, Operator.LT, Int32Type.instance.decompose(7)))));
 
         Assert.assertEquals(2, expressions.size());
-        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+        Assert.assertEquals(new Expression(SAITester.createIndexContext("age", Int32Type.instance))
                             {{
                                     operation = Op.RANGE;
                                     upper = new Bound(Int32Type.instance.decompose(7), Int32Type.instance, false);
                             }}, expressions.get(Expression.Op.RANGE));
-        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+        Assert.assertEquals(new Expression(SAITester.createIndexContext("age", Int32Type.instance))
                             {{
                                     operation = Op.NOT_EQ;
                                     lower = new Bound(Int32Type.instance.decompose(5), Int32Type.instance, true);
@@ -194,7 +194,7 @@ public class OperationTest extends IndexingSchemaLoader
                                                                   new SimpleExpression(age, Operator.LT, Int32Type.instance.decompose(7)))));
 
         Assert.assertEquals(1, expressions.size());
-        Assert.assertEquals(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+        Assert.assertEquals(new Expression(SAITester.createIndexContext("age", Int32Type.instance))
                             {{
                                     operation = Op.RANGE;
                                     lower = new Bound(Int32Type.instance.decompose(1), Int32Type.instance, false);
@@ -207,13 +207,13 @@ public class OperationTest extends IndexingSchemaLoader
                                                                   new SimpleExpression(firstName, Operator.NEQ, UTF8Type.instance.decompose("b")))));
 
         Assert.assertEquals(2, expressions.size());
-        Assert.assertEquals(new Expression(SAITester.createColumnContext("first_name", UTF8Type.instance))
+        Assert.assertEquals(new Expression(SAITester.createIndexContext("first_name", UTF8Type.instance))
                             {{
                                     operation = Op.NOT_EQ;
                                     lower = new Bound(UTF8Type.instance.decompose("b"), UTF8Type.instance, true);
                                     upper = lower;
                             }}, expressions.get(Expression.Op.NOT_EQ));
-        Assert.assertEquals(new Expression(SAITester.createColumnContext("first_name", UTF8Type.instance))
+        Assert.assertEquals(new Expression(SAITester.createIndexContext("first_name", UTF8Type.instance))
                             {{
                                     operation = Op.EQ;
                                     lower = upper = new Bound(UTF8Type.instance.decompose("a"), UTF8Type.instance, true);
@@ -226,14 +226,14 @@ public class OperationTest extends IndexingSchemaLoader
 
         List<Expression> expectedExpressions = new ArrayList<Expression>(2)
         {{
-                add(new Expression(SAITester.createColumnContext("comment", UTF8Type.instance))
+                add(new Expression(SAITester.createIndexContext("comment", UTF8Type.instance))
                 {{
                         operation = Op.MATCH;
                         lower = new Bound(UTF8Type.instance.decompose("soft eng"), UTF8Type.instance, true);
                         upper = lower;
                 }});
 
-                add(new Expression(SAITester.createColumnContext("comment", UTF8Type.instance))
+                add(new Expression(SAITester.createIndexContext("comment", UTF8Type.instance))
                 {{
                         operation = Op.NOT_EQ;
                         lower = new Bound(UTF8Type.instance.decompose("likes do"), UTF8Type.instance, true);
@@ -250,7 +250,7 @@ public class OperationTest extends IndexingSchemaLoader
 
         expectedExpressions = new ArrayList<Expression>(2)
         {{
-                add(new Expression(SAITester.createColumnContext("comment", UTF8Type.instance))
+                add(new Expression(SAITester.createIndexContext("comment", UTF8Type.instance))
                 {{
                         operation = Op.NOT_EQ;
                         lower = new Bound(UTF8Type.instance.decompose("likes do"), UTF8Type.instance, true);
@@ -268,14 +268,14 @@ public class OperationTest extends IndexingSchemaLoader
 
         expectedExpressions = new ArrayList<Expression>(2)
         {{
-                add(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+                add(new Expression(SAITester.createIndexContext("age", Int32Type.instance))
                 {{
                         operation = Op.NOT_EQ;
                         lower = new Bound(Int32Type.instance.decompose(27), Int32Type.instance, true);
                         upper = lower;
                 }});
 
-                add(new Expression(SAITester.createColumnContext("age", Int32Type.instance))
+                add(new Expression(SAITester.createIndexContext("age", Int32Type.instance))
                 {{
                         operation = Op.NOT_EQ;
                         lower = new Bound(Int32Type.instance.decompose(25), Int32Type.instance, true);
@@ -456,7 +456,7 @@ public class OperationTest extends IndexingSchemaLoader
 
         Assert.assertEquals(2, expressions.size());
 
-        Assert.assertEquals(new Expression(SAITester.createColumnContext("height", Int32Type.instance))
+        Assert.assertEquals(new Expression(SAITester.createIndexContext("height", Int32Type.instance))
         {{
                 operation = Op.NOT_EQ;
                 lower = new Bound(Int32Type.instance.decompose(5), Int32Type.instance, true);
@@ -470,7 +470,7 @@ public class OperationTest extends IndexingSchemaLoader
 
         Assert.assertEquals(2, expressions.size());
 
-        Assert.assertEquals(new Expression(SAITester.createColumnContext("height", Int32Type.instance))
+        Assert.assertEquals(new Expression(SAITester.createIndexContext("height", Int32Type.instance))
         {{
             operation = Op.RANGE;
             lower = new Bound(Int32Type.instance.decompose(0), Int32Type.instance, false);
@@ -485,7 +485,7 @@ public class OperationTest extends IndexingSchemaLoader
 
         Assert.assertEquals(2, expressions.size());
 
-        Assert.assertEquals(new Expression(SAITester.createColumnContext("height", Int32Type.instance))
+        Assert.assertEquals(new Expression(SAITester.createIndexContext("height", Int32Type.instance))
         {{
                 operation = Op.RANGE;
                 lower = new Bound(Int32Type.instance.decompose(0), Int32Type.instance, true);
