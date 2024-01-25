@@ -83,6 +83,7 @@ public class IndexInputReader extends IndexInput
         return new IndexInputReader(input, close, 0L, input.length());
     }
 
+    @SuppressWarnings("resource")
     public static IndexInputReader create(FileHandle handle)
     {
         RandomAccessReader reader = handle.createReader();

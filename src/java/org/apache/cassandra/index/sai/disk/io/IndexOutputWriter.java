@@ -35,7 +35,7 @@ public class IndexOutputWriter extends IndexOutput
     private final SequentialWriter out;
     private boolean closed;
 
-    IndexOutputWriter(SequentialWriter out)
+    public IndexOutputWriter(SequentialWriter out)
     {
         super(out.getFile().toString(), out.getFile().name());
         this.out = out;
@@ -54,7 +54,7 @@ public class IndexOutputWriter extends IndexOutput
     @Override
     public long getChecksum()
     {
-        return ((IndexComponents.ChecksumWriter)out).getChecksum();
+        return ((IndexFileUtils.ChecksumWriter)out).getChecksum();
     }
 
     @Override
