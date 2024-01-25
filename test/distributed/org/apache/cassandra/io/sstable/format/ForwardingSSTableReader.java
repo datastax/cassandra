@@ -45,6 +45,7 @@ import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.AbstractRowIndexEntry;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.IKeyFetcher;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.IVerifier;
 import org.apache.cassandra.io.sstable.KeyIterator;
@@ -371,15 +372,9 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public DecoratedKey keyAtPositionFromSecondaryIndex(long keyPositionFromSecondaryIndex) throws IOException
+    public IKeyFetcher openKeyFetcher(boolean isForSASI)
     {
-        return delegate.keyAtPositionFromSecondaryIndex(keyPositionFromSecondaryIndex);
-    }
-
-    @Override
-    public DecoratedKey keyAt(FileDataInput reader) throws IOException
-    {
-        return delegate.keyAt(reader);
+        return delegate.openKeyFetcher(isForSASI);
     }
 
     @Override
