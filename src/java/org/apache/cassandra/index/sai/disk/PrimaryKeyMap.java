@@ -21,57 +21,54 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.Closeable;
 import java.io.IOException;
 
-import javax.annotation.concurrent.NotThreadSafe;
-import javax.annotation.concurrent.ThreadSafe;
-
+import org.apache.cassandra.index.sai.SSTableQueryContext;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 /**
- * A bidirectional map of {@link PrimaryKey} to row ID. Implementations of this interface
+ * A bidirectional map of {@link PrimaryKey} to row Id. Implementations of this interface
  * are not expected to be threadsafe.
  */
-@NotThreadSafe
 public interface PrimaryKeyMap extends Closeable
 {
     /**
      * A factory for creating {@link PrimaryKeyMap} instances. Implementations of this
      * interface are expected to be threadsafe.
      */
-    @ThreadSafe
-    interface Factory extends Closeable
+    public interface Factory extends Closeable
     {
         /**
          * Creates a new {@link PrimaryKeyMap} instance
          *
+         * @param context the context used to record query time metrics and for caching
          * @return a {@link PrimaryKeyMap}
-         * @throws IOException if the {@link PrimaryKeyMap} couldn't be created
+         * @throws IOException
          */
-        PrimaryKeyMap newPerSSTablePrimaryKeyMap() throws IOException;
+        PrimaryKeyMap newPerSSTablePrimaryKeyMap(SSTableQueryContext context) throws IOException;
 
         @Override
-        default void close()
+        default void close() throws IOException
         {
         }
     }
 
     /**
-     * Returns a {@link PrimaryKey} for a row ID
+     * Returns a {@link PrimaryKey} for a row Id
      *
-     * @param sstableRowId the row ID to lookup
-     * @return the {@link PrimaryKey} associated with the row ID
+     * @param sstableRowId the row Id to lookup
+     * @return the {@link PrimaryKey} associated with the row Id
      */
     PrimaryKey primaryKeyFromRowId(long sstableRowId);
 
     /**
-     * Returns a row ID for a {@link PrimaryKey}
+     * Returns a row Id for a {@link PrimaryKey}
      *
      * @param key the {@link PrimaryKey} to lookup
-     * @return the row ID associated with the {@link PrimaryKey}
+     * @return the row Id associated with the {@link PrimaryKey}
      */
     long rowIdFromPrimaryKey(PrimaryKey key);
 
     @Override
-    default void close()
+    default void close() throws IOException
     {
     }
 }
