@@ -175,7 +175,7 @@ public class NumericIndexWriter implements Closeable
             components.put(IndexComponent.KD_TREE, bkdPosition, bkdOffset, bkdLength, attributes);
         }
 
-        try (TraversingBKDReader reader = new TraversingBKDReader(indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext), bkdPosition);
+        try (TraversingBKDReader reader = new TraversingBKDReader(indexDescriptor.createFlushTimePerIndexFileHandle(IndexComponent.KD_TREE, indexContext), bkdPosition);
              IndexOutput postingsOutput = indexDescriptor.openPerIndexOutput(IndexComponent.KD_TREE_POSTING_LISTS, indexContext, true))
         {
             final long postingsOffset = postingsOutput.getFilePointer();
