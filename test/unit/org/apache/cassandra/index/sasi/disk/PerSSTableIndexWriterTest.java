@@ -53,6 +53,7 @@ import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.index.sasi.utils.RangeIterator;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.IKeyFetcher;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -146,9 +147,19 @@ public class PerSSTableIndexWriterTest extends SchemaLoader
         for (String segment : segments)
             Assert.assertFalse(new File(segment).exists());
 
-        OnDiskIndex index = new OnDiskIndex(indexFile, Int32Type.instance, keyPosition -> {
-            ByteBuffer key = ByteBufferUtil.bytes(String.format(keyFormat, keyPosition));
-            return cfs.metadata().partitioner.decorateKey(key);
+        OnDiskIndex index = new OnDiskIndex(indexFile, Int32Type.instance, new IKeyFetcher()
+        {
+            @Override
+            public void close()
+            {
+            }
+
+            @Override
+            public DecoratedKey apply(long keyOffset)
+            {
+                ByteBuffer key = ByteBufferUtil.bytes(String.format(keyFormat, keyOffset));
+                return cfs.metadata().partitioner.decorateKey(key);
+            }
         });
 
         Assert.assertEquals(0, UTF8Type.instance.compare(index.minKey(), ByteBufferUtil.bytes(String.format(keyFormat, 0))));
