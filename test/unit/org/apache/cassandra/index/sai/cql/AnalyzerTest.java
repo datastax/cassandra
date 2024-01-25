@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-
 import org.junit.Test;
 
 public class AnalyzerTest extends VectorTester
