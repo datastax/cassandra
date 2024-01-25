@@ -27,6 +27,7 @@ import java.util.zip.Checksum;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -34,6 +35,7 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.lucene.store.ChecksumIndexInput;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.store.IndexInput;
 
 public class IndexFileUtils
@@ -48,8 +50,22 @@ public class IndexFileUtils
 
     public static final IndexFileUtils instance = new IndexFileUtils(DEFAULT_WRITER_OPTION);
     private static final Supplier<Checksum> CHECKSUM_FACTORY = CRC32C::new;
+    private static IndexFileUtils overrideInstance = null;
 
     private final SequentialWriterOption writerOption;
+
+    public static synchronized void setOverrideInstance(IndexFileUtils overrideInstance)
+    {
+        IndexFileUtils.overrideInstance = overrideInstance;
+    }
+
+    public static IndexFileUtils instance()
+    {
+        if (overrideInstance == null)
+            return instance;
+        else
+            return overrideInstance;
+    }
 
     @VisibleForTesting
     protected IndexFileUtils(SequentialWriterOption writerOption)
@@ -71,15 +87,32 @@ public class IndexFileUtils
 
     public IndexInput openBlockingInput(File file)
     {
-        FileHandle fileHandle = new FileHandle.Builder(file).complete();
-        RandomAccessReader randomReader = fileHandle.createReader();
+        FileHandle.Builder builder = new FileHandle.Builder(file);
+        FileHandle fileHandle = null;
+        RandomAccessReader randomReader = null;
+        try
+        {
+            fileHandle = builder.complete();
+            randomReader = fileHandle.createReader();
 
-        return IndexInputReader.create(randomReader, fileHandle::close);
+            return IndexInputReader.create(randomReader, fileHandle::close);
+        }
+        catch (RuntimeException | Error e)
+        {
+            Throwables.closeNonNullAndAddSuppressed(e, randomReader, fileHandle);
+            throw e;
+        }
     }
 
     public static ChecksumIndexInput getBufferedChecksumIndexInput(IndexInput indexInput)
     {
         return new BufferedChecksumIndexInput(indexInput, CHECKSUM_FACTORY.get());
+    }
+
+
+    public interface ChecksumWriter
+    {
+        long getChecksum();
     }
 
     /**
@@ -88,7 +121,7 @@ public class IndexFileUtils
      * with {@link IndexOutputWriter}. This, in turn, is used in conjunction with {@link BufferedChecksumIndexInput}
      * to verify the checksum of the data read from the file, so they must share the same checksum algorithm.
      */
-    static class ChecksummingWriter extends SequentialWriter
+    static class ChecksummingWriter extends SequentialWriter implements ChecksumWriter
     {
         private final Checksum checksum = CHECKSUM_FACTORY.get();
 
@@ -97,9 +130,16 @@ public class IndexFileUtils
             super(file, writerOption);
         }
 
-        public long getChecksum() throws IOException
+        public long getChecksum()
         {
-            flush();
+            try
+            {
+                flush();
+            }
+            catch (IOException e)
+            {
+                throw new FSWriteError(e, getFile());
+            }
             return checksum.getValue();
         }
 
