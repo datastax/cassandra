@@ -485,7 +485,6 @@ public class TableMetadata implements SchemaElement
         validatePartitionKeyColumns(previous);
         validateClusteringColumns(previous);
         validateRegularAndStaticColumns(previous);
-
     }
 
     private void validateKeyspaceName(TableMetadata previous)
