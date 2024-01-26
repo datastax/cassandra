@@ -516,8 +516,8 @@ public class TableMetadata implements SchemaElement
         if (!partitionKeyType.isCompatibleWith(previous.partitionKeyType))
         {
             except("Partition keys of different types (found %s; expected %s)",
-                    partitionKeyType,
-                    previous.partitionKeyType);
+                partitionKeyType,
+                previous.partitionKeyType);
         }
     }
 
@@ -526,8 +526,8 @@ public class TableMetadata implements SchemaElement
         if (previous.partitionKeyColumns.size() != partitionKeyColumns.size())
         {
             except("Partition keys of different length (found %s; expected %s)",
-                    partitionKeyColumns.size(),
-                    previous.partitionKeyColumns.size());
+                partitionKeyColumns.size(),
+                previous.partitionKeyColumns.size());
         }
 
         for (int i = 0; i < partitionKeyColumns.size(); i++)
@@ -535,8 +535,8 @@ public class TableMetadata implements SchemaElement
             if (!partitionKeyColumns.get(i).type.isCompatibleWith(previous.partitionKeyColumns.get(i).type))
             {
                 except("Partition key column mismatch (found %s; expected %s)",
-                        partitionKeyColumns.get(i).type,
-                        previous.partitionKeyColumns.get(i).type);
+                    partitionKeyColumns.get(i).type,
+                    previous.partitionKeyColumns.get(i).type);
             }
         }
     }
@@ -546,8 +546,8 @@ public class TableMetadata implements SchemaElement
         if (previous.clusteringColumns.size() != clusteringColumns.size())
         {
             except("Clustering columns of different length (found %s; expected %s)",
-                    clusteringColumns.size(),
-                    previous.clusteringColumns.size());
+                clusteringColumns.size(),
+                previous.clusteringColumns.size());
         }
 
         for (int i = 0; i < clusteringColumns.size(); i++)
@@ -555,8 +555,8 @@ public class TableMetadata implements SchemaElement
             if (!clusteringColumns.get(i).type.isCompatibleWith(previous.clusteringColumns.get(i).type))
             {
                 except("Clustering column mismatch (found %s; expected %s)",
-                        clusteringColumns.get(i).type,
-                        previous.clusteringColumns.get(i).type);
+                    clusteringColumns.get(i).type,
+                    previous.clusteringColumns.get(i).type);
             }
         }
     }
