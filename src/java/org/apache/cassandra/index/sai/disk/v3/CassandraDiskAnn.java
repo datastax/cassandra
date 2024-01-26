@@ -21,8 +21,10 @@ package org.apache.cassandra.index.sai.disk.v3;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.function.IntConsumer;
-import java.util.logging.Logger;
 import javax.annotation.Nullable;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.disk.CachingGraphIndex;
 import io.github.jbellis.jvector.disk.OnDiskGraphIndex;
@@ -53,7 +55,7 @@ import org.apache.cassandra.utils.CloseableIterator;
 
 public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 {
-    private static final Logger logger = Logger.getLogger(CassandraDiskAnn.class.getName());
+    private static final Logger logger = LoggerFactory.getLogger(CassandraDiskAnn.class.getName());
 
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
@@ -71,7 +73,16 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
         SegmentMetadata.ComponentMetadata termsMetadata = getComponentMetadata(IndexComponent.TERMS_DATA);
         graphHandle = indexFiles.termsData();
-        graph = new CachingGraphIndex(new OnDiskGraphIndex<>(graphHandle::createReader, termsMetadata.offset));
+        var graphIndex = new OnDiskGraphIndex<float[]>(graphHandle::createReader, termsMetadata.offset);
+
+        // try to reduce cache distance from default 3 to reduce memory usage.
+        // let's have astra target 1% of the vectors
+        int distance = Math.min(logBaseX(0.01d * graphIndex.size(), graphIndex.maxDegree()), 3);
+
+        if (distance < 3 && logger.isDebugEnabled())
+            logger.debug("Reducing cache distance from 3 to {} for {}", distance, graphHandle.path());
+
+        graph = new CachingGraphIndex(graphIndex, distance);
         view = ThreadLocal.withInitial(graph::getView);
 
         long pqSegmentOffset = getComponentMetadata(IndexComponent.PQ).offset;
@@ -90,6 +101,12 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
         SegmentMetadata.ComponentMetadata postingListsMetadata = getComponentMetadata(IndexComponent.POSTING_LISTS);
         ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
+    }
+
+    private static int logBaseX(double val, double base) {
+        if (base <= 1.0d || val <= 1.0d)
+            return 0;
+        return (int)Math.floor(Math.log(val) / Math.log(base));
     }
 
     @Override
