@@ -461,16 +461,33 @@ public class TableMetadata implements SchemaElement
         return !columnName.hasRemaining();
     }
 
-    public void validateTableStructureCompatibility(TableMetadata previous)
+    /**
+     * Method that compares two TableMetadata objects. This is a modified version of validateCompatibility that is used
+     * when checking the compatibility between the schema metadata from an SSTable against the schema metadata from a
+     * CQL table.
+     *
+     * The serialization header of the SSTable does not contain exactly the same information available in the schema of
+     * a CQL table, so the comparison needs to be adapted to the information available.
+     *
+     * For example, the serialization header does not contain the partition key columns: it only contains the composite
+     * type of the whole partition key. For this reason, the comparison must be between the partition key types contained
+     * in the two metadata objects, rather than comparing the individual column as validateCompatibility does.
+     * This comparison is sufficient anyway because the composite types are the same only if their components are of the
+     * same type and in the same order.
+     *
+     * @param other TableMetadata instance to compare against
+     */
+    public void validateTableStructureCompatibility(TableMetadata other)
     {
         if (isIndex())
             return;
 
-        validateTableName(previous);
-        validateTableType(previous);
-        validatePartitionKeyColumnTypes(previous);
-        validateClusteringColumns(previous);
-        validateRegularAndStaticColumns(previous);
+        validateTableName(other);
+        validateTableType(other);
+        // comparing the types of the partition keys rather than the individual columns, as explained in the comment above
+        validatePartitionKeyTypes(other);
+        validateClusteringColumns(other);
+        validateRegularAndStaticColumns(other);
     }
 
     void validateCompatibility(TableMetadata previous)
@@ -511,7 +528,7 @@ public class TableMetadata implements SchemaElement
             except("Table type mismatch (found %s; expected %s)", flags, previous.flags);
     }
 
-    private void validatePartitionKeyColumnTypes(TableMetadata previous)
+    private void validatePartitionKeyTypes(TableMetadata previous)
     {
         if (!partitionKeyType.isCompatibleWith(previous.partitionKeyType))
         {
