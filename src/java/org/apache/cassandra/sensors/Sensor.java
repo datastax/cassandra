@@ -19,9 +19,12 @@
 package org.apache.cassandra.sensors;
 
 import java.util.Objects;
+import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.AtomicDouble;
+
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
  * Tracks the {@link #value} for a given measurement of a given {@link Type} and {@link Context}, during any
@@ -41,6 +44,8 @@ public class Sensor
     private final Context context;
     private final Type type;
     private final AtomicDouble value;
+    private long lastSnapshotTime;
+    private double lastSnapshotValue;
 
     protected Sensor(Context context, Type type)
     {
@@ -51,7 +56,16 @@ public class Sensor
 
     protected void increment(double value)
     {
-        this.value.addAndGet(value);
+        this.increment(value, (ignored) -> false, 0L);
+    }
+
+    protected void increment(double value, Predicate<Sensor> snapshotSensorValue, long now)
+    {
+        double oldValue = this.value.getAndAdd(value);
+        if (snapshotSensorValue.test(this)) {
+            this.lastSnapshotValue = oldValue;
+            this.lastSnapshotTime = now;
+        }
     }
 
     public Context getContext()
@@ -67,6 +81,16 @@ public class Sensor
     public double getValue()
     {
         return value.doubleValue();
+    }
+
+    public long getLastSnapshotTime()
+    {
+        return lastSnapshotTime;
+    }
+
+    public double getLastSnapshotValue()
+    {
+        return lastSnapshotValue;
     }
 
     @VisibleForTesting

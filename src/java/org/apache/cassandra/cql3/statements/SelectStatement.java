@@ -36,6 +36,8 @@ import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -62,6 +64,12 @@ import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.SensorsRegistry;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
@@ -492,6 +500,14 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         try (PartitionIterator page = pager.fetchPage(pageSize, queryStartNanoTime))
         {
             msg = processResults(page, options, selectors, nowInSec, userLimit);
+
+            RequestSensors requestSensors = RequestTracker.instance.get();
+            if (requestSensors != null)
+            {
+                Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(Type.READ_BYTES);
+                readRequestSensor.map(SensorsCustomParams::sensorValueAsByteBuffer)
+                                 .ifPresent(bytes -> msg.setCustomPayload(Collections.singletonMap(SensorsCustomParams.READ_BYTES_REQUEST, bytes)));
+            }
         }
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this

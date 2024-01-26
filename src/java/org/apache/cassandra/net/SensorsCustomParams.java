@@ -44,11 +44,24 @@ public final class SensorsCustomParams
     /**
      * Utility method to encode senors value as byte buffer in the big endian order.
      */
-    public static byte[] sensorValueAsBytes(double value)
+    public static byte[] sensorValueAsBytes(Sensor sensor)
+    {
+        return sensorValueAsByteBuffer(sensor).array();
+    }
+
+    public static ByteBuffer sensorValueAsByteBuffer(Sensor sensor)
     {
         ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);
-        buffer.putDouble(value);
+        buffer.putDouble(sensor.getValue());
 
-        return buffer.array();
+        return buffer;
+    }
+
+    public static double sensorValueFromBytes(byte[] bytes)
+    {
+        ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);
+        buffer.put(bytes);
+        buffer.flip();
+        return buffer.getDouble();
     }
 }

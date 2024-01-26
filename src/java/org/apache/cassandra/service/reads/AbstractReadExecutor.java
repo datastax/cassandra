@@ -17,6 +17,10 @@
  */
 package org.apache.cassandra.service.reads;
 
+import java.util.Collection;
+import java.util.Map;
+import java.util.Optional;
+
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +31,7 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.transform.DuplicateRowChecker;
@@ -42,6 +47,13 @@ import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.metrics.ReadCoordinationMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.SensorsRegistry;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.StorageProxy.LocalReadRunnable;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
@@ -440,6 +452,31 @@ public abstract class AbstractReadExecutor
             // the caught exception here will have CL.ALL from the repair command,
             // not whatever CL the initial command was at (CASSANDRA-7947)
             throw new ReadTimeoutException(replicaPlan().consistencyLevel(), handler.blockFor - 1, handler.blockFor, true);
+        }
+    }
+
+    /**
+     * Update the {@link RequestSensors} with the number of bytes read returned by the replicas.
+     */
+    public void updateSensorValues()
+    {
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors == null)
+            return;
+
+        Collection<Message<ReadResponse>> messages = this.handler.resolver.responses.snapshot();
+        for (Message<ReadResponse> msg : messages)
+        {
+            Map<String, byte[]> customParams = msg.header.customParams();
+            if (customParams != null)
+            {
+                byte[] tableBytes = msg.header.customParams().get(SensorsCustomParams.READ_BYTES_REQUEST);
+                if (tableBytes != null)
+                {
+                    double tableValue = SensorsCustomParams.sensorValueFromBytes(tableBytes);
+                    sensors.incrementSensor(Type.READ_BYTES, tableValue);
+                }
+            }
         }
     }
 

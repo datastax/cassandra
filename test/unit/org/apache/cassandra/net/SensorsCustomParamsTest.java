@@ -22,16 +22,25 @@ import java.nio.ByteBuffer;
 
 import org.junit.Test;
 
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.SensorsRegistry;
+import org.apache.cassandra.sensors.Type;
+
 import static org.junit.Assert.assertEquals;
 
 public class SensorsCustomParamsTest
 {
     @Test
-    public void testDoubleAsBytes()
+    public void testSensorValueAsBytes()
     {
+        RequestSensors requestSensors = new RequestSensors(null);
+        requestSensors.registerSensor(Type.READ_BYTES);
         double d = Double.MAX_VALUE;
-        byte[] bytes = SensorsCustomParams.sensorValueAsBytes(d);
+        requestSensors.incrementSensor(Type.READ_BYTES, d);
+        Sensor sensor = requestSensors.getSensor(Type.READ_BYTES).get();
+        byte[] bytes = SensorsCustomParams.sensorValueAsBytes(sensor);
         ByteBuffer bb = ByteBuffer.wrap(bytes);
-        assertEquals(Double.MAX_VALUE, bb.getDouble(), 0.0);
+        assertEquals(d, bb.getDouble(), 0.0);
     }
 }

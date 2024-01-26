@@ -86,10 +86,10 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(Type.READ_BYTES);
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
-        readRequestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_REQUEST, bytes));
+        readRequestSensor.map(SensorsCustomParams::sensorValueAsBytes).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_REQUEST, bytes));
 
         Optional<Sensor> readTableSensor = SensorsRegistry.instance.getSensor(Context.from(command), Type.READ_BYTES);
-        readTableSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_TABLE, bytes));
+        readTableSensor.map(SensorsCustomParams::sensorValueAsBytes).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_TABLE, bytes));
 
         MessagingService.instance().send(reply.build(), message.from());
     }
