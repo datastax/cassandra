@@ -340,7 +340,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         if (relation == Relation.CELL_OUTSIDE_QUERY)
         {
             listener.onIntersectionEarlyExit();
-            return null;
+            return PostingList.EMPTY;
         }
 
         listener.onSegmentHit();
