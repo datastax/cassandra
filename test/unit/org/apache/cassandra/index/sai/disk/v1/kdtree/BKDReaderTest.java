@@ -211,7 +211,7 @@ public class BKDReaderTest extends SaiRandomizedTest
 
         try (PostingList intersection = reader.intersect(NONE_MATCH, (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext()))
         {
-            assertNull(intersection);
+            assertEquals(PostingList.EMPTY, intersection);
         }
 
         try (PostingList collectAllIntersection = reader.intersect(ALL_MATCH, (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
@@ -236,7 +236,6 @@ public class BKDReaderTest extends SaiRandomizedTest
 
         final PostingList intersection = reader.intersect(buildQuery(queryMin, queryMax), (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
 
-        assertThat(intersection, is(instanceOf(MergePostingList.class)));
         long expectedRowID = queryMin;
         for (long id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
         {
@@ -275,7 +274,7 @@ public class BKDReaderTest extends SaiRandomizedTest
         final BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
 
         PostingList intersection = reader.intersect(NONE_MATCH, (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
-        assertNull(intersection);
+        assertEquals(PostingList.EMPTY, intersection);
 
         intersection = reader.intersect(ALL_MATCH, (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
         assertEquals(numRows, intersection.size());
@@ -314,7 +313,7 @@ public class BKDReaderTest extends SaiRandomizedTest
         final BKDReader reader = finishAndOpenReaderOneDim(50, buffer);
 
         final PostingList intersection = reader.intersect(buildQuery(1017, 1096), (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
-        assertNull(intersection);
+        assertEquals(PostingList.EMPTY, intersection);
     }
 
     private BKDReader.IntersectVisitor buildQuery(int queryMin, int queryMax)
