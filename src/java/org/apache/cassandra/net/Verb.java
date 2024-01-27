@@ -175,22 +175,22 @@ public class Verb
 
     // repair; mostly doesn't use callbacks and sends responses as their own request messages, with matching sessions by uuid; should eventually harmonize and make idiomatic
     // for the repair messages that implement retry logic, use rpcTimeout so the single request fails faster, then retries can be used to recover
-    public static Verb REPAIR_RSP             = new Verb("REPAIR_RSP",             100, P1, repairTimeout,   REQUEST_RESPONSE,  () -> NoPayload.serializer,                 () -> ResponseVerbHandler.instance                             );
-    public static Verb VALIDATION_RSP         = new Verb("VALIDATION_RSP",         102, P1, repairValidationRspTimeout, ANTI_ENTROPY, () -> ValidationResponse.serializer,  () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb VALIDATION_REQ         = new Verb("VALIDATION_REQ",         101, P1, repairWithBackoffTimeout, ANTI_ENTROPY, () -> ValidationRequest.serializer,     () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb SYNC_RSP               = new Verb("SYNC_RSP",               104, P1, repairWithBackoffTimeout, ANTI_ENTROPY, () -> SyncResponse.serializer,          () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb SYNC_REQ               = new Verb("SYNC_REQ",               103, P1, repairWithBackoffTimeout, ANTI_ENTROPY, () -> SyncRequest.serializer,           () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb PREPARE_MSG            = new Verb("PREPARE_MSG",            105, P1, repairWithBackoffTimeout, ANTI_ENTROPY, () -> PrepareMessage.serializer,        () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb SNAPSHOT_MSG           = new Verb("SNAPSHOT_MSG",           106, P1, repairWithBackoffTimeout, ANTI_ENTROPY, () -> SnapshotMessage.serializer,       () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb CLEANUP_MSG            = new Verb("CLEANUP_MSG",            107, P1, repairWithBackoffTimeout, ANTI_ENTROPY, () -> CleanupMessage.serializer,        () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb PREPARE_CONSISTENT_RSP = new Verb("PREPARE_CONSISTENT_RSP", 109, P1, repairTimeout,   ANTI_ENTROPY,      () -> PrepareConsistentResponse.serializer, () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb PREPARE_CONSISTENT_REQ = new Verb("PREPARE_CONSISTENT_REQ", 108, P1, repairTimeout,   ANTI_ENTROPY,      () -> PrepareConsistentRequest.serializer,  () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb FINALIZE_PROPOSE_MSG   = new Verb("FINALIZE_PROPOSE_MSG",   110, P1, repairTimeout,   ANTI_ENTROPY,      () -> FinalizePropose.serializer,           () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb FINALIZE_PROMISE_MSG   = new Verb("FINALIZE_PROMISE_MSG",   111, P1, repairTimeout,   ANTI_ENTROPY,      () -> FinalizePromise.serializer,           () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb FINALIZE_COMMIT_MSG    = new Verb("FINALIZE_COMMIT_MSG",    112, P1, repairTimeout,   ANTI_ENTROPY,      () -> FinalizeCommit.serializer,            () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb FAILED_SESSION_MSG     = new Verb("FAILED_SESSION_MSG",     113, P1, repairTimeout,   ANTI_ENTROPY,      () -> FailSession.serializer,               () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb STATUS_RSP             = new Verb("STATUS_RSP",             115, P1, repairTimeout,   ANTI_ENTROPY,      () -> StatusResponse.serializer,            () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
-    public static Verb STATUS_REQ             = new Verb("STATUS_REQ",             114, P1, repairTimeout,   ANTI_ENTROPY,      () -> StatusRequest.serializer,             () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb REPAIR_RSP             = new Verb("REPAIR_RSP",             100, P1, repairMsgTimeout,REQUEST_RESPONSE,  () -> NoPayload.serializer,                 () -> ResponseVerbHandler.instance                             );
+    public static Verb VALIDATION_RSP         = new Verb("VALIDATION_RSP",         102, P1, longTimeout     ,ANTI_ENTROPY,      () -> ValidationResponse.serializer,        () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb VALIDATION_REQ         = new Verb("VALIDATION_REQ",         101, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> ValidationRequest.serializer,         () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb SYNC_RSP               = new Verb("SYNC_RSP",               104, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> SyncResponse.serializer,              () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb SYNC_REQ               = new Verb("SYNC_REQ",               103, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> SyncRequest.serializer,               () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb PREPARE_MSG            = new Verb("PREPARE_MSG",            105, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> PrepareMessage.serializer,            () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb SNAPSHOT_MSG           = new Verb("SNAPSHOT_MSG",           106, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> SnapshotMessage.serializer,           () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb CLEANUP_MSG            = new Verb("CLEANUP_MSG",            107, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> CleanupMessage.serializer,            () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb PREPARE_CONSISTENT_RSP = new Verb("PREPARE_CONSISTENT_RSP", 109, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> PrepareConsistentResponse.serializer, () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb PREPARE_CONSISTENT_REQ = new Verb("PREPARE_CONSISTENT_REQ", 108, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> PrepareConsistentRequest.serializer,  () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb FINALIZE_PROPOSE_MSG   = new Verb("FINALIZE_PROPOSE_MSG",   110, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> FinalizePropose.serializer,           () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb FINALIZE_PROMISE_MSG   = new Verb("FINALIZE_PROMISE_MSG",   111, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> FinalizePromise.serializer,           () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb FINALIZE_COMMIT_MSG    = new Verb("FINALIZE_COMMIT_MSG",    112, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> FinalizeCommit.serializer,            () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb FAILED_SESSION_MSG     = new Verb("FAILED_SESSION_MSG",     113, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> FailSession.serializer,               () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb STATUS_RSP             = new Verb("STATUS_RSP",             115, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> StatusResponse.serializer,            () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
+    public static Verb STATUS_REQ             = new Verb("STATUS_REQ",             114, P1, repairMsgTimeout,ANTI_ENTROPY,      () -> StatusRequest.serializer,             () -> RepairMessageVerbHandler.instance(), REPAIR_RSP          );
 
     public static Verb REPLICATION_DONE_RSP   = new Verb("REPLICATION_DONE_RSP",   82,  P0, rpcTimeout,      MISC,              () -> NoPayload.serializer,                 () -> ResponseVerbHandler.instance                             );
     public static Verb REPLICATION_DONE_REQ   = new Verb("REPLICATION_DONE_REQ",   22,  P0, rpcTimeout,      MISC,              () -> NoPayload.serializer,                 () -> ReplicationDoneVerbHandler.instance, REPLICATION_DONE_RSP);
@@ -236,7 +236,7 @@ public class Verb
     // largest used public static Verb ID: 116
 
     // CUSTOM VERBS
-    public static Verb UNUSED_CUSTOM_VERB     = new Verb("UNUSED_CUSTOM_VERB", CUSTOM,0,P1, rpcTimeout,      INTERNAL_RESPONSE, () -> null,                                 () -> null                                                     );
+    public static Verb UNUSED_CUSTOM_VERB     = new Verb("UNUSED_CUSTOM_VERB", CUSTOM,          0, P1,  rpcTimeout,      INTERNAL_RESPONSE, () -> null,                                 () -> null                                                     );
 
     public enum Priority
     {
