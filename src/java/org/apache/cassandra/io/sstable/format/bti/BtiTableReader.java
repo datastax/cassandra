@@ -45,12 +45,14 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.IKeyFetcher;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.IVerifier;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.SSTableReadsListener.SelectionReason;
 import org.apache.cassandra.io.sstable.SSTableReadsListener.SkippingReason;
+import org.apache.cassandra.io.sstable.format.AbstractKeyFetcher;
 import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
@@ -218,6 +220,19 @@ public class BtiTableReader extends SSTableReaderWithFilter
             reader.seek(keyPositionFromSecondaryIndex);
             return keyAt(reader);
         }
+    }
+
+    @Override
+    public IKeyFetcher openKeyFetcher(boolean isForSASI)
+    {
+        return new AbstractKeyFetcher(openDataReader())
+        {
+            @Override
+            public DecoratedKey readKey(RandomAccessReader reader) throws IOException
+            {
+                return decorateKey(ByteBufferUtil.readWithShortLength(reader));
+            }
+        };
     }
 
     @Override

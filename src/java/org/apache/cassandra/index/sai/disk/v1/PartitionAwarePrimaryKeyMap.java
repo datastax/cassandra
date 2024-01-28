@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-
 import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -33,10 +32,10 @@ import org.apache.cassandra.index.sai.disk.v1.bitpack.BlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.MonotonicBlockPackedReader;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.io.sstable.IKeyFetcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.Throwables;
 
 /**
@@ -50,7 +49,7 @@ import org.apache.cassandra.utils.Throwables;
  *     Uses component {@link IndexComponent#OFFSETS_VALUES} </li>
  * </ul>
  *
- * This uses a {@link KeyFetcher} to read the {@link org.apache.cassandra.db.DecoratedKey} for a {@link PrimaryKey} from the
+ * This uses a {@link IKeyFetcher} to read the {@link org.apache.cassandra.db.DecoratedKey} for a {@link PrimaryKey} from the
  * sstable using the sstable offset provided by the monotonic-block-packed structure above.
  */
 @NotThreadSafe
@@ -62,7 +61,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         private final LongArray.Factory tokenReaderFactory;
         private final LongArray.Factory offsetReaderFactory;
         private final MetadataSource metadata;
-        private final KeyFetcher keyFetcher;
+        private final SSTableReader sstable;
         private final IPartitioner partitioner;
         private final PrimaryKey.Factory primaryKeyFactory;
 
@@ -83,7 +82,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
                 this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
                 this.offsetReaderFactory = new MonotonicBlockPackedReader(offset, offsetsMeta);
                 this.partitioner = indexDescriptor.partitioner;
-                this.keyFetcher = new KeyFetcher(sstable);
+                this.sstable = sstable;
                 this.primaryKeyFactory = indexDescriptor.primaryKeyFactory;
             }
             catch (Throwable t)
@@ -95,38 +94,48 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         @Override
         public PrimaryKeyMap newPerSSTablePrimaryKeyMap(SSTableQueryContext context)
         {
-            final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.openTokenReader(0, context));
-            final LongArray rowIdToOffset = new LongArray.DeferredLongArray(() -> offsetReaderFactory.open());
+            LongArray rowIdToToken = null;
+            LongArray rowIdToOffset = null;
+            IKeyFetcher keyFetcher = null;
+            try
+            {
+                rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.openTokenReader(0, context));
+                rowIdToOffset = new LongArray.DeferredLongArray(offsetReaderFactory::open);
+                keyFetcher = sstable.openKeyFetcher(false);
 
-            return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory);
+                return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory);
+            }
+            catch (RuntimeException | Error e)
+            {
+                Throwables.closeNonNullAndAddSuppressed(e, rowIdToToken, rowIdToOffset, keyFetcher);
+            }
+            return null;
         }
 
         @Override
         public void close() throws IOException
         {
-            FileUtils.closeQuietly(token, offset);
+            FileUtils.closeQuietly(offset, token);
         }
     }
 
     private final LongArray rowIdToToken;
     private final LongArray rowIdToOffset;
     private final IPartitioner partitioner;
-    private final KeyFetcher keyFetcher;
-    private final RandomAccessReader reader;
+    private final IKeyFetcher keyFetcher;
     private final PrimaryKey.Factory primaryKeyFactory;
     private final ByteBuffer tokenBuffer = ByteBuffer.allocate(Long.BYTES);
 
     private PartitionAwarePrimaryKeyMap(LongArray rowIdToToken,
                                         LongArray rowIdToOffset,
                                         IPartitioner partitioner,
-                                        KeyFetcher keyFetcher,
+                                        IKeyFetcher keyFetcher,
                                         PrimaryKey.Factory primaryKeyFactory)
     {
         this.rowIdToToken = rowIdToToken;
         this.rowIdToOffset = rowIdToOffset;
         this.partitioner = partitioner;
         this.keyFetcher = keyFetcher;
-        this.reader = null; //keyFetcher.createReader(); TODO fix this
         this.primaryKeyFactory = primaryKeyFactory;
     }
 
@@ -147,11 +156,11 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public void close() throws IOException
     {
-        FileUtils.closeQuietly(rowIdToToken, rowIdToOffset, reader);
+        FileUtils.closeQuietly(rowIdToToken, rowIdToOffset, keyFetcher);
     }
 
     private PrimaryKey supplier(long sstableRowId)
     {
-        return primaryKeyFactory.createPartitionKeyOnly(keyFetcher.apply(rowIdToOffset.get(sstableRowId))); // TODO fix key fetcher
+        return primaryKeyFactory.createPartitionKeyOnly(keyFetcher.apply(rowIdToOffset.get(sstableRowId)));
     }
 }

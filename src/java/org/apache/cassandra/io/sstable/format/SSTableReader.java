@@ -85,6 +85,7 @@ import org.apache.cassandra.io.sstable.AbstractRowIndexEntry;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.IKeyFetcher;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.IVerifier;
 import org.apache.cassandra.io.sstable.KeyIterator;
@@ -1089,9 +1090,9 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     }
 
     /**
-     * Reads the key stored at the position saved in SASI.
+     * Reads the key stored at the position saved in secondary index
      * <p>
-     * When SASI is created, it uses key locations retrieved from {@link KeyReader#keyPositionForSecondaryIndex()}.
+     * When a secondary index is created, it uses key locations retrieved from {@link KeyReader#keyPositionForSecondaryIndex()}.
      * This method is to read the key stored at such position. It is up to the concrete SSTable format implementation
      * what that position means and which file it refers. The only requirement is that it is consistent with what
      * {@link KeyReader#keyPositionForSecondaryIndex()} returns.
@@ -1099,6 +1100,15 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      * @return key if found, {@code null} otherwise
      */
     public abstract DecoratedKey keyAtPositionFromSecondaryIndex(long keyPositionFromSecondaryIndex) throws IOException;
+
+    /**
+     * Returns an instance of {@link IKeyFetcher} that can be used to fetch keys from this SSTable.
+     *
+     * @param isForSASI whether the key fetcher is for SASI index - SASI indexes may use a different source of keys
+     *                  depending on the SSTableFormat (for example index file vs data file). If false, the keys are
+     *                  fetched from the data file.
+     */
+    public abstract IKeyFetcher openKeyFetcher(boolean isForSASI);
 
     public DecoratedKey keyAt(RandomAccessReader indexFileReader, long indexPosition) throws IOException
     {
