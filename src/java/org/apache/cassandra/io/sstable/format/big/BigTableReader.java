@@ -416,15 +416,6 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
     }
 
     @Override
-    public DecoratedKey keyAtPositionFromSecondaryIndex(long keyPositionFromSecondaryIndex) throws IOException
-    {
-        try (FileDataInput in = ifile.createReader(keyPositionFromSecondaryIndex))
-        {
-            return keyAt(in);
-        }
-    }
-
-    @Override
     public IKeyFetcher openKeyFetcher(boolean isForSASI)
     {
         return new AbstractKeyFetcher(isForSASI ? openIndexReader() : openDataReader())
@@ -435,16 +426,6 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
                 return decorateKey(ByteBufferUtil.readWithShortLength(reader));
             }
         };
-    }
-
-    @Override
-    public DecoratedKey keyAt(FileDataInput reader) throws IOException
-    {
-        if (reader.isEOF()) return null;
-
-        DecoratedKey key = decorateKey(ByteBufferUtil.readWithShortLength(reader));
-
-        return key;
     }
 
     @Override

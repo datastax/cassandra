@@ -372,21 +372,9 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public DecoratedKey keyAtPositionFromSecondaryIndex(long keyPositionFromSecondaryIndex) throws IOException
-    {
-        return delegate.keyAtPositionFromSecondaryIndex(keyPositionFromSecondaryIndex);
-    }
-
-    @Override
     public IKeyFetcher openKeyFetcher(boolean isForSASI)
     {
         return delegate.openKeyFetcher(isForSASI);
-    }
-
-    @Override
-    public DecoratedKey keyAt(FileDataInput reader) throws IOException
-    {
-        return delegate.keyAt(reader);
     }
 
     @Override

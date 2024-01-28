@@ -52,27 +52,16 @@ import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ClusteringBoundOrBoundary;
-import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.AbstractLogTransaction;
-import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.EncodingStats;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.Rows;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.db.rows.UnfilteredSource;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
@@ -91,11 +80,10 @@ import org.apache.cassandra.io.sstable.IVerifier;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.KeyReader;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
-import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.SSTableWatcher;
+import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
@@ -114,9 +102,9 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.OutputHandler;
-import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -1090,18 +1078,6 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     }
 
     /**
-     * Reads the key stored at the position saved in secondary index
-     * <p>
-     * When a secondary index is created, it uses key locations retrieved from {@link KeyReader#keyPositionForSecondaryIndex()}.
-     * This method is to read the key stored at such position. It is up to the concrete SSTable format implementation
-     * what that position means and which file it refers. The only requirement is that it is consistent with what
-     * {@link KeyReader#keyPositionForSecondaryIndex()} returns.
-     *
-     * @return key if found, {@code null} otherwise
-     */
-    public abstract DecoratedKey keyAtPositionFromSecondaryIndex(long keyPositionFromSecondaryIndex) throws IOException;
-
-    /**
      * Returns an instance of {@link IKeyFetcher} that can be used to fetch keys from this SSTable.
      *
      * @param isForSASI whether the key fetcher is for SASI index - SASI indexes may use a different source of keys
@@ -1109,109 +1085,6 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      *                  fetched from the data file.
      */
     public abstract IKeyFetcher openKeyFetcher(boolean isForSASI);
-
-    public DecoratedKey keyAt(RandomAccessReader indexFileReader, long indexPosition) throws IOException
-    {
-        indexFileReader.seek(indexPosition);
-        return keyAt(indexFileReader);
-    }
-
-
-    public abstract DecoratedKey keyAt(FileDataInput reader) throws IOException;
-
-    /**
-     * Retrieves the partition-level deletion time at the given position of the data file, as specified by
-     * {@link SSTableFlushObserver#partitionLevelDeletion(DeletionTime, long)}.
-     *
-     * @param position the start position of the partion-level deletion time in the data file
-     * @return the partion-level deletion time at the specified position
-     */
-    public DeletionTime partitionLevelDeletionAt(long position) throws IOException
-    {
-        try (FileDataInput in = dfile.createReader(position))
-        {
-            if (in.isEOF())
-                return null;
-
-            return DeletionTime.serializer.deserialize(in);
-        }
-    }
-
-    /**
-     * Retrieves the static row at the given position of the data file, as specified by
-     * {@link SSTableFlushObserver#staticRow(Row, long)}.
-     *
-     * @param position the start position of the static row in the data file
-     * @param columnFilter the columns to fetch, {@code null} to select all the columns
-     * @return the static row at the specified position
-     */
-    public Row staticRowAt(long position, ColumnFilter columnFilter) throws IOException
-    {
-        if (!header.hasStatic())
-            return Rows.EMPTY_STATIC_ROW;
-
-        try (FileDataInput in = dfile.createReader(position))
-        {
-            if (in.isEOF())
-                return null;
-
-            int version = descriptor.version.correspondingMessagingVersion();
-            DeserializationHelper helper = new DeserializationHelper(metadata.get(),
-                                                                     version,
-                                                                     DeserializationHelper.Flag.LOCAL,
-                                                                     columnFilter);
-
-            return UnfilteredSerializer.serializer.deserializeStaticRow(in, header, helper);
-        }
-    }
-
-    /**
-     * Retrieves the clustering prefix of the unfiltered at the given position of the data file, as specified by
-     * {@link SSTableFlushObserver#nextUnfilteredCluster(Unfiltered, long)}.
-     *
-     * @param position the start position of the unfiltered in the data file
-     * @return the clustering prefix of the unfiltered at the specified position
-     */
-    public ClusteringPrefix clusteringAt(long position) throws IOException
-    {
-        try (FileDataInput in = dfile.createReader(position))
-        {
-            if (in.isEOF())
-                return null;
-
-            int version = descriptor.version.correspondingMessagingVersion();
-            int flags = in.readUnsignedByte();
-            boolean isRow = UnfilteredSerializer.kind(flags) == Unfiltered.Kind.ROW;
-
-            return isRow
-                   ? Clustering.serializer.deserialize(in, version, header.clusteringTypes())
-                   : ClusteringBoundOrBoundary.serializer.deserialize(in, version, header.clusteringTypes());
-        }
-    }
-
-    /**
-     * Retrieves the unfiltered at the given position of the data file, as specified by
-     * {@link SSTableFlushObserver#nextUnfilteredCluster(Unfiltered, long)}.
-     *
-     * @param position the start position of the unfiltered in the data file
-     * @param columnFilter the columns to fetch, {@code null} to select all the columns
-     * @return the unfiltered at the specified position
-     */
-    public Unfiltered unfilteredAt(long position, ColumnFilter columnFilter) throws IOException
-    {
-        try (FileDataInput in = dfile.createReader(position))
-        {
-            if (in.isEOF())
-                return null;
-
-            int version = descriptor.version.correspondingMessagingVersion();
-            DeserializationHelper helper = new DeserializationHelper(metadata.get(),
-                                                                     version,
-                                                                     DeserializationHelper.Flag.LOCAL,
-                                                                     columnFilter);
-            return UnfilteredSerializer.serializer.deserialize(in, header, helper, BTreeRow.sortedBuilder());
-        }
-    }
 
     @Override
     public boolean isPendingRepair()

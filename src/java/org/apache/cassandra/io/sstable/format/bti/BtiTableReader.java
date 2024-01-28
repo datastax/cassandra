@@ -213,16 +213,6 @@ public class BtiTableReader extends SSTableReaderWithFilter
     }
 
     @Override
-    public DecoratedKey keyAtPositionFromSecondaryIndex(long keyPositionFromSecondaryIndex) throws IOException
-    {
-        try (RandomAccessReader reader = openDataReader())
-        {
-            reader.seek(keyPositionFromSecondaryIndex);
-            return keyAt(reader);
-        }
-    }
-
-    @Override
     public IKeyFetcher openKeyFetcher(boolean isForSASI)
     {
         return new AbstractKeyFetcher(openDataReader())
@@ -235,13 +225,6 @@ public class BtiTableReader extends SSTableReaderWithFilter
         };
     }
 
-    @Override
-    public DecoratedKey keyAt(FileDataInput reader) throws IOException {
-        if (reader.isEOF())
-            return null;
-        return decorateKey(ByteBufferUtil.readWithShortLength(reader));
-    }
-    
     TrieIndexEntry getExactPosition(DecoratedKey dk,
                                     SSTableReadsListener listener,
                                     boolean updateStats)
