@@ -21,11 +21,12 @@ import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -38,6 +39,7 @@ public abstract class AbstractKeyRangeIteratorTest
     @Before
     public void setup()
     {
+        DatabaseDescriptor.daemonInitialization();
         primaryKeyFactory = new RowAwarePrimaryKeyFactory(SAITester.EMPTY_COMPARATOR);
     }
 

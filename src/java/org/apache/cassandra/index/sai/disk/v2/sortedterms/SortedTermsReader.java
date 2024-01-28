@@ -299,7 +299,8 @@ public class SortedTermsReader
         @Override
         public void close() throws IOException
         {
-            this.termsData.close();
+            blockOffsets.close();
+            termsData.close();
         }
     }
 }

@@ -192,6 +192,6 @@ public class IndexDescriptorTest
 
     private void createFileOnDisk(String filename) throws Throwable
     {
-        descriptor.baseFile().parent().resolve(filename).createFileIfNotExists();
+        descriptor.baseFile().parent().resolve(descriptor.baseFile().name() + filename).createFileIfNotExists();
     }
 }

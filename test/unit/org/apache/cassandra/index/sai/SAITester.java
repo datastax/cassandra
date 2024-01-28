@@ -53,6 +53,7 @@ import com.datastax.driver.core.QueryTrace;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.exceptions.ReadFailureException;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -100,6 +101,11 @@ import static org.junit.Assert.assertTrue;
 
 public class SAITester extends CQLTester
 {
+    static
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
+
     protected static final String CREATE_KEYSPACE_TEMPLATE = "CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}";
 
     protected static final String CREATE_TABLE_TEMPLATE = "CREATE TABLE %s (id1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
