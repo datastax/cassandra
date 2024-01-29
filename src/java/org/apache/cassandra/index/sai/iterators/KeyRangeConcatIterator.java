@@ -26,7 +26,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
- * {@link RangeConcatIterator} takes a list of sorted range iterator and concatenates them, leaving duplicates in
+ * {@link KeyRangeConcatIterator} takes a list of sorted range iterator and concatenates them, leaving duplicates in
  * place, to produce a new stably sorted iterator. Duplicates are eliminated later in
  * {@link org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher}
  * as results from multiple SSTable indexes and their respective segments are consumed.
@@ -35,13 +35,13 @@ import org.apache.cassandra.io.util.FileUtils;
  * ex. (1, 2, 2, 3) + (3, 4, 4, 6, 6, 7) -> (1, 2, 2, 3, 3, 4, 4, 6, 6, 7)
  *
  */
-public class RangeConcatIterator extends RangeIterator
+public class KeyRangeConcatIterator extends KeyRangeIterator
 {
-    private final Iterator<RangeIterator> ranges;
-    private RangeIterator currentRange;
-    private final List<RangeIterator> toRelease;
+    private final Iterator<KeyRangeIterator> ranges;
+    private KeyRangeIterator currentRange;
+    private final List<KeyRangeIterator> toRelease;
 
-    protected RangeConcatIterator(RangeIterator.Builder.Statistics statistics, List<RangeIterator> ranges)
+    protected KeyRangeConcatIterator(KeyRangeIterator.Builder.Statistics statistics, List<KeyRangeIterator> ranges)
     {
         super(statistics);
 
@@ -101,15 +101,15 @@ public class RangeConcatIterator extends RangeIterator
         return new Builder(size);
     }
 
-    public static RangeIterator build(List<RangeIterator> tokens)
+    public static KeyRangeIterator build(List<KeyRangeIterator> tokens)
     {
         return new Builder(tokens.size()).add(tokens).build();
     }
 
-    public static class Builder extends RangeIterator.Builder
+    public static class Builder extends KeyRangeIterator.Builder
     {
         // We can use a list because the iterators are already in order
-        private final List<RangeIterator> rangeIterators;
+        private final List<KeyRangeIterator> rangeIterators;
         public Builder(int size)
         {
             super(IteratorType.CONCAT);
@@ -123,7 +123,7 @@ public class RangeConcatIterator extends RangeIterator
         }
 
         @Override
-        public Builder add(RangeIterator range)
+        public Builder add(KeyRangeIterator range)
         {
             if (range == null)
                 return this;
@@ -140,7 +140,7 @@ public class RangeConcatIterator extends RangeIterator
         }
 
         @Override
-        public RangeIterator.Builder add(List<RangeIterator> ranges)
+        public KeyRangeIterator.Builder add(List<KeyRangeIterator> ranges)
         {
             if (ranges == null || ranges.isEmpty())
                 return this;
@@ -149,13 +149,13 @@ public class RangeConcatIterator extends RangeIterator
             return this;
         }
 
-        protected RangeIterator buildIterator()
+        protected KeyRangeIterator buildIterator()
         {
             if (rangeCount() == 0)
                 return empty();
             if (rangeCount() == 1)
                 return rangeIterators.get(0);
-            return new RangeConcatIterator(statistics, rangeIterators);
+            return new KeyRangeConcatIterator(statistics, rangeIterators);
         }
     }
 }

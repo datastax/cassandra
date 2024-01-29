@@ -31,7 +31,7 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -75,9 +75,9 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
      * @param queryContext to track per sstable cache and per query metrics
      * @param defer        create the iterator in a deferred state
      * @param limit        the num of rows to returned, used by ANN index
-     * @return {@link RangeIterator} that matches given expression
+     * @return {@link KeyRangeIterator} that matches given expression
      */
-    public abstract RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit) throws IOException;
+    public abstract KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit) throws IOException;
 
     /**
      * Order the on-disk index synchronously and produce an iterator in score order
@@ -93,10 +93,10 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
         throw new UnsupportedOperationException();
     }
 
-    protected RangeIterator toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext) throws IOException
+    protected KeyRangeIterator toPrimaryKeyIterator(PostingList postingList, QueryContext queryContext) throws IOException
     {
         if (postingList == null || postingList.size() == 0)
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
 
         IndexSearcherContext searcherContext = new IndexSearcherContext(metadata.minKey,
                                                                         metadata.maxKey,

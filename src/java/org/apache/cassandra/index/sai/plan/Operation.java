@@ -37,9 +37,9 @@ import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.iterators.RangeIntersectionIterator;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
-import org.apache.cassandra.index.sai.iterators.RangeUnionIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
@@ -272,7 +272,7 @@ public class Operation
 
         abstract FilterTree filterTree();
 
-        abstract RangeIterator rangeIterator(QueryController controller);
+        abstract KeyRangeIterator rangeIterator(QueryController controller);
 
         static Node buildTree(List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
         {
@@ -377,9 +377,9 @@ public class Operation
         }
 
         @Override
-        RangeIterator rangeIterator(QueryController controller)
+        KeyRangeIterator rangeIterator(QueryController controller)
         {
-            var builder = RangeIntersectionIterator.sizedBuilder(1 + children.size());
+            var builder = KeyRangeIntersectionIterator.sizedBuilder(1 + children.size());
             if (!expressionMap.isEmpty())
                 builder.add(controller.buildRangeIteratorForExpressions(OperationType.AND, expressionMap.values()));
             for (Node child : children)
@@ -404,9 +404,9 @@ public class Operation
         }
 
         @Override
-        RangeIterator rangeIterator(QueryController controller)
+        KeyRangeIterator rangeIterator(QueryController controller)
         {
-            var builder = RangeUnionIterator.<PrimaryKey>builder(1 + children.size());
+            var builder = KeyRangeUnionIterator.<PrimaryKey>builder(1 + children.size());
             if (!expressionMap.isEmpty())
                 builder.add(controller.buildRangeIteratorForExpressions(OperationType.OR, expressionMap.values()));
             for (Node child : children)
@@ -444,7 +444,7 @@ public class Operation
         }
 
         @Override
-        RangeIterator rangeIterator(QueryController controller)
+        KeyRangeIterator rangeIterator(QueryController controller)
         {
             assert canFilter() : "Cannot process query with no expressions";
             return controller.buildRangeIteratorForExpressions(OperationType.AND, expressionMap.values());

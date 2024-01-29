@@ -22,16 +22,15 @@ import java.util.PriorityQueue;
 import java.util.SortedSet;
 
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
 
-public class KeyRangeIterator extends RangeIterator
+public class KeyRangeIterator extends org.apache.cassandra.index.sai.iterators.KeyRangeIterator
 {
     private final PriorityQueue<PrimaryKey> keys;
     private final boolean uniqueKeys;
     private volatile PrimaryKey lastKey;
 
     /**
-     * An in-memory {@link RangeIterator} that uses a {@link SortedSet} which has no duplication as its backing store.
+     * An in-memory {@link org.apache.cassandra.index.sai.iterators.KeyRangeIterator} that uses a {@link SortedSet} which has no duplication as its backing store.
      */
     public KeyRangeIterator(SortedSet<PrimaryKey> keys)
     {
@@ -41,7 +40,7 @@ public class KeyRangeIterator extends RangeIterator
     }
 
     /**
-     * An in-memory {@link RangeIterator} that uses a {@link PriorityQueue} which may
+     * An in-memory {@link org.apache.cassandra.index.sai.iterators.KeyRangeIterator} that uses a {@link PriorityQueue} which may
      * contain duplicated keys as its backing store.
      */
     public KeyRangeIterator(PrimaryKey min, PrimaryKey max, PriorityQueue<PrimaryKey> keys)

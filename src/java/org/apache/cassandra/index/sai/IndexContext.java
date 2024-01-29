@@ -71,9 +71,9 @@ import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.iterators.RangeAntiJoinIterator;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
-import org.apache.cassandra.index.sai.iterators.RangeUnionIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
@@ -411,24 +411,24 @@ public class IndexContext
                             .orElse(null);
     }
 
-    public RangeIterator searchMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public KeyRangeIterator searchMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         if (e.getOp().isNonEquality())
         {
             Expression negExpression = e.negated();
-            RangeIterator allKeys = scanMemtable(keyRange);
-            RangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
-            return RangeAntiJoinIterator.create(allKeys, matchedKeys);
+            KeyRangeIterator allKeys = scanMemtable(keyRange);
+            KeyRangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
+            return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
         }
 
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
         if (memtables.isEmpty())
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
 
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         for (MemtableIndex index : memtables)
         {
@@ -453,19 +453,19 @@ public class IndexContext
         return result;
     }
 
-    private RangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
+    private KeyRangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
     {
         Collection<Memtable> memtables = liveMemtables.keySet();
         if (memtables.isEmpty())
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
 
-        RangeIterator.Builder builder = RangeUnionIterator.builder(memtables.size());
+        KeyRangeIterator.Builder builder = KeyRangeUnionIterator.builder(memtables.size());
 
         for (Memtable memtable : memtables)
         {
-            RangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
+            KeyRangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
             builder.add(memtableIterator);
         }
         return builder.build();

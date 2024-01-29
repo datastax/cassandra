@@ -22,19 +22,19 @@ import java.util.PriorityQueue;
 
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 
 public class PriorityKeyRangeIteratorTest extends AbstractKeyRangeIteratorTest
 {
     @Override
-    protected RangeIterator makeIterator(long minimumTokenValue, long maximumTokenValue, long... tokens)
+    protected KeyRangeIterator makeIterator(long minimumTokenValue, long maximumTokenValue, long... tokens)
     {
         PriorityQueue<PrimaryKey> queue = new PriorityQueue<>(tokens.length);
 
         Arrays.stream(tokens).forEach(t -> queue.add(keyForToken(t)));
 
-        return new KeyRangeIterator(primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(minimumTokenValue)),
-                                    primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(maximumTokenValue)),
-                                    queue);
+        return new org.apache.cassandra.index.sai.memory.KeyRangeIterator(primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(minimumTokenValue)),
+                                                                          primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(maximumTokenValue)),
+                                                                          queue);
     }
 }

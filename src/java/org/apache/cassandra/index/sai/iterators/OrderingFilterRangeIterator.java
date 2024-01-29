@@ -25,24 +25,23 @@ import java.util.function.Function;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
- * An iterator that consumes a chunk of {@link PrimaryKey}s from the {@link RangeIterator}, passes them to the
+ * An iterator that consumes a chunk of {@link PrimaryKey}s from the {@link KeyRangeIterator}, passes them to the
  * {@link Function} to filter the chunk of {@link PrimaryKey}s and then pass the results to next consumer.
  * The PKs are currently returned in score order.
  */
 @NotThreadSafe
 public class OrderingFilterRangeIterator<T> implements Iterator<T>, AutoCloseable
 {
-    private final RangeIterator input;
+    private final KeyRangeIterator input;
     private final QueryContext context;
     private final int chunkSize;
     private final Function<List<PrimaryKey>, T> nextRangeFunction;
 
-    public OrderingFilterRangeIterator(RangeIterator input,
+    public OrderingFilterRangeIterator(KeyRangeIterator input,
                                        int chunkSize,
                                        QueryContext context,
                                        Function<List<PrimaryKey>, T> nextRangeFunction)

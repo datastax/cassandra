@@ -29,7 +29,7 @@ import com.datastax.driver.core.Session;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
-import org.apache.cassandra.index.sai.iterators.RangeIntersectionIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.inject.Injections;
 import org.apache.lucene.store.IndexInput;
 
@@ -39,7 +39,7 @@ import static org.junit.Assert.assertEquals;
 public class SelectiveIntersectionTest extends SAITester
 {
     private static Injections.Counter INTERSECTION_FLOW_COUNTER = Injections.newCounter("IntersectionFlowCounter")
-                                                                            .add(newInvokePoint().onClass("org.apache.cassandra.index.sai.iterators.RangeIntersectionIterator").onMethod("<init>"))
+                                                                            .add(newInvokePoint().onClass("org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator").onMethod("<init>"))
                                                                             .build();
 
     // Only count opening the main constructor. This is a brittle test.
@@ -156,7 +156,7 @@ public class SelectiveIntersectionTest extends SAITester
 
     private static void setLimits(final int selectivityLimit) throws Exception
     {
-        Field selectivity = RangeIntersectionIterator.class.getDeclaredField("INTERSECTION_CLAUSE_LIMIT");
+        Field selectivity = KeyRangeIntersectionIterator.class.getDeclaredField("INTERSECTION_CLAUSE_LIMIT");
         selectivity.setAccessible(true);
         Field modifiersField = Field.class.getDeclaredField("modifiers");
         modifiersField.setAccessible(true);

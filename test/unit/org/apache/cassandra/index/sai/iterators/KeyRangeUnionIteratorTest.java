@@ -32,12 +32,12 @@ import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.index.sai.iterators.LongIterator.convert;
 
-public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
+public class KeyRangeUnionIteratorTest extends AbstractKeyRangeIteratorTester
 {
     @Test
     public void testNoOverlappingValues()
     {
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         builder.add(new LongIterator(new long[] { 2L, 3L, 5L, 6L }));
         builder.add(new LongIterator(new long[] { 1L, 7L }));
@@ -49,7 +49,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testSingleIterator()
     {
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         builder.add(new LongIterator(new long[] { 1L, 2L, 4L, 9L }));
 
@@ -59,7 +59,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testOverlappingValues()
     {
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         builder.add(new LongIterator(new long[] { 1L, 4L, 6L, 7L }));
         builder.add(new LongIterator(new long[] { 2L, 3L, 5L, 6L }));
@@ -73,7 +73,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testNoOverlappingRanges()
     {
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         builder.add(new LongIterator(new long[] { 1L, 2L, 3L }));
         builder.add(new LongIterator(new long[] { 4L, 5L, 6L }));
@@ -85,7 +85,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testTwoIteratorsWithSingleValues()
     {
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         builder.add(new LongIterator(new long[] { 1L }));
         builder.add(new LongIterator(new long[] { 1L }));
@@ -96,7 +96,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testDifferentSizeIterators()
     {
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         builder.add(new LongIterator(new long[] { 2L, 3L, 5L, 6L, 12L, 13L }));
         builder.add(new LongIterator(new long[] { 1L, 7L, 14L, 15 }));
@@ -115,10 +115,10 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
         }
     }
 
-    static Pair<RangeIterator, long[]> createRandom(int nRanges)
+    static Pair<KeyRangeIterator, long[]> createRandom(int nRanges)
     {
         long[][] values = new long[nRanges][];
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         var allValues = new HashSet<Long>();
         // add a random number of random values
@@ -138,14 +138,14 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
         }
 
         long[] totalOrdering = allValues.stream().mapToLong(Long::longValue).sorted().toArray();
-        RangeIterator tokens = builder.build();
+        KeyRangeIterator tokens = builder.build();
         return Pair.create(tokens, totalOrdering);
     }
 
     @Test
     public void testMinMaxAndCount()
     {
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         builder.add(new LongIterator(new long[] { 1L, 2L, 3L }));
         builder.add(new LongIterator(new long[] { 4L, 5L, 6L }));
@@ -154,7 +154,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
         Assert.assertEquals(9L, builder.getMaximum().token().getLongValue());
         Assert.assertEquals(9L, builder.getTokenCount());
 
-        RangeIterator tokens = builder.build();
+        KeyRangeIterator tokens = builder.build();
 
         Assert.assertNotNull(tokens);
         Assert.assertEquals(1L, tokens.getMinimum().token().getLongValue());
@@ -174,7 +174,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testBuilder()
     {
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         Assert.assertNull(builder.getMinimum());
         Assert.assertNull(builder.getMaximum());
@@ -195,7 +195,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
         Assert.assertEquals(4L, builder.rangeIterators.get(1).getMinimum().token().getLongValue());
         Assert.assertEquals(7L, builder.rangeIterators.get(2).getMinimum().token().getLongValue());
 
-        RangeIterator tokens = RangeUnionIterator.build(new ArrayList<RangeIterator>()
+        KeyRangeIterator tokens = KeyRangeUnionIterator.build(new ArrayList<KeyRangeIterator>()
         {{
             add(new LongIterator(new long[]{1L, 2L, 4L}));
             add(new LongIterator(new long[]{3L, 5L, 6L}));
@@ -205,16 +205,16 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
 
         FileUtils.closeQuietly(tokens);
 
-        var emptyTokens = RangeUnionIterator.builder().build();
+        var emptyTokens = KeyRangeUnionIterator.builder().build();
         Assert.assertEquals(0, emptyTokens.getMaxKeys());
 
-        builder = RangeUnionIterator.builder();
-        Assert.assertEquals(0L, builder.add((RangeIterator) null).rangeCount());
-        Assert.assertEquals(0L, builder.add((List<RangeIterator>) null).getTokenCount());
+        builder = KeyRangeUnionIterator.builder();
+        Assert.assertEquals(0L, builder.add((KeyRangeIterator) null).rangeCount());
+        Assert.assertEquals(0L, builder.add((List<KeyRangeIterator>) null).getTokenCount());
         Assert.assertEquals(0L, builder.add(new LongIterator(new long[] {})).rangeCount());
 
         var single = new LongIterator(new long[] { 1L, 2L, 3L });
-        var range = RangeIntersectionIterator.<PrimaryKey>builder().add(single).build();
+        var range = KeyRangeIntersectionIterator.<PrimaryKey>builder().add(single).build();
 
         // because build should return first element if it's only one instead of building yet another iterator
         Assert.assertEquals(range, single);
@@ -223,13 +223,13 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testSkipTo()
     {
-        var builder = RangeUnionIterator.<PrimaryKey>builder();
+        var builder = KeyRangeUnionIterator.<PrimaryKey>builder();
 
         builder.add(new LongIterator(new long[]{1L, 2L, 3L}));
         builder.add(new LongIterator(new long[]{4L, 5L, 6L}));
         builder.add(new LongIterator(new long[]{7L, 8L, 9L}));
 
-        RangeIterator tokens = builder.build();
+        KeyRangeIterator tokens = builder.build();
         Assert.assertNotNull(tokens);
 
         tokens.skipTo(LongIterator.fromToken(5L));
@@ -249,17 +249,17 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testMergingMultipleIterators()
     {
-        RangeUnionIterator.Builder builderA = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builderA = KeyRangeUnionIterator.builder();
 
         builderA.add(new LongIterator(new long[] { 1L, 3L, 5L }));
         builderA.add(new LongIterator(new long[] { 8L, 10L, 12L }));
 
-        RangeUnionIterator.Builder builderB = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builderB = KeyRangeUnionIterator.builder();
 
         builderB.add(new LongIterator(new long[] { 7L, 9L, 11L }));
         builderB.add(new LongIterator(new long[] { 2L, 4L, 6L }));
 
-        RangeIterator union = RangeUnionIterator.build(Arrays.asList(builderA.build(), builderB.build()));
+        KeyRangeIterator union = KeyRangeUnionIterator.build(Arrays.asList(builderA.build(), builderB.build()));
         Assert.assertEquals(convert(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L, 11L, 12L), convert(union));
     }
 
@@ -298,10 +298,10 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
 
     @Test
     public void emptyRangeTest() {
-        RangeIterator.Builder builder;
-        RangeIterator range;
+        KeyRangeIterator.Builder builder;
+        KeyRangeIterator range;
         // empty, then non-empty
-        builder = RangeUnionIterator.builder();
+        builder = KeyRangeUnionIterator.builder();
         builder.add(new LongIterator(new long[] {}));
         for (int i = 0; i < 10; i++)
             builder.add(new LongIterator(new long[] {i + 10}));
@@ -311,7 +311,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
         Assert.assertTrue(range.hasNext());
         Assert.assertEquals(10, range.getMaxKeys());
 
-        builder = RangeUnionIterator.builder();
+        builder = KeyRangeUnionIterator.builder();
         builder.add(new LongIterator(new long[] {}));
         builder.add(new LongIterator(new long[] {10}));
         range = builder.build();
@@ -321,7 +321,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
         Assert.assertEquals(1, range.getMaxKeys());
 
         // non-empty, then empty
-        builder = RangeUnionIterator.builder();
+        builder = KeyRangeUnionIterator.builder();
         for (int i = 0; i < 10; i++)
             builder.add(new LongIterator(new long[] {i + 10}));
         builder.add(new LongIterator(new long[] {}));
@@ -331,7 +331,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
         Assert.assertTrue(range.hasNext());
         Assert.assertEquals(10, range.getMaxKeys());
 
-        builder = RangeUnionIterator.builder();
+        builder = KeyRangeUnionIterator.builder();
         builder.add(new LongIterator(new long[] {10}));
         builder.add(new LongIterator(new long[] {}));
         range = builder.build();
@@ -341,7 +341,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
         Assert.assertEquals(1, range.getMaxKeys());
 
         // empty, then non-empty then empty again
-        builder = RangeUnionIterator.builder();
+        builder = KeyRangeUnionIterator.builder();
         builder.add(new LongIterator(new long[] {}));
         for (int i = 0; i < 10; i++)
             builder.add(new LongIterator(new long[] {i + 10}));
@@ -353,7 +353,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
         Assert.assertEquals(10, range.getMaxKeys());
 
         // non-empty, empty, then non-empty again
-        builder = RangeUnionIterator.builder();
+        builder = KeyRangeUnionIterator.builder();
         for (int i = 0; i < 5; i++)
             builder.add(new LongIterator(new long[] {i + 10}));
         builder.add(new LongIterator(new long[] {}));
@@ -371,10 +371,10 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
     public void testUnionOfIntersection()
     {
         // union of two non-intersected intersections
-        RangeIterator intersectionA = buildIntersection(arr(1L, 2L, 3L), arr(4L, 5L, 6L));
-        RangeIterator intersectionB = buildIntersection(arr(6L, 7L, 8L), arr(9L, 10L, 11L));
+        KeyRangeIterator intersectionA = buildIntersection(arr(1L, 2L, 3L), arr(4L, 5L, 6L));
+        KeyRangeIterator intersectionB = buildIntersection(arr(6L, 7L, 8L), arr(9L, 10L, 11L));
 
-        RangeIterator union = buildUnion(intersectionA, intersectionB);
+        KeyRangeIterator union = buildUnion(intersectionA, intersectionB);
         assertEquals(convert(), convert(union));
 
         // union of two intersected intersections
@@ -383,7 +383,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
 
         union = buildUnion(intersectionA, intersectionB);
         assertEquals(convert(2L, 3L, 7L, 8L), convert(union));
-        assertEquals(RangeUnionIterator.class, union.getClass());
+        assertEquals(KeyRangeUnionIterator.class, union.getClass());
 
         // union of one intersected intersection and one non-intersected intersection
         intersectionA = buildIntersection(arr(1L, 2L, 3L), arr(2L, 3L, 4L ));
@@ -399,7 +399,7 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
         for (int testIteration = 0; testIteration < 16; testIteration++)
         {
             var allValues = new HashSet<Long>();
-            var builder = RangeUnionIterator.builder();
+            var builder = KeyRangeUnionIterator.builder();
             for (int i = 0; i < nextInt(2, 3); i++)
             {
                 var p = createRandomIterator();

@@ -49,7 +49,7 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
-import org.apache.cassandra.index.sai.iterators.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
@@ -159,7 +159,7 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         if (logger.isTraceEnabled())
             logger.trace("Searching memtable index on expression '{}'...", expression);
@@ -178,18 +178,18 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-    public RangeIterator exactMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public KeyRangeIterator exactMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : encode(expression.lower.value.encoded);
         final PrimaryKeys primaryKeys = data.get(prefix);
         if (primaryKeys == null)
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
         return new FilteringKeyRangeIterator(primaryKeys.keys(), keyRange);
     }
 
-    private RangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    private KeyRangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         ByteComparable lowerBound, upperBound;
         boolean lowerInclusive, upperInclusive;
@@ -231,11 +231,11 @@ public class TrieMemoryIndex extends MemoryIndex
 
         if (cd.mergedKeys.isEmpty())
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
 
         lastQueueSize.set(Math.max(MINIMUM_QUEUE_SIZE, cd.mergedKeys.size()));
-        return new KeyRangeIterator(cd.minimumKey, cd.maximumKey, cd.mergedKeys);
+        return new org.apache.cassandra.index.sai.memory.KeyRangeIterator(cd.minimumKey, cd.maximumKey, cd.mergedKeys);
     }
 
     public ByteBuffer getMinTerm()

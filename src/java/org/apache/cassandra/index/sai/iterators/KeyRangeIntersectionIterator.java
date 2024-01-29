@@ -38,7 +38,7 @@ import org.apache.cassandra.tracing.Tracing;
  * the number of ranges that will be included in the intersection. This currently defaults to 2.
  */
 @SuppressWarnings("resource")
-public class RangeIntersectionIterator extends RangeIterator
+public class KeyRangeIntersectionIterator extends KeyRangeIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -56,10 +56,10 @@ public class RangeIntersectionIterator extends RangeIterator
         return (INTERSECTION_CLAUSE_LIMIT <= 0) || (numberOfExpressions <= INTERSECTION_CLAUSE_LIMIT);
     }
 
-    public final List<RangeIterator> ranges;
+    public final List<KeyRangeIterator> ranges;
     private final int[] rangeStats;
 
-    private RangeIntersectionIterator(Builder.Statistics statistics, List<RangeIterator> ranges)
+    private KeyRangeIntersectionIterator(Builder.Statistics statistics, List<KeyRangeIterator> ranges)
     {
         super(statistics);
         this.ranges = ranges;
@@ -84,7 +84,7 @@ public class RangeIntersectionIterator extends RangeIterator
             {
                 if (index != alreadyAvanced)
                 {
-                    RangeIterator range = ranges.get(index);
+                    KeyRangeIterator range = ranges.get(index);
                     PrimaryKey nextKey = nextOrNull(range, highestKey);
                     rangeStats[index]++;
                     int comparisonResult;
@@ -153,7 +153,7 @@ public class RangeIntersectionIterator extends RangeIterator
      * Fetches the next available item from the iterator, such that the item is not lower than the given key.
      * If no such items are available, returns null.
      */
-    private PrimaryKey nextOrNull(RangeIterator iterator, PrimaryKey minKey)
+    private PrimaryKey nextOrNull(KeyRangeIterator iterator, PrimaryKey minKey)
     {
         iterator.skipTo(minKey);
         return iterator.hasNext() ? iterator.next() : null;
@@ -164,7 +164,7 @@ public class RangeIntersectionIterator extends RangeIterator
         ranges.forEach(FileUtils::closeQuietly);
     }
 
-    public static Builder builder(List<RangeIterator> ranges, int limit)
+    public static Builder builder(List<KeyRangeIterator> ranges, int limit)
     {
         var builder = new Builder(ranges.size(), limit);
         for (var range : ranges)
@@ -192,10 +192,10 @@ public class RangeIntersectionIterator extends RangeIterator
         return builder(Integer.MAX_VALUE);
     }
 
-    public static class Builder extends RangeIterator.Builder
+    public static class Builder extends KeyRangeIterator.Builder
     {
         private final int limit;
-        protected List<RangeIterator> rangeIterators;
+        protected List<KeyRangeIterator> rangeIterators;
 
         private Builder(int size, int limit)
         {
@@ -204,7 +204,7 @@ public class RangeIntersectionIterator extends RangeIterator
             this.limit = limit;
         }
 
-        public RangeIterator.Builder add(RangeIterator range)
+        public KeyRangeIterator.Builder add(KeyRangeIterator range)
         {
             if (range == null)
                 return this;
@@ -218,7 +218,7 @@ public class RangeIntersectionIterator extends RangeIterator
             return this;
         }
 
-        public RangeIterator.Builder add(List<RangeIterator> ranges)
+        public KeyRangeIterator.Builder add(List<KeyRangeIterator> ranges)
         {
             if (ranges == null || ranges.isEmpty())
                 return this;
@@ -232,9 +232,9 @@ public class RangeIntersectionIterator extends RangeIterator
             return rangeIterators.size();
         }
 
-        protected RangeIterator buildIterator()
+        protected KeyRangeIterator buildIterator()
         {
-            rangeIterators.sort(Comparator.comparingLong(RangeIterator::getMaxKeys));
+            rangeIterators.sort(Comparator.comparingLong(KeyRangeIterator::getMaxKeys));
             int initialSize = rangeIterators.size();
             // all ranges will be included
             if (limit >= rangeIterators.size() || limit <= 0)
@@ -252,13 +252,13 @@ public class RangeIntersectionIterator extends RangeIterator
                 Tracing.trace("Selecting {} {} of {} out of {} indexes",
                               rangeIterators.size(),
                               rangeIterators.size() > 1 ? "indexes with cardinalities" : "index with cardinality",
-                              rangeIterators.stream().map(RangeIterator::getMaxKeys).map(Object::toString).collect(Collectors.joining(", ")),
+                              rangeIterators.stream().map(KeyRangeIterator::getMaxKeys).map(Object::toString).collect(Collectors.joining(", ")),
                               initialSize);
 
             return buildIterator(selectiveStatistics, rangeIterators);
         }
 
-        private static RangeIterator buildIterator(Statistics statistics, List<RangeIterator> ranges)
+        private static KeyRangeIterator buildIterator(Statistics statistics, List<KeyRangeIterator> ranges)
         {
             // if the range is disjoint or we have an intersection with an empty set,
             // we can simply return an empty iterator, because it's not going to produce any results.
@@ -266,13 +266,13 @@ public class RangeIntersectionIterator extends RangeIterator
             {
                 // release posting lists
                 FileUtils.closeQuietly(ranges);
-                return RangeIterator.empty();
+                return KeyRangeIterator.empty();
             }
 
             if (ranges.size() == 1)
                 return ranges.get(0);
 
-            return new RangeIntersectionIterator(statistics, ranges);
+            return new KeyRangeIntersectionIterator(statistics, ranges);
         }
     }
 }

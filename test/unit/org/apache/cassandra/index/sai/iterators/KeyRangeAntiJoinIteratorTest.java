@@ -34,7 +34,7 @@ public class KeyRangeAntiJoinIteratorTest
     {
         LongIterator left = new LongIterator(EMPTY);
         LongIterator right = new LongIterator(EMPTY);
-        RangeAntiJoinIterator iter = RangeAntiJoinIterator.create(left, right);
+        KeyRangeAntiJoinIterator iter = KeyRangeAntiJoinIterator.create(left, right);
         assertEquals(convert(), convert(iter));
     }
 
@@ -43,7 +43,7 @@ public class KeyRangeAntiJoinIteratorTest
     {
         LongIterator left = new LongIterator(EMPTY);
         LongIterator right = new LongIterator(new long[] { 1L, 3L, 5L, 7L });
-        RangeAntiJoinIterator iter = RangeAntiJoinIterator.create(left, right);
+        KeyRangeAntiJoinIterator iter = KeyRangeAntiJoinIterator.create(left, right);
         assertEquals(convert(), convert(iter));
     }
 
@@ -52,7 +52,7 @@ public class KeyRangeAntiJoinIteratorTest
     {
         LongIterator left = new LongIterator(new long[] { 1L, 2L });
         LongIterator right = new LongIterator(EMPTY);
-        RangeAntiJoinIterator iter = RangeAntiJoinIterator.create(left, right);
+        KeyRangeAntiJoinIterator iter = KeyRangeAntiJoinIterator.create(left, right);
         assertEquals(convert(1, 2), convert(iter));
     }
 
@@ -61,7 +61,7 @@ public class KeyRangeAntiJoinIteratorTest
     {
         LongIterator left = new LongIterator(new long[] { 2L, 4L, 6L, 8L });
         LongIterator right = new LongIterator(new long[] { 1L, 3L, 5L, 7L });
-        RangeAntiJoinIterator iter = RangeAntiJoinIterator.create(left, right);
+        KeyRangeAntiJoinIterator iter = KeyRangeAntiJoinIterator.create(left, right);
         assertEquals(convert(2, 4, 6, 8), convert(iter));
     }
 
@@ -70,7 +70,7 @@ public class KeyRangeAntiJoinIteratorTest
     {
         LongIterator left = new LongIterator(new long[] { 2L, 3L, 4L, 6L, 8L, 9L, 10L });
         LongIterator right = new LongIterator(new long[] { 4L, 8L, 9L });
-        RangeAntiJoinIterator iter = RangeAntiJoinIterator.create(left, right);
+        KeyRangeAntiJoinIterator iter = KeyRangeAntiJoinIterator.create(left, right);
         assertEquals(convert(2, 3, 6, 10), convert(iter));
     }
 
@@ -79,11 +79,11 @@ public class KeyRangeAntiJoinIteratorTest
     {
         LongIterator left = new LongIterator(new long[] { 2L, 3L, 4L, 6L, 8L, 9L, 10L });
         LongIterator right = new LongIterator(new long[] { 2L, 3L, 4L });
-        RangeAntiJoinIterator iter = RangeAntiJoinIterator.create(left, right);
+        KeyRangeAntiJoinIterator iter = KeyRangeAntiJoinIterator.create(left, right);
         assertEquals(convert(6, 8, 9, 10), convert(iter));
     }
 
-    public static List<Long> convert(RangeIterator tokens)
+    public static List<Long> convert(KeyRangeIterator tokens)
     {
         List<Long> results = new ArrayList<>();
         while (tokens.hasNext())

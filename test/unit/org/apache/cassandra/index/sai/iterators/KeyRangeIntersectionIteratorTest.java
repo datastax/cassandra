@@ -34,12 +34,12 @@ import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.index.sai.iterators.LongIterator.convert;
 
-public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
+public class KeyRangeIntersectionIteratorTest extends AbstractKeyRangeIteratorTester
 {
     @Test
     public void testNoOverlappingValues()
     {
-        RangeIterator.Builder builder = RangeIntersectionIterator.builder();
+        KeyRangeIterator.Builder builder = KeyRangeIntersectionIterator.builder();
 
         builder.add(new LongIterator(new long[] { 2L, 3L, 5L, 6L }));
         builder.add(new LongIterator(new long[] { 1L, 7L }));
@@ -47,17 +47,17 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
 
         Assert.assertEquals(convert(), convert(builder.build()));
 
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         // both ranges overlap by min/max but not by value
         builder.add(new LongIterator(new long[] { 1L, 5L, 7L, 9L }));
         builder.add(new LongIterator(new long[] { 6L }));
 
-        RangeIterator range = builder.build();
+        KeyRangeIterator range = builder.build();
 
         Assert.assertNotNull(range);
         Assert.assertFalse(range.hasNext());
 
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         // both ranges overlap by min/max but not by value
         builder.add(new LongIterator(new long[] { 1L, 5L, 7L, 9L }));
         builder.add(new LongIterator(new long[] { 0L, 10L, 12L }));
@@ -71,7 +71,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testOverlappingValues()
     {
-        RangeIterator.Builder builder = RangeIntersectionIterator.builder();
+        KeyRangeIterator.Builder builder = KeyRangeIntersectionIterator.builder();
 
         builder.add(new LongIterator(new long[] { 1L, 4L, 6L, 7L }));
         builder.add(new LongIterator(new long[] { 2L, 4L, 5L, 6L }));
@@ -83,7 +83,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testSameValues()
     {
-        RangeIterator.Builder builder = RangeIntersectionIterator.builder();
+        KeyRangeIterator.Builder builder = KeyRangeIntersectionIterator.builder();
 
         builder.add(new LongIterator(new long[] { 1L, 2L, 3L, 4L }));
         builder.add(new LongIterator(new long[] { 1L, 2L, 3L, 4L }));
@@ -94,7 +94,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testSingleIterator()
     {
-        RangeIntersectionIterator.Builder builder = RangeIntersectionIterator.builder();
+        KeyRangeIntersectionIterator.Builder builder = KeyRangeIntersectionIterator.builder();
 
         builder.add(new LongIterator(new long[] { 1L, 2L, 4L, 9L }));
 
@@ -104,13 +104,13 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testSkipTo()
     {
-        RangeIterator.Builder builder = RangeIntersectionIterator.builder();
+        KeyRangeIterator.Builder builder = KeyRangeIntersectionIterator.builder();
 
         builder.add(new LongIterator(new long[] { 1L, 4L, 6L, 7L, 9L, 10L }));
         builder.add(new LongIterator(new long[] { 2L, 4L, 5L, 6L, 7L, 10L, 12L }));
         builder.add(new LongIterator(new long[] { 4L, 6L, 7L, 9L, 10L }));
 
-        RangeIterator range = builder.build();
+        KeyRangeIterator range = builder.build();
         Assert.assertNotNull(range);
 
         // first let's skipTo something before range
@@ -137,7 +137,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testMinMaxAndCount()
     {
-        RangeIterator.Builder builder = RangeIntersectionIterator.builder();
+        KeyRangeIterator.Builder builder = KeyRangeIntersectionIterator.builder();
 
         builder.add(new LongIterator(new long[]{1L, 2L, 9L}));
         builder.add(new LongIterator(new long[]{4L, 5L, 9L}));
@@ -146,7 +146,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
         assertEquals(9L, builder.getMaximum().token().getLongValue());
         assertEquals(3L, builder.getTokenCount());
 
-        RangeIterator tokens = builder.build();
+        KeyRangeIterator tokens = builder.build();
 
         assertNotNull(tokens);
         assertEquals(7L, tokens.getMinimum().token().getLongValue());
@@ -159,7 +159,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testBuilder()
     {
-        RangeIntersectionIterator.Builder builder = RangeIntersectionIterator.builder();
+        KeyRangeIntersectionIterator.Builder builder = KeyRangeIntersectionIterator.builder();
 
         Assert.assertNull(builder.getMinimum());
         Assert.assertNull(builder.getMaximum());
@@ -186,7 +186,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
 
         Assert.assertEquals(convert(6L), convert(builder.build()));
 
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         builder.add(new LongIterator(new long[]{ 1L, 5L, 6L }));
         builder.add(new LongIterator(new long[]{ 3L, 5L, 6L }));
 
@@ -196,22 +196,22 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
 
         FileUtils.closeQuietly(tokens);
 
-        var emptyTokens = RangeIntersectionIterator.builder().build();
+        var emptyTokens = KeyRangeIntersectionIterator.builder().build();
         Assert.assertEquals(0, emptyTokens.getMaxKeys());
 
-        builder = RangeIntersectionIterator.builder();
-        Assert.assertEquals(0L, builder.add((RangeIterator) null).rangeCount());
-        Assert.assertEquals(0L, builder.add((List<RangeIterator>) null).getTokenCount());
+        builder = KeyRangeIntersectionIterator.builder();
+        Assert.assertEquals(0L, builder.add((KeyRangeIterator) null).rangeCount());
+        Assert.assertEquals(0L, builder.add((List<KeyRangeIterator>) null).getTokenCount());
         Assert.assertEquals(0L, builder.add(new LongIterator(new long[] {})).rangeCount());
 
         var single = new LongIterator(new long[] { 1L, 2L, 3L });
-        var range = RangeIntersectionIterator.<PrimaryKey>builder().add(single).build();
+        var range = KeyRangeIntersectionIterator.<PrimaryKey>builder().add(single).build();
 
         // because build should return first element if it's only one instead of building yet another iterator
         Assert.assertEquals(range, single);
 
         // Make a difference between empty and null ranges.
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         builder.add(new LongIterator(new long[] {}));
         Assert.assertEquals(0L, builder.rangeCount());
         builder.add(single);
@@ -220,7 +220,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
         Assert.assertEquals(0, range.getMaxKeys());
 
         // disjoint case
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         builder.add(new LongIterator(new long[] { 1L, 2L, 3L }));
         builder.add(new LongIterator(new long[] { 4L, 5L, 6L }));
 
@@ -235,27 +235,27 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void emptyRangeTest()
     {
-        RangeIterator.Builder builder;
+        KeyRangeIterator.Builder builder;
 
         // empty, then non-empty
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         builder.add(new LongIterator(new long[] {}));
         builder.add(new LongIterator(new long[] {10}));
         assertEmpty(builder.build());
 
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         builder.add(new LongIterator(new long[] {}));
         for (int i = 0; i < 10; i++)
             builder.add(new LongIterator(new long[] {0, i + 10}));
         assertEmpty(builder.build());
 
         // non-empty, then empty
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         builder.add(new LongIterator(new long[] {10}));
         builder.add(new LongIterator(new long[] {}));
         assertEmpty(builder.build());
 
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         for (int i = 0; i < 10; i++)
             builder.add(new LongIterator(new long[] {0, i + 10}));
 
@@ -263,13 +263,13 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
         assertEmpty(builder.build());
 
         // empty, then non-empty then empty again
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         builder.add(new LongIterator(new long[] {}));
         builder.add(new LongIterator(new long[] {0, 10}));
         builder.add(new LongIterator(new long[] {}));
         assertEmpty(builder.build());
 
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         builder.add(new LongIterator(new long[] {}));
         for (int i = 0; i < 10; i++)
             builder.add(new LongIterator(new long[] {0, i + 10}));
@@ -277,13 +277,13 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
         assertEmpty(builder.build());
 
         // non-empty, empty, then non-empty again
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         builder.add(new LongIterator(new long[] {0, 10}));
         builder.add(new LongIterator(new long[] {}));
         builder.add(new LongIterator(new long[] {0, 10}));
         assertEmpty(builder.build());
 
-        builder = RangeIntersectionIterator.builder();
+        builder = KeyRangeIntersectionIterator.builder();
         for (int i = 0; i < 5; i++)
             builder.add(new LongIterator(new long[] {0, i + 10}));
         builder.add(new LongIterator(new long[] {}));
@@ -292,7 +292,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
         assertEmpty(builder.build());
     }
 
-    public static void assertEmpty(RangeIterator range)
+    public static void assertEmpty(KeyRangeIterator range)
     {
         Assert.assertNull(range.getMinimum());
         Assert.assertNull(range.getMaximum());
@@ -303,9 +303,9 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testClose() throws IOException
     {
-        var tokens = RangeIntersectionIterator.<PrimaryKey>builder()
-                                              .add(new LongIterator(new long[] { 1L, 2L, 3L }))
-                                              .build();
+        var tokens = KeyRangeIntersectionIterator.<PrimaryKey>builder()
+                                                 .add(new LongIterator(new long[] { 1L, 2L, 3L }))
+                                                 .build();
 
         Assert.assertNotNull(tokens);
         tokens.close();
@@ -314,27 +314,27 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
     @Test
     public void testIsOverlapping()
     {
-        RangeIterator rangeA, rangeB;
+        KeyRangeIterator rangeA, rangeB;
 
         rangeA = new LongIterator(new long[] { 1L, 5L });
         rangeB = new LongIterator(new long[] { 5L, 9L });
-        Assert.assertTrue(RangeIterator.isOverlapping(rangeA, rangeB));
+        Assert.assertTrue(KeyRangeIterator.isOverlapping(rangeA, rangeB));
 
         rangeA = new LongIterator(new long[] { 5L, 9L });
         rangeB = new LongIterator(new long[] { 1L, 6L });
-        Assert.assertTrue(RangeIterator.isOverlapping(rangeA, rangeB));
+        Assert.assertTrue(KeyRangeIterator.isOverlapping(rangeA, rangeB));
 
         rangeA = new LongIterator(new long[] { 5L, 9L });
         rangeB = new LongIterator(new long[] { 5L, 9L });
-        Assert.assertTrue(RangeIterator.isOverlapping(rangeA, rangeB));
+        Assert.assertTrue(KeyRangeIterator.isOverlapping(rangeA, rangeB));
 
         rangeA = new LongIterator(new long[] { 1L, 4L });
         rangeB = new LongIterator(new long[] { 5L, 9L });
-        Assert.assertFalse(RangeIterator.isOverlapping(rangeA, rangeB));
+        Assert.assertFalse(KeyRangeIterator.isOverlapping(rangeA, rangeB));
 
         rangeA = new LongIterator(new long[] { 6L, 9L });
         rangeB = new LongIterator(new long[] { 1L, 4L });
-        Assert.assertFalse(RangeIterator.isOverlapping(rangeA, rangeB));
+        Assert.assertFalse(KeyRangeIterator.isOverlapping(rangeA, rangeB));
     }
 
     @Test
@@ -350,7 +350,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
     /**
      * @return a long[][] of random elements, and a long[] of the intersection of those elements
      */
-    static Pair<RangeIterator, long[]> createRandom(int nRanges)
+    static Pair<KeyRangeIterator, long[]> createRandom(int nRanges)
     {
         // generate randomize ranges
         long[][] ranges = new long[nRanges][];
@@ -365,7 +365,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
             ranges[i] = range.toArray();
             Arrays.sort(ranges[i]);
         }
-        var builder = RangeIntersectionIterator.builder();
+        var builder = KeyRangeIntersectionIterator.builder();
         for (long[] range : ranges)
             builder.add(new LongIterator(range));
 
