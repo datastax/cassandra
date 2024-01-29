@@ -44,7 +44,7 @@ import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
-import org.apache.cassandra.index.sai.disk.vector.VectorsView;
+import org.apache.cassandra.index.sai.disk.vector.VectorSupplier;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
@@ -194,9 +194,9 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     }
 
     @Override
-    public VectorsView getVectorsView()
+    public VectorSupplier getVectorSupplier()
     {
-        return new HNSWVectorsView(vectorsSupplier.get());
+        return new HNSWVectorSupplier(vectorsSupplier.get());
     }
 
     @Override
@@ -249,11 +249,11 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         }
     }
 
-    private static class HNSWVectorsView implements VectorsView
+    private static class HNSWVectorSupplier implements VectorSupplier
     {
         private final VectorsWithCache view;
 
-        private HNSWVectorsView(VectorsWithCache view)
+        private HNSWVectorSupplier(VectorsWithCache view)
         {
             this.view = view;
         }

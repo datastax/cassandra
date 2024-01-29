@@ -72,24 +72,21 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
     private final PriorityQueue<RowWithApproximateScore> approximateScoreQueue;
     // Priority queue with full resolution scores
     private final PriorityQueue<ScoredRowId> exactScoreQueue;
-    private final NodeSimilarity.Reranker reranker;
+    private final CloseableReranker reranker;
     private final int topK;
     private final int limit;
     private int rerankedCount;
-    private final AutoCloseable onClose;
 
     /**
      * @param approximateScoreQueue A priority queue of rows and their ordinal ordered by their approximate similarity scores
      * @param reranker A function that takes a graph ordinal and returns the exact similarity score
      * @param limit The query limit
      * @param topK The number of vectors to resolve and score before returning results
-     * @param onClose an {@link AutoCloseable} object to close when this iterator is closed
      */
     public BruteForceRowIdIterator(PriorityQueue<RowWithApproximateScore> approximateScoreQueue,
-                                   NodeSimilarity.Reranker reranker,
+                                   CloseableReranker reranker,
                                    int limit,
-                                   int topK,
-                                   AutoCloseable onClose)
+                                   int topK)
     {
         this.approximateScoreQueue = approximateScoreQueue;
         this.exactScoreQueue = new PriorityQueue<>(topK, (a, b) -> Float.compare(b.score, a.score));
@@ -98,7 +95,6 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
         this.limit = limit;
         this.topK = topK;
         this.rerankedCount = topK; // placeholder to kick off computeNext
-        this.onClose = onClose;
     }
 
     @Override
@@ -127,6 +123,6 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
     @Override
     public void close()
     {
-        FileUtils.closeQuietly(onClose);
+        FileUtils.closeQuietly(reranker);
     }
 }

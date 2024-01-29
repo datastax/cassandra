@@ -49,7 +49,7 @@ import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
-import org.apache.cassandra.index.sai.disk.vector.VectorsView;
+import org.apache.cassandra.index.sai.disk.vector.VectorSupplier;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
@@ -204,16 +204,16 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     }
 
     @Override
-    public VectorsView getVectorsView()
+    public VectorSupplier getVectorSupplier()
     {
-        return new ANNVectorsView(graph.getView());
+        return new ANNVectorSupplier(graph.getView());
     }
 
-    private static class ANNVectorsView implements VectorsView
+    private static class ANNVectorSupplier implements VectorSupplier
     {
         private final GraphIndex.View<float[]> view;
 
-        private ANNVectorsView(GraphIndex.View<float[]> view)
+        private ANNVectorSupplier(GraphIndex.View<float[]> view)
         {
             this.view = view;
         }

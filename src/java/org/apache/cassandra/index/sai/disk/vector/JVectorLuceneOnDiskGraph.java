@@ -52,7 +52,7 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
     public abstract int size();
 
     public abstract OrdinalsView getOrdinalsView() throws IOException;
-    public abstract VectorsView getVectorsView() throws IOException;
+    public abstract VectorSupplier getVectorSupplier() throws IOException;
 
     /** returns null if no compression was performed */
     public abstract CompressedVectors getCompressedVectors();

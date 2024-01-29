@@ -18,7 +18,7 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-public interface VectorsView extends AutoCloseable
+public interface VectorSupplier extends AutoCloseable
 {
     /**
      * Returns the vector for the given ordinal.

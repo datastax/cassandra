@@ -29,7 +29,6 @@ import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.graph.NodeSimilarity;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseFixedBitSet;
@@ -49,6 +48,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
+import org.apache.cassandra.index.sai.disk.vector.CloseableReranker;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OverqueryUtils;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
@@ -300,9 +300,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
             }
         }
-        var vectorsView = graph.getVectorsView();
-        NodeSimilarity.Reranker reranker = o -> similarityFunction.compare(queryVector, vectorsView.getVectorForOrdinal(o));
-        return new BruteForceRowIdIterator(approximateScores, reranker, limit, topK, vectorsView);
+        var reranker = new CloseableReranker(similarityFunction, queryVector, graph.getVectorSupplier());
+        return new BruteForceRowIdIterator(approximateScores, reranker, limit, topK);
     }
 
     /**
@@ -338,7 +337,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     {
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         try (var ordinalsView = graph.getOrdinalsView();
-             var vectorsView = graph.getVectorsView())
+             var vectorsView = graph.getVectorSupplier())
         {
             for (int i = 0; i < segmentRowIds.size(); i++)
             {
