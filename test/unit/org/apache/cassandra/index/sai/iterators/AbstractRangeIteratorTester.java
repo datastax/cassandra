@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.iterators;
 
 import java.util.Arrays;
 import java.util.Set;
@@ -23,9 +23,11 @@ import java.util.stream.Collectors;
 
 import org.junit.Assert;
 
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.utils.Pair;
 
-public class AbstractRangeIteratorTest extends SaiRandomizedTest
+public class AbstractRangeIteratorTester extends SaiRandomizedTest
 {
     protected long[] arr(long... longArray)
     {
@@ -79,7 +81,7 @@ public class AbstractRangeIteratorTest extends SaiRandomizedTest
 
     private static RangeIterator[] toRangeIterator(long[]... ranges)
     {
-        return Arrays.stream(ranges).map(AbstractRangeIteratorTest::build).toArray(RangeIterator[]::new);
+        return Arrays.stream(ranges).map(AbstractRangeIteratorTester::build).toArray(RangeIterator[]::new);
     }
 
     protected static LongIterator build(long... tokens)

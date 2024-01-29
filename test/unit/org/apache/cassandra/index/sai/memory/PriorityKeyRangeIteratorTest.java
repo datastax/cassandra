@@ -22,7 +22,7 @@ import java.util.PriorityQueue;
 
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.RangeIterator;
 
 public class PriorityKeyRangeIteratorTest extends AbstractKeyRangeIteratorTest
 {

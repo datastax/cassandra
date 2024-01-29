@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.iterators;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -26,12 +26,13 @@ import java.util.stream.Collectors;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Pair;
 
-import static org.apache.cassandra.index.sai.utils.LongIterator.convert;
+import static org.apache.cassandra.index.sai.iterators.LongIterator.convert;
 
-public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
+public class RangeUnionIteratorTest extends AbstractRangeIteratorTester
 {
     @Test
     public void testNoOverlappingValues()

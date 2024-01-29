@@ -16,13 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.iterators;
 
 import java.util.List;
 import java.util.SortedSet;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
+
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 
 /**
  * A {@link RangeIterator} that iterates over a collection of {@link PrimaryKey}s without modifying the underlying list.

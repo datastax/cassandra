@@ -22,7 +22,7 @@ import java.util.PriorityQueue;
 import java.util.SortedSet;
 
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.RangeIterator;
 
 public class KeyRangeIterator extends RangeIterator
 {

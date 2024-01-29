@@ -23,10 +23,6 @@ import java.util.List;
 
 import org.junit.Test;
 
-import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
-import org.apache.cassandra.index.sai.utils.LongIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
-
 import static org.junit.Assert.assertEquals;
 
 public class KeyRangeAntiJoinIteratorTest

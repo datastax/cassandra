@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.iterators;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -28,12 +28,13 @@ import org.junit.Test;
 
 import com.carrotsearch.hppc.LongHashSet;
 import com.carrotsearch.hppc.LongSet;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Pair;
 
-import static org.apache.cassandra.index.sai.utils.LongIterator.convert;
+import static org.apache.cassandra.index.sai.iterators.LongIterator.convert;
 
-public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
+public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTester
 {
     @Test
     public void testNoOverlappingValues()
@@ -303,8 +304,8 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
     public void testClose() throws IOException
     {
         var tokens = RangeIntersectionIterator.<PrimaryKey>builder()
-                                                        .add(new LongIterator(new long[] { 1L, 2L, 3L }))
-                                                        .build();
+                                              .add(new LongIterator(new long[] { 1L, 2L, 3L }))
+                                              .build();
 
         Assert.assertNotNull(tokens);
         tokens.close();
