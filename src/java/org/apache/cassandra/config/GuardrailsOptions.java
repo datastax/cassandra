@@ -345,12 +345,14 @@ public class GuardrailsOptions implements GuardrailsConfig
     }
 
     @Override
+    @Nullable
     public DataStorageSpec.IntBytesBound getPageWeightWarnThreshold()
     {
         return config.page_weight_warn_threshold;
     }
 
     @Override
+    @Nullable
     public DataStorageSpec.IntBytesBound getPageWeightFailThreshold()
     {
         return config.page_weight_fail_threshold;
