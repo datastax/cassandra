@@ -30,7 +30,7 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-public class AbstractPrimaryKeyTest extends SAIRandomizedTester
+public class AbstractPrimaryKeyTester extends SAIRandomizedTester
 {
     static TableMetadata simplePartition = TableMetadata.builder("test", "test")
                                                         .partitioner(Murmur3Partitioner.instance)

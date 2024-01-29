@@ -25,7 +25,7 @@ import org.junit.Test;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory;
 
-public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
+public class RowAwarePrimaryKeyTest extends AbstractPrimaryKeyTester
 {
     @Test
     public void singlePartitionTest()
