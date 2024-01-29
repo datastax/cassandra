@@ -94,7 +94,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
     }
 
     @Override
-    public ScoredRowId computeNext() {
+    protected ScoredRowId computeNext() {
         int consumed = rerankedCount - exactScoreQueue.size();
         if (consumed >= limit) {
             // Refill the exactScoreQueue until it reaches topK exact scores, or the approximate score queue is empty
