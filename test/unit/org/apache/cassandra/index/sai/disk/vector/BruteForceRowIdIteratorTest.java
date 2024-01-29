@@ -45,6 +45,8 @@ public class BruteForceRowIdIteratorTest
         var iter = new BruteForceRowIdIterator(pq, reranker, limit, topK);
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
+        assertFalse(view.isClosed);
+        iter.close();
         assertTrue(view.isClosed);
     }
 
