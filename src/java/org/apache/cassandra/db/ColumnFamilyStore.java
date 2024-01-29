@@ -1401,7 +1401,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                         SSTableMultiWriter writer = writerIterator.next();
                         if (writer.getBytesWritten() > 0)
                         {
-                            writer.setOpenResult(true).prepareToCommit();
+                            writer.prepareToCommit();
                         }
                         else
                         {
@@ -1412,6 +1412,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
                     // This can throw on remote storage, e.g. if a file cannot be uploaded
                     txn.prepareToCommit();
+
+                    // Open the underlying readers, the one that will be returne below by `finished()`.
+                    // Currently needs to be called before commit, because committing will close a certain number
+                    // of resources used by the writers which are accessed to open the readers.
+                    for (SSTableMultiWriter writer : flushResults)
+                        writer.openResult();
                 }
                 catch (Throwable t)
                 {

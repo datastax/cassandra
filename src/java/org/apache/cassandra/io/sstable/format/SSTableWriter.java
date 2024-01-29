@@ -284,7 +284,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         return this;
     }
 
-    public abstract SSTableWriter setOpenResult(boolean openResult);
+    public abstract void openResult();
 
     /**
      * Open the resultant SSTableReader before it has been fully written
@@ -307,8 +307,10 @@ public abstract class SSTableWriter extends SSTable implements Transactional
 
     public SSTableReader finish(boolean openResult)
     {
-        setOpenResult(openResult);
-        txnProxy().finish();
+        txnProxy().prepareToCommit();
+        if (openResult)
+            openResult();
+        txnProxy().commit();
         observers.forEach(SSTableFlushObserver::complete);
         return finished();
     }
