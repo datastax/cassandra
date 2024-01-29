@@ -20,19 +20,18 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.util.Arrays;
 import java.util.Iterator;
-import java.util.NoSuchElementException;
 import java.util.function.IntConsumer;
 
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.SearchResult;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.AbstractIterator;
 
 /**
  * An iterator over {@link SearchResult.NodeScore} backed by a {@link SearchResult} that resumes search
  * when the backing {@link SearchResult} is exhausted.
  */
-public class AutoResumingNodeScoreIterator implements CloseableIterator<SearchResult.NodeScore>
+public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult.NodeScore>
 {
     private final GraphSearcher<float[]> searcher;
     private final int topK;
@@ -66,24 +65,17 @@ public class AutoResumingNodeScoreIterator implements CloseableIterator<SearchRe
     }
 
     @Override
-    public boolean hasNext()
+    public SearchResult.NodeScore computeNext()
     {
         if (nodeScores.hasNext())
-            return true;
+            return nodeScores.next();
 
         var nextResult = searcher.resume(topK);
         maybeLogTrace(nextResult);
         cumulativeNodesVisited += nextResult.getVisitedCount();
+        // If the next result is empty, we are done searching.
         nodeScores = Arrays.stream(nextResult.getNodes()).iterator();
-        return nodeScores.hasNext();
-    }
-
-    @Override
-    public SearchResult.NodeScore next()
-    {
-        if (!hasNext())
-            throw new NoSuchElementException();
-        return nodeScores.next();
+        return nodeScores.hasNext() ? nodeScores.next() : endOfData();
     }
 
     private void maybeLogTrace(SearchResult result)
