@@ -41,14 +41,14 @@ import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.store.IndexInput;
 
-public class SortedTermsTest extends SaiRandomizedTest
+public class SortedTermsTest extends SAIRandomizedTester
 {
     @Test
     public void testLexicographicException() throws Exception

@@ -18,10 +18,7 @@
 package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.Before;
@@ -37,11 +34,9 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.MergeOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.lucene.index.PointValues.Relation;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
@@ -52,10 +47,9 @@ import static org.apache.lucene.index.PointValues.Relation.CELL_CROSSES_QUERY;
 import static org.apache.lucene.index.PointValues.Relation.CELL_INSIDE_QUERY;
 import static org.apache.lucene.index.PointValues.Relation.CELL_OUTSIDE_QUERY;
 import static org.hamcrest.Matchers.greaterThan;
-import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 
-public class BKDReaderTest extends SaiRandomizedTest
+public class BKDReaderTest extends SAIRandomizedTester
 {
     private final BKDReader.IntersectVisitor NONE_MATCH = new BKDReader.IntersectVisitor()
     {

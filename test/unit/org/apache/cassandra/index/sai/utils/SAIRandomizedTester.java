@@ -43,7 +43,7 @@ import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.TableMetadata;
 
 @ThreadLeakScope(ThreadLeakScope.Scope.NONE)
-public class SaiRandomizedTest extends RandomizedTest
+public class SAIRandomizedTester extends RandomizedTest
 {
     private static Thread.UncaughtExceptionHandler handler;
 

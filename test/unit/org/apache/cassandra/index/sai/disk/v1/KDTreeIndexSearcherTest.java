@@ -39,9 +39,9 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 
-public class KDTreeIndexSearcherTest extends SaiRandomizedTest
+public class KDTreeIndexSearcherTest extends SAIRandomizedTester
 {
     private static final short EQ_TEST_LOWER_BOUND_INCLUSIVE = 0;
     private static final short EQ_TEST_UPPER_BOUND_EXCLUSIVE = 3;

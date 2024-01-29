@@ -31,9 +31,9 @@ import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 
-public class MergePostingListTest extends SaiRandomizedTest
+public class MergePostingListTest extends SAIRandomizedTester
 {
     @Test
     public void shouldMergeInterleavedPostingLists() throws IOException

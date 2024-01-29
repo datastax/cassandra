@@ -23,26 +23,15 @@ import java.util.Set;
 
 import org.junit.Test;
 
-import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FilterDirectory;
 import org.apache.lucene.store.IOContext;
-import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.util.NumericUtils;
-import org.apache.lucene.util.bkd.BKDConfig;
-import org.apache.lucene.util.bkd.BKDReader;
-import org.apache.lucene.util.bkd.BKDWriter;
 
-import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.is;
 
-public class BKDTempFilesDirectoryTest extends SaiRandomizedTest
+public class BKDTempFilesDirectoryTest extends SAIRandomizedTester
 {
     @Test
     public void shouldSortPointsOnDisk() throws IOException

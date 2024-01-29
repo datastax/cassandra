@@ -24,10 +24,10 @@ import java.util.stream.Collectors;
 import org.junit.Assert;
 
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.cassandra.utils.Pair;
 
-public class AbstractKeyRangeIteratorTester extends SaiRandomizedTest
+public class AbstractKeyRangeIteratorTester extends SAIRandomizedTester
 {
     protected long[] arr(long... longArray)
     {

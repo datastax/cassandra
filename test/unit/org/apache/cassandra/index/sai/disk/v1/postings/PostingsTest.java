@@ -35,10 +35,10 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.lucene.store.IndexInput;
 
-public class PostingsTest extends SaiRandomizedTest
+public class PostingsTest extends SAIRandomizedTester
 {
     @Rule
     public final ExpectedException expectedException = ExpectedException.none();

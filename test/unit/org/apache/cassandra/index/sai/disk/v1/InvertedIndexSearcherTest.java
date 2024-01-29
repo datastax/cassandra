@@ -40,7 +40,7 @@ import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -51,7 +51,7 @@ import static org.hamcrest.Matchers.is;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class InvertedIndexSearcherTest extends SaiRandomizedTest
+public class InvertedIndexSearcherTest extends SAIRandomizedTester
 {
     public static final int LIMIT = Integer.MAX_VALUE;
 

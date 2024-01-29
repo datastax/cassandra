@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.carrotsearch.hppc.IntArrayList;
 import com.carrotsearch.hppc.LongArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -38,7 +37,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
 import org.apache.cassandra.index.sai.utils.AbstractIterator;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.Pair;
@@ -49,7 +48,7 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.Counter;
 import org.apache.lucene.util.NumericUtils;
 
-public class NumericIndexWriterTest extends SaiRandomizedTest
+public class NumericIndexWriterTest extends SAIRandomizedTester
 {
     private IndexDescriptor indexDescriptor;
     private String index;

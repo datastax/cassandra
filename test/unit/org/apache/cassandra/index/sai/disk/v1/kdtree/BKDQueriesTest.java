@@ -23,7 +23,7 @@ import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -32,7 +32,7 @@ import static org.apache.lucene.index.PointValues.Relation.CELL_CROSSES_QUERY;
 import static org.apache.lucene.index.PointValues.Relation.CELL_INSIDE_QUERY;
 import static org.apache.lucene.index.PointValues.Relation.CELL_OUTSIDE_QUERY;
 
-public class BKDQueriesTest extends SaiRandomizedTest
+public class BKDQueriesTest extends SAIRandomizedTester
 {
     @Test
     public void testInclusiveLowerBound()

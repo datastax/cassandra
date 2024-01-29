@@ -22,11 +22,11 @@ import java.util.Arrays;
 
 import org.junit.Test;
 
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.lucene.util.Counter;
 import org.apache.lucene.util.FixedBitSet;
 
-public class RAMPostingSlicesTest extends SaiRandomizedTest
+public class RAMPostingSlicesTest extends SAIRandomizedTester
 {
     @Test
     public void testRAMPostingSlices() throws Exception

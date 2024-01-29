@@ -34,7 +34,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
@@ -45,7 +45,7 @@ import static org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryRea
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS41;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.compare;
 
-public class TrieTermsDictionaryTest extends SaiRandomizedTest
+public class TrieTermsDictionaryTest extends SAIRandomizedTester
 {
     private IndexDescriptor indexDescriptor;
     private String index;

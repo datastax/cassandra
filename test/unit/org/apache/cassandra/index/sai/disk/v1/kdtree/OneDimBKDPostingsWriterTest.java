@@ -36,14 +36,14 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
 
 import static org.apache.cassandra.index.sai.metrics.QueryEventListeners.NO_OP_POSTINGS_LISTENER;
 
-public class OneDimBKDPostingsWriterTest extends SaiRandomizedTest
+public class OneDimBKDPostingsWriterTest extends SAIRandomizedTester
 {
     private IndexDescriptor indexDescriptor;
     private String index;
