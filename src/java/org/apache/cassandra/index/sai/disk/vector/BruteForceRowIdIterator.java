@@ -18,14 +18,10 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 
-import com.google.common.collect.AbstractIterator;
-
-import io.github.jbellis.jvector.graph.NodeSimilarity;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.AbstractIterator;
 
 
 /**
@@ -44,7 +40,7 @@ import org.apache.cassandra.utils.CloseableIterator;
  * <p>
  * As an implementation detail, we use a PriorityQueue to maintain state rather than a List and sorting.
  */
-public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
+public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
 {
     public static class RowWithApproximateScore
     {
@@ -98,7 +94,7 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
     }
 
     @Override
-    public boolean hasNext() {
+    public ScoredRowId computeNext() {
         int consumed = rerankedCount - exactScoreQueue.size();
         if (consumed >= limit) {
             // Refill the exactScoreQueue until it reaches topK exact scores, or the approximate score queue is empty
@@ -109,15 +105,7 @@ public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
             }
             rerankedCount = exactScoreQueue.size();
         }
-        return !exactScoreQueue.isEmpty();
-    }
-
-    @Override
-    public ScoredRowId next()
-    {
-        if (!hasNext())
-            throw new NoSuchElementException();
-        return exactScoreQueue.poll();
+        return exactScoreQueue.isEmpty() ? endOfData() : exactScoreQueue.poll();
     }
 
     @Override
