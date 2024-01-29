@@ -106,7 +106,6 @@ public class AutoResumingNodeScoreIterator implements CloseableIterator<SearchRe
     public void close()
     {
         nodesVisitedConsumer.accept(cumulativeNodesVisited);
-        if (onClose != null)
-            FileUtils.closeQuietly(onClose);
+        FileUtils.closeQuietly(onClose);
     }
 }
