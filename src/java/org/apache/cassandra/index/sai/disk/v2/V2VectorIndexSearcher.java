@@ -300,20 +300,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
             }
         }
-        NodeSimilarity.Reranker reranker = o -> similarityFunction.compare(queryVector, getVectorForOrdinal(o));
-        return CloseableIterator.wrap(new BruteForceRowIdIterator(approximateScores, reranker, limit, topK));
-    }
-
-    private float[] getVectorForOrdinal(int ordinal)
-    {
-        try
-        {
-            return graph.getVectorForOrdinal(ordinal);
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
-        }
+        var vectorsView = graph.getVectorsView();
+        NodeSimilarity.Reranker reranker = o -> similarityFunction.compare(queryVector, vectorsView.getVectorForOrdinal(o));
+        return new BruteForceRowIdIterator(approximateScores, reranker, limit, topK, vectorsView);
     }
 
     /**
@@ -348,7 +337,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                             Collection<ScoredRowId> collector) throws IOException
     {
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
-        try (var ordinalsView = graph.getOrdinalsView())
+        try (var ordinalsView = graph.getOrdinalsView();
+             var vectorsView = graph.getVectorsView())
         {
             for (int i = 0; i < segmentRowIds.size(); i++)
             {
@@ -357,7 +347,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 if (ordinal < 0)
                     continue;
 
-                float[] vector = graph.getVectorForOrdinal(ordinal);
+                float[] vector = vectorsView.getVectorForOrdinal(ordinal);
                 assert vector != null : "Vector for ordinal " + ordinal + " is null";
                 var score = similarityFunction.compare(queryVector, vector);
                 if (score >= threshold)

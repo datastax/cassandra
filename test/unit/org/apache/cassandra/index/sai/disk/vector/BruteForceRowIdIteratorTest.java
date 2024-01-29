@@ -41,7 +41,7 @@ public class BruteForceRowIdIteratorTest
 
         // Should work for an empty pq
         NodeSimilarity.Reranker reranker = o -> VectorSimilarityFunction.COSINE.compare(queryVector, identityMapper(o));
-        var iter = new BruteForceRowIdIterator(pq, reranker, limit, topK);
+        var iter = new BruteForceRowIdIterator(pq, reranker, limit, topK, () -> {});
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
     }

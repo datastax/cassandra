@@ -49,7 +49,9 @@ import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
+import org.apache.cassandra.index.sai.disk.vector.VectorsView;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -60,7 +62,6 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final CachingGraphIndex graph;
-    private final ThreadLocal<GraphIndex.View<float[]>> view;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
@@ -83,7 +84,6 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             logger.debug("Reducing cache distance from 3 to {} for {}", distance, graphHandle.path());
 
         graph = new CachingGraphIndex(graphIndex, distance);
-        view = ThreadLocal.withInitial(graph::getView);
 
         long pqSegmentOffset = getComponentMetadata(IndexComponent.PQ).offset;
         try (var pqFile = indexFiles.pq();
@@ -141,28 +141,36 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
-        // Retrieve the view reference once.
-        var threadLocalView = view.get();
+        var view = graph.getView();
         NodeSimilarity.ScoreFunction scoreFunction;
         NodeSimilarity.Reranker reranker;
         if (compressedVectors == null)
         {
             scoreFunction = (NodeSimilarity.ExactScoreFunction)
-                            i -> similarityFunction.compare(queryVector, threadLocalView.getVector(i));
+                            i -> similarityFunction.compare(queryVector, view.getVector(i));
             reranker = null;
         }
         else
         {
             scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, similarityFunction);
-            reranker = i -> similarityFunction.compare(queryVector, threadLocalView.getVector(i));
+            reranker = i -> similarityFunction.compare(queryVector, view.getVector(i));
         }
-        var searcher = new GraphSearcher.Builder<>(threadLocalView).build();
+        var searcher = new GraphSearcher.Builder<>(view).build();
         var result = searcher.search(scoreFunction, reranker, topK, threshold, ordinalsMap.ignoringDeleted(acceptBits));
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         // Threshold based searches are comprehensive and do not need to resume the search.
-        var nodeScores = threshold > 0 ? CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator())
-                                       : new AutoResumingNodeScoreIterator(searcher, result, nodesVisitedConsumer, topK, false);
-        return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
+        if (threshold > 0)
+        {
+            FileUtils.closeQuietly(view);
+            nodesVisitedConsumer.accept(result.getVisitedCount());
+            var nodeScores = CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
+            return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
+        }
+        else
+        {
+            var nodeScores = new AutoResumingNodeScoreIterator(searcher, result, nodesVisitedConsumer, topK, false, view);
+            return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
+        }
     }
 
     @Override
@@ -186,8 +194,30 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     }
 
     @Override
-    public float[] getVectorForOrdinal(int ordinal)
+    public VectorsView getVectorsView()
     {
-        return view.get().getVector(ordinal);
+        return new ANNVectorsView(graph.getView());
+    }
+
+    private static class ANNVectorsView implements VectorsView
+    {
+        private final GraphIndex.View<float[]> view;
+
+        private ANNVectorsView(GraphIndex.View<float[]> view)
+        {
+            this.view = view;
+        }
+
+        @Override
+        public float[] getVectorForOrdinal(int ordinal)
+        {
+            return view.getVector(ordinal);
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(view);
+        }
     }
 }

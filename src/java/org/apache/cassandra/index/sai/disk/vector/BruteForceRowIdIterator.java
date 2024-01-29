@@ -18,11 +18,14 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
+import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 
 import com.google.common.collect.AbstractIterator;
 
 import io.github.jbellis.jvector.graph.NodeSimilarity;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.CloseableIterator;
 
 
 /**
@@ -41,7 +44,7 @@ import io.github.jbellis.jvector.graph.NodeSimilarity;
  * <p>
  * As an implementation detail, we use a PriorityQueue to maintain state rather than a List and sorting.
  */
-public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
+public class BruteForceRowIdIterator implements CloseableIterator<ScoredRowId>
 {
     public static class RowWithApproximateScore
     {
@@ -73,17 +76,20 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
     private final int topK;
     private final int limit;
     private int rerankedCount;
+    private final AutoCloseable onClose;
 
     /**
      * @param approximateScoreQueue A priority queue of rows and their ordinal ordered by their approximate similarity scores
      * @param reranker A function that takes a graph ordinal and returns the exact similarity score
      * @param limit The query limit
      * @param topK The number of vectors to resolve and score before returning results
+     * @param onClose an {@link AutoCloseable} object to close when this iterator is closed
      */
     public BruteForceRowIdIterator(PriorityQueue<RowWithApproximateScore> approximateScoreQueue,
                                    NodeSimilarity.Reranker reranker,
                                    int limit,
-                                   int topK)
+                                   int topK,
+                                   AutoCloseable onClose)
     {
         this.approximateScoreQueue = approximateScoreQueue;
         this.exactScoreQueue = new PriorityQueue<>(topK, (a, b) -> Float.compare(b.score, a.score));
@@ -92,10 +98,11 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
         this.limit = limit;
         this.topK = topK;
         this.rerankedCount = topK; // placeholder to kick off computeNext
+        this.onClose = onClose;
     }
 
     @Override
-    protected ScoredRowId computeNext() {
+    public boolean hasNext() {
         int consumed = rerankedCount - exactScoreQueue.size();
         if (consumed >= limit) {
             // Refill the exactScoreQueue until it reaches topK exact scores, or the approximate score queue is empty
@@ -106,6 +113,20 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
             }
             rerankedCount = exactScoreQueue.size();
         }
-        return exactScoreQueue.isEmpty() ? endOfData() : exactScoreQueue.poll();
+        return !exactScoreQueue.isEmpty();
+    }
+
+    @Override
+    public ScoredRowId next()
+    {
+        if (!hasNext())
+            throw new NoSuchElementException();
+        return exactScoreQueue.poll();
+    }
+
+    @Override
+    public void close()
+    {
+        FileUtils.closeQuietly(onClose);
     }
 }
