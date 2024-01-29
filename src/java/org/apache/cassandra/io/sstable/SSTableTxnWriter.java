@@ -103,8 +103,10 @@ public class SSTableTxnWriter extends Transactional.AbstractTransactional implem
 
     public Collection<SSTableReader> finish(boolean openResult)
     {
-        writer.setOpenResult(openResult);
-        finish();
+        prepareToCommit();
+        if (openResult)
+            writer.openResult();
+        commit();
         return writer.finished();
     }
 
