@@ -129,8 +129,6 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     @Override
     public Collection<SSTableReader> finish(boolean openResult)
     {
-        setOpenResult(openResult);
-
         for (ZeroCopySequentialWriter writer : componentWriters.values())
             writer.finish();
 
@@ -147,9 +145,8 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     }
 
     @Override
-    public SSTableMultiWriter setOpenResult(boolean openResult)
+    public void openResult()
     {
-        return null;
     }
 
     @Override
