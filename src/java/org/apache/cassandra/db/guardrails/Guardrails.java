@@ -276,8 +276,8 @@ public final class Guardrails implements GuardrailsMBean
     public static final MaxThreshold pageWeight =
     new MaxThreshold("page_weight",
                      null,
-                     state -> CONFIG_PROVIDER.getOrCreate(state).getPageWeightWarnThreshold().toBytes(),
-                     state -> CONFIG_PROVIDER.getOrCreate(state).getPageWeightFailThreshold().toBytes(),
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getPageWeightWarnThreshold()),
+                     state -> sizeToBytes(CONFIG_PROVIDER.getOrCreate(state).getPageWeightFailThreshold()),
                      (isWarning, what, value, threshold) ->
                      isWarning ? format("Query for table %s with page weight %s bytes exceeds warning threshold of %s bytes.",
                                         what, value, threshold)
@@ -1396,6 +1396,11 @@ public final class Guardrails implements GuardrailsMBean
     }
 
     private static Long sizeToBytes(@Nullable DataStorageSpec.LongBytesBound size)
+    {
+        return size == null ? -1 : size.toBytes();
+    }
+
+    private static Integer sizeToBytes(@Nullable DataStorageSpec.IntBytesBound size)
     {
         return size == null ? -1 : size.toBytes();
     }

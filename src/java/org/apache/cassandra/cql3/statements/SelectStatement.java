@@ -39,6 +39,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
+
+import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -935,7 +937,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // want to limit the number of rows returned to the user
             if (Guardrails.pageWeight.enabled(clientState))
             {
-                int bytesLimit = DatabaseDescriptor.getGuardrailsConfig().getPageWeightFailThreshold().toBytes();
+                DataStorageSpec.IntBytesBound pageWeightFailThreshold = DatabaseDescriptor.getGuardrailsConfig().getPageWeightFailThreshold();
+                int bytesLimit = pageWeightFailThreshold == null ? NO_LIMIT : pageWeightFailThreshold.toBytes();
                 String limitStr = "Applied page weight limit of " + FBUtilities.prettyPrintMemory(bytesLimit);
                 ClientWarn.instance.warn(limitStr);
                 logger.trace(limitStr);
@@ -943,7 +946,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             }
             else if (Guardrails.pageSize.enabled(clientState))
             {   // TODO should we do that?
-                int rowsLimit = DatabaseDescriptor.getGuardrailsConfig().getPageSizeFailThreshold();
+                int pageSizeFailThreshold = DatabaseDescriptor.getGuardrailsConfig().getPageSizeFailThreshold();
+                int rowsLimit = pageSizeFailThreshold < 0 ? NO_LIMIT : pageSizeFailThreshold;
                 String limitStr = "Applied page size limit of " + rowsLimit + " rows";
                 ClientWarn.instance.warn(limitStr);
                 logger.trace(limitStr);
