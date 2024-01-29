@@ -39,6 +39,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
+
+import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -933,7 +935,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // want to limit the number of rows returned to the user
             if (Guardrails.pageWeight.enabled(clientState))
             {
-                int bytesLimit = DatabaseDescriptor.getGuardrailsConfig().getPageWeightFailThreshold().toBytes();
+                DataStorageSpec.IntBytesBound pageWeightFailThreshold = DatabaseDescriptor.getGuardrailsConfig().getPageWeightFailThreshold();
+                int bytesLimit = pageWeightFailThreshold == null ? NO_LIMIT : pageWeightFailThreshold.toBytes();
                 String limitStr = USAGE_WARNING_PAGE_WEIGHT + FBUtilities.prettyPrintMemory(bytesLimit);
                 ClientWarn.instance.warn(limitStr);
                 logger.trace(limitStr);
