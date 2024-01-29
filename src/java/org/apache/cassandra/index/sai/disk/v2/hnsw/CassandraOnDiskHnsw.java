@@ -156,7 +156,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         }
 
         @Override
-        public SearchResult.NodeScore computeNext()
+        protected SearchResult.NodeScore computeNext()
         {
             if (index < 0)
             {

@@ -53,7 +53,7 @@ public class MergeScoredPrimaryKeyIterator extends AbstractIterator<ScoredPrimar
     }
 
     @Override
-    public ScoredPrimaryKey computeNext()
+    protected ScoredPrimaryKey computeNext()
     {
         if (pq.isEmpty())
             return endOfData();

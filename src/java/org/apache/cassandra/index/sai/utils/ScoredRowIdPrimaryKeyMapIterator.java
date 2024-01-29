@@ -45,7 +45,7 @@ public class ScoredRowIdPrimaryKeyMapIterator extends AbstractIterator<ScoredPri
     }
 
     @Override
-    public ScoredPrimaryKey computeNext()
+    protected ScoredPrimaryKey computeNext()
     {
         if (!scoredRowIdIterator.hasNext())
             return endOfData();

@@ -36,7 +36,7 @@ public class PriorityQueueIterator<T> extends AbstractIterator<T>
     }
 
     @Override
-    public T computeNext()
+    protected T computeNext()
     {
         return !pq.isEmpty() ? pq.poll() : endOfData();
     }

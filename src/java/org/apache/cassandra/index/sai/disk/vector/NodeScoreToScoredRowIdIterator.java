@@ -45,7 +45,7 @@ public class NodeScoreToScoredRowIdIterator extends AbstractIterator<ScoredRowId
     }
 
     @Override
-    public ScoredRowId computeNext()
+    protected ScoredRowId computeNext()
     {
         try
         {

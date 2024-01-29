@@ -506,7 +506,7 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         @Override
-        public ScoredPrimaryKey computeNext()
+        protected ScoredPrimaryKey computeNext()
         {
             if (primaryKeysForNode.hasNext())
                 return primaryKeysForNode.next();

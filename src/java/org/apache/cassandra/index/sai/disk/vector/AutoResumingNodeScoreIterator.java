@@ -65,7 +65,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
     }
 
     @Override
-    public SearchResult.NodeScore computeNext()
+    protected SearchResult.NodeScore computeNext()
     {
         if (nodeScores.hasNext())
             return nodeScores.next();
