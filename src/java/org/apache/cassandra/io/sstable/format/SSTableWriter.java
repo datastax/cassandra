@@ -234,9 +234,9 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         return this;
     }
 
-    public void setOpenResult(boolean openResult)
+    public void openResult()
     {
-        txnProxy.openResult = openResult;
+        txnProxy().openResult();
     }
 
     /**
@@ -261,9 +261,11 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
 
     public SSTableReader finish(boolean openResult)
     {
-        this.setOpenResult(openResult);
+        txnProxy().prepareToCommit();
+        if (openResult)
+            openResult();
+        txnProxy().commit();
         observers.forEach(SSTableFlushObserver::complete);
-        txnProxy.finish();
         return finished();
     }
 
@@ -367,7 +369,6 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         private final Supplier<ImmutableList<Transactional>> transactionals;
 
         private SSTableReader finalReader;
-        private boolean openResult;
         private boolean finalReaderAccessed;
 
         public TransactionalProxy(Supplier<ImmutableList<Transactional>> transactionals)
@@ -383,9 +384,11 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
 
             // save the table of components
             TOCComponent.appendTOC(descriptor, components);
+        }
 
-            if (openResult)
-                finalReader = openFinal(SSTableReader.OpenReason.NORMAL);
+        private void openResult()
+        {
+            finalReader = openFinal(SSTableReader.OpenReason.NORMAL);
         }
 
         protected Throwable doCommit(Throwable accumulate)
