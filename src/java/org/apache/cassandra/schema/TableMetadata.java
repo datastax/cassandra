@@ -70,6 +70,7 @@ public class TableMetadata implements SchemaElement
         COMPOUND,
         DENSE,
         COUNTER,
+        READ_QUERIED_COLUMNS,
         // The only reason we still have those is that on the first startup after an upgrade from pre-4.0, we cannot
         // guarantee some tables won't have those flags (users having forgotten to use DROP COMPACT STORAGE before
         // upgrading). So we still "deserialize" those flags correctly, but otherwise prevent startup if any table
@@ -150,6 +151,7 @@ public class TableMetadata implements SchemaElement
 
     public final Indexes indexes;
     public final Triggers triggers;
+    public final boolean isApiTable;
 
     // derived automatically from flags and columns
     public final AbstractType<?> partitionKeyType;
@@ -181,7 +183,7 @@ public class TableMetadata implements SchemaElement
 
         indexes = builder.indexes;
         triggers = builder.triggers;
-
+        isApiTable = isApiTableColumns(flags);
         partitionKeyType = partitionKeyColumns.size() == 1
                          ? partitionKeyColumns.get(0).type
                          : CompositeType.getInstance(transform(partitionKeyColumns, t -> t.type));
@@ -189,6 +191,11 @@ public class TableMetadata implements SchemaElement
         comparator = new ClusteringComparator(transform(clusteringColumns, c -> c.type));
 
         resource = DataResource.table(keyspace, name);
+    }
+
+    private boolean isApiTableColumns(ImmutableSet<Flag> flags)
+    {
+        return flags.contains(Flag.READ_QUERIED_COLUMNS);
     }
 
     public static Builder builder(String keyspace, String table)
@@ -962,6 +969,12 @@ public class TableMetadata implements SchemaElement
         public Builder flags(Set<Flag> val)
         {
             flags = val;
+            return this;
+        }
+
+        public Builder addToFlags(Flag val)
+        {
+            flags.add(val);
             return this;
         }
 

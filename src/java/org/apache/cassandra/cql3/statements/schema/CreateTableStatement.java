@@ -337,6 +337,9 @@ public final class CreateTableStatement extends AlterSchemaStatement
                     builder.addRegularColumn(column, type.getType());
             });
         }
+        if (attrs.getBoolean(TableAttributes.READ_QUERIED_COLUMNS, false))
+            builder.addToFlags(TableMetadata.Flag.READ_QUERIED_COLUMNS);
+
         for (DroppedColumn.Raw record : attrs.droppedColumnRecords())
             builder.recordColumnDrop(record.prepare(keyspaceName, tableName, types));
         return builder;
