@@ -18,16 +18,15 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 
-import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.AbstractIterator;
 
 /**
  * An iterator that returns elements from a priority queue in order. This is different from
  * {@link PriorityQueue#iterator()} which returns elements in undefined order.
  */
-public class PriorityQueueIterator<T> implements CloseableIterator<T>
+public class PriorityQueueIterator<T> extends AbstractIterator<T>
 {
     private final PriorityQueue<T> pq;
 
@@ -37,21 +36,8 @@ public class PriorityQueueIterator<T> implements CloseableIterator<T>
     }
 
     @Override
-    public boolean hasNext()
+    protected T computeNext()
     {
-        return !pq.isEmpty();
-    }
-
-    @Override
-    public T next()
-    {
-        if (!hasNext())
-            throw new NoSuchElementException();
-        return pq.poll();
-    }
-
-    @Override
-    public void close()
-    {
+        return !pq.isEmpty() ? pq.poll() : endOfData();
     }
 }
