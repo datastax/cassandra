@@ -19,18 +19,18 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
-import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
 import java.util.stream.IntStream;
 
 import io.github.jbellis.jvector.graph.SearchResult;
+import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 
 /**
  * An iterator over {@link ScoredRowId} sorted by score descending. The iterator converts ordinals (node ids) to
  * segment row ids and pairs them with the score given by the index.
  */
-public class NodeScoreToScoredRowIdIterator implements CloseableIterator<ScoredRowId>
+public class NodeScoreToScoredRowIdIterator extends AbstractIterator<ScoredRowId>
 {
     private final CloseableIterator<SearchResult.NodeScore> nodeScores;
     private final RowIdsView rowIdsView;
@@ -45,12 +45,12 @@ public class NodeScoreToScoredRowIdIterator implements CloseableIterator<ScoredR
     }
 
     @Override
-    public boolean hasNext()
+    protected ScoredRowId computeNext()
     {
         try
         {
             if (segmentRowIdIterator.hasNext())
-                return true;
+                return new ScoredRowId(segmentRowIdIterator.nextInt(), currentScore);
 
             while (nodeScores.hasNext())
             {
@@ -59,22 +59,14 @@ public class NodeScoreToScoredRowIdIterator implements CloseableIterator<ScoredR
                 var ordinal = result.node;
                 segmentRowIdIterator = rowIdsView.getSegmentRowIdsMatching(ordinal);
                 if (segmentRowIdIterator.hasNext())
-                    return true;
+                    return new ScoredRowId(segmentRowIdIterator.nextInt(), currentScore);
             }
-            return false;
+            return endOfData();
         }
         catch (IOException e)
         {
             throw new RuntimeException(e);
         }
-    }
-
-    @Override
-    public ScoredRowId next()
-    {
-        if (!hasNext())
-            throw new NoSuchElementException();
-        return new ScoredRowId(segmentRowIdIterator.nextInt(), currentScore);
     }
 
     @Override
