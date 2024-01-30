@@ -23,8 +23,11 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.function.IntConsumer;
 
+import javax.annotation.Nullable;
+
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.SearchResult;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -37,6 +40,7 @@ public class AutoResumingNodeScoreIterator implements CloseableIterator<SearchRe
     private final GraphSearcher<float[]> searcher;
     private final int topK;
     private final boolean inMemory;
+    private final AutoCloseable onClose;
     private final IntConsumer nodesVisitedConsumer;
     private Iterator<SearchResult.NodeScore> nodeScores;
     private int cumulativeNodesVisited;
@@ -50,12 +54,14 @@ public class AutoResumingNodeScoreIterator implements CloseableIterator<SearchRe
      * @param nodesVisitedConsumer a consumer that accepts the total number of nodes visited
      * @param topK the limit to pass to the {@link GraphSearcher} when resuming search
      * @param inMemory whether the graph is in memory or on disk (used for trace logging)
+     * @param onClose an {@link AutoCloseable} object to close when this iterator is closed
      */
     public AutoResumingNodeScoreIterator(GraphSearcher<float[]> searcher,
                                          SearchResult result,
                                          IntConsumer nodesVisitedConsumer,
                                          int topK,
-                                         boolean inMemory)
+                                         boolean inMemory,
+                                         @Nullable AutoCloseable onClose)
     {
         this.searcher = searcher;
         this.nodeScores = Arrays.stream(result.getNodes()).iterator();
@@ -63,6 +69,7 @@ public class AutoResumingNodeScoreIterator implements CloseableIterator<SearchRe
         this.nodesVisitedConsumer = nodesVisitedConsumer;
         this.topK = topK;
         this.inMemory = inMemory;
+        this.onClose = onClose;
     }
 
     @Override
@@ -99,5 +106,6 @@ public class AutoResumingNodeScoreIterator implements CloseableIterator<SearchRe
     public void close()
     {
         nodesVisitedConsumer.accept(cumulativeNodesVisited);
+        FileUtils.closeQuietly(onClose);
     }
 }
