@@ -694,7 +694,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void testMaxTermSizeRejectionsAtWrite() throws Throwable
+    public void testMaxTermSizeRejectionsAtWrite()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (k int PRIMARY KEY, v text, m map<text, text>, frozen_m frozen<map<text, text>>)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
@@ -704,15 +704,18 @@ public class NativeIndexDDLTest extends SAITester
 
         String largeTerm = UTF8Type.instance.compose(ByteBuffer.allocate(FBUtilities.MAX_UNSIGNED_SHORT / 2 + 1));
         assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, v) VALUES (0, ?)", largeTerm))
-        .hasMessage("Term of column v exceeds the byte limit for index. Term size 32.000KiB. Max allowed size 1.000KiB.")
+        .hasMessage(String.format("Term of column v exceeds the byte limit for index. Term size 32.000KiB. Max allowed size %s.",
+                                  FBUtilities.prettyPrintMemory(IndexContext.MAX_STRING_TERM_SIZE)))
         .isInstanceOf(InvalidQueryException.class);
 
         assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, m) VALUES (0, {'key': '" + largeTerm + "'})"))
-        .hasMessage("Term of column m exceeds the byte limit for index. Term size 32.000KiB. Max allowed size 1.000KiB.")
+        .hasMessage(String.format("Term of column m exceeds the byte limit for index. Term size 32.000KiB. Max allowed size %s.",
+                                  FBUtilities.prettyPrintMemory(IndexContext.MAX_STRING_TERM_SIZE)))
         .isInstanceOf(InvalidQueryException.class);
 
         assertThatThrownBy(() -> executeNet("INSERT INTO %s (k, frozen_m) VALUES (0, {'key': '" + largeTerm + "'})"))
-        .hasMessage("Term of column frozen_m exceeds the byte limit for index. Term size 32.015KiB. Max allowed size 5.000KiB.")
+        .hasMessage(String.format("Term of column frozen_m exceeds the byte limit for index. Term size 32.015KiB. Max allowed size %s.",
+                                  FBUtilities.prettyPrintMemory(IndexContext.MAX_FROZEN_TERM_SIZE)))
         .isInstanceOf(InvalidQueryException.class);
     }
 
@@ -1495,6 +1498,82 @@ public class NativeIndexDDLTest extends SAITester
         // mode with one SAI codec footer per segment (see OnHeapGraph.writeData). Multi-segment
         // builds therefore need segment-aware checksum validation.
         assertTrue(verifyChecksum(vectorIndexTermType, vectorIndexIdentifier));
+    }
+
+    @Test
+    public void shouldRejectLargeStringTerms()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        String insert = "INSERT INTO %s (k, v) VALUES (0, ?)";
+
+        // insert a text term with the max possible size
+        execute(insert, ByteBuffer.allocate(IndexContext.MAX_STRING_TERM_SIZE));
+
+        // insert a text term over the max possible size
+        assertThatThrownBy(() -> execute(insert, ByteBuffer.allocate(IndexContext.MAX_STRING_TERM_SIZE + 1)))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Term of column v exceeds the byte limit for index");
+    }
+
+    @Test
+    public void shouldRejectLargeFrozenTerms()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v frozen<list<text>>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(full(v)) USING 'StorageAttachedIndex'");
+        String insert = "INSERT INTO %s (k, v) VALUES (0, ?)";
+
+        // insert a frozen term with the max possible size
+        // list serialization uses 4 bytes for the collection size, and then 4 bytes per each item size
+        String value1 = UTF8Type.instance.compose(ByteBuffer.allocate(IndexContext.MAX_FROZEN_TERM_SIZE / 2 - 8));
+        String value2 = UTF8Type.instance.compose(ByteBuffer.allocate(IndexContext.MAX_FROZEN_TERM_SIZE / 2 - 4));
+        execute(insert, Arrays.asList(value1, value2));
+
+        // insert a frozen term over the max possible size
+        assertThatThrownBy(() -> execute(insert, Arrays.asList(value1, value2, "x")))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Term of column v exceeds the byte limit for index");
+    }
+
+    @Test
+    public void shouldRejectLargeAnalyzedTerms()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'" +
+                    " WITH OPTIONS = {'index_analyzer': 'whitespace'}");
+        String insert = "INSERT INTO %s (k, v) VALUES (0, ?)";
+
+
+        // insert an analyzed column with terms of cumulating up to the max possible size
+        String term = UTF8Type.instance.compose(ByteBuffer.allocate(IndexContext.MAX_ANALYZED_SIZE / 2));
+        execute(insert, term + ' ' + term);
+
+        // insert a frozen term over the max possible size
+        assertThatThrownBy(() -> execute(insert, term + ' ' + term + ' ' + term))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Term's analyzed size for column v exceeds the cumulative limit for index");
+    }
+
+    @Test
+    public void shouldRejectLargeVector()
+    {
+        String table = "CREATE TABLE %%s (k int PRIMARY KEY, v vector<float, %d>)";
+        String index = "CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}";
+        String insert = "INSERT INTO %s (k, v) VALUES (0, ?)";
+
+        // insert a vector term with the max possible size
+        int dimensions = IndexContext.MAX_VECTOR_TERM_SIZE / Float.BYTES;
+        createTable(String.format(table, dimensions));
+        createIndex(index);
+        execute(insert, vector(new float[dimensions]));
+
+        // create a vector index producing terms over the max possible size
+        createTable(String.format(table, dimensions + 1));
+        assertThatThrownBy(() -> execute(index))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("An index of vector<float, 4097> will produce terms of 16.004KiB, " +
+                              "exceeding the max vector term size of 16.000KiB. " +
+                              "That sets an implicit limit of 4096 dimensions for float vectors.");
     }
 
     private void assertZeroSegmentBuilderUsage()
