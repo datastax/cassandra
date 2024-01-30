@@ -29,7 +29,6 @@ import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.graph.NodeSimilarity;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseFixedBitSet;
@@ -49,6 +48,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
+import org.apache.cassandra.index.sai.disk.vector.CloseableReranker;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OverqueryUtils;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
@@ -300,20 +300,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
             }
         }
-        NodeSimilarity.Reranker reranker = o -> similarityFunction.compare(queryVector, getVectorForOrdinal(o));
-        return CloseableIterator.wrap(new BruteForceRowIdIterator(approximateScores, reranker, limit, topK));
-    }
-
-    private float[] getVectorForOrdinal(int ordinal)
-    {
-        try
-        {
-            return graph.getVectorForOrdinal(ordinal);
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
-        }
+        var reranker = new CloseableReranker(similarityFunction, queryVector, graph.getVectorSupplier());
+        return new BruteForceRowIdIterator(approximateScores, reranker, limit, topK);
     }
 
     /**
@@ -348,7 +336,8 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                             Collection<ScoredRowId> collector) throws IOException
     {
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
-        try (var ordinalsView = graph.getOrdinalsView())
+        try (var ordinalsView = graph.getOrdinalsView();
+             var vectorsView = graph.getVectorSupplier())
         {
             for (int i = 0; i < segmentRowIds.size(); i++)
             {
@@ -357,7 +346,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 if (ordinal < 0)
                     continue;
 
-                float[] vector = graph.getVectorForOrdinal(ordinal);
+                float[] vector = vectorsView.getVectorForOrdinal(ordinal);
                 assert vector != null : "Vector for ordinal " + ordinal + " is null";
                 var score = similarityFunction.compare(queryVector, vector);
                 if (score >= threshold)

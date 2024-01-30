@@ -20,8 +20,8 @@ package org.apache.cassandra.index.sai.disk.v2.hnsw;
 
 import java.io.IOException;
 import java.util.NoSuchElementException;
-import java.util.function.Function;
 import java.util.function.IntConsumer;
+import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.slf4j.Logger;
@@ -44,7 +44,9 @@ import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
+import org.apache.cassandra.index.sai.disk.vector.VectorSupplier;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.index.VectorEncoding;
@@ -56,7 +58,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraOnDiskHnsw.class);
 
-    private final Function<QueryContext, VectorsWithCache> vectorsSupplier;
+    private final Supplier<VectorsWithCache> vectorsSupplier;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final OnDiskHnswGraph hnsw;
     private final VectorSimilarityFunction similarityFunction;
@@ -73,7 +75,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
 
         vectorsFile = indexFiles.vectors();
         long vectorsSegmentOffset = getComponentMetadata(IndexComponent.VECTOR).offset;
-        vectorsSupplier = (qc) -> new VectorsWithCache(new OnDiskVectors(vectorsFile, vectorsSegmentOffset), qc);
+        vectorsSupplier = () -> new VectorsWithCache(new OnDiskVectors(vectorsFile, vectorsSegmentOffset));
 
         SegmentMetadata.ComponentMetadata postingListsMetadata = getComponentMetadata(IndexComponent.POSTING_LISTS);
         ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
@@ -111,7 +113,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
         NeighborQueue queue;
-        try (var vectors = vectorsSupplier.apply(context); var view = hnsw.getView(context))
+        try (var vectors = vectorsSupplier.get(); var view = hnsw.getView(context))
         {
             queue = HnswGraphSearcher.search(queryVector,
                                              topK,
@@ -192,9 +194,9 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     }
 
     @Override
-    public float[] getVectorForOrdinal(int ordinal) throws IOException
+    public VectorSupplier getVectorSupplier()
     {
-        return vectorCache.get(ordinal);
+        return new HNSWVectorSupplier(vectorsSupplier.get());
     }
 
     @Override
@@ -207,12 +209,10 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     class VectorsWithCache implements RandomAccessVectorValues<float[]>, AutoCloseable
     {
         private final OnDiskVectors vectors;
-        private final QueryContext queryContext;
 
-        public VectorsWithCache(OnDiskVectors vectors, QueryContext queryContext)
+        public VectorsWithCache(OnDiskVectors vectors)
         {
             this.vectors = vectors;
-            this.queryContext = queryContext;
         }
 
         @Override
@@ -246,6 +246,35 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         public void close()
         {
             vectors.close();
+        }
+    }
+
+    private static class HNSWVectorSupplier implements VectorSupplier
+    {
+        private final VectorsWithCache view;
+
+        private HNSWVectorSupplier(VectorsWithCache view)
+        {
+            this.view = view;
+        }
+
+        @Override
+        public float[] getVectorForOrdinal(int ordinal)
+        {
+            try
+            {
+                return view.vectorValue(ordinal);
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(view);
         }
     }
 }
