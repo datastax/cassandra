@@ -462,22 +462,26 @@ public class TableMetadata implements SchemaElement
     }
 
     /**
-     * Method that compares two TableMetadata objects. This is a modified version of validateCompatibility that is used
+     * Method that compares two TableMetadata objects. This is a modified version of {@link #validateCompatibility} that is used
      * when checking the compatibility between the schema metadata from an SSTable against the schema metadata from a
      * CQL table.
-     *
+     * <p>
      * The serialization header of the SSTable does not contain exactly the same information available in the schema of
      * a CQL table, so the comparison needs to be adapted to the information available.
-     *
+     * <p>
      * For example, the serialization header does not contain the partition key columns: it only contains the composite
      * type of the whole partition key. For this reason, the comparison must be between the partition key types contained
-     * in the two metadata objects, rather than comparing the individual column as validateCompatibility does.
+     * in the two metadata objects, rather than comparing the individual column as {@link #validateCompatibility} does.
      * This comparison is sufficient anyway because the composite types are the same only if their components are of the
      * same type and in the same order.
-     *
+     * <p>
+     * Another difference worth pointing out is that this method compares the table name, but not the keyspace name or table id.
+     * This is to allow the comparison between externally generated SSTables and a CQL schema, in which case the keyspace name
+     * and table id may be different.
+     * <p>
      * @param other TableMetadata instance to compare against
      */
-    public void validateTableStructureCompatibility(TableMetadata other)
+    public void validateTableNameAndStructureCompatibility(TableMetadata other)
     {
         if (isIndex())
             return;
