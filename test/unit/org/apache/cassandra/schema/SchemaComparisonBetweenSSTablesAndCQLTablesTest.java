@@ -53,7 +53,7 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
 {
-    private static final String encodedKeyspaceName = "74656e616e742d616161_schema_validation_tests";
+    private static final String ksName = "74656e616e742d616161_schema_validation_tests";
     private static final String ssTableResourceRootPath = "src/resources/org/apache/cassandra/schema/schema_validation_tests/";
 
     /**
@@ -149,23 +149,23 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     {
         ssTableMetadataForTableMap.put(TABLE_1_NAME,
                                        Util.metadataFromSSTable(Descriptor.fromFilename(ssTableResourceRootPath + "test_1-7ab21491848211ee825e31532694b0d3/bb-2-bti-Data.db"),
-                                                                encodedKeyspaceName, TABLE_1_NAME));
+                                                                ksName, TABLE_1_NAME));
 
         ssTableMetadataForTableMap.put(TABLE_2_NAME,
                                        Util.metadataFromSSTable(Descriptor.fromFilename(ssTableResourceRootPath + "test_2-83ac0dd1848211ee825e31532694b0d3/bb-1-bti-Data.db"),
-                                                                encodedKeyspaceName, TABLE_2_NAME));
+                                                                ksName, TABLE_2_NAME));
 
         ssTableMetadataForTableMap.put(TABLE_3_NAME,
                                        Util.metadataFromSSTable(Descriptor.fromFilename(ssTableResourceRootPath + "test_3-88b6cb80848211ee825e31532694b0d3/bb-1-bti-Data.db"),
-                                                                encodedKeyspaceName, TABLE_3_NAME));
+                                                                ksName, TABLE_3_NAME));
 
         ssTableMetadataForTableMap.put(TABLE_4_NAME,
                                        Util.metadataFromSSTable(Descriptor.fromFilename(ssTableResourceRootPath + "test_4-8bf57bc0848211ee825e31532694b0d3/bb-1-bti-Data.db"),
-                                                                encodedKeyspaceName, TABLE_4_NAME));
+                                                                ksName, TABLE_4_NAME));
 
         ssTableMetadataForTableMap.put(TABLE_5_NAME,
                                        Util.metadataFromSSTable(Descriptor.fromFilename(ssTableResourceRootPath + "test_5-9db47b90848211ee825e31532694b0d3/bb-1-bti-Data.db"),
-                                                                encodedKeyspaceName, TABLE_5_NAME));
+                                                                ksName, TABLE_5_NAME));
     }
 
     // *** GENERAL VALIDATION SUCCESS TESTS *** //
@@ -174,112 +174,7 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     public void testIdenticalSchemaPassesValidation_SinglePartKeyNoClustering()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_1_NAME,
-                                                               TableId.fromUUID(TABLE_1_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addRegularColumn("col_uuiid", UUIDType.instance)
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
-        assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
-    }
-
-    @Test
-    public void testIdenticalSchemaPassesValidation_SinglePartKeySingleClusteringAsc()
-    {
-        TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_2_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_2_NAME,
-                                                               TableId.fromUUID(TABLE_2_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addClusteringColumn("col_uuiid", UUIDType.instance)
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
-        assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
-    }
-
-    @Test
-    public void testIdenticalSchemaPassesValidation_CompoundPartKeySingleClusteringDesc()
-    {
-        TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_3_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_3_NAME,
-                                                               TableId.fromUUID(TABLE_3_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addPartitionKeyColumn("col_int", Int32Type.instance)
-                                                                    .addClusteringColumn("col_uuid", ReversedType.getInstance(UUIDType.instance))
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
-
-        assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
-    }
-
-    @Test
-    public void testIdenticalSchemaPassesValidation_SinglePartKeyTwoClusteringAscDesc()
-    {
-        TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_4_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_4_NAME,
-                                                               TableId.fromUUID(TABLE_4_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addClusteringColumn("col_int", ReversedType.getInstance(Int32Type.instance))
-                                                                    .addClusteringColumn("col_uuid", UUIDType.instance)
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
-        assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
-    }
-
-    @Test
-    public void testIdenticalSchemaPassesValidation_ManyDataTypes()
-    {
-        TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_5_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_5_NAME,
-                                                               TableId.fromUUID(TABLE_5_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addRegularColumn("col_ascii", AsciiType.instance)
-                                                                    .addRegularColumn("col_bigint", LongType.instance)
-                                                                    .addRegularColumn("col_blob", BytesType.instance)
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_date", SimpleDateType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .addRegularColumn("col_dbl", DoubleType.instance)
-                                                                    .addRegularColumn("col_float", FloatType.instance)
-                                                                    .addRegularColumn("col_inet", InetAddressType.instance)
-                                                                    .addRegularColumn("col_small", ShortType.instance)
-                                                                    .addRegularColumn("col_time", TimeType.instance)
-                                                                    .addRegularColumn("col_timestamp", TimestampType.instance)
-                                                                    .addRegularColumn("col_timeuuid", TimeUUIDType.instance)
-                                                                    .addRegularColumn("col_tinyint", ByteType.instance)
-                                                                    .addRegularColumn("col_varchar", UTF8Type.instance)
-                                                                    .addRegularColumn("col_varint", IntegerType.instance)
-                                                                    .build();
-        assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
-    }
-
-    // *** KEYSPACE NAME, TABLE NAME AND TABLE ID ADDITIONAL TESTS *** //
-
-    @Test
-    public void testTableNameMismatchFailsValidation() {
-        TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, "different_table_name",
-                                                               TableId.fromUUID(TABLE_1_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addRegularColumn("col_uuiid", UUIDType.instance)
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
-        assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
-                    .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
-    }
-
-    @Test
-    public void testKeyspaceNameMismatchPassesValidation() {
-        TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder("different_keyspace_name", TABLE_1_NAME,
-                                                               TableId.fromUUID(TABLE_1_UUID))
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_1_NAME, TableId.fromUUID(TABLE_1_UUID))
                                                       .addPartitionKeyColumn("col_txt", UTF8Type.instance)
                                                       .addRegularColumn("col_int", Int32Type.instance)
                                                       .addRegularColumn("col_uuiid", UUIDType.instance)
@@ -290,10 +185,110 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     }
 
     @Test
-    public void testTableIdMismatchPassesValidation() {
+    public void testIdenticalSchemaPassesValidation_SinglePartKeySingleClusteringAsc()
+    {
+        TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_2_NAME);
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_2_NAME, TableId.fromUUID(TABLE_2_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addClusteringColumn("col_uuiid", UUIDType.instance)
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
+        assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testIdenticalSchemaPassesValidation_CompoundPartKeySingleClusteringDesc()
+    {
+        TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_3_NAME);
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_3_NAME, TableId.fromUUID(TABLE_3_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addPartitionKeyColumn("col_int", Int32Type.instance)
+                                                      .addClusteringColumn("col_uuid", ReversedType.getInstance(UUIDType.instance))
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
+
+        assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testIdenticalSchemaPassesValidation_SinglePartKeyTwoClusteringAscDesc()
+    {
+        TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_4_NAME);
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_4_NAME, TableId.fromUUID(TABLE_4_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addClusteringColumn("col_int", ReversedType.getInstance(Int32Type.instance))
+                                                      .addClusteringColumn("col_uuid", UUIDType.instance)
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
+        assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testIdenticalSchemaPassesValidation_ManyDataTypes()
+    {
+        TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_5_NAME);
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_5_NAME, TableId.fromUUID(TABLE_5_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addRegularColumn("col_ascii", AsciiType.instance)
+                                                      .addRegularColumn("col_bigint", LongType.instance)
+                                                      .addRegularColumn("col_blob", BytesType.instance)
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_date", SimpleDateType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .addRegularColumn("col_dbl", DoubleType.instance)
+                                                      .addRegularColumn("col_float", FloatType.instance)
+                                                      .addRegularColumn("col_inet", InetAddressType.instance)
+                                                      .addRegularColumn("col_small", ShortType.instance)
+                                                      .addRegularColumn("col_time", TimeType.instance)
+                                                      .addRegularColumn("col_timestamp", TimestampType.instance)
+                                                      .addRegularColumn("col_timeuuid", TimeUUIDType.instance)
+                                                      .addRegularColumn("col_tinyint", ByteType.instance)
+                                                      .addRegularColumn("col_varchar", UTF8Type.instance)
+                                                      .addRegularColumn("col_varint", IntegerType.instance)
+                                                      .build();
+        assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
+    }
+
+    // *** KEYSPACE NAME, TABLE NAME AND TABLE ID ADDITIONAL TESTS *** //
+
+    @Test
+    public void testTableNameMismatchFailsValidation()
+    {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_1_NAME,
-                                                               TableId.fromUUID(UUID.randomUUID())) // different UUID
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, "different_table_name", TableId.fromUUID(TABLE_1_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addRegularColumn("col_uuiid", UUIDType.instance)
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
+        assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
+        .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
+    }
+
+    @Test
+    public void testKeyspaceNameMismatchPassesValidation()
+    {
+        TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
+        TableMetadata cqlTableMetadata = TableMetadata.builder("different_keyspace_name", TABLE_1_NAME, TableId.fromUUID(TABLE_1_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addRegularColumn("col_uuiid", UUIDType.instance)
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
+        assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testTableIdMismatchPassesValidation()
+    {
+        TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_1_NAME, TableId.fromUUID(UUID.randomUUID())) // different UUID
                                                       .addPartitionKeyColumn("col_txt", UTF8Type.instance)
                                                       .addRegularColumn("col_int", Int32Type.instance)
                                                       .addRegularColumn("col_uuiid", UUIDType.instance)
@@ -309,48 +304,45 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     public void testPartitionKeyMismatchFailsValidation_WrongColumn()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_1_NAME,
-                                                               TableId.fromUUID(TABLE_1_UUID))
-                                                                    .addRegularColumn("col_txt", UTF8Type.instance) // should be single part key
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addPartitionKeyColumn("col_uuiid", UUIDType.instance) // is not part key
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_1_NAME, TableId.fromUUID(TABLE_1_UUID))
+                                                      .addRegularColumn("col_txt", UTF8Type.instance) // should be single part key
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addPartitionKeyColumn("col_uuiid", UUIDType.instance) // is not part key
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
 
         assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
-                    .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
+        .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
     }
 
     @Test
     public void testPartitionKeyMismatchFailsValidation_WrongAdditionalColumn()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_1_NAME,
-                                                               TableId.fromUUID(TABLE_1_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance) // is single part key
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addPartitionKeyColumn("col_uuiid", UUIDType.instance) // is not part key
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance).build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_1_NAME, TableId.fromUUID(TABLE_1_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance) // is single part key
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addPartitionKeyColumn("col_uuiid", UUIDType.instance) // is not part key
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance).build();
         assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
-                    .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
+        .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
     }
 
     @Test
     public void testPartitionKeyMismatchFailsValidation_WrongColumnType()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_1_NAME,
-                                                               TableId.fromUUID(TABLE_1_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", Int32Type.instance) // is single part key but wrong type
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addRegularColumn("col_uuiid", UUIDType.instance)
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_1_NAME, TableId.fromUUID(TABLE_1_UUID))
+                                                      .addPartitionKeyColumn("col_txt", Int32Type.instance) // is single part key but wrong type
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addRegularColumn("col_uuiid", UUIDType.instance)
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
         assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
-                    .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
+        .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
     }
 
     /**
@@ -361,13 +353,12 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     public void testPartitionKeyColumnNameMismatchPassesValidation()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_1_NAME,
-                                                               TableId.fromUUID(TABLE_1_UUID))
-                                                                    .addPartitionKeyColumn("wrong_name", UTF8Type.instance) // correct type but wrong type
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addRegularColumn("col_uuiid", UUIDType.instance)
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance).build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_1_NAME, TableId.fromUUID(TABLE_1_UUID))
+                                                      .addPartitionKeyColumn("wrong_name", UTF8Type.instance) // correct type but wrong type
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addRegularColumn("col_uuiid", UUIDType.instance)
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance).build();
         assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
     }
 
@@ -375,16 +366,15 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     public void testPartitionKeyMismatchFailsValidation_CompoundPartKeyWrongColumnOrder()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_3_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_3_NAME,
-                                                               TableId.fromUUID(TABLE_3_UUID))
-                                                                    .addPartitionKeyColumn("col_int", Int32Type.instance)   // is part key column but should be second
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)   // is part key column but should be first
-                                                                    .addClusteringColumn("col_uuid", ReversedType.getInstance(UUIDType.instance))
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_3_NAME, TableId.fromUUID(TABLE_3_UUID))
+                                                      .addPartitionKeyColumn("col_int", Int32Type.instance)   // is part key column but should be second
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)   // is part key column but should be first
+                                                      .addClusteringColumn("col_uuid", ReversedType.getInstance(UUIDType.instance))
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
         assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
-                    .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
+        .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
     }
 
     // *** CLUSTERING COLUMN VALIDATION ADDITIONAL TESTS *** //
@@ -393,80 +383,76 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     public void testClusteringColumnsMismatchFailsValidation_MissingClusteringColumn()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_2_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_2_NAME,
-                                                               TableId.fromUUID(TABLE_2_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addRegularColumn("col_uuiid", UUIDType.instance)   // should be clustering column
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_2_NAME, TableId.fromUUID(TABLE_2_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addRegularColumn("col_uuiid", UUIDType.instance)   // should be clustering column
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
         assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
-                    .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
+        .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
     }
 
     @Test
     public void testClusteringColumnsMismatchFailsValidation_WrongClusteringColumn()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_2_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_2_NAME,
-                                                               TableId.fromUUID(TABLE_2_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addClusteringColumn("col_int", Int32Type.instance) // is not clustering column
-                                                                    .addRegularColumn("col_uuiid", UUIDType.instance)   // should be clustering column
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_2_NAME, TableId.fromUUID(TABLE_2_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addClusteringColumn("col_int", Int32Type.instance) // is not clustering column
+                                                      .addRegularColumn("col_uuiid", UUIDType.instance)   // should be clustering column
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
         assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
-                    .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
+        .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
     }
 
     @Test
     public void testClusteringColumnsMismatchFailsValidation_CorrectClusteringColumnButWrongOrderingClause()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_2_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_2_NAME,
-                                                               TableId.fromUUID(TABLE_2_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addClusteringColumn("col_uuiid", ReversedType.getInstance(UUIDType.instance)) // is clustering column but should be ascending
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_2_NAME, TableId.fromUUID(TABLE_2_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addClusteringColumn("col_uuiid", ReversedType.getInstance(UUIDType.instance)) // is clustering column but should be ascending
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
         assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
-                    .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
+        .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
     }
 
     @Test
     public void testClusteringColumnsMismatchFailsValidation_WrongAdditionalClusteringColumn()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_2_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_2_NAME,
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_2_NAME,
                                                                TableId.fromUUID(TABLE_2_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addClusteringColumn("col_int", Int32Type.instance)// is not clustering column
-                                                                    .addClusteringColumn("col_uuiid", UUIDType.instance) // is clustering column
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addClusteringColumn("col_int", Int32Type.instance)// is not clustering column
+                                                      .addClusteringColumn("col_uuiid", UUIDType.instance) // is clustering column
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
         assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
-                    .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
+        .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
     }
 
     @Test
     public void testClusteringColumnsMismatchFailsValidation_WrongClusteringColumnType()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_2_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_2_NAME,
-                                                               TableId.fromUUID(TABLE_2_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addClusteringColumn("col_uuiid", DecimalType.instance) // is clustering column but wrong type
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_2_NAME, TableId.fromUUID(TABLE_2_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addClusteringColumn("col_uuiid", DecimalType.instance) // is clustering column but wrong type
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
         assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
-                    .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
+        .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
     }
 
     @Test
@@ -474,16 +460,15 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     {
 
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_4_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_4_NAME,
-                                                               TableId.fromUUID(TABLE_4_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addClusteringColumn("col_uuid", UUIDType.instance) // is clustering column but should be second
-                                                                    .addClusteringColumn("col_int", ReversedType.getInstance(Int32Type.instance))   // is clustering column but should be first
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_4_NAME, TableId.fromUUID(TABLE_4_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addClusteringColumn("col_uuid", UUIDType.instance) // is clustering column but should be second
+                                                      .addClusteringColumn("col_int", ReversedType.getInstance(Int32Type.instance))   // is clustering column but should be first
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
         assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
-                    .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
+        .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
     }
 
     /**
@@ -494,13 +479,12 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     public void testClusteringColumnNameMismatchPassesValidation()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_2_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_2_NAME,
-                                                               TableId.fromUUID(TABLE_2_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addClusteringColumn("wrong_name", UUIDType.instance)   // is clustering column but wrong name
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance).build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_2_NAME, TableId.fromUUID(TABLE_2_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addClusteringColumn("wrong_name", UUIDType.instance)   // is clustering column but wrong name
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance).build();
         assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
     }
 
@@ -510,16 +494,15 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     public void testRegularColumnMismatchFailsValidation_WrongColumnType()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_1_NAME,
-                                                               TableId.fromUUID(TABLE_1_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addRegularColumn("col_uuid", UTF8Type.instance)  // is regular column but wrong type
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_1_NAME, TableId.fromUUID(TABLE_1_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addRegularColumn("col_uuid", UTF8Type.instance)  // is regular column but wrong type
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
         assertThatExceptionOfType(org.apache.cassandra.exceptions.ConfigurationException.class)
-                    .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
+        .isThrownBy(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata));
     }
 
     @Test
@@ -527,14 +510,13 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     {
         // TODO this may have to be expected to pass validation legitimately
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_1_NAME,
-                                                               TableId.fromUUID(TABLE_1_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addRegularColumn("xvfdsfsdfsd", UUIDType.instance)  // is regular column but wrong name
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_1_NAME, TableId.fromUUID(TABLE_1_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addRegularColumn("xvfdsfsdfsd", UUIDType.instance)  // is regular column but wrong name
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
         assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
     }
 
@@ -542,15 +524,14 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     public void testAdditionalRegularColumnPassesValidation()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_1_NAME,
-                                                               TableId.fromUUID(TABLE_1_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addRegularColumn("col_uuid", UUIDType.instance)
-                                                                    .addRegularColumn("col_bool", BooleanType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .addRegularColumn("additional_column", FloatType.instance) // column not present in sstable schema
-                                                                    .build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_1_NAME, TableId.fromUUID(TABLE_1_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addRegularColumn("col_uuid", UUIDType.instance)
+                                                      .addRegularColumn("col_bool", BooleanType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .addRegularColumn("additional_column", FloatType.instance) // column not present in sstable schema
+                                                      .build();
         assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
     }
 
@@ -558,13 +539,12 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     public void testMissingRegularColumnPassesValidation()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_1_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(encodedKeyspaceName, TABLE_1_NAME,
-                                                               TableId.fromUUID(TABLE_1_UUID))
-                                                                    .addPartitionKeyColumn("col_txt", UTF8Type.instance)
-                                                                    .addRegularColumn("col_int", Int32Type.instance)
-                                                                    .addRegularColumn("col_uuid", UUIDType.instance)
-                                                                    .addRegularColumn("col_dec", DecimalType.instance)
-                                                                    .build();
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_1_NAME, TableId.fromUUID(TABLE_1_UUID))
+                                                      .addPartitionKeyColumn("col_txt", UTF8Type.instance)
+                                                      .addRegularColumn("col_int", Int32Type.instance)
+                                                      .addRegularColumn("col_uuid", UUIDType.instance)
+                                                      .addRegularColumn("col_dec", DecimalType.instance)
+                                                      .build();
         assertThatCode(() -> ssTableMetadata.validateTableNameAndStructureCompatibility(cqlTableMetadata)).doesNotThrowAnyException();
     }
 }

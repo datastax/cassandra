@@ -303,13 +303,12 @@ public final class Util
     }
 
     /**
-     * Construct table schema from info stored in SSTable's Stats.db
+     * Construct table schema from info stored in SSTable's Stats.db.
+     * Hardcodes the keyspace and table name to default values to preserve the existing behavior.
      *
      * @param desc SSTable's descriptor
      * @return Restored CFMetaData
      * @throws IOException when Stats.db cannot be read
-     *
-     * Hardcodes the keyspace and table name to default values to preserve the existing behavior.
      */
     public static TableMetadata metadataFromSSTable(Descriptor desc) throws IOException
     {
