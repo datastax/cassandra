@@ -1193,7 +1193,13 @@ public abstract class CommitLogTest
         {
             // Currently we don't attempt to re-flush a memtable that failed, thus make sure data is replayed by commitlog.
             // If retries work subsequent flushes should clear up error and this should change to expect 0.
-            assertEquals(1, CommitLog.instance.resetUnsafe(false));
+            Map<Keyspace, Integer> partitionUpdates = CommitLog.instance.resetUnsafe(false);
+            Integer keyspacePartitionUpdates = partitionUpdates.entrySet().stream()
+                                                               .filter(e -> e.getKey().getName().equals(KEYSPACE1))
+                                                               .findFirst()
+                                                               .map(Map.Entry::getValue)
+                                                               .orElseThrow();
+            assertEquals(1, keyspacePartitionUpdates.intValue());
         }
     }
 
