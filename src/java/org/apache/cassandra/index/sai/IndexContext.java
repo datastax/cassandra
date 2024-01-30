@@ -100,8 +100,8 @@ public class IndexContext
     private static final Logger logger = LoggerFactory.getLogger(IndexContext.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    private static final int MAX_STRING_TERM_SIZE = SAI_MAX_STRING_TERM_SIZE.getInt() * 1024;
-    private static final int MAX_FROZEN_TERM_SIZE = SAI_MAX_FROZEN_TERM_SIZE.getInt() * 1024;
+    public static final int MAX_STRING_TERM_SIZE = SAI_MAX_STRING_TERM_SIZE.getInt() * 1024;
+    public static final int MAX_FROZEN_TERM_SIZE = SAI_MAX_FROZEN_TERM_SIZE.getInt() * 1024;
     public static final int MAX_VECTOR_TERM_SIZE = SAI_MAX_VECTOR_TERM_SIZE.getInt() * 1024;
     public static final int MAX_ANALYZED_SIZE = SAI_MAX_ANALYZED_SIZE.getInt() * 1024;
     private static final String TERM_OVERSIZE_LOG_MESSAGE =
@@ -366,7 +366,7 @@ public class IndexContext
         {
             final ByteBuffer token = analyzer.next();
             bytesCount += token.remaining();
-            if (bytesCount >= maxTermSize)
+            if (bytesCount > maxTermSize)
             {
                 noSpamLogger.warn(logMessage(ANALYZED_TERM_OVERSIZE_LOG_MESSAGE),
                                   getColumnName(),
