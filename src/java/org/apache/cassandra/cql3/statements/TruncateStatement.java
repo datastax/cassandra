@@ -24,6 +24,7 @@ import java.util.function.UnaryOperator;
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -126,7 +127,11 @@ public class TruncateStatement implements CQLStatement, CQLStatement.SingleKeysp
                 throw new InvalidRequestException("Cannot truncate virtual tables");
 
             ColumnFamilyStore cfs = Keyspace.open(keyspace()).getColumnFamilyStore(name());
-            cfs.truncateBlocking();
+            // Only take a snapshot if auto snapshot is enabled.
+            if (DatabaseDescriptor.getAutoSnapshot())
+                cfs.truncateBlocking();
+            else
+                cfs.truncateBlockingWithoutSnapshot();
         }
         catch (Exception e)
         {
