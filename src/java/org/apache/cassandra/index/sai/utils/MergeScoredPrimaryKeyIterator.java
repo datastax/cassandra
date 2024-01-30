@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.Collection;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 
 import com.google.common.collect.Iterators;
@@ -28,6 +27,7 @@ import com.google.common.collect.PeekingIterator;
 
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 
 /**
@@ -35,7 +35,7 @@ import org.apache.cassandra.utils.CloseableIterator;
  * scores of the top element of each iterator and returning the {@link ScoredPrimaryKey} with the
  * highest score.
  */
-public class MergeScoredPrimaryKeyIterator implements CloseableIterator<ScoredPrimaryKey>
+public class MergeScoredPrimaryKeyIterator extends AbstractIterator<ScoredPrimaryKey>
 {
     private final PriorityQueue<PeekingIterator<ScoredPrimaryKey>> pq;
     private final List<CloseableIterator<ScoredPrimaryKey>> iteratorsToBeClosed;
@@ -51,17 +51,12 @@ public class MergeScoredPrimaryKeyIterator implements CloseableIterator<ScoredPr
         iteratorsToBeClosed = iterators;
         indexesToBeClosed = referencedIndexes;
     }
-    @Override
-    public boolean hasNext()
-    {
-        return !pq.isEmpty();
-    }
 
     @Override
-    public ScoredPrimaryKey next()
+    protected ScoredPrimaryKey computeNext()
     {
-        if (!hasNext())
-            throw new NoSuchElementException();
+        if (pq.isEmpty())
+            return endOfData();
 
         // Get the iterator with the highest score
         var nextIter = pq.poll();
