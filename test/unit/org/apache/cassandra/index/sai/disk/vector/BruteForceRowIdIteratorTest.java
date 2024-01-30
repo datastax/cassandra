@@ -23,11 +23,11 @@ import java.util.PriorityQueue;
 
 import org.junit.Test;
 
-import io.github.jbellis.jvector.graph.NodeSimilarity;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 public class BruteForceRowIdIteratorTest
 {
@@ -40,14 +40,30 @@ public class BruteForceRowIdIteratorTest
         var limit = 10;
 
         // Should work for an empty pq
-        NodeSimilarity.Reranker reranker = o -> VectorSimilarityFunction.COSINE.compare(queryVector, identityMapper(o));
+        var view = new TestVectorSupplier();
+        CloseableReranker reranker = new CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
         var iter = new BruteForceRowIdIterator(pq, reranker, limit, topK);
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
+        assertFalse(view.isClosed);
+        iter.close();
+        assertTrue(view.isClosed);
     }
 
-    private float[] identityMapper(int rowId)
+    private static class TestVectorSupplier implements VectorSupplier
     {
-        return new float[] { rowId };
+        private boolean isClosed = false;
+
+        @Override
+        public float[] getVectorForOrdinal(int ordinal)
+        {
+            return new float[] { ordinal };
+        }
+
+        @Override
+        public void close()
+        {
+            isClosed = true;
+        }
     }
 }
