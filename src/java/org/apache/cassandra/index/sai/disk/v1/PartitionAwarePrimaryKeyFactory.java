@@ -80,6 +80,12 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         }
 
         @Override
+        public Kind kind()
+        {
+            return partitionKey != null ? Kind.SKINNY : Kind.TOKEN;
+        }
+
+        @Override
         public Token token()
         {
             return this.token;

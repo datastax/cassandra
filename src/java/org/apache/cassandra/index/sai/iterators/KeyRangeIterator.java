@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
+import java.util.Properties;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -341,20 +342,20 @@ public abstract class KeyRangeIterator extends AbstractIterator<PrimaryKey> impl
     }
 
     @SuppressWarnings("unchecked")
-    private static <T extends Comparable> T nullSafeMin(T a, T b)
+    private static PrimaryKey nullSafeMin(PrimaryKey a, PrimaryKey b)
     {
         if (a == null) return b;
         if (b == null) return a;
 
-        return a.compareTo(b) > 0 ? b : a;
+        return a.compareToStrict(b) > 0 ? b : a;
     }
 
     @SuppressWarnings("unchecked")
-    private static <T extends Comparable> T nullSafeMax(T a, T b)
+    private static PrimaryKey nullSafeMax(PrimaryKey a, PrimaryKey b)
     {
         if (a == null) return b;
         if (b == null) return a;
 
-        return a.compareTo(b) > 0 ? a : b;
+        return a.compareToStrict(b) > 0 ? a : b;
     }
 }
