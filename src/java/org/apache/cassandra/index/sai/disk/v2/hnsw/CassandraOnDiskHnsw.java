@@ -19,7 +19,6 @@
 package org.apache.cassandra.index.sai.disk.v2.hnsw;
 
 import java.io.IOException;
-import java.util.NoSuchElementException;
 import java.util.function.IntConsumer;
 import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -48,6 +47,7 @@ import org.apache.cassandra.index.sai.disk.vector.VectorSupplier;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.util.hnsw.HnswGraphSearcher;
@@ -138,7 +138,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     /**
      * An iterator that reorders the results from HNSW to descending score order.
      */
-    static class ReorderingNodeScoresIterator implements CloseableIterator<SearchResult.NodeScore>
+    static class ReorderingNodeScoresIterator extends AbstractIterator<SearchResult.NodeScore>
     {
         private final SearchResult.NodeScore[] scores;
         private int index;
@@ -158,25 +158,15 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         }
 
         @Override
-        public boolean hasNext()
+        protected SearchResult.NodeScore computeNext()
         {
             if (index < 0)
             {
                 logger.warn("HNSW queue is empty, returning false, but the search might not have been exhaustive");
-                return false;
+                return endOfData();
             }
-            return true;
-        }
-
-        @Override
-        public SearchResult.NodeScore next() {
-            if (!hasNext())
-                throw new NoSuchElementException();
             return scores[index--];
         }
-
-        @Override
-        public void close() {}
     }
 
     @Override
