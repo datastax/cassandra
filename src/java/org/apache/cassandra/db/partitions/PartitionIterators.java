@@ -22,8 +22,6 @@ import java.util.*;
 import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.transform.MorePartitions;
 import org.apache.cassandra.db.transform.Transformation;
-import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.utils.AbstractIterator;
 
 import org.apache.cassandra.db.SinglePartitionReadQuery;
@@ -139,16 +137,11 @@ public abstract class PartitionIterators
     {
         return new PartitionIterator()
         {
-            private final RequestTracker requestTracker = RequestTracker.instance;
             public void close()
             {
                 try
                 {
                     delegate.close();
-
-                    RequestSensors sensors = requestTracker.get();
-                    if (sensors != null)
-                        sensors.syncAllSensors();
                 }
                 finally
                 {

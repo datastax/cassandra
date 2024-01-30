@@ -36,7 +36,6 @@ import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.guardrails.Guardrails;
-import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -505,8 +504,17 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             if (requestSensors != null)
             {
                 Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(Type.READ_BYTES);
+                Map<String, ByteBuffer> customPayload = new HashMap<>();
                 readRequestSensor.map(SensorsCustomParams::sensorValueAsByteBuffer)
-                                 .ifPresent(bytes -> msg.setCustomPayload(Collections.singletonMap(SensorsCustomParams.READ_BYTES_REQUEST, bytes)));
+                                 .ifPresent(bytes -> customPayload.put(SensorsCustomParams.READ_BYTES_REQUEST, bytes));
+
+                Optional<Sensor> readTableSensor = SensorsRegistry.instance.getSensor(Context.from(this.table), Type.READ_BYTES);
+                readTableSensor.map(s -> {
+                                   double bytes = SensorsRegistry.instance.aggregateSensorsByType(Type.READ_BYTES);
+                                   return SensorsCustomParams.sensorValueAsByteBuffer(bytes);
+                               })
+                               .ifPresent(bytes -> customPayload.put(SensorsCustomParams.READ_BYTES_RATE, bytes));
+                msg.setCustomPayload(customPayload);
             }
         }
 

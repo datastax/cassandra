@@ -111,6 +111,7 @@ public class SensorsRegistry implements SchemaChangeListener
     private final ConcurrentMap<String, Set<Sensor>> byTableId = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Set<Sensor>> byType = new ConcurrentHashMap<>();
     private final CopyOnWriteArrayList<SensorsRegistryListener> listeners = new CopyOnWriteArrayList<>();
+    private final ConcurrentMap<String, SensorsRegisterAggregator> aggregatorPyType = new ConcurrentHashMap<>();
 
     private final long sensorRateWindowInNanos =  TimeUnit.SECONDS.toNanos(Integer.getInteger(SENSORS_RATE_WINDOW_IN_SECONDS_SYSTEM_PROPERTY, 60));
 
@@ -170,6 +171,15 @@ public class SensorsRegistry implements SchemaChangeListener
         }
     }
 
+    /**
+     * Register a new sensor aggregator function for a given type. Overwrites any previously registered aggregator for the same type.
+     */
+    public void registerSensorAggregator(SensorsRegisterAggregator aggregator, Type type)
+    {
+        aggregatorPyType.put(type.name(), aggregator);
+        logger.debug("Aggregator {} for type {} registered", aggregator, type);
+    }
+
     protected void updateSensor(Context context, Type type, double value)
     {
         long now = this.clock.now();
@@ -198,13 +208,18 @@ public class SensorsRegistry implements SchemaChangeListener
         return Optional.ofNullable(byType.get(type.name())).orElseGet(() -> ImmutableSet.of());
     }
 
-    public double aggregateSensors(Predicate<Sensor> shouldAggregate, Function<Sensor, Double> sensorValueFn)
+    /**
+     * Aggregate all sensors of a given type using a registered aggregator function.
+     * If no aggregator is registered for the given type, it defaults to a sum of all sensor values.
+     */
+    public double aggregateSensorsByType(Type type)
     {
-        return identity.values()
-                       .stream()
-                       .filter(shouldAggregate)
-                       .map(sensorValueFn)
-                       .reduce(0.0, Double::sum);
+        SensorsRegisterAggregator aggregator = aggregatorPyType.getOrDefault(type.name(), SensorsRegisterAggregator.DEFAULT);
+        return byType.get(type.name())
+                     .stream()
+                     .filter(aggregator.aggregatorFilter())
+                     .map(aggregator.aggregatorFn())
+                     .reduce(0.0, Double::sum);
     }
 
     @Override

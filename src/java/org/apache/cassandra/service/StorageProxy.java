@@ -1880,7 +1880,7 @@ public class StorageProxy implements StorageProxyMBean
                                                                                       consistencyLevel);
         // Request sensors are utilized to track usages from all writers serving a request.
         RequestSensors sensors = new RequestSensors(Context.from(group.metadata()));
-        sensors.registerSensor(Type.READ_BYTES);
+        sensors.registerSensor(Type.READ_BYTES, true);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
@@ -2140,12 +2140,6 @@ public class StorageProxy implements StorageProxyMBean
         for (int i=0; i<cmdCount; i++)
         {
             reads[i].awaitResponses();
-        }
-
-        // update sensor values based on replica responses
-        for (int i=0; i<cmdCount; i++)
-        {
-            reads[i].updateSensorValues();
         }
 
         // read repair - if it looks like we may not receive enough full data responses to meet CL, send

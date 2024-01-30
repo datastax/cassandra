@@ -228,15 +228,30 @@ public class SensorsRegistryTest
 
         SensorsRegistry.instance.updateSensor(context1, type1, 1.0);
         SensorsRegistry.instance.updateSensor(context1, type1, 2.0);
-        SensorsRegistry.instance.updateSensor(context2, type1, 100.0); // should be excluded
-        SensorsRegistry.instance.updateSensor(context2, type2, 4.0);
-        SensorsRegistry.instance.updateSensor(context2, type2, 5.0);
+        SensorsRegistry.instance.updateSensor(context2, type1, 100.0);
+        SensorsRegistry.instance.updateSensor(context2, type2, 4.0); // should not be aggregated
+        SensorsRegistry.instance.updateSensor(context2, type2, 5.0); // should not be aggregated
 
-        Predicate<Sensor> sensorsFilter = (s) -> s.getContext().getTable().equals(CF1) || s.getType() == type2;
-        Function<Sensor, Double> sensorValueFn = Sensor::getValue;
+        SensorsRegisterAggregator aggregator = new SensorsRegisterAggregator()
+        {
+            @Override
+            public Function<Sensor, Double> aggregatorFn()
+            {
+                return s -> s.getValue() < 100 ? s.getValue() * s.getValue() : s.getValue();
+            }
 
-        double aggregatedValue = SensorsRegistry.instance.aggregateSensors(sensorsFilter, sensorValueFn);
-        assertThat(aggregatedValue).isEqualTo(12.0);
+            @Override
+            public Predicate<Sensor> aggregatorFilter()
+            {
+                return (s) -> s.getContext() == context1 || s.getContext() == context2;
+            }
+        };
+
+        SensorsRegistry.instance.registerSensorAggregator(aggregator, type1);
+        double aggregatedValue = SensorsRegistry.instance.aggregateSensorsByType(type1);
+        double expectedContext1Type1Value = 1.0 + 2.0; // (context1, type1) summed up because of the monotonic nature of the registry
+        double expectedValue = expectedContext1Type1Value * expectedContext1Type1Value + 100.0;  // (context1, type1) is squared and (context2, type1) is not because of the aggregator definition
+        assertThat(aggregatedValue).isEqualTo(expectedValue);
     }
 
     @Test

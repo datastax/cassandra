@@ -44,14 +44,21 @@ public class Sensor
     private final Context context;
     private final Type type;
     private final AtomicDouble value;
+    private final boolean autoSync;
     private long lastSnapshotTime;
     private double lastSnapshotValue;
 
     protected Sensor(Context context, Type type)
     {
+        this(context, type, false);
+    }
+
+    protected Sensor(Context context, Type type, boolean autoSync)
+    {
         this.context = context;
         this.type = type;
         this.value = new AtomicDouble();
+        this.autoSync = autoSync;
     }
 
     protected void increment(double value)
@@ -91,6 +98,11 @@ public class Sensor
     public double getLastSnapshotValue()
     {
         return lastSnapshotValue;
+    }
+
+    public boolean autoSync()
+    {
+        return autoSync;
     }
 
     @VisibleForTesting

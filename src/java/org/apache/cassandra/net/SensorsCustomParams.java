@@ -21,6 +21,8 @@ package org.apache.cassandra.net;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.SensorsRegisterAggregator;
+import org.apache.cassandra.sensors.Type;
 
 /**
  * A utility class that contains the definition of custom params added to the {@link Message} header to propagate {@link Sensor} values from
@@ -32,10 +34,19 @@ public final class SensorsCustomParams
      * The per-request read bytes value for a given keyspace and table.
      */
     public static final String READ_BYTES_REQUEST = "READ_BYTES_REQUEST";
+
     /**
      * The total read bytes value for a given keyspace and table, across all requests. This is a monotonically increasing value.
      */
     public static final String READ_BYTES_TABLE = "READ_BYTES_TABLE";
+
+    /**
+     * The rate of change of read bytes value, across all requests over a given time window
+     * configured by the {@link org.apache.cassandra.sensors.SensorsRegistry.SENSORS_RATE_WINDOW_IN_SECONDS_SYSTEM_PROPERTY) system property.
+     * The subset of sensors for a given type consiider for rate calculation is configured is application specefic.
+     * See {@link org.apache.cassandra.sensors.SensorsRegistry#registerSensorAggregator(SensorsRegisterAggregator, Type)}. for details/.
+     */
+    public static final String READ_BYTES_RATE = "READ_BYTES_RATE";
 
     private SensorsCustomParams()
     {
@@ -51,8 +62,13 @@ public final class SensorsCustomParams
 
     public static ByteBuffer sensorValueAsByteBuffer(Sensor sensor)
     {
+        return sensorValueAsByteBuffer(sensor.getValue());
+    }
+
+    public static ByteBuffer sensorValueAsByteBuffer(double value)
+    {
         ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);
-        buffer.putDouble(sensor.getValue());
+        buffer.putDouble(value);
 
         return buffer;
     }
