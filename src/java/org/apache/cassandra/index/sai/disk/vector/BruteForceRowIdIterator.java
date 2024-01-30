@@ -20,9 +20,8 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.util.PriorityQueue;
 
-import com.google.common.collect.AbstractIterator;
-
-import io.github.jbellis.jvector.graph.NodeSimilarity;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.AbstractIterator;
 
 
 /**
@@ -69,7 +68,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
     private final PriorityQueue<RowWithApproximateScore> approximateScoreQueue;
     // Priority queue with full resolution scores
     private final PriorityQueue<ScoredRowId> exactScoreQueue;
-    private final NodeSimilarity.Reranker reranker;
+    private final CloseableReranker reranker;
     private final int topK;
     private final int limit;
     private int rerankedCount;
@@ -81,7 +80,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
      * @param topK The number of vectors to resolve and score before returning results
      */
     public BruteForceRowIdIterator(PriorityQueue<RowWithApproximateScore> approximateScoreQueue,
-                                   NodeSimilarity.Reranker reranker,
+                                   CloseableReranker reranker,
                                    int limit,
                                    int topK)
     {
@@ -107,5 +106,11 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
             rerankedCount = exactScoreQueue.size();
         }
         return exactScoreQueue.isEmpty() ? endOfData() : exactScoreQueue.poll();
+    }
+
+    @Override
+    public void close()
+    {
+        FileUtils.closeQuietly(reranker);
     }
 }
