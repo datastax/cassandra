@@ -366,7 +366,7 @@ public class BatchStatement implements CQLStatement
         if (mutations.size() <= 1)
             return;
 
-        long size = IMutation.dataSize(mutations);
+        long size = batchSize(mutations);
 
         if (Guardrails.batchSize.triggersOn(size, queryState))
         {
@@ -379,6 +379,23 @@ public class BatchStatement implements CQLStatement
 
             Guardrails.batchSize.guard(size, tableNames.toString(), false, queryState);
         }
+    }
+
+    /**
+     * Returns the size of the batch mutations,
+     * this method includes the primary key size in the size calculation formula.
+     *
+     * @param mutations - the batch mutations.
+     * @return the total size of the batch mutations.
+     */
+    private static long batchSize(Collection<? extends IMutation> mutations)
+    {
+        return IMutation.dataSize(mutations) + primaryKeysSize(mutations);
+    }
+
+    private static long primaryKeysSize(Collection<? extends IMutation> mutations)
+    {
+        return mutations.stream().map(IMutation::key).mapToLong(DecoratedKey::getKeyLength).sum();
     }
 
     private void verifyBatchType(Collection<? extends IMutation> mutations, QueryState queryState)
