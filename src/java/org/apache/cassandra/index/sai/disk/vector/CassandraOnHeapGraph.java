@@ -311,7 +311,7 @@ public class CassandraOnHeapGraph<T>
         context.addAnnNodesVisited(result.getVisitedCount());
         // Threshold based searches do not support resuming the search.
         return threshold > 0 ? CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator())
-                             : new AutoResumingNodeScoreIterator(searcher, result, context::addAnnNodesVisited, topK, true);
+                             : new AutoResumingNodeScoreIterator(searcher, result, context::addAnnNodesVisited, topK, true, null);
     }
 
     public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Function<T, Integer> postingTransformer) throws IOException
