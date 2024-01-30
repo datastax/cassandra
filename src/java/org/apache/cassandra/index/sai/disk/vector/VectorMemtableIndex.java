@@ -27,7 +27,6 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
-import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
@@ -59,6 +58,7 @@ import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -495,7 +495,7 @@ public class VectorMemtableIndex implements MemtableIndex
      * An iterator over {@link ScoredPrimaryKey} sorted by score descending. The iterator converts ordinals (node ids)
      * to {@link PrimaryKey}s and pairs them with the score given by the index.
      */
-    private class NodeScoreToScoredPrimaryKeyIterator implements CloseableIterator<ScoredPrimaryKey>
+    private class NodeScoreToScoredPrimaryKeyIterator extends AbstractIterator<ScoredPrimaryKey>
     {
         private final Iterator<SearchResult.NodeScore> nodeScores;
         private Iterator<ScoredPrimaryKey> primaryKeysForNode = Collections.emptyIterator();
@@ -506,10 +506,10 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         @Override
-        public boolean hasNext()
+        protected ScoredPrimaryKey computeNext()
         {
             if (primaryKeysForNode.hasNext())
-                return true;
+                return primaryKeysForNode.next();
 
             while (nodeScores.hasNext())
             {
@@ -519,23 +519,10 @@ public class VectorMemtableIndex implements MemtableIndex
                                           .map(pk -> new ScoredPrimaryKey(pk, nodeScore.score))
                                           .iterator();
                 if (primaryKeysForNode.hasNext())
-                    return true;
+                    return primaryKeysForNode.next();
             }
 
-            return false;
-        }
-
-        @Override
-        public ScoredPrimaryKey next()
-        {
-            if (!hasNext())
-                throw new NoSuchElementException();
-            return primaryKeysForNode.next();
-        }
-
-        @Override
-        public void close()
-        {
+            return endOfData();
         }
     }
 }
