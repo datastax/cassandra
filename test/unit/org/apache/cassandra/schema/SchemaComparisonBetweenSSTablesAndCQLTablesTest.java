@@ -428,8 +428,7 @@ public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
     public void testClusteringColumnsMismatchFailsValidation_WrongAdditionalClusteringColumn()
     {
         TableMetadata ssTableMetadata = ssTableMetadataForTableMap.get(TABLE_2_NAME);
-        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_2_NAME,
-                                                               TableId.fromUUID(TABLE_2_UUID))
+        TableMetadata cqlTableMetadata = TableMetadata.builder(ksName, TABLE_2_NAME, TableId.fromUUID(TABLE_2_UUID))
                                                       .addPartitionKeyColumn("col_txt", UTF8Type.instance)
                                                       .addClusteringColumn("col_int", Int32Type.instance)// is not clustering column
                                                       .addClusteringColumn("col_uuiid", UUIDType.instance) // is clustering column
