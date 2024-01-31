@@ -32,11 +32,13 @@ import org.junit.Test;
 import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.index.IndexBuildDecider;
+import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableContextManager;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
-import org.apache.cassandra.index.sai.disk.MemtableIndexWriter;
-import org.apache.cassandra.index.sai.disk.io.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.MemtableIndexWriter;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -48,7 +50,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-public class IndexBuildDeciderTest extends AbstractNodeLifecycleTest
+public class IndexBuildDeciderTest extends SAITester
 {
     static final Injections.Counter flushWithMemtableIndexWriterCount =
             Injections.newCounter("flushWithMemtableIndexWriterCount")
@@ -88,7 +90,7 @@ public class IndexBuildDeciderTest extends AbstractNodeLifecycleTest
         // populate one sstable
         int rowCount = 10;
         for (int j = 0; j < rowCount / 2; j++)
-            execute("INSERT INTO %s (id, v1) VALUES (?, ?)", String.valueOf(j), j);
+            execute("INSERT INTO %s (id1, v1) VALUES (?, ?)", String.valueOf(j), j);
         flush();
 
         SSTableReader initialSSTable = Iterables.getOnlyElement(getCurrentColumnFamilyStore().getLiveSSTables());
@@ -96,7 +98,7 @@ public class IndexBuildDeciderTest extends AbstractNodeLifecycleTest
 
         // populate memtable
         for (int j = rowCount / 2; j < rowCount; j++)
-            execute("INSERT INTO %s (id, v1) VALUES (?, ?)", String.valueOf(j), j);
+            execute("INSERT INTO %s (id1, v1) VALUES (?, ?)", String.valueOf(j), j);
 
         // create index: it's not queryable because IndexBuildDeciderWithoutInitialBuild skipped the initial build and
         // didn't consider the index queryable because there was already one sstable
@@ -120,19 +122,20 @@ public class IndexBuildDeciderTest extends AbstractNodeLifecycleTest
 
         // check the second sstable flushed at index creation is now indexed:
         SSTableReader secondSSTable = getCurrentColumnFamilyStore().getLiveSSTables().stream().filter(s -> s != initialSSTable).findFirst().get();
-        assertEquals(initialSSTableFileCount + numericIndexFileCount(), sstableFileCount(secondSSTable));
+        StorageAttachedIndex sai = (StorageAttachedIndex) group.getIndexes().iterator().next();
+        assertEquals(initialSSTableFileCount + indexFileCount(sai.getIndexContext()), sstableFileCount(secondSSTable));
         assertTrue(sstableContext.contains(secondSSTable));
 
         // SAI#canFlushFromMemtableIndex should be true
-        StorageAttachedIndex sai = (StorageAttachedIndex) group.getIndexes().iterator().next();
         assertTrue(sai.canFlushFromMemtableIndex());
 
         // flush another memtable: it should be flushed with MemtableIndexWriter
-        execute("INSERT INTO %s (id, v1) VALUES (?, ?)", String.valueOf(0), 0);
+        execute("INSERT INTO %s (id1, v1) VALUES (?, ?)", String.valueOf(0), 0);
         flush();
         assertEquals(1, flushWithMemtableIndexWriterCount.get());
         SSTableReader thirdSStable = getCurrentColumnFamilyStore().getLiveSSTables().stream().filter(s -> s != initialSSTable && s != secondSSTable).findFirst().get();
-        assertEquals(initialSSTableFileCount + numericIndexFileCount(), sstableFileCount(thirdSStable));
+
+        assertEquals(initialSSTableFileCount + indexFileCount(sai.getIndexContext()), sstableFileCount(thirdSStable));
         assertTrue(sstableContext.contains(thirdSStable));
     }
 
@@ -141,10 +144,10 @@ public class IndexBuildDeciderTest extends AbstractNodeLifecycleTest
         return FileUtils.listPathsWithAbsolutePath(secondSSTable.descriptor.baseFileURI()).size();
     }
 
-    private int numericIndexFileCount()
+    private int indexFileCount(IndexContext context)
     {
-        return IndexComponents.perColumnComponents("v1", false).size()
-                + IndexComponents.PER_SSTABLE_COMPONENTS.size();
+        return Version.LATEST.onDiskFormat().perIndexComponents(context).size()
+               + Version.LATEST.onDiskFormat().perSSTableComponents().size();
     }
 
     public static class IndexBuildDeciderWithoutInitialBuild implements IndexBuildDecider
