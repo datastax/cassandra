@@ -267,6 +267,10 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                                     : clusteringComparator.clusteringFromByteComparable(ByteBufferAccessor.instance,
                                                                                         v -> ByteSourceInverse.nextComponentSource(peekable));
 
+            // Clustering is null for static rows
+            if (clustering == null && clusteringComparator.size() > 0)
+                clustering = Clustering.STATIC_CLUSTERING;
+
             return primaryKeyFactory.create(partitionKey, clustering);
         }
         catch (IOException e)
