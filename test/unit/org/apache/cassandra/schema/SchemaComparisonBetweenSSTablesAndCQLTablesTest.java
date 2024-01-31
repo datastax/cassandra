@@ -54,7 +54,7 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 public class SchemaComparisonBetweenSSTablesAndCQLTablesTest
 {
     private static final String ksName = "74656e616e742d616161_schema_validation_tests";
-    private static final String ssTableResourceRootPath = "src/resources/org/apache/cassandra/schema/schema_validation_tests/";
+    private static final String ssTableResourceRootPath = "test/resources/schema/schema_validation_tests/";
 
     /**
      * Table schema:
