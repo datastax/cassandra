@@ -20,7 +20,6 @@
  */
 package org.apache.cassandra.index.sai.functional;
 
-import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
@@ -32,7 +31,6 @@ import org.junit.Test;
 
 import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
@@ -40,7 +38,7 @@ import org.apache.cassandra.index.sai.SSTableContextManager;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.sai.disk.v1.MemtableIndexWriter;
-import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -125,11 +123,11 @@ public class IndexBuildDeciderTest extends SAITester
 
         // check the second sstable flushed at index creation is now indexed:
         SSTableReader secondSSTable = getCurrentColumnFamilyStore().getLiveSSTables().stream().filter(s -> s != initialSSTable).findFirst().get();
-        assertEquals(initialSSTableFileCount + numericIndexFileCount(), sstableFileCount(secondSSTable));
+        StorageAttachedIndex sai = (StorageAttachedIndex) group.getIndexes().iterator().next();
+        assertEquals(initialSSTableFileCount + indexFileCount(sai.getIndexContext()), sstableFileCount(secondSSTable));
         assertTrue(sstableContext.contains(secondSSTable));
 
         // SAI#canFlushFromMemtableIndex should be true
-        StorageAttachedIndex sai = (StorageAttachedIndex) group.getIndexes().iterator().next();
         assertTrue(sai.canFlushFromMemtableIndex());
 
         // flush another memtable: it should be flushed with MemtableIndexWriter
@@ -137,22 +135,20 @@ public class IndexBuildDeciderTest extends SAITester
         flush();
         assertEquals(1, flushWithMemtableIndexWriterCount.get());
         SSTableReader thirdSStable = getCurrentColumnFamilyStore().getLiveSSTables().stream().filter(s -> s != initialSSTable && s != secondSSTable).findFirst().get();
-        assertEquals(initialSSTableFileCount + numericIndexFileCount(), sstableFileCount(thirdSStable));
+
+        assertEquals(initialSSTableFileCount + indexFileCount(sai.getIndexContext()), sstableFileCount(thirdSStable));
         assertTrue(sstableContext.contains(thirdSStable));
     }
 
     private int sstableFileCount(SSTableReader secondSSTable)
     {
-        Path sstableDir = secondSSTable.descriptor.directory.toPath();
-        String prefix = sstableDir + "/" + secondSSTable.descriptor.baseFile().name();
-        return FileUtils.listPaths(sstableDir, path -> path.toString().startsWith(prefix)).size();
+        return FileUtils.listPathsWithAbsolutePath(secondSSTable.descriptor.baseFileURI()).size();
     }
 
-    private int numericIndexFileCount()
+    private int indexFileCount(IndexContext context)
     {
-        IndexContext context = createIndexContext("v1", Int32Type.instance);
-        return V2OnDiskFormat.instance.perIndexComponents(context).size()
-               + V2OnDiskFormat.instance.perSSTableComponents().size();
+        return Version.LATEST.onDiskFormat().perIndexComponents(context).size()
+               + Version.LATEST.onDiskFormat().perSSTableComponents().size();
     }
 
     public static class IndexBuildDeciderWithoutInitialBuild implements IndexBuildDecider
