@@ -400,7 +400,7 @@ public class StorageAttachedIndex implements Index
             // Force another flush to make sure on disk index is generated for memtable data before marking it queryable.
             // In case of offline scrub, there is no live memtables.
             if (!baseCfs.getTracker().getView().liveMemtables.isEmpty())
-                baseCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
+                baseCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.INDEX_BUILD_STARTED);
 
             // From now on, all memtable will have attached memtable index. It is now safe to flush indexes directly from flushing Memtables.
             canFlushFromMemtableIndex = true;
