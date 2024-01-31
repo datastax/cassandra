@@ -69,7 +69,7 @@ public final class SensorsCustomParams
     {
         ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);
         buffer.putDouble(value);
-
+        buffer.flip();
         return buffer;
     }
 

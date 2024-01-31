@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.service.reads;
 
-import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -224,11 +223,11 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         Map<String, byte[]> customParams = msg.header.customParams();
         if (customParams != null)
         {
-            byte[] tableBytes = msg.header.customParams().get(SensorsCustomParams.READ_BYTES_REQUEST);
-            if (tableBytes != null)
+            byte[] readBytes = msg.header.customParams().get(SensorsCustomParams.READ_BYTES_REQUEST);
+            if (readBytes != null)
             {
-                double tableValue = SensorsCustomParams.sensorValueFromBytes(tableBytes);
-                this.requestSensors.incrementSensor(Type.READ_BYTES, tableValue);
+                double readValue = SensorsCustomParams.sensorValueFromBytes(readBytes);
+                this.requestSensors.incrementSensor(Type.READ_BYTES, readValue);
             }
         }
     }

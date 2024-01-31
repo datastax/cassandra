@@ -43,6 +43,7 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.BloomFilter;
@@ -56,9 +57,6 @@ public class SensorsReadTest
     public static final String KEYSPACE1 = "SensorsReadTest";
     public static final String CF_STANDARD = "Standard";
     public static final String CF_STANDARD_CLUSTERING = "StandardClustering";
-
-    private static final String READ_BYTES_REQUEST = "READ_BYTES_REQUEST";
-    private static final String READ_BYTES_TABLE = "READ_BYTES_TABLE";
 
     private ColumnFamilyStore store;
     private CopyOnWriteArrayList<Message> capturedOutboundMessages;
@@ -305,11 +303,11 @@ public class SensorsReadTest
     private void assertResponseSensors(Message message, double requestValue, double registryValue)
     {
         assertThat(message.header.customParams()).isNotNull();
-        assertThat(message.header.customParams()).containsKey(READ_BYTES_REQUEST);
-        assertThat(message.header.customParams()).containsKey(READ_BYTES_TABLE);
+        assertThat(message.header.customParams()).containsKey(SensorsCustomParams.READ_BYTES_REQUEST);
+        assertThat(message.header.customParams()).containsKey(SensorsCustomParams.READ_BYTES_TABLE);
 
-        double requestReadBytes = bytesToDouble(message.header.customParams().get(READ_BYTES_REQUEST));
-        double tableReadBytes = bytesToDouble(message.header.customParams().get(READ_BYTES_TABLE));
+        double requestReadBytes = bytesToDouble(message.header.customParams().get(SensorsCustomParams.READ_BYTES_REQUEST));
+        double tableReadBytes = bytesToDouble(message.header.customParams().get(SensorsCustomParams.READ_BYTES_TABLE));
         assertThat(requestReadBytes).isEqualTo(requestValue);
         assertThat(tableReadBytes).isEqualTo(registryValue);
     }

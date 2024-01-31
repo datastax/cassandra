@@ -24,13 +24,22 @@ import org.junit.Test;
 
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.Sensor;
-import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
 
 public class SensorsCustomParamsTest
 {
+
+    @Test
+    public void testHeaderNames()
+    {
+        assertEquals("READ_BYTES_REQUEST", SensorsCustomParams.READ_BYTES_REQUEST);
+        assertEquals("READ_BYTES_TABLE", SensorsCustomParams.READ_BYTES_TABLE);
+        assertEquals("READ_BYTES_RATE", SensorsCustomParams.READ_BYTES_RATE);
+    }
+
     @Test
     public void testSensorValueAsBytes()
     {
@@ -42,5 +51,15 @@ public class SensorsCustomParamsTest
         byte[] bytes = SensorsCustomParams.sensorValueAsBytes(sensor);
         ByteBuffer bb = ByteBuffer.wrap(bytes);
         assertEquals(d, bb.getDouble(), 0.0);
+    }
+
+    @Test
+    public void testSensorValueAsByteBuffer()
+    {
+        double d = Double.MAX_VALUE;
+        ByteBuffer bb = SensorsCustomParams.sensorValueAsByteBuffer(d);
+        // bb should already be flipped
+        assertEquals(bb.position(), 0);
+        assertEquals(d, ByteBufferUtil.toDouble(bb), 0.0);
     }
 }
