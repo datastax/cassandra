@@ -63,6 +63,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.SettableFuture;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -795,6 +796,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         String indexName = index.getIndexMetadata().name;
         if (isFullRebuild)
             makeIndexQueryable(index, Index.Status.BUILD_SUCCEEDED);
+
+        // If the index is a StorageAttachedIndex, then set initBuildStarted to true. Hack for Astra.
+        if (index instanceof StorageAttachedIndex)
+            ((StorageAttachedIndex) index).initBuildStarted = true;
+
 
         AtomicInteger counter = inProgressBuilds.get(indexName);
         if (counter != null)

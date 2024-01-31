@@ -221,7 +221,7 @@ public class StorageAttachedIndex implements Index
     private final IndexContext indexContext;
 
     // Tracks whether or not we've started the index build on initialization.
-    private volatile boolean initBuildStarted = false;
+    public volatile boolean initBuildStarted = false;
 
     // Tracks whether the index has been invalidated due to removal, a table drop, etc.
     private volatile boolean valid = true;
