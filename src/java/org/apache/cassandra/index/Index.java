@@ -226,7 +226,17 @@ public interface Index
     {
         return INDEX_BUILDER_SUPPORT;
     }
-    
+
+    /**
+      * Returns true if index initialization should be skipped, false if it should run
+      * (via {@link #getInitializationTask()}); defaults to skipping based on {@link IndexBuildDecider#onInitialBuild()}
+      * decision.
+      */
+    default boolean shouldSkipInitialization()
+    {
+        return IndexBuildDecider.instance.onInitialBuild().skipped();
+    }
+
     /**
      * Same as {@code getBuildTaskSupport} but can be overloaded with a specific 'recover' logic different than the index building one
      */

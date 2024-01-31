@@ -81,6 +81,7 @@ import org.apache.cassandra.dht.OrderPreservingPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -221,7 +222,7 @@ public class StorageAttachedIndex implements Index
     private final IndexContext indexContext;
 
     // Tracks whether or not we've started the index build on initialization.
-    private volatile boolean initBuildStarted = false;
+    private volatile boolean canFlushFromMemtableIndex = false;
 
     // Tracks whether the index has been invalidated due to removal, a table drop, etc.
     private volatile boolean valid = true;
@@ -373,21 +374,43 @@ public class StorageAttachedIndex implements Index
         return config;
     }
 
+     @Override
+     public boolean shouldSkipInitialization()
+     {
+         // SAI performs partial initialization so it must always execute it; the actual index build is then still skipped
+         // if IndexBuildDecider.instance.onInitialBuild().skipped() is true.
+         return false;
+    }
+
     @Override
     public Callable<?> getInitializationTask()
     {
+        IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onInitialBuild();
         // New storage-attached indexes will be available for queries after on disk index data are built.
         // Memtable data will be indexed via flushing triggered by schema change
         // We only want to validate the index files if we are starting up
-        return () -> startInitialBuild(baseCfs, StorageService.instance.isStarting()).get();
+        return () -> startInitialBuild(baseCfs, StorageService.instance.isStarting(), decision.skipped()).get();
     }
 
-    private Future<?> startInitialBuild(ColumnFamilyStore baseCfs, boolean validate)
+    private Future<?> startInitialBuild(ColumnFamilyStore baseCfs, boolean validate, boolean skipIndexBuild)
     {
+        if (skipIndexBuild)
+        {
+            logger.info("Skipping initialization task for {}.{} after flushing memtable", baseCfs.metadata(), indexContext.getIndexName());
+            // Force another flush to make sure on disk index is generated for memtable data before marking it queryable.
+            // In case of offline scrub, there is no live memtables.
+            if (!baseCfs.getTracker().getView().liveMemtables.isEmpty())
+                baseCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
+
+            // From now on, all memtable will have attached memtable index. It is now safe to flush indexes directly from flushing Memtables.
+            canFlushFromMemtableIndex = true;
+            return CompletableFuture.completedFuture(null);
+        }
+
         if (baseCfs.indexManager.isIndexQueryable(this))
         {
             logger.debug(indexContext.logMessage("Skipping validation and building in initialization task, as pre-join has already made the storage attached index queryable..."));
-            initBuildStarted = true;
+            canFlushFromMemtableIndex = true;
             return CompletableFuture.completedFuture(null);
         }
 
@@ -405,8 +428,8 @@ public class StorageAttachedIndex implements Index
             baseCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.INDEX_BUILD_STARTED);
         }
 
-        // It is now safe to flush indexes directly from flushing Memtables.
-        initBuildStarted = true;
+        // From now on, all memtable will have attached memtable index. It is now safe to flush indexes directly from flushing Memtables.
+        canFlushFromMemtableIndex = true;
 
         StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(baseCfs);
         List<SSTableReader> nonIndexed = findNonIndexedSSTables(baseCfs, indexGroup, validate);
@@ -524,9 +547,10 @@ public class StorageAttachedIndex implements Index
         return this::startPreJoinTask;
     }
 
-    public boolean isInitBuildStarted()
+    @VisibleForTesting
+    public boolean canFlushFromMemtableIndex()
     {
-        return initBuildStarted;
+        return canFlushFromMemtableIndex;
     }
 
     public BooleanSupplier isIndexValid()
