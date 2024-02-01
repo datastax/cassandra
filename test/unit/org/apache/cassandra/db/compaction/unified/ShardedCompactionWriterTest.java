@@ -20,11 +20,10 @@ import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Random;
 
-import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
-import org.apache.cassandra.utils.TimeUUID;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -37,8 +36,10 @@ import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.TimeUUID;
 
 import static org.junit.Assert.assertEquals;
 
@@ -166,7 +167,7 @@ public class ShardedCompactionWriterTest extends CQLTester
         {
             while (ci.hasNext())
             {
-                if (writer.append(ci.next()))
+                if (writer.append(ci.next()) != null)
                     rowsWritten++;
             }
         }
