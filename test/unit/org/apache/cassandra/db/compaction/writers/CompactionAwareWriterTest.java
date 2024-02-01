@@ -38,7 +38,9 @@ import org.junit.Test;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.CompactionController;
 import org.apache.cassandra.db.compaction.CompactionIterator;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -236,7 +238,7 @@ public class CompactionAwareWriterTest extends CQLTester
         {
             while (ci.hasNext())
             {
-                if (writer.append(ci.next()))
+                if (writer.append(ci.next()) != null)
                     rowsWritten++;
             }
         }

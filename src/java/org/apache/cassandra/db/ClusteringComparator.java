@@ -26,11 +26,11 @@ import java.util.Objects;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.io.sstable.format.big.IndexInfo;
 import org.apache.cassandra.serializers.MarshalException;
-
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -40,7 +40,6 @@ import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONEN
 import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT_EMPTY_REVERSED;
 import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT_NULL;
 import static org.apache.cassandra.utils.bytecomparable.ByteSource.TERMINATOR;
-import org.apache.cassandra.io.sstable.format.big.IndexInfo;
 
 /**
  * A comparator of clustering prefixes (or more generally of {@link Clusterable}}.
@@ -349,7 +348,7 @@ public class ClusteringComparator implements Comparator<Clusterable>
      * @param accessor Accessor to use to construct components.
      * @param comparable The clustering encoded as a byte-comparable sequence.
      */
-    public <V> Clustering<V> clusteringFromByteComparable(ValueAccessor<V> accessor, ByteComparable comparable)
+    public <V> Clustering<?> clusteringFromByteComparable(ValueAccessor<V> accessor, ByteComparable comparable)
     {
         ByteComparable.Version version = ByteComparable.Version.OSS50;
         ByteSource.Peekable orderedBytes = ByteSource.peekable(comparable.asComparableBytes(version));
@@ -364,7 +363,7 @@ public class ClusteringComparator implements Comparator<Clusterable>
             assert size() == 0 : "Terminator should be after " + size() + " components, got 0";
             return accessor.factory().clustering();
         case EXCLUDED:
-            return accessor.factory().staticClustering();
+            return Clustering.STATIC_CLUSTERING;
         default:
             // continue with processing
         }
