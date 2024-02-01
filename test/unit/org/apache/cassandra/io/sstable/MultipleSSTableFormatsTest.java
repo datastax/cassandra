@@ -42,9 +42,9 @@ import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.assertj.core.api.Assertions;
 
 
-public class MutlipleSSTableFormatsTest extends CQLTester
+public class MultipleSSTableFormatsTest extends CQLTester
 {
-    private final static Logger logger = LoggerFactory.getLogger(MutlipleSSTableFormatsTest.class);
+    private final static Logger logger = LoggerFactory.getLogger(MultipleSSTableFormatsTest.class);
     private final static int cnt = 100;
     private final static int overlap = 70;
     private final static int deletionCount = 30;

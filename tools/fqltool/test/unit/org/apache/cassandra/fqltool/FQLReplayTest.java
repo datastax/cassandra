@@ -38,19 +38,20 @@ import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.Statement;
 import net.openhft.chronicle.core.io.IORuntimeException;
 import net.openhft.chronicle.queue.ChronicleQueue;
-import net.openhft.chronicle.queue.impl.single.SingleChronicleQueueBuilder;
 import net.openhft.chronicle.queue.ExcerptAppender;
 import net.openhft.chronicle.queue.ExcerptTailer;
+import net.openhft.chronicle.queue.impl.single.SingleChronicleQueueBuilder;
 import net.openhft.chronicle.wire.WireOut;
-import org.apache.cassandra.fql.FullQueryLogger;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.fql.FullQueryLogger;
 import org.apache.cassandra.fqltool.commands.Compare;
 import org.apache.cassandra.fqltool.commands.Replay;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tools.Util;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.binlog.BinLog;
@@ -120,7 +121,7 @@ public class FQLReplayTest
              ChronicleQueue queue2 = SingleChronicleQueueBuilder.single(f2).build();
              FQLQueryIterator iter = new FQLQueryIterator(queue.createTailer(), 101);
              FQLQueryIterator iter2 = new FQLQueryIterator(queue2.createTailer(), 101);
-             MergeIterator<FQLQuery, List<FQLQuery>> merger = MergeIterator.get(Lists.newArrayList(iter, iter2), FQLQuery::compareTo, new Replay.Reducer()))
+             CloseableIterator<List<FQLQuery>> merger = MergeIterator.getCloseable(Lists.newArrayList(iter, iter2), FQLQuery::compareTo, new Replay.ReplayReducer()))
         {
             long last = -1;
 
