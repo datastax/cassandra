@@ -118,7 +118,7 @@ public class PaxosKeyState implements UncommittedPaxosKey
             return cmp > 0 ? left : right;
     }
 
-    static class Reducer extends MergeIterator.Reducer<PaxosKeyState, PaxosKeyState>
+    static class Reducer extends org.apache.cassandra.utils.Reducer<PaxosKeyState, PaxosKeyState>
     {
         private PaxosKeyState mostRecent = null;
 
@@ -127,7 +127,7 @@ public class PaxosKeyState implements UncommittedPaxosKey
             mostRecent = merge(mostRecent, current);
         }
 
-        protected PaxosKeyState getReduced()
+        public PaxosKeyState getReduced()
         {
             return mostRecent;
         }
@@ -141,7 +141,7 @@ public class PaxosKeyState implements UncommittedPaxosKey
 
     public static CloseableIterator<PaxosKeyState> mergeUncommitted(CloseableIterator<PaxosKeyState>... iterators)
     {
-        return MergeIterator.get(Lists.newArrayList(iterators), PaxosKeyState.KEY_COMPARATOR, new Reducer());
+        return MergeIterator.getCloseable(Lists.newArrayList(iterators), PaxosKeyState.KEY_COMPARATOR, new Reducer());
     }
 
     public static CloseableIterator<UncommittedPaxosKey> toUncommittedInfo(CloseableIterator<PaxosKeyState> iter)
