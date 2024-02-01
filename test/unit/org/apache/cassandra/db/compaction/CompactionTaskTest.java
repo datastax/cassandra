@@ -24,10 +24,13 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
+import com.google.common.collect.ImmutableSet;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
@@ -38,35 +41,50 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.Tracker;
+import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.NonThrowingCloseable;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Transactional;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import static java.lang.String.format;
 import static org.apache.cassandra.db.lifecycle.View.updateCompacting;
+import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import static java.lang.String.format;
-import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
-import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
-
+@RunWith(Parameterized.class)
 public class CompactionTaskTest
 {
     private static TableMetadata cfm;
     private static ColumnFamilyStore cfs;
+
+    @Parameterized.Parameters(name = "useCursors={0}")
+    public static Iterable<Boolean> useCursorChoices()
+    {
+        return ImmutableSet.of(false, true);
+    }
+
+    private final CompactionStrategy mockStrategy;
+
+    public CompactionTaskTest(boolean useCursors)
+    {
+        this.mockStrategy = mockStrategy(useCursors);
+    }
 
     @BeforeClass
     public static void setUpClass() throws Exception
@@ -135,7 +153,7 @@ public class CompactionTaskTest
         LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
         Assert.assertNotNull(txn);
 
-        AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0);
+        AbstractCompactionTask task = new CompactionTask(cfs, txn, 0, false, mockStrategy);
         Assert.assertNotNull(task);
         cfs.getCompactionStrategyContainer().pause();
         try
@@ -159,7 +177,7 @@ public class CompactionTaskTest
         LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
         assertNotNull(txn);
 
-        AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0);
+        AbstractCompactionTask task = new CompactionTask(cfs, txn, 0, false, mockStrategy);
         assertNotNull(task);
 
         TableOperationObserver obs = Mockito.mock(TableOperationObserver.class);
@@ -228,7 +246,7 @@ public class CompactionTaskTest
             {
                 txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
                 Assert.assertNotNull(txn);
-                AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0);
+                new CompactionTask(cfs, txn, 0, false, mockStrategy);
                 Assert.fail("Expected IllegalArgumentException");
             }
             catch (IllegalArgumentException e)
@@ -280,15 +298,15 @@ public class CompactionTaskTest
             cfs.getTracker().removeUnsafe(sstables);
         }
     }
-    
+
     @Test
     public void testMajorCompactTask()
     {
-        //major compact without range/pk specified 
+        //major compact without range/pk specified
         CompactionTasks compactionTasks = cfs.getCompactionStrategyContainer().getMaximalTasks(Integer.MAX_VALUE, false);
         Assert.assertTrue(compactionTasks.stream().allMatch(task -> task.compactionType.equals(OperationType.MAJOR_COMPACTION)));
     }
-    
+
     @Test
     public void testCompactionReporting()
     {
@@ -300,7 +318,7 @@ public class CompactionTaskTest
         CompactionObserver compObserver = Mockito.mock(CompactionObserver.class);
         final ArgumentCaptor<TableOperation> tableOpCaptor = ArgumentCaptor.forClass(AbstractTableOperation.class);
         final ArgumentCaptor<CompactionProgress> compactionCaptor = ArgumentCaptor.forClass(CompactionProgress.class);
-        AbstractCompactionTask task = CompactionTask.forTesting(cfs, txn, 0);
+        AbstractCompactionTask task = new CompactionTask(cfs, txn, 0, false, mockStrategy);
         task.addObserver(compObserver);
         assertNotNull(task);
         task.execute(operationObserver);
@@ -324,5 +342,18 @@ public class CompactionTaskTest
         Set<SSTableReader> sstables = cfs.getLiveSSTables();
         Assert.assertEquals(numSSTables, sstables.size());
         return sstables;
+    }
+
+    static CompactionStrategy mockStrategy(boolean useCursors)
+    {
+        CompactionStrategy mock = Mockito.mock(CompactionStrategy.class);
+        CompactionLogger logger = new CompactionLogger(cfs.metadata());
+        Mockito.when(mock.supportsCursorCompaction()).thenReturn(useCursors);
+        Mockito.when(mock.getCompactionLogger()).thenReturn(logger);
+        Mockito.when(mock.getScanners(anyCollection()))
+               .thenAnswer(answ -> ScannerList.of(answ.getArgument(0), null));
+        Mockito.when(mock.getScanners(anyCollection(), anyCollection()))
+               .thenAnswer(answ -> ScannerList.of(answ.getArgument(0), answ.getArgument(1)));
+        return mock;
     }
 }

@@ -38,6 +38,7 @@ import org.apache.cassandra.index.sasi.utils.MappedBuffer;
 import org.apache.cassandra.index.sasi.utils.RangeIterator;
 import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 
 import static org.apache.cassandra.index.sasi.disk.TokenTreeBuilder.EntryType;
 
@@ -392,11 +393,11 @@ public class TokenTree
             if (!loadedKeys.isEmpty())
                 keys.add(loadedKeys.iterator());
 
-            return MergeIterator.get(keys, DecoratedKey.comparator, new MergeIterator.Reducer<DecoratedKey, DecoratedKey>()
+            return MergeIterator.get(keys, DecoratedKey.comparator, new Reducer<DecoratedKey, DecoratedKey>()
             {
                 DecoratedKey reduced = null;
 
-                public boolean trivialReduceIsTrivial()
+                public boolean singleSourceReduceIsTrivial()
                 {
                     return true;
                 }
@@ -406,7 +407,7 @@ public class TokenTree
                     reduced = current;
                 }
 
-                protected DecoratedKey getReduced()
+                public DecoratedKey getReduced()
                 {
                     return reduced;
                 }
