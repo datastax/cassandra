@@ -457,6 +457,8 @@ public class Config
     @Replaces(oldName = "sstable_preemptive_open_interval_in_mb", converter = Converters.NEGATIVE_MEBIBYTES_DATA_STORAGE_INT, deprecated = true)
     public volatile DataStorageSpec.IntMebibytesBound sstable_preemptive_open_interval = new DataStorageSpec.IntMebibytesBound("50MiB");
 
+    /** @deprecated CPU-intensive optimization that visibly slows down compaction but does not provide a clear benefit (see STAR-782) */
+    @Deprecated(since = "CC 4.0")
     public volatile boolean key_cache_migrate_during_compaction = true;
     public volatile int key_cache_keys_to_save = Integer.MAX_VALUE;
     @Replaces(oldName = "key_cache_size_in_mb", converter = Converters.MEBIBYTES_DATA_STORAGE_LONG, deprecated = true)

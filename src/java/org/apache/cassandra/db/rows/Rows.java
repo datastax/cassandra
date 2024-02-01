@@ -17,16 +17,24 @@
  */
 package org.apache.cassandra.db.rows;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.LivenessInfo;
+import org.apache.cassandra.db.SimpleBuilders;
+import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 
 /**
  * Static utilities to work on Row objects.
@@ -143,7 +151,7 @@ public abstract class Rows
         for (Row row : inputs)
             inputIterators.add(row == null ? Collections.emptyIterator() : row.iterator());
 
-        Iterator<?> iter = MergeIterator.get(inputIterators, ColumnData.comparator, new MergeIterator.Reducer<ColumnData, Object>()
+        Iterator<?> iter = MergeIterator.get(inputIterators, ColumnData.comparator, new Reducer<ColumnData, Object>()
         {
             ColumnData mergedData;
             ColumnData[] inputDatas = new ColumnData[inputs.length];
@@ -155,7 +163,7 @@ public abstract class Rows
                     inputDatas[idx - 1] = current;
             }
 
-            protected Object getReduced()
+            public Object getReduced()
             {
                 for (int i = 0 ; i != inputDatas.length ; i++)
                 {

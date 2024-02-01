@@ -823,7 +823,11 @@ public interface StorageServiceMBean extends NotificationEmitter
     public int getSSTablePreemptiveOpenIntervalInMB();
     public void setSSTablePreemptiveOpenIntervalInMB(int intervalInMB);
 
+    /** @deprecated CPU-intensive optimization that visibly slows down compaction but does not provide a clear benefit (see STAR-782) */
+    @Deprecated(since = "CC 4.0")
     public boolean getMigrateKeycacheOnCompaction();
+    /** @deprecated CPU-intensive optimization that visibly slows down compaction but does not provide a clear benefit (see STAR-782) */
+    @Deprecated(since = "CC 4.0")
     public void setMigrateKeycacheOnCompaction(boolean invalidateKeyCacheOnCompaction);
 
     public int getConcurrentViewBuilders();
