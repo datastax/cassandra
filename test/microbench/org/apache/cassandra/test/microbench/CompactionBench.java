@@ -19,114 +19,40 @@
 package org.apache.cassandra.test.microbench;
 
 
-import java.io.IOException;
-import java.util.List;
-import java.util.concurrent.*;
+import java.util.Map;
 
-import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.FileUtils;
-import org.openjdk.jmh.annotations.*;
+import org.apache.cassandra.db.compaction.CompactionStrategyFactory;
+import org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.Param;
 
-@BenchmarkMode(Mode.AverageTime)
-@OutputTimeUnit(TimeUnit.MILLISECONDS)
-@Warmup(iterations = 25, time = 1, timeUnit = TimeUnit.SECONDS)
-@Measurement(iterations = 5, time = 2, timeUnit = TimeUnit.SECONDS)
-@Fork(value = 1)
-@Threads(1)
-@State(Scope.Benchmark)
-public class CompactionBench extends CQLTester
+public class CompactionBench extends BaseCompactionBench
 {
-    static String keyspace;
-    String table;
-    String writeStatement;
-    String readStatement;
-    ColumnFamilyStore cfs;
-    List<File> snapshotFiles;
-    List<Descriptor> liveFiles;
-
-    @Setup(Level.Trial)
-    public void setup() throws Throwable
-    {
-        CQLTester.prepareServer();
-        keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
-        table = createTable(keyspace, "CREATE TABLE %s ( userid bigint, picid bigint, commentid bigint, PRIMARY KEY(userid, picid))");
-        execute("use "+keyspace+";");
-        writeStatement = "INSERT INTO "+table+"(userid,picid,commentid)VALUES(?,?,?)";
-        readStatement = "SELECT * from "+table+" limit 100";
-
-        Keyspace.system().forEach(k -> k.getColumnFamilyStores().forEach(c -> c.disableAutoCompaction()));
-
-        cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
-        cfs.disableAutoCompaction();
-
-        //Warm up
-        System.err.println("Writing 50k");
-        for (long i = 0; i < 50000; i++)
-            execute(writeStatement, i, i, i );
-
-
-        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
-
-        System.err.println("Writing 50k again...");
-        for (long i = 0; i < 50000; i++)
-            execute(writeStatement, i, i, i );
-
-        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
-
-        cfs.snapshot("originals");
-
-        snapshotFiles = cfs.getDirectories().sstableLister(Directories.OnTxnErr.IGNORE).snapshots("originals").listFiles();
-    }
-
-    @TearDown(Level.Trial)
-    public void teardown() throws IOException, ExecutionException, InterruptedException
-    {
-        int active = Thread.currentThread().getThreadGroup().activeCount();
-        Thread[] threads = new Thread[active];
-        Thread.currentThread().getThreadGroup().enumerate(threads);
-        for (Thread t : threads)
-        {
-            if (!t.isDaemon())
-                System.err.println("Thread "+t.getName());
-        }
-
-        CQLTester.cleanup();
-    }
-
-
-    @TearDown(Level.Invocation)
-    public void resetSnapshot()
-    {
-        cfs.truncateBlocking();
-
-        List<File> directories = cfs.getDirectories().getCFDirectories();
-
-        for (File file : directories)
-        {
-            for (File f : file.tryList())
-            {
-                if (f.isDirectory())
-                    continue;
-
-                FileUtils.delete(f);
-            }
-        }
-
-
-        for (File file : snapshotFiles)
-            FileUtils.createHardLink(file, new File(new File(file.toPath().getParent().getParent().getParent()), file.name()));
-
-        cfs.loadNewSSTables();
-    }
+    @Param({"false", "true"})
+    boolean cursors;
 
     @Benchmark
-    public void compactTest() throws Throwable
+    public void compactSSTables() throws Throwable
     {
         cfs.forceMajorCompaction();
+    }
+
+    @Override
+    public String compactionClass()
+    {
+        return cursors ? "SizeTieredCompactionStrategy" : "org.apache.cassandra.test.microbench.CompactionBenchmark$CursorDisabledStrategy";
+    }
+
+    public static class CursorDisabledStrategy extends SizeTieredCompactionStrategy
+    {
+        public CursorDisabledStrategy(CompactionStrategyFactory factory, Map<String, String> options)
+        {
+            super(factory, options);
+        }
+
+        public boolean supportsCursorCompaction()
+        {
+            return false;
+        }
     }
 }
