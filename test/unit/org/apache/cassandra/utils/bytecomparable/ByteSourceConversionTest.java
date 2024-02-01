@@ -20,7 +20,17 @@ package org.apache.cassandra.utils.bytecomparable;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.TreeMap;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -39,7 +49,41 @@ import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.db.marshal.ByteType;
+import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.DateType;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.DoubleType;
+import org.apache.cassandra.db.marshal.DynamicCompositeType;
+import org.apache.cassandra.db.marshal.DynamicCompositeTypeTest;
+import org.apache.cassandra.db.marshal.EmptyType;
+import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.InetAddressType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.LexicalUUIDType;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
+import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.marshal.SetType;
+import org.apache.cassandra.db.marshal.ShortType;
+import org.apache.cassandra.db.marshal.SimpleDateType;
+import org.apache.cassandra.db.marshal.TimeType;
+import org.apache.cassandra.db.marshal.TimeUUIDType;
+import org.apache.cassandra.db.marshal.TimestampType;
+import org.apache.cassandra.db.marshal.TupleType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.db.marshal.ValueAccessor;
+import org.apache.cassandra.db.marshal.ValueAccessors;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.LocalPartitioner;
@@ -333,8 +377,8 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
             if (kind.isBoundary())
                 continue;
 
-            ClusteringPrefix<ByteBuffer> empty = ByteSourceComparisonTest.makeBound(kind);
-            ClusteringPrefix<ByteBuffer> converted = getClusteringPrefix(accessor, kind, comp, comp.asByteComparable(empty));
+            ClusteringPrefix<?> empty = ByteSourceComparisonTest.makeBound(kind);
+            ClusteringPrefix<?> converted = getClusteringPrefix(accessor, kind, comp, comp.asByteComparable(empty));
             assertEquals(empty, converted);
         }
     }
@@ -358,10 +402,10 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
                 V[] b = accessor.createArray(2);
                 b[0] = accessor.valueOf(decompose.apply(t1, o1));
                 b[1] = accessor.valueOf(decompose.apply(t2, o2));
-                ClusteringPrefix<V> c = ByteSourceComparisonTest.makeBound(accessor.factory(), k1, b);
+                ClusteringPrefix<?> c = ByteSourceComparisonTest.makeBound(accessor.factory(), k1, b);
                 final ByteComparable bsc = comp.asByteComparable(c);
                 logger.info("Clustering {} bytesource {}", c.clusteringString(comp.subtypes()), bsc.byteComparableAsString(VERSION));
-                ClusteringPrefix<V> converted = getClusteringPrefix(accessor, k1, comp, bsc);
+                ClusteringPrefix<?> converted = getClusteringPrefix(accessor, k1, comp, bsc);
                 assertEquals(String.format("Failed compare(%s, converted %s ByteSource %s) == 0\ntype %s",
                                            safeStr(c.clusteringString(comp.subtypes())),
                                            safeStr(converted.clusteringString(comp.subtypes())),
@@ -395,7 +439,7 @@ public class ByteSourceConversionTest extends ByteSourceTestBase
             }
     }
 
-    private static <V> ClusteringPrefix<V> getClusteringPrefix(ValueAccessor<V> accessor,
+    private static <V> ClusteringPrefix<?> getClusteringPrefix(ValueAccessor<V> accessor,
                                                                ClusteringPrefix.Kind k1,
                                                                ClusteringComparator comp,
                                                                ByteComparable bsc)
