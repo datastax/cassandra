@@ -18,14 +18,28 @@
 package org.apache.cassandra.db.rows;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
 import java.util.function.IntUnaryOperator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.junit.Assert;
 
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.BufferClusteringBound;
+import org.apache.cassandra.db.Clusterable;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringBound;
+import org.apache.cassandra.db.ClusteringBoundary;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.rows.Unfiltered.Kind;
 import org.apache.cassandra.schema.TableMetadata;
@@ -217,6 +231,28 @@ public class UnfilteredRowsGenerator
         }
         attachBoundaries(out);
         return out;
+    }
+
+    /**
+     * As above, but also parses "Dxx|" prefix which specifies deletion time to be put in the specified deletion times map.
+     * @param input
+     * @param defaultLiveness
+     * @param deletionTimes
+     * @return
+     */
+    public List<Unfiltered> parse(String input, int defaultLiveness, Map<List<Unfiltered>, DeletionTime> deletionTimes)
+    {
+        Matcher m = Pattern.compile("D(\\d+)\\|").matcher(input);
+        if (m.lookingAt())
+        {
+            long del = Long.parseLong(m.group(1));
+            input = input.substring(m.end());
+            List<Unfiltered> list = parse(input, defaultLiveness);
+            deletionTimes.put(list, DeletionTime.build(del, del));
+            return list;
+        }
+        else
+            return parse(input, defaultLiveness);
     }
 
     static Row emptyRowAt(int pos, IntUnaryOperator timeGenerator)

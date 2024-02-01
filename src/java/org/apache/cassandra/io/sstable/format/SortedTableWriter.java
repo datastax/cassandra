@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -33,6 +34,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.compaction.writers.SSTableDataSink;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.guardrails.Threshold;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -69,11 +71,13 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * A generic implementation of a writer which assumes the existence of some partition index and bloom filter.
  */
-public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I extends SortedTableWriter.AbstractIndexWriter> extends SSTableWriter
+@NotThreadSafe
+public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I extends SortedTableWriter.AbstractIndexWriter> extends SSTableWriter implements SSTableDataSink
 {
     private final static Logger logger = LoggerFactory.getLogger(SortedTableWriter.class);
 
@@ -87,6 +91,8 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
     private DataPosition dataMark;
     private long lastEarlyOpenLength;
     private final Supplier<Double> crcCheckChanceSupplier;
+
+    private Throwable failure = null;
 
     public SortedTableWriter(Builder<P, I, ?, ?> builder, LifecycleNewTracker lifecycleNewTracker, SSTable.Owner owner)
     {
@@ -116,8 +122,15 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
         {
             Throwables.closeNonNullAndAddSuppressed(ex, partitionWriter, indexWriter, dataWriter);
             handleConstructionFailure(ex);
+            failure = ex;
             throw ex;
         }
+    }
+
+    private void assertNotBroken()
+    {
+        if (failure != null)
+            throw new AssertionError("Cannot use a broken writer", failure);
     }
 
     /**
@@ -131,15 +144,15 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
     @Override
     public final AbstractRowIndexEntry append(UnfilteredRowIterator partition)
     {
+        assertNotBroken();
+
         if (partition.isEmpty())
             return null;
 
         try
         {
-            if (!verifyPartition(partition.partitionKey()))
+            if (!startPartition(partition.partitionKey(), partition.partitionLevelDeletion()))
                 return null;
-
-            startPartition(partition.partitionKey(), partition.partitionLevelDeletion());
 
             AbstractRowIndexEntry indexEntry;
             if (header.hasStatic())
@@ -154,11 +167,56 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
         }
         catch (BufferOverflowException boe)
         {
+            failure = boe;
             throw new PartitionSerializationException(partition, boe);
         }
         catch (IOException e)
         {
+            failure = e;
             throw new FSWriteError(e, getFilename());
+        }
+    }
+
+    @Override
+    public final void addUnfiltered(Unfiltered unfiltered)
+    {
+        assertNotBroken();
+
+        try
+        {
+            if (unfiltered.isRow())
+            {
+                Row row = (Row) unfiltered;
+                if (row.isStatic())
+                    addStaticRow(requireNonNull(partitionWriter.getLastKey()), row);
+                else
+                    addRow(requireNonNull(partitionWriter.getLastKey()), row);
+            }
+            else
+            {
+                addRangeTomstoneMarker((RangeTombstoneMarker) unfiltered);
+            }
+        }
+        catch (IOException | RuntimeException ex)
+        {
+            failure = ex;
+            throw new FSWriteError(ex, getFilename());
+        }
+    }
+
+    @Override
+    public final AbstractRowIndexEntry endPartition()
+    {
+        assertNotBroken();
+
+        try
+        {
+            return endPartition(requireNonNull(partitionWriter.getLastKey()), partitionWriter.getLastPartitionLevelDeletion());
+        }
+        catch (IOException | RuntimeException ex)
+        {
+            failure = ex;
+            throw new FSWriteError(ex, getFilename());
         }
     }
 
@@ -178,12 +236,28 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
         return true;
     }
 
-    private void startPartition(DecoratedKey key, DeletionTime partitionLevelDeletion) throws IOException
+    @Override
+    public boolean startPartition(DecoratedKey key, DeletionTime partitionLevelDeletion) throws IOException
     {
-        partitionWriter.start(key, partitionLevelDeletion);
-        metadataCollector.updatePartitionDeletion(partitionLevelDeletion);
+        assertNotBroken();
 
-        onStartPartition(key);
+        if (!verifyPartition(key))
+            return false;
+
+        try
+        {
+            partitionWriter.start(key, partitionLevelDeletion);
+            metadataCollector.updatePartitionDeletion(partitionLevelDeletion);
+
+            onStartPartition(key);
+        }
+        catch (IOException | RuntimeException ex)
+        {
+            failure = ex;
+            throw ex;
+        }
+
+        return true;
     }
 
     private void addStaticRow(DecoratedKey key, Row row) throws IOException
