@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.compaction.writers.SSTableDataSink;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -66,7 +67,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * {@link Builder}, a {@link LifecycleNewTracker} and {@link SSTable.Owner} instances. Implementing classes should
  * not extend that list and all the additional properties should be included in the builder.
  */
-public abstract class SSTableWriter extends SSTable implements Transactional
+public abstract class SSTableWriter extends SSTable implements Transactional, SSTableDataSink
 {
     private final static Logger logger = LoggerFactory.getLogger(SSTableWriter.class);
 
