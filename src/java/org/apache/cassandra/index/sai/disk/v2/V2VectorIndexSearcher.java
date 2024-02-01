@@ -102,7 +102,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     {
         super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
         this.graph = graph;
-        this.keyFactory = PrimaryKey.factory(indexContext.comparator(), indexContext.indexFeatureSet());
+        this.keyFactory = PrimaryKey.factory(indexContext.getTableMetadata(), indexContext.indexFeatureSet());
         cachedBitSets = ThreadLocal.withInitial(() -> new SparseFixedBitSet(graph.size()));
 
         globalBruteForceRows = Integer.MAX_VALUE;

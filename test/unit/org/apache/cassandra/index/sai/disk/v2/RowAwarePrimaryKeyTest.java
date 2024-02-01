@@ -33,6 +33,9 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.schema.CachingParams;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -42,7 +45,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
     @Test
     public void testHashCodeForDeferredPrimaryKey()
     {
-        var factory = Version.BA.onDiskFormat().primaryKeyFactory(EMPTY_COMPARATOR);
+        var factory = Version.BA.onDiskFormat().primaryKeyFactory(EMPTY_TABLE);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);
@@ -69,7 +72,7 @@ public class RowAwarePrimaryKeyTest extends SAITester
     @Test
     public void testHashCodeForLoadedPrimaryKey()
     {
-        var factory = Version.BA.onDiskFormat().primaryKeyFactory(EMPTY_COMPARATOR);
+        var factory = Version.BA.onDiskFormat().primaryKeyFactory(SAITester.EMPTY_TABLE);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);
@@ -90,8 +93,14 @@ public class RowAwarePrimaryKeyTest extends SAITester
     @Test
     public void testHashCodeForDeferedPrimaryKeyWithClusteringColumns()
     {
-        var comparator = new ClusteringComparator(Int32Type.instance);
-        var factory = Version.BA.onDiskFormat().primaryKeyFactory(comparator);
+        TableMetadata table = TableMetadata.builder("test_ks", "test_cf")
+                                           .addPartitionKeyColumn("pk", Int32Type.instance)
+                                           .addClusteringColumn("c", Int32Type.instance)
+                                           .partitioner(Murmur3Partitioner.instance)
+                                           .caching(CachingParams.CACHE_NOTHING)
+                                           .build();
+
+        var factory = Version.BA.onDiskFormat().primaryKeyFactory(table);
 
         // Test relies on this implementation detail
         assertTrue(factory instanceof RowAwarePrimaryKeyFactory);

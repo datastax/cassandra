@@ -173,7 +173,7 @@ public class QueryController
         DataRange last = ranges.get(ranges.size() - 1);
         this.mergeRange = ranges.size() == 1 ? first.keyRange() : first.keyRange().withNewRight(last.keyRange().right);
 
-        this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
+        this.keyFactory = PrimaryKey.factory(cfs.metadata(), indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
         this.lastPrimaryKey = keyFactory.createTokenOnly(mergeRange.right.getToken());
     }
@@ -232,10 +232,7 @@ public class QueryController
         if (index != null)
             return index.getIndexContext();
 
-        return new IndexContext(cfs.metadata().keyspace,
-                                cfs.metadata().name,
-                                cfs.metadata().partitionKeyType,
-                                cfs.metadata().comparator,
+        return new IndexContext(cfs.metadata(),
                                 expression.column(),
                                 IndexTarget.Type.VALUES,
                                 null,

@@ -26,6 +26,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -119,9 +120,9 @@ public interface PrimaryKey extends Comparable<PrimaryKey>
      *                        factory to use
      * @return a {@link Factory} for {@link PrimaryKey} creation
      */
-    static Factory factory(ClusteringComparator clusteringComparator, IndexFeatureSet indexFeatureSet)
+    static Factory factory(TableMetadata tableMetadata, IndexFeatureSet indexFeatureSet)
     {
-        return indexFeatureSet.isRowAware() ? new RowAwarePrimaryKeyFactory(clusteringComparator)
+        return indexFeatureSet.isRowAware() ? new RowAwarePrimaryKeyFactory(tableMetadata)
                                             : new PartitionAwarePrimaryKeyFactory();
     }
 

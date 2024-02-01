@@ -25,9 +25,11 @@ import java.util.stream.Collectors;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -40,30 +42,33 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
 {
     private final ClusteringComparator clusteringComparator;
     private final boolean hasEmptyClustering;
+    private final boolean canHaveStaticClustering;
 
-
-    public RowAwarePrimaryKeyFactory(ClusteringComparator clusteringComparator)
+    public RowAwarePrimaryKeyFactory(TableMetadata tableMetadata)
     {
-        this.clusteringComparator = clusteringComparator;
+        this.clusteringComparator = tableMetadata.comparator;
         this.hasEmptyClustering = clusteringComparator.size() == 0;
+        this.canHaveStaticClustering = tableMetadata.hasStaticColumns();
     }
 
     @Override
     public PrimaryKey createTokenOnly(Token token)
     {
-        return new RowAwarePrimaryKey(token, null, null, null);
+        return new RowAwarePrimaryKey(token, null, null, null, false);
     }
 
     @Override
     public PrimaryKey createDeferred(Token token, Supplier<PrimaryKey> primaryKeySupplier)
     {
-        return new RowAwarePrimaryKey(token, null, null, primaryKeySupplier);
+        return new RowAwarePrimaryKey(token, null, null, primaryKeySupplier, canHaveStaticClustering);
     }
 
     @Override
     public PrimaryKey create(DecoratedKey partitionKey, Clustering clustering)
     {
-        return new RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null);
+        if (clustering == Clustering.STATIC_CLUSTERING && !canHaveStaticClustering)
+            throw new IllegalArgumentException("Static clustering not expected");
+        return new RowAwarePrimaryKey(partitionKey.getToken(), partitionKey, clustering, null, canHaveStaticClustering);
     }
 
     private class RowAwarePrimaryKey implements PrimaryKey
@@ -73,17 +78,33 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         private Clustering clustering;
         private Supplier<PrimaryKey> primaryKeySupplier;
 
-        private RowAwarePrimaryKey(Token token, DecoratedKey partitionKey, Clustering clustering, Supplier<PrimaryKey> primaryKeySupplier)
+        /**
+         * Set to true if the primary key belongs to a table with static columns.
+         * Setting it to false allows to skip potentially costly operations for determining if the clustering is
+         * actually static.
+         */
+        private final boolean canHaveStaticClustering;
+
+        private RowAwarePrimaryKey(Token token,
+                                   DecoratedKey partitionKey,
+                                   Clustering clustering,
+                                   Supplier<PrimaryKey> primaryKeySupplier,
+                                   boolean canHaveStaticClustering)
         {
             this.token = token;
             this.partitionKey = partitionKey;
             this.clustering = clustering;
             this.primaryKeySupplier = primaryKeySupplier;
+            this.canHaveStaticClustering = canHaveStaticClustering;
         }
 
         @Override
         public Kind kind()
         {
+            // If we know the key cannot have static clustering, skip loading it
+            if (!canHaveStaticClustering)
+                return Kind.WIDE;
+
             Clustering<?> clustering = clustering();
             return clustering != null && clustering.kind() == Clustering.STATIC_CLUSTERING.kind()
                    ? Kind.STATIC
@@ -175,7 +196,7 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         @Override
         public PrimaryKey toStatic()
         {
-            return new RowAwarePrimaryKey(token(), partitionKey(), Clustering.STATIC_CLUSTERING, null);
+            return new RowAwarePrimaryKey(token(), partitionKey(), Clustering.STATIC_CLUSTERING, null, true);
         }
 
         @Override

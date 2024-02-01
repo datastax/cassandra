@@ -22,10 +22,10 @@ import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.schema.TableMetadata;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -38,7 +38,7 @@ public abstract class AbstractKeyRangeIteratorTest
     @Before
     public void setup()
     {
-        primaryKeyFactory = new RowAwarePrimaryKeyFactory(SAITester.EMPTY_COMPARATOR);
+        primaryKeyFactory = new RowAwarePrimaryKeyFactory(TableMetadata.minimal("test", "test"));
     }
 
     @Test

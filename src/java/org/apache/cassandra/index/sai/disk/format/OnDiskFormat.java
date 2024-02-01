@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * An interface to the on-disk format of an index. This provides format agnostics methods
@@ -74,10 +75,9 @@ public interface OnDiskFormat
     /**
      * Returns the {@link PrimaryKey.Factory} for the on-disk format
      *
-     * @param comparator
      * @return the primary key factory
      */
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator);
+    public PrimaryKey.Factory primaryKeyFactory(TableMetadata tableMetadata);
 
     /**
      * Returns true if the per-sstable index components have been built and are valid.
