@@ -335,15 +335,18 @@ public abstract class Message
                     CBUtil.writeUUID(tracingId, body);
                     flags.add(Envelope.Header.Flag.TRACING);
                 }
-                if (warnings != null)
-                {
-                    CBUtil.writeStringList(warnings, body);
-                    flags.add(Envelope.Header.Flag.WARNING);
-                }
+                // Order is significant, see https://github.com/apache/cassandra-java-driver/blob/e1f397e2ac0dad04bfe4f05fe1b78b270f41d9e8/driver-core/src/main/java/com/datastax/driver/core/Message.java#L279-L291
+                // distributes tests like org.apache.cassandra.cql3.validation.operations.SelectGroupByTest.testGroupByWithoutPaging already verify the order as they have both warnings and customPayload
+                // TODO: Add a minimal test to verify decoding/encoding
                 if (customPayload != null)
                 {
                     CBUtil.writeBytesMap(customPayload, body);
                     flags.add(Envelope.Header.Flag.CUSTOM_PAYLOAD);
+                }
+                if (warnings != null)
+                {
+                    CBUtil.writeStringList(warnings, body);
+                    flags.add(Envelope.Header.Flag.WARNING);
                 }
             }
             else
