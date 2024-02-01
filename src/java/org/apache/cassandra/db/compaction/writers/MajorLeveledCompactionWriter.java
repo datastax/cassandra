@@ -28,6 +28,7 @@ import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.LeveledManifest;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.io.sstable.AbstractRowIndexEntry;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
@@ -68,7 +69,7 @@ public class MajorLeveledCompactionWriter extends CompactionAwareWriter
     }
 
     @Override
-    public boolean append(UnfilteredRowIterator partition)
+    public AbstractRowIndexEntry append(UnfilteredRowIterator partition)
     {
         partitionsWritten++;
         return super.append(partition);
