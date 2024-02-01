@@ -56,6 +56,9 @@ public abstract class SortedTablePartitionWriter implements AutoCloseable
     protected DeletionTime openMarker = DeletionTime.LIVE;
     protected DeletionTime startOpenMarker = DeletionTime.LIVE;
 
+    private DecoratedKey lastKey;
+    private DeletionTime lastPartitionLevelDeletion;
+
     // Sequence control, also used to add empty static row if `addStaticRow` is not called.
     private enum State
     {
@@ -103,6 +106,9 @@ public abstract class SortedTablePartitionWriter implements AutoCloseable
 
         ByteBufferUtil.writeWithShortLength(key.getKey(), writer);
         DeletionTime.getSerializer(version).serialize(partitionLevelDeletion, writer);
+
+        lastKey = key;
+        lastPartitionLevelDeletion = partitionLevelDeletion;
 
         if (!header.hasStatic())
         {
@@ -162,6 +168,9 @@ public abstract class SortedTablePartitionWriter implements AutoCloseable
         long endPosition = currentPosition();
         unfilteredSerializer.writeEndOfPartition(writer);
 
+        lastKey = null;
+        lastPartitionLevelDeletion = null;
+
         return endPosition;
     }
 
@@ -173,5 +182,15 @@ public abstract class SortedTablePartitionWriter implements AutoCloseable
     public long getInitialPosition()
     {
         return initialPosition;
+    }
+
+    public DecoratedKey getLastKey()
+    {
+        return lastKey;
+    }
+
+    public DeletionTime getLastPartitionLevelDeletion()
+    {
+        return lastPartitionLevelDeletion;
     }
 }

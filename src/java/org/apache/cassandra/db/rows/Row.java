@@ -17,13 +17,24 @@
  */
 package org.apache.cassandra.db.rows;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
 import org.apache.cassandra.cache.IMeasurableMemory;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DeletionPurger;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.Digest;
+import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -32,6 +43,7 @@ import org.apache.cassandra.utils.BiLongAccumulator;
 import org.apache.cassandra.utils.LongAccumulator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.ObjectSizes;
+import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.btree.BTree;
 import org.apache.cassandra.utils.memory.Cloner;
@@ -790,7 +802,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
             return rows;
         }
 
-        private static class ColumnDataReducer extends MergeIterator.Reducer<ColumnData, ColumnData>
+        private static class ColumnDataReducer extends Reducer<ColumnData, ColumnData>
         {
             private ColumnMetadata column;
             private final List<ColumnData> versions;
@@ -836,7 +848,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
             }
 
             @SuppressWarnings("resource")
-            protected ColumnData getReduced()
+            public ColumnData getReduced()
             {
                 if (column.isSimple())
                 {
@@ -891,7 +903,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
             }
         }
 
-        private static class CellReducer extends MergeIterator.Reducer<Cell<?>, Cell<?>>
+        private static class CellReducer extends Reducer<Cell<?>, Cell<?>>
         {
             private DeletionTime activeDeletion;
             private Cell<?> merged;
@@ -908,7 +920,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
                     merged = merged == null ? cell : Cells.reconcile(merged, cell);
             }
 
-            protected Cell<?> getReduced()
+            public Cell<?> getReduced()
             {
                 return merged;
             }

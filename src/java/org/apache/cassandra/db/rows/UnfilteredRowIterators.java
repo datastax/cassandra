@@ -37,9 +37,10 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.IMergeIterator;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 
 /**
  * Static methods to work with atom iterators.
@@ -402,7 +403,7 @@ public abstract class UnfilteredRowIterators
      */
     private static class UnfilteredRowMergeIterator extends AbstractUnfilteredRowIterator
     {
-        private final IMergeIterator<Unfiltered, Unfiltered> mergeIterator;
+        private final CloseableIterator<Unfiltered> mergeIterator;
         private final MergeListener listener;
 
         private UnfilteredRowMergeIterator(TableMetadata metadata,
@@ -420,9 +421,21 @@ public abstract class UnfilteredRowIterators
                   reversed,
                   EncodingStats.merge(iterators, UnfilteredRowIterator::stats));
 
-            this.mergeIterator = MergeIterator.get(iterators,
-                                                   reversed ? metadata.comparator.reversed() : metadata.comparator,
-                                                   new MergeReducer(iterators.size(), reversed, listener));
+            // If merging more than 1 source, ask iterators to provide artificial lower bounds which will help to delay
+            // opening sstables until they are needed. The tomsbtone processing will throw these ineffective bounds away
+            // (they are in the form of range tombstone markers with DeletionTime.LIVE).
+            if (iterators.size() > 1)
+            {
+                for (UnfilteredRowIterator iter : iterators)
+                {
+                    if (iter instanceof UnfilteredRowIteratorWithLowerBound)
+                        ((UnfilteredRowIteratorWithLowerBound) iter).requestLowerBound();
+                }
+            }
+
+            this.mergeIterator = MergeIterator.getCloseable(iterators,
+                                                            reversed ? metadata.comparator.reversed() : metadata.comparator,
+                                                            new MergeReducer(iterators.size(), reversed, listener));
             this.listener = listener;
         }
 
@@ -550,7 +563,7 @@ public abstract class UnfilteredRowIterators
                 listener.close();
         }
 
-        private class MergeReducer extends MergeIterator.Reducer<Unfiltered, Unfiltered>
+        private class MergeReducer extends Reducer<Unfiltered, Unfiltered>
         {
             private final MergeListener listener;
 
@@ -567,7 +580,7 @@ public abstract class UnfilteredRowIterators
             }
 
             @Override
-            public boolean trivialReduceIsTrivial()
+            public boolean singleSourceReduceIsTrivial()
             {
                 // If we have a listener, we must signal it even when we have a single version
                 return listener == null;
@@ -582,7 +595,7 @@ public abstract class UnfilteredRowIterators
                     markerMerger.add(idx, (RangeTombstoneMarker)current);
             }
 
-            protected Unfiltered getReduced()
+            public Unfiltered getReduced()
             {
                 if (nextKind == Unfiltered.Kind.ROW)
                 {
