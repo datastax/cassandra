@@ -740,6 +740,7 @@ public class Schema implements SchemaProvider
             Keyspace unloadedKeyspace = maybeRemoveKeyspaceInstance(keyspaceMetadata.name, ks -> {
                 ks.unload(dropData);
                 unload(keyspaceMetadata);
+                logger.debug("Instance removed for keyspace {}", ks.getName());
             });
             assert unloadedKeyspace == keyspace;
 
