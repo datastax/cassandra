@@ -91,6 +91,9 @@ public class TermIterator extends RangeIterator
                 if (logger.isDebugEnabled() && !(e1 instanceof AbortedOperationException))
                     logger.debug(String.format("Failed search an index %s, skipping.", index.getSSTable()), e1);
 
+                // Close the iterators that were successfully opened before the error
+                FileUtils.closeQuietly(tokens);
+
                 throw Throwables.cleaned(e1);
             }
         }
