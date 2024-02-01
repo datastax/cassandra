@@ -58,6 +58,7 @@ import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -218,10 +219,11 @@ public class RowIndexEntryTest extends CQLTester
         void build(Row staticRow, DecoratedKey partitionKey,
                    Collection<Clustering<?>> clusterings, long startPosition) throws IOException
         {
-
             Iterator<Clustering<?>> clusteringIter = clusterings.iterator();
+            if (staticRow == null)
+                staticRow = Rows.EMPTY_STATIC_ROW;
             partitionWriter.start(partitionKey, DeletionTime.LIVE);
-            if (staticRow != null)
+            if (!staticRow.isEmpty())
                 partitionWriter.addStaticRow(staticRow);
             AbstractUnfilteredRowIterator rowIter = makeRowIter(staticRow, partitionKey, clusteringIter, dataWriterNew);
             while (rowIter.hasNext())

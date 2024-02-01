@@ -225,7 +225,7 @@ public class UncommittedTableData
         }
     }
 
-    private static class Reducer extends MergeIterator.Reducer<PaxosKeyState, PaxosKeyState>
+    private static class Reducer extends org.apache.cassandra.utils.Reducer<PaxosKeyState, PaxosKeyState>
     {
         PaxosKeyState merged = null;
 
@@ -234,7 +234,7 @@ public class UncommittedTableData
             merged = PaxosKeyState.merge(merged, current);
         }
 
-        protected PaxosKeyState getReduced()
+        public PaxosKeyState getReduced()
         {
             return merged;
         }
@@ -257,7 +257,7 @@ public class UncommittedTableData
                 if (iterator == null) continue;
                 iterators.add(iterator);
             }
-            return MergeIterator.get(iterators, PaxosKeyState.KEY_COMPARATOR, new Reducer());
+            return MergeIterator.getCloseable(iterators, PaxosKeyState.KEY_COMPARATOR, new Reducer());
         }
         catch (Throwable t)
         {
