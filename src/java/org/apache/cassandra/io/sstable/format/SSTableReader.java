@@ -964,6 +964,18 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         return tidy.global.obsoletion != null;
     }
 
+    /**
+     * Used by CNDB to detect sstables marked as obsolete (compacted). Without obtaining the actual
+     * {@link SSTableReader} instance. See {@link #isMarkedCompacted()} that performs the same check for an
+     * exisiting reader instance.
+     * @see #isMarkedCompacted()
+     * @see #markObsolete(AbstractLogTransaction.ReaderTidier)
+     */
+    public static boolean isMarkedCompacted(Descriptor descriptor)
+    {
+        return GlobalTidy.hasTidier(descriptor);
+    }
+
     public void markSuspect()
     {
         if (logger.isTraceEnabled())
@@ -1486,67 +1498,75 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
                 barrier = null;
             }
 
-            ScheduledExecutors.nonPeriodicTasks.execute(new Runnable()
-            {
-                @Override
-                public void run()
-                {
-                    if (logger.isTraceEnabled())
-                        logger.trace("Async instance tidier for {}, before barrier", descriptor);
-
-                    if (barrier != null)
-                        barrier.await();
-
-                    if (logger.isTraceEnabled())
-                        logger.trace("Async instance tidier for {}, after barrier", descriptor);
-
-                    Throwable exceptions = null;
-                    if (runOnClose != null) try
-                    {
-                        runOnClose.run();
-                    }
-                    catch (RuntimeException | Error ex)
-                    {
-                        logger.error("Failed to run on-close listeners for sstable " + descriptor.baseFile(), ex);
-                        exceptions = ex;
-                    }
-
-                    Throwable closeExceptions = Throwables.close(null, Iterables.filter(closeables, Objects::nonNull));
-                    if (closeExceptions != null)
-                    {
-                        logger.error("Failed to close some sstable components of " + descriptor.baseFile(), closeExceptions);
-                        exceptions = Throwables.merge(exceptions, closeExceptions);
-                    }
-
-                    try
-                    {
-                        globalRef.release();
-                    }
-                    catch (RuntimeException | Error ex)
-                    {
-                        logger.error("Failed to release the global ref of " + descriptor.baseFile(), ex);
-                        exceptions = Throwables.merge(exceptions, ex);
-                    }
-
-                    if (exceptions != null)
-                        JVMStabilityInspector.inspectThrowable(exceptions);
-
-                    if (logger.isTraceEnabled())
-                        logger.trace("Async instance tidier for {}, completed", descriptor);
-                }
-
-                @Override
-                public String toString()
-                {
-                    return "Tidy " + descriptor.ksname + '.' + descriptor.cfname + '-' + descriptor.id;
-                }
-            });
+            Runnable cleanup = new CleanupTask(barrier);
+            ScheduledExecutors.nonPeriodicTasks.execute(cleanup);
         }
 
-        @Override
         public String name()
         {
             return descriptor.toString();
+        }
+
+        private class CleanupTask implements Runnable
+        {
+            private final OpOrder.Barrier barrier;
+
+            public CleanupTask(OpOrder.Barrier barrier) {
+                this.barrier = barrier;
+            }
+
+            @Override
+            public void run()
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Async instance tidier for {}, before barrier", descriptor);
+
+                if (barrier != null)
+                    barrier.await();
+
+                if (logger.isTraceEnabled())
+                    logger.trace("Async instance tidier for {}, after barrier", descriptor);
+
+                Throwable exceptions = null;
+                if (runOnClose != null) try
+                {
+                    runOnClose.run();
+                }
+                catch (RuntimeException | Error ex)
+                {
+                    logger.error("Failed to run on-close listeners for sstable " + descriptor.baseFile(), ex);
+                    exceptions = ex;
+                }
+
+                Throwable closeExceptions = Throwables.close(null, Iterables.filter(closeables, Objects::nonNull));
+                if (closeExceptions != null)
+                {
+                    logger.error("Failed to close some sstable components of " + descriptor.baseFile(), closeExceptions);
+                    exceptions = Throwables.merge(exceptions, closeExceptions);
+                }
+
+                try
+                {
+                    globalRef.release();
+                }
+                catch (RuntimeException | Error ex)
+                {
+                    logger.error("Failed to release the global ref of " + descriptor.baseFile(), ex);
+                    exceptions = Throwables.merge(exceptions, ex);
+                }
+
+                if (exceptions != null)
+                    JVMStabilityInspector.inspectThrowable(exceptions);
+
+                if (logger.isTraceEnabled())
+                    logger.trace("Async instance tidier for {}, completed", descriptor);
+            }
+
+            @Override
+            public String toString()
+            {
+                return "Tidy " + descriptor.ksname + '.' + descriptor.cfname + '-' + descriptor.id;
+            }
         }
     }
 
@@ -1743,6 +1763,25 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         public static boolean exists(Descriptor descriptor)
         {
             return lookup.containsKey(descriptor);
+        }
+
+        private static boolean hasTidier(Descriptor descriptor)
+        {
+            Ref<GlobalTidy> globalTidyRef = lookup.get(descriptor);
+            if (globalTidyRef != null)
+            {
+                try
+                {
+                    GlobalTidy globalTidy = globalTidyRef.get();
+                    if (globalTidy != null)
+                        return globalTidy.obsoletion != null;
+                }
+                catch (AssertionError e)
+                {
+                    // ignore, we're just checking if the tidier exists
+                }
+            }
+            return false;
         }
     }
 
