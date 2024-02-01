@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.io.sstable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -25,8 +26,11 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.compaction.CompactionRealm;
+import org.apache.cassandra.db.compaction.writers.SSTableDataSink;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
@@ -47,7 +51,7 @@ import org.apache.cassandra.utils.concurrent.Transactional;
  * but leave any hard-links in place for the readers we opened, and clean-up when the readers finish as we would do
  * if we had finished successfully.
  */
-public class SSTableRewriter extends Transactional.AbstractTransactional implements Transactional
+public class SSTableRewriter extends Transactional.AbstractTransactional implements Transactional, SSTableDataSink
 {
     @VisibleForTesting
     public static boolean disableEarlyOpeningForTests = false;
@@ -127,6 +131,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             op.accept(writer);
     }
 
+    @Override
     public AbstractRowIndexEntry append(UnfilteredRowIterator partition)
     {
         // we do this before appending to ensure we can resetAndTruncate() safely if appending fails
@@ -148,6 +153,25 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             writer.resetAndTruncate();
             throw t;
         }
+    }
+
+    @Override
+    public boolean startPartition(DecoratedKey key, DeletionTime deletionTime) throws IOException
+    {
+        maybeReopenEarly(key);
+        return writer.startPartition(key, deletionTime);
+    }
+
+    @Override
+    public void addUnfiltered(Unfiltered unfiltered) throws IOException
+    {
+        writer.addUnfiltered(unfiltered);
+    }
+
+    @Override
+    public AbstractRowIndexEntry endPartition() throws IOException
+    {
+        return writer.endPartition();
     }
 
     private void maybeReopenEarly(DecoratedKey key)

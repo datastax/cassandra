@@ -18,26 +18,38 @@
 */
 package org.apache.cassandra.db.compaction;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.BeforeClass;
+import com.google.common.collect.ImmutableSet;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
-import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.partitions.*;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.SSTableUtils;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -45,10 +57,24 @@ import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.junit.Assert.assertEquals;
 
+@RunWith(Parameterized.class)
 public class LongCompactionsTest
 {
     public static final String KEYSPACE1 = "Keyspace1";
     public static final String CF_STANDARD = "Standard1";
+
+    @Parameterized.Parameters(name = "useCursors={0}")
+    public static Iterable<Boolean> useCursorChoices()
+    {
+        return ImmutableSet.of(false, true);
+    }
+
+    private final boolean useCursors;
+
+    public LongCompactionsTest(boolean useCursors)
+    {
+        this.useCursors = useCursors;
+    }
 
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
@@ -130,7 +156,7 @@ public class LongCompactionsTest
         try (LifecycleTransaction txn = store.getTracker().tryModify(sstables, OperationType.COMPACTION))
         {
             assert txn != null : "Cannot markCompacting all sstables";
-            CompactionTask.forTesting(store, txn, gcBefore).execute();
+            new CompactionTask(store, txn, gcBefore, false, CompactionTaskTest.mockStrategy(useCursors)).execute();
         }
         System.out.println(String.format("%s: sstables=%d rowsper=%d colsper=%d: %d ms",
                                          this.getClass().getName(),
