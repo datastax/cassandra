@@ -19,18 +19,30 @@ package org.apache.cassandra.db.partitions;
 
 import java.io.IOError;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.NoSuchElementException;
 
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Digest;
+import org.apache.cassandra.db.EmptyIterators;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.DeserializationHelper;
+import org.apache.cassandra.db.rows.LazilyInitializedUnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredRowIteratorSerializer;
+import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.db.transform.FilteredPartitions;
 import org.apache.cassandra.db.transform.MorePartitions;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Reducer;
 
 /**
  * Static methods to work with partition iterators.
@@ -128,7 +140,7 @@ public abstract class UnfilteredPartitionIterators
 
         final boolean preserveOrder = listener != null && listener.preserveOrder();
 
-        final MergeIterator<UnfilteredRowIterator, UnfilteredRowIterator> merged = MergeIterator.get(iterators, partitionComparator, new MergeIterator.Reducer<UnfilteredRowIterator, UnfilteredRowIterator>()
+        final CloseableIterator<UnfilteredRowIterator> merged = MergeIterator.getCloseable(iterators, partitionComparator, new Reducer<UnfilteredRowIterator, UnfilteredRowIterator>()
         {
             private final List<UnfilteredRowIterator> toMerge = new ArrayList<>(iterators.size());
 
@@ -152,7 +164,7 @@ public abstract class UnfilteredPartitionIterators
                 }
             }
 
-            protected UnfilteredRowIterator getReduced()
+            public UnfilteredRowIterator getReduced()
             {
                 UnfilteredRowIterators.MergeListener rowListener = listener == null
                                                                  ? null
@@ -226,7 +238,7 @@ public abstract class UnfilteredPartitionIterators
 
         final TableMetadata metadata = iterators.get(0).metadata();
 
-        final MergeIterator<UnfilteredRowIterator, UnfilteredRowIterator> merged = MergeIterator.get(iterators, partitionComparator, new MergeIterator.Reducer<UnfilteredRowIterator, UnfilteredRowIterator>()
+        final CloseableIterator<UnfilteredRowIterator> merged = MergeIterator.getCloseable(iterators, partitionComparator, new Reducer<UnfilteredRowIterator, UnfilteredRowIterator>()
         {
             private final List<UnfilteredRowIterator> toMerge = new ArrayList<>(iterators.size());
 
@@ -235,7 +247,7 @@ public abstract class UnfilteredPartitionIterators
                 toMerge.add(current);
             }
 
-            protected UnfilteredRowIterator getReduced()
+            public UnfilteredRowIterator getReduced()
             {
                 return new LazilyInitializedUnfilteredRowIterator(toMerge.get(0).partitionKey())
                 {
