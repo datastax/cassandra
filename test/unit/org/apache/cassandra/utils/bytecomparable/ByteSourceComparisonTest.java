@@ -21,7 +21,17 @@ import java.math.BigDecimal;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.TreeMap;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -43,7 +53,40 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.marshal.ByteBufferAccessor;
+import org.apache.cassandra.db.marshal.ByteType;
+import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.DateType;
+import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.DoubleType;
+import org.apache.cassandra.db.marshal.DynamicCompositeType;
+import org.apache.cassandra.db.marshal.DynamicCompositeTypeTest;
+import org.apache.cassandra.db.marshal.EmptyType;
+import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.InetAddressType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.LexicalUUIDType;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
+import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.marshal.SetType;
+import org.apache.cassandra.db.marshal.ShortType;
+import org.apache.cassandra.db.marshal.SimpleDateType;
+import org.apache.cassandra.db.marshal.TimeType;
+import org.apache.cassandra.db.marshal.TimeUUIDType;
+import org.apache.cassandra.db.marshal.TimestampType;
+import org.apache.cassandra.db.marshal.TupleType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.LocalPartitioner;
@@ -363,12 +406,12 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
     public void testNullsInClusteringLegacy()
     {
         // verify the legacy encoding treats null clustering the same as null value
-        ClusteringPrefix<ByteBuffer> aNull = makeBound(ClusteringPrefix.Kind.CLUSTERING,
-                                                       decomposeAndRandomPad(UTF8Type.instance, "a"),
-                                                       decomposeAndRandomPad(Int32Type.instance, null));
-        ClusteringPrefix<ByteBuffer> aEmpty = makeBound(ClusteringPrefix.Kind.CLUSTERING,
-                                                        decomposeAndRandomPad(UTF8Type.instance, "a"),
-                                                        null);
+        ClusteringPrefix<?> aNull = makeBound(ClusteringPrefix.Kind.CLUSTERING,
+                                              decomposeAndRandomPad(UTF8Type.instance, "a"),
+                                              decomposeAndRandomPad(Int32Type.instance, null));
+        ClusteringPrefix<?> aEmpty = makeBound(ClusteringPrefix.Kind.CLUSTERING,
+                                               decomposeAndRandomPad(UTF8Type.instance, "a"),
+                                               null);
         ClusteringComparator comp = new ClusteringComparator(UTF8Type.instance, Int32Type.instance);
         assertEquals(0, ByteComparable.compare(comp.asByteComparable(aNull), comp.asByteComparable(aEmpty), Version.LEGACY));
         ClusteringComparator compReversed = new ClusteringComparator(UTF8Type.instance, ReversedType.getInstance(Int32Type.instance));
@@ -391,7 +434,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
 
     private void assertEmptyComparedToStatic(int expected, ClusteringPrefix.Kind kind, Version version)
     {
-        ClusteringPrefix<ByteBuffer> empty = makeBound(kind);
+        ClusteringPrefix<?> empty = makeBound(kind);
         ClusteringComparator compEmpty = new ClusteringComparator();
         assertEquals(expected, Integer.signum(ByteComparable.compare(compEmpty.asByteComparable(empty),
                                                                      compEmpty.asByteComparable(Clustering.STATIC_CLUSTERING),
@@ -423,8 +466,8 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
                     b[1] = decompose.apply(t2, o2);
                     d[0] = decompose.apply(t1, o3);
                     d[1] = decompose.apply(t2, o4);
-                    ClusteringPrefix<ByteBuffer> c = makeBound(k1, b);
-                    ClusteringPrefix<ByteBuffer> e = makeBound(k2, d);
+                    ClusteringPrefix<?> c = makeBound(k1, b);
+                    ClusteringPrefix<?> e = makeBound(k2, d);
                     final ByteComparable bsc = comp.asByteComparable(c);
                     final ByteComparable bse = comp.asByteComparable(e);
                     int expected = Integer.signum(comp.compare(c, e));
@@ -448,12 +491,12 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
                 }
     }
 
-    static ClusteringPrefix<ByteBuffer> makeBound(ClusteringPrefix.Kind k1, ByteBuffer... b)
+    static ClusteringPrefix<?> makeBound(ClusteringPrefix.Kind k1, ByteBuffer... b)
     {
         return makeBound(ByteBufferAccessor.instance.factory(), k1, b);
     }
 
-    static <T> ClusteringPrefix<T> makeBound(ValueAccessor.ObjectFactory<T> factory, ClusteringPrefix.Kind k1, T[] b)
+    static <V> ClusteringPrefix<?> makeBound(ValueAccessor.ObjectFactory<V> factory, ClusteringPrefix.Kind k1, V[] b)
     {
         switch (k1)
         {
@@ -471,7 +514,7 @@ public class ByteSourceComparisonTest extends ByteSourceTestBase
             return factory.clustering(b);
 
         case STATIC_CLUSTERING:
-            return factory.staticClustering();
+            return Clustering.STATIC_CLUSTERING;
 
         default:
             throw new AssertionError(k1);

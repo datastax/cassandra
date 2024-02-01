@@ -41,7 +41,12 @@ import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
-import static org.apache.cassandra.db.ClusteringPrefix.Kind.*;
+import static org.apache.cassandra.db.ClusteringPrefix.Kind.EXCL_END_BOUND;
+import static org.apache.cassandra.db.ClusteringPrefix.Kind.EXCL_END_INCL_START_BOUNDARY;
+import static org.apache.cassandra.db.ClusteringPrefix.Kind.EXCL_START_BOUND;
+import static org.apache.cassandra.db.ClusteringPrefix.Kind.INCL_END_BOUND;
+import static org.apache.cassandra.db.ClusteringPrefix.Kind.INCL_END_EXCL_START_BOUNDARY;
+import static org.apache.cassandra.db.ClusteringPrefix.Kind.INCL_START_BOUND;
 
 /**
  * ValueAccessor allows serializers and other code dealing with raw bytes to operate on different backing types
@@ -69,7 +74,7 @@ public interface ValueAccessor<V>
         Cell<V> cell(ColumnMetadata column, long timestamp, int ttl, long localDeletionTime, V value, CellPath path);
         Clustering<V> clustering(V... values);
         Clustering<V> clustering();
-        Clustering<V> staticClustering();
+        // Note: the static clustering is always Clustering.STATIC_CLUSTERING (of ByteBuffer accessor).
         ClusteringBound<V> bound(ClusteringPrefix.Kind kind, V... values);
         ClusteringBound<V> bound(ClusteringPrefix.Kind kind);
         ClusteringBoundary<V> boundary(ClusteringPrefix.Kind kind, V... values);
