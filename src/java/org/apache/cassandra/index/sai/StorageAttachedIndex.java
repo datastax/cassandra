@@ -336,7 +336,7 @@ public class StorageAttachedIndex implements Index
             if (type.isValueLengthFixed() && IndexContext.MAX_VECTOR_TERM_SIZE < type.valueLengthIfFixed())
             {
                 AbstractType<?> elementType = ((VectorType<?>) type).elementType;
-                var error = String.format("An index of %s will produce terms of %s, " +
+                var error = String.format("Vector index created with %s will produce terms of %s, " +
                                           "exceeding the max vector term size of %s. " +
                                           "That sets an implicit limit of %d dimensions for %s vectors.",
                                           type.asCQL3Type(),
@@ -344,7 +344,9 @@ public class StorageAttachedIndex implements Index
                                           FBUtilities.prettyPrintMemory(IndexContext.MAX_VECTOR_TERM_SIZE),
                                           IndexContext.MAX_VECTOR_TERM_SIZE / elementType.valueLengthIfFixed(),
                                           elementType.asCQL3Type());
-                throw new InvalidRequestException(error);
+                // VSTODO until we can safely differentiate client and system requests, we can only log here
+                // Ticket for this: https://github.com/riptano/VECTOR-SEARCH/issues/85
+                logger.warn(error);
             }
         }
         else if (!SUPPORTED_TYPES.contains(type.asCQL3Type()) && !TypeUtil.isFrozen(type))
