@@ -203,7 +203,8 @@ public class OnDiskOrdinalsMap
 
     private static class RowIdMatchingOrdinalsView implements OrdinalsView
     {
-        // The number of ordinals in the segment. If we see a rowId greater than this, we know it's not in the graph.
+        // The number of ordinals in the segment. If we see a rowId greater than or equal to this, we know it's not in
+        // the graph.
         private final long size;
 
         RowIdMatchingOrdinalsView(long size)
