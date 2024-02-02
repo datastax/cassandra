@@ -42,6 +42,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.metrics.AbstractMetrics;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
@@ -212,10 +213,11 @@ public class V1OnDiskFormat implements OnDiskFormat
 
             try (IndexInput input = indexDescriptor.openPerSSTableInput(indexComponent))
             {
+                Version earliest = getExpectedEarliestVersion(indexComponent);
                 if (checksum)
                     SAICodecUtils.validateChecksum(input, indexDescriptor.version);
                 else
-                    SAICodecUtils.validate(input);
+                    SAICodecUtils.validate(input, earliest);
             }
             catch (Throwable e)
             {
@@ -230,6 +232,18 @@ public class V1OnDiskFormat implements OnDiskFormat
             }
         }
         return true;
+    }
+
+    protected Version getExpectedEarliestVersion(IndexComponent indexComponent)
+    {
+        Version earliest = Version.EARLIEST;
+        if (isVectorDataComponent(indexComponent))
+        {
+            if (!Version.LATEST.onOrAfter(Version.VECTOR_EARLIEST))
+                throw new IllegalStateException("Configured latest version " + Version.LATEST + " is not compatible with vector index");
+            earliest = Version.VECTOR_EARLIEST;
+        }
+        return earliest;
     }
 
     @Override
