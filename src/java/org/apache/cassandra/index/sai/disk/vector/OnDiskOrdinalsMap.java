@@ -38,7 +38,7 @@ public class OnDiskOrdinalsMap
 {
     private static final Logger logger = LoggerFactory.getLogger(OnDiskOrdinalsMap.class);
 
-    private static final RowIdMatchingOrdinalsView rowIdMatchingOrdinalsView = new RowIdMatchingOrdinalsView();
+    private final RowIdMatchingOrdinalsView rowIdMatchingOrdinalsView;
     private static final OrdinalsMatchingRowIdsView ordinalsMatchingRowIdsView = new OrdinalsMatchingRowIdsView();
     private final FileHandle fh;
     private final long ordToRowOffset;
@@ -71,6 +71,7 @@ public class OnDiskOrdinalsMap
 
             this.ordToRowOffset = reader.getFilePointer();
             this.size = reader.readInt();
+            this.rowIdMatchingOrdinalsView = new RowIdMatchingOrdinalsView(size);
             reader.seek(segmentEnd - 8);
             this.rowOrdinalOffset = reader.readLong();
             assert rowOrdinalOffset < segmentEnd : "rowOrdinalOffset " + rowOrdinalOffset + " is not less than segmentEnd " + segmentEnd;
@@ -202,10 +203,20 @@ public class OnDiskOrdinalsMap
 
     private static class RowIdMatchingOrdinalsView implements OrdinalsView
     {
+        // The number of ordinals in the segment. If we see a rowId greater than or equal to this, we know it's not in
+        // the graph.
+        private final int size;
+
+        RowIdMatchingOrdinalsView(int size)
+        {
+            this.size = size;
+        }
 
         @Override
         public int getOrdinalForRowId(int rowId) throws IOException
         {
+            if (rowId >= size)
+                return -1;
             return rowId;
         }
 
