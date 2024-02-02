@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.plan;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -427,10 +426,7 @@ public class QueryController
 
         try
         {
-            var sstableResults = queryView.view.values()
-                                               .stream()
-                                               .flatMap(e -> orderBy(e, limit).stream())
-                                               .collect(Collectors.toList());
+            var sstableResults = orderSstables(queryView, Collections.emptyList());
             sstableResults.addAll(memtableResults);
             return new MergeScoredPrimaryKeyIterator(sstableResults, queryView.referencedIndexes);
         }
@@ -438,6 +434,7 @@ public class QueryController
         {
             // all sstable indexes in view have been referenced, need to clean up when exception is thrown
             queryView.referencedIndexes.forEach(SSTableIndex::release);
+            FileUtils.closeQuietly(memtableResults);
             throw t;
         }
     }
@@ -476,10 +473,7 @@ public class QueryController
 
         try
         {
-            var sstableScoredPrimaryKeyIterators = queryView.view.values()
-                                                                 .stream()
-                                                                 .flatMap(e -> orderResultsBy(sourceKeys, e, limit).stream())
-                                                                 .collect(Collectors.toList());
+            var sstableScoredPrimaryKeyIterators = orderSstables(queryView, sourceKeys);
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
             if (sstableScoredPrimaryKeyIterators.isEmpty())
             {
@@ -495,48 +489,45 @@ public class QueryController
         {
             // all sstable indexes in view have been referenced, need to clean up when exception is thrown
             queryView.referencedIndexes.forEach(SSTableIndex::release);
+            FileUtils.closeQuietly(memtableResults);
             throw t;
         }
 
     }
 
-    private List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(List<PrimaryKey> keys, List<QueryViewBuilder.IndexExpression> annIndexExpressions, int limit)
-    {
-        assert annIndexExpressions.size() == 1 : "only one index is expected in ANN expression, found " + annIndexExpressions.size() + " in " + annIndexExpressions;
-        QueryViewBuilder.IndexExpression annIndexExpression = annIndexExpressions.get(0);
-
-        try
-        {
-            return annIndexExpression.index.orderResultsBy(queryContext, keys, annIndexExpression.expression, limit);
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
-        }
-    }
-
     /**
-     * Create row id iterator from different indexes' on-disk searcher of the same sstable
+     * Create the list of iterators over {@link ScoredPrimaryKey} from the given {@link QueryViewBuilder.QueryView}.
+     * @param queryView The view to use to create the iterators.
+     * @param sourceKeys The source keys to use to create the iterators. Use an empty list to search all keys.
+     * @return The list of iterators over {@link ScoredPrimaryKey}.
      */
-    private List<CloseableIterator<ScoredPrimaryKey>> orderBy(List<QueryViewBuilder.IndexExpression> indexExpressions, int limit)
+    private List<CloseableIterator<ScoredPrimaryKey>> orderSstables(QueryViewBuilder.QueryView queryView, List<PrimaryKey> sourceKeys)
     {
-        return indexExpressions
-               .stream()
-               .map(ie ->
-                    {
-                        try
-                        {
-                            return ie.index.orderBy(ie.expression, mergeRange, queryContext, limit);
-                        }
-                        catch (Throwable ex)
-                        {
-                            if (!(ex instanceof AbortedOperationException))
-                                logger.debug(ie.index.getIndexContext().logMessage(String.format("Failed search on index %s, aborting query.", ie.index.getSSTable())), ex);
-                            throw Throwables.cleaned(ex);
-                        }
-                    })
-               .flatMap(List::stream)
-               .collect(Collectors.toList());
+        List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>();
+        for (var e : queryView.view.values())
+        {
+            QueryViewBuilder.IndexExpression annIndexExpression = null;
+            try
+            {
+                assert e.size() == 1 : "only one index is expected in ANN expression, found " + e.size() + " in " + e;
+                annIndexExpression = e.get(0);
+                var iterators = sourceKeys.isEmpty() ? annIndexExpression.index.orderBy(annIndexExpression.expression, mergeRange, queryContext, limit)
+                                                     : annIndexExpression.index.orderResultsBy(queryContext, sourceKeys, annIndexExpression.expression, limit);
+                results.addAll(iterators);
+            }
+            catch (Throwable ex)
+            {
+                // Close any iterators that were successfully opened before the exception
+                FileUtils.closeQuietly(results);
+                if (logger.isDebugEnabled() && !(ex instanceof AbortedOperationException) && annIndexExpression != null)
+                {
+                    var msg = String.format("Failed search on index %s, aborting query.", annIndexExpression.index.getSSTable());
+                    logger.debug(annIndexExpression.index.getIndexContext().logMessage(msg), ex);
+                }
+                throw Throwables.cleaned(ex);
+            }
+        }
+        return results;
     }
 
     public int getExactLimit()
