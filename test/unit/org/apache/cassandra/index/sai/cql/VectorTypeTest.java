@@ -1057,4 +1057,36 @@ public class VectorTypeTest extends VectorTester
         // Assert that the results are the same
         assertThat(filteredRows).containsExactly(unfilteredRows);
     }
+
+    // This test covers a bug in the RowIdMatchingOrdinalsView logic. Essentially, when the final rows in a segment
+    // do not have an associated vector, we will think we can do fast mapping from row id to ordinal, but in reality
+    // we have to do bounds checking still.
+    @Test
+    public void testHybridIndexWithPartialRowInsertsAtSegmentBoundaries() throws Throwable
+    {
+        // This test requires the non-bruteforce route
+        setMaxBruteForceRows(0);
+        createTable("CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (pk, val, vec) VALUES (1, 'A', [1, 1])");
+        execute("INSERT INTO %s (pk, val) VALUES (2, 'A')");
+        flush();
+        execute("INSERT INTO %s (pk, vec) VALUES (2, [1,3])");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"), row(1));
+        });
+
+        // Assert the opposite with these writes where the lower bound is not present. (This case actually pushes us to
+        // use disk based ordinal mapping.)
+        execute("INSERT INTO %s (pk, val, vec) VALUES (2, 'A', [1, 1])");
+        execute("INSERT INTO %s (pk, val) VALUES (1, 'A')");
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"), row(1));
+        });
+    }
 }
