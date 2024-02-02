@@ -205,9 +205,9 @@ public class OnDiskOrdinalsMap
     {
         // The number of ordinals in the segment. If we see a rowId greater than or equal to this, we know it's not in
         // the graph.
-        private final long size;
+        private final int size;
 
-        RowIdMatchingOrdinalsView(long size)
+        RowIdMatchingOrdinalsView(int size)
         {
             this.size = size;
         }
