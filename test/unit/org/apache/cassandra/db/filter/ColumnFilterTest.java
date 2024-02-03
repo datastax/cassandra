@@ -82,7 +82,6 @@ public class ColumnFilterTest
         DatabaseDescriptor.setSeedProvider(Arrays::asList);
         DatabaseDescriptor.setEndpointSnitch(new SimpleSnitch());
         DatabaseDescriptor.setDefaultFailureDetector();
-        DatabaseDescriptor.setPartitionerUnsafe(new Murmur3Partitioner());
         Gossiper.instance.start(0);
     }
 
