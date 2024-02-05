@@ -151,7 +151,7 @@ public class TableMetadata implements SchemaElement
 
     public final Indexes indexes;
     public final Triggers triggers;
-    public final boolean isApiTable;
+    public final boolean isReadQueriedColumnTable;
 
     // derived automatically from flags and columns
     public final AbstractType<?> partitionKeyType;
@@ -183,7 +183,7 @@ public class TableMetadata implements SchemaElement
 
         indexes = builder.indexes;
         triggers = builder.triggers;
-        isApiTable = isApiTableColumns(flags);
+        isReadQueriedColumnTable = isReadQueriedColumnTable(flags);
         partitionKeyType = partitionKeyColumns.size() == 1
                          ? partitionKeyColumns.get(0).type
                          : CompositeType.getInstance(transform(partitionKeyColumns, t -> t.type));
@@ -193,7 +193,7 @@ public class TableMetadata implements SchemaElement
         resource = DataResource.table(keyspace, name);
     }
 
-    private boolean isApiTableColumns(ImmutableSet<Flag> flags)
+    private boolean isReadQueriedColumnTable(ImmutableSet<Flag> flags)
     {
         return flags.contains(Flag.READ_QUERIED_COLUMNS);
     }

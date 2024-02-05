@@ -546,7 +546,7 @@ public abstract class ColumnFilter
 
         public ColumnFilter build()
         {
-            boolean isFetchAll = metadata != null && !metadata.isApiTable;
+            boolean isFetchAll = metadata != null && !(metadata.isReadQueriedColumnTable);
 
             RegularAndStaticColumns queried = queriedBuilder == null ? null : queriedBuilder.build();
 
