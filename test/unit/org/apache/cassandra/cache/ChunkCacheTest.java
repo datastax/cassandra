@@ -20,6 +20,7 @@ package org.apache.cassandra.cache;
 
 
 import java.io.IOException;
+import java.util.List;
 
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -68,6 +69,40 @@ public class ChunkCacheTest
 
         Assert.assertEquals(ChunkCache.instance.size(), 0);
         Assert.assertEquals(ChunkCache.instance.sizeOfFile(file.path()), 0);
+    }
+
+    @Test
+    public void testInvalidateFiles() throws IOException
+    {
+        File file = FileUtils.createTempFile("foo", null);
+        file.deleteOnExit();
+
+        Assert.assertEquals(ChunkCache.instance.size(), 0);
+        Assert.assertEquals(ChunkCache.instance.sizeOfFile(file.path()), 0);
+
+        try (SequentialWriter writer = new SequentialWriter(file))
+        {
+            writer.write(new byte[64]);
+            writer.flush();
+        }
+
+        try (FileHandle.Builder builder = new FileHandle.Builder(file).withChunkCache(ChunkCache.instance);
+             FileHandle h = builder.complete();
+             RandomAccessReader r = h.createReader())
+        {
+            r.reBuffer();
+
+            Assert.assertEquals(ChunkCache.instance.size(), 1);
+            Assert.assertEquals(ChunkCache.instance.sizeOfFile(file.path()), 1);
+
+            // The point of this test is to invalidate the file here and then
+            // verify it is out of the cache before closing anything.
+            ChunkCache.instance.invalidateFiles(List.of(file.path()));
+
+            Assert.assertEquals(ChunkCache.instance.size(), 0);
+            Assert.assertEquals(ChunkCache.instance.sizeOfFile(file.path()), 0);
+        }
+
     }
 
 }

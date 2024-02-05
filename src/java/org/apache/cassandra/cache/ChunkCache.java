@@ -21,6 +21,8 @@
 package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
+import java.util.Collection;
+import java.util.IdentityHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -207,6 +209,20 @@ public class ChunkCache
             return file;
 
         return instance.wrapper.apply(file);
+    }
+
+    /**
+     * Invalidate all chunks for the given files. Because cache invalidation is inefficient, when multiple files
+     * are invalidated, it is more efficient to call this method once with all files than to call it once for each file.
+     * @param filePaths the files to invalidate
+     */
+    public void invalidateFiles(Collection<String> filePaths)
+    {
+        // Use the identity map to avoid unnecessary equality checks.
+        var internedPaths = new IdentityHashMap<>();
+        for (String filePath : filePaths)
+            internedPaths.put(filePath.intern(), null);
+        cache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> internedPaths.containsKey(x.internedPath)));
     }
 
     public void invalidateFile(String filePath)
