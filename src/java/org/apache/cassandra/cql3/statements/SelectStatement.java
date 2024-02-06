@@ -499,24 +499,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         try (PartitionIterator page = pager.fetchPage(pageSize, queryStartNanoTime))
         {
             msg = processResults(page, options, selectors, nowInSec, userLimit);
-
-            RequestSensors requestSensors = RequestTracker.instance.get();
-            if (requestSensors != null)
-            {
-                Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(Type.READ_BYTES);
-                Map<String, ByteBuffer> customPayload = new HashMap<>();
-                readRequestSensor.map(SensorsCustomParams::sensorValueAsByteBuffer)
-                                 .ifPresent(bytes -> customPayload.put(SensorsCustomParams.READ_BYTES_REQUEST, bytes));
-
-                Optional<Sensor> readTableSensor = SensorsRegistry.instance.getSensor(Context.from(this.table), Type.READ_BYTES);
-                readTableSensor.map(s -> {
-                                   double bytes = SensorsRegistry.instance.aggregateSensorsByType(Type.READ_BYTES);
-                                   return SensorsCustomParams.sensorValueAsByteBuffer(bytes);
-                               })
-                               .ifPresent(bytes -> customPayload.put(SensorsCustomParams.READ_BYTES_RATE, bytes));
-                msg.setCustomPayload(customPayload);
-            }
         }
+
+        // Propagate request sensor data
+        addRequestSensorData(msg, options);
 
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
@@ -540,6 +526,35 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     {
         ResultSet rset = process(partitions, options, selectors, nowInSec, userLimit);
         return new ResultMessage.Rows(rset);
+    }
+
+    private void addRequestSensorData(ResultMessage.Rows msg, QueryOptions options)
+    {
+        // Custom payload is not supported for protocol versions < 4
+        if (options.getProtocolVersion().isSmallerThan(ProtocolVersion.V4))
+        {
+            return;
+        }
+
+        // Not all requests are tracked (yet)
+        RequestSensors requestSensors = RequestTracker.instance.get();
+        if (requestSensors == null)
+        {
+            return;
+        }
+
+        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(Type.READ_BYTES);
+        Map<String, ByteBuffer> customPayload = new HashMap<>();
+        readRequestSensor.map(SensorsCustomParams::sensorValueAsByteBuffer)
+                         .ifPresent(bytes -> customPayload.put(SensorsCustomParams.READ_BYTES_REQUEST, bytes));
+
+        Optional<Sensor> readTableSensor = SensorsRegistry.instance.getSensor(Context.from(this.table), Type.READ_BYTES);
+        readTableSensor.map(s -> {
+                           double bytes = SensorsRegistry.instance.aggregateSensorsByType(Type.READ_BYTES);
+                           return SensorsCustomParams.sensorValueAsByteBuffer(bytes);
+                       })
+                       .ifPresent(bytes -> customPayload.put(SensorsCustomParams.READ_BYTES_RATE, bytes));
+        msg.setCustomPayload(customPayload);
     }
 
     public ResultMessage.Rows executeLocally(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
