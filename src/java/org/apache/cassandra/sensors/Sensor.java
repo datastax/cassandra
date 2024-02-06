@@ -24,8 +24,6 @@ import java.util.function.Predicate;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.AtomicDouble;
 
-import static org.apache.cassandra.utils.MonotonicClock.approxTime;
-
 /**
  * Tracks the {@link #value} for a given measurement of a given {@link Type} and {@link Context}, during any
  * request/response cycle.
