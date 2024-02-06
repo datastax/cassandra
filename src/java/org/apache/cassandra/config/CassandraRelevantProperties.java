@@ -40,7 +40,7 @@ public enum CassandraRelevantProperties
     ACQUIRE_SLEEP_MS("cassandra.acquire_sleep_ms", "1000"),
     ALLOCATE_TOKENS_FOR_KEYSPACE("cassandra.allocate_tokens_for_keyspace"),
     ALLOW_ALTER_RF_DURING_RANGE_MOVEMENT("cassandra.allow_alter_rf_during_range_movement"),
-    ALLOW_CURSOR_COMPACTION("cassandra.allow_cursor_compaction", "true"),
+    ALLOW_CURSOR_COMPACTION("cassandra.allow_cursor_compaction", "false"),
     /** If we should allow having duplicate keys in the config file, default to true for legacy reasons */
     ALLOW_DUPLICATE_CONFIG_KEYS("cassandra.allow_duplicate_config_keys", "true"),
     /** If we should allow having both new (post CASSANDRA-15234) and old config keys for the same config item in the yaml */
