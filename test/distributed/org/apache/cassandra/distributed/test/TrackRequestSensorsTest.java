@@ -33,6 +33,7 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
+import org.apache.cassandra.distributed.api.IIsolatedExecutor;
 import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
@@ -53,12 +54,8 @@ public class TrackRequestSensorsTest extends TestBaseImpl
     {
         try (Cluster cluster = builder().withNodes(1).start())
         {
-            // resister a noop sensor listener to ensure that the registry singleton instance is subscribed to schema notifications
-            cluster.coordinator(1).instance().sync(initSensorsRegistry());
-
-            //TODO: remove this sleep, for now, without it, sometimes the onCreateKeyspace is not called before the actual query runs (init(cluster) is responsible foe creating the ks)
-            Thread.sleep(10_000);
-
+            // resister a noop sensor listener before init(cluster) which creates the test keyspace to ensure that the registry singleton instance is subscribed to schema notifications
+            cluster.get(1).runsOnInstance(initSensorsRegistry()).run();
             init(cluster);
             cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int PRIMARY KEY, v1 text)"));
             cluster.get(1).executeInternal(withKeyspace("INSERT INTO %s.tbl(pk, v1) VALUES (1, 'read me')"));
@@ -109,7 +106,7 @@ public class TrackRequestSensorsTest extends TestBaseImpl
     /**
      * Registers a noop listener to ensure that the registry singleton instance is subscribed to schema notifications
      */
-    public Runnable initSensorsRegistry()
+    private static IIsolatedExecutor.SerializableRunnable initSensorsRegistry()
     {
         return () ->
                SensorsRegistry.instance.registerListener(new SensorsRegistryListener()
