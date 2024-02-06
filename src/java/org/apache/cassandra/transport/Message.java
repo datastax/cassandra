@@ -335,9 +335,11 @@ public abstract class Message
                     CBUtil.writeUUID(tracingId, body);
                     flags.add(Envelope.Header.Flag.TRACING);
                 }
-                // Order is significant, see https://github.com/apache/cassandra-java-driver/blob/e1f397e2ac0dad04bfe4f05fe1b78b270f41d9e8/driver-core/src/main/java/com/datastax/driver/core/Message.java#L279-L291
-                // distributes tests like org.apache.cassandra.cql3.validation.operations.SelectGroupByTest.testGroupByWithoutPaging already verify the order as they have both warnings and customPayload
-                // TODO: Add a minimal test to verify decoding/encoding
+                /**
+                 * Order matters, see https://github.com/apache/cassandra-java-driver/blob/e1f397e2ac0dad04bfe4f05fe1b78b270f41d9e8/driver-core/src/main/java/com/datastax/driver/core/Message.java#L279-L291
+                 * distributes tests like org.apache.cassandra.cql3.validation.operations.SelectGroupByTest#testGroupByWithoutPaging verifies the order as they have both warnings and customPayload
+                 * unit tests like org.apache.cassandra.transport.MessagePayloadTest#testMessagePayloadBeta verified the order, however both decoding and encoding happen on the {@link Message} class and the java driver is not involved
+                 * */
                 if (customPayload != null)
                 {
                     CBUtil.writeBytesMap(customPayload, body);
@@ -401,9 +403,10 @@ public abstract class Message
             boolean isCustomPayload = inbound.header.flags.contains(Envelope.Header.Flag.CUSTOM_PAYLOAD);
             boolean hasWarning = inbound.header.flags.contains(Envelope.Header.Flag.WARNING);
 
+            // Order is matters, see https://github.com/apache/cassandra-java-driver/blob/e1f397e2ac0dad04bfe4f05fe1b78b270f41d9e8/driver-core/src/main/java/com/datastax/driver/core/Message.java#L278-L291
             UUID tracingId = isRequest || !isTracing ? null : CBUtil.readUUID(inbound.body);
-            List<String> warnings = isRequest || !hasWarning ? null : CBUtil.readStringList(inbound.body);
             Map<String, ByteBuffer> customPayload = !isCustomPayload ? null : CBUtil.readBytesMap(inbound.body);
+            List<String> warnings = isRequest || !hasWarning ? null : CBUtil.readStringList(inbound.body);
 
             if (isCustomPayload && inbound.header.version.isSmallerThan(ProtocolVersion.V4))
                 throw new ProtocolException("Received frame with CUSTOM_PAYLOAD flag for native protocol version < 4");

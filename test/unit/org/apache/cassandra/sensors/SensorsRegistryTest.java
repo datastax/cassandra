@@ -19,7 +19,6 @@
 package org.apache.cassandra.sensors;
 
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -40,6 +39,7 @@ import org.apache.cassandra.utils.MonotonicClock;
 import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.withPrecision;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.never;
@@ -287,13 +287,14 @@ public class SensorsRegistryTest
         SensorsRegistry.instance.updateSensor(context1, type1, v6);
 
         rate = SensorsRegistry.instance.getSensorRate(sensor);
-        assertThat(rate).isEqualTo(v5 + v6);
+        double epsilon = 0.00000001;
+        assertThat(rate).isEqualTo(v5 + v6, withPrecision(epsilon));
         // make sure the value is indeed ever increasing
-        assertThat(sensor.getValue()).isEqualTo(v1 + v2 + v3 + v4 + v5 + v6);
+        assertThat(sensor.getValue()).isEqualTo(v1 + v2 + v3 + v4 + v5 + v6, withPrecision(epsilon));
 
         // advance the clock to the next rate window without updating the sensor
         Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(rateWindowInSeconds * 2 + 2));
         rate = SensorsRegistry.instance.getSensorRate(sensor);
-        assertThat(rate).isEqualTo(0);
+        assertThat(rate).isEqualTo(0D, withPrecision(epsilon));
     }
 }
