@@ -45,6 +45,7 @@ public class IndexMetrics extends AbstractMetrics
     public final Histogram segmentsPerCompaction;
     public final Histogram compactionSegmentCellsPerSecond;
     public final Histogram compactionSegmentBytesPerSecond;
+    public final Histogram memtableIndexFlushCellsAvgPerSecond;
 
     public IndexMetrics(IndexContext context)
     {
@@ -55,6 +56,7 @@ public class IndexMetrics extends AbstractMetrics
         compactionSegmentBytesPerSecond = Metrics.histogram(createMetricName("CompactionSegmentBytesPerSecond"), false);
         memtableFlushCellsPerSecond = Metrics.histogram(createMetricName("MemtableIndexFlushCellsPerSecond"), false);
         segmentsPerCompaction = Metrics.histogram(createMetricName("SegmentsPerCompaction"), false);
+        memtableIndexFlushCellsAvgPerSecond = Metrics.histogram(createMetricName("MemtableIndexFlushCellsAvgPerSecond"), false);
         ssTableCellCount = Metrics.register(createMetricName("SSTableCellCount"), context::getCellCount);
         memtableIndexFlushCount = Metrics.counter(createMetricName("MemtableIndexFlushCount"));
         compactionCount = Metrics.counter(createMetricName("CompactionCount"));
