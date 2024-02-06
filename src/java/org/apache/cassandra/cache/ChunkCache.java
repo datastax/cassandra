@@ -216,7 +216,7 @@ public class ChunkCache
      * are invalidated, it is more efficient to call this method once with all files than to call it once for each file.
      * @param filePaths the files to invalidate
      */
-    public void invalidateFiles(Collection<String> filePaths)
+    public void invalidateFiles(Iterable<String> filePaths)
     {
         // Use the identity map to avoid unnecessary equality checks.
         var internedPaths = new IdentityHashMap<>();
