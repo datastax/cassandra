@@ -204,7 +204,6 @@ public class ClientRequestsMetricsTest
 
     private void updateCASClientWriteRequestMetrics(CASClientWriteRequestMetrics metrics)
     {
-        metrics.overMaxPendingThreshold.inc();
         metrics.conditionNotMet.inc();
         metrics.mutationSize.update(1);
         updateCASClientRequestMetrics(metrics);
@@ -214,6 +213,13 @@ public class ClientRequestsMetricsTest
     {
         metrics.unfinishedCommit.inc();
         metrics.contention.update(1);
+        metrics.unknownResult.mark();
+        updateLatencyMetrics(metrics.prepareLatency);
+        updateLatencyMetrics(metrics.createProposalLatency);
+        updateLatencyMetrics(metrics.proposeLatency);
+        updateLatencyMetrics(metrics.commitLatency);
+        updateLatencyMetrics(metrics.contentionBackoffLatency);
+        metrics.missingMostRecentCommit.inc();
         updateClientRequestMetrics(metrics);
     }
 
@@ -257,7 +263,6 @@ public class ClientRequestsMetricsTest
     {
         assertEquals(value, metrics.mutationSize.getCount());
         assertEquals(value, metrics.conditionNotMet.getCount());
-        assertEquals(value, metrics.overMaxPendingThreshold.getCount());
         verifyCASClientRequestMetrics(metrics, value);
     }
 
@@ -265,6 +270,13 @@ public class ClientRequestsMetricsTest
     {
         assertEquals(value, metrics.unfinishedCommit.getCount());
         assertEquals(value, metrics.contention.getCount());
+        assertEquals(value, metrics.unknownResult.getCount());
+        verifyLatencyMetrics(metrics.prepareLatency, value);
+        verifyLatencyMetrics(metrics.createProposalLatency, value);
+        verifyLatencyMetrics(metrics.proposeLatency, value);
+        verifyLatencyMetrics(metrics.commitLatency, value);
+        verifyLatencyMetrics(metrics.contentionBackoffLatency, value);
+        assertEquals(value, metrics.missingMostRecentCommit.getCount());
         verifyClientRequestMetrics(metrics, value);
     }
 
