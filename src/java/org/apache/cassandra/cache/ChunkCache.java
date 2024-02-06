@@ -21,7 +21,6 @@
 package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
-import java.util.Collection;
 import java.util.IdentityHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
