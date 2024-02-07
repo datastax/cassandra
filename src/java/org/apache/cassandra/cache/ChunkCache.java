@@ -21,13 +21,13 @@
 package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
-import java.util.HashSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.MoreExecutors;
+import org.cliffc.high_scale_lib.NonBlockingHashSet;
 import org.cliffc.high_scale_lib.NonBlockingIdentityHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,8 +61,10 @@ public class ChunkCache
 
     private final BufferPool bufferPool;
 
-    // Relies on the implementation detail that file paths are interned and can be compared by reference.
-    private final NonBlockingIdentityHashMap<String, HashSet<Key>> keysByFile;
+    // Relies on the implementation detail that keys are interned strings and can be compared by reference.
+    // Because compute optimistically updates the set without acquiring a lock, we must use a set that is
+    // safe for concurrent access.
+    private final NonBlockingIdentityHashMap<String, NonBlockingHashSet<Key>> keysByFile;
     private final LoadingCache<Key, Buffer> cache;
     public final ChunkCacheMetrics metrics;
 
@@ -189,7 +191,7 @@ public class ChunkCache
         // Complete addition within compute remapping function to ensure there is no race condition with removal.
         keysByFile.compute(key.internedPath, (k, v) -> {
             if (v == null)
-                v = new HashSet<>();
+                v = new NonBlockingHashSet<>();
             v.add(key);
             return v;
         });
