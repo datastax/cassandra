@@ -765,10 +765,38 @@ public class QueryController
      *
      * @param iterator iterator over the keys from the index(es)
      */
-    float estimateSelectivity(RangeIterator iterator)
+    private float estimateSelectivity(RangeIterator iterator)
     {
-        float selectivity = Math.min((float) iterator.getMaxKeys() / estimateTotalAvailableRows(), 1.0f);
-        queryContext.setPostFilterSelectivityEstimate(selectivity);
+        long totalRowCount = estimateTotalAvailableRows();
+        return estimateSelectivity(iterator, totalRowCount);
+    }
+
+    private float estimateSelectivity(RangeIterator iterator, long totalRowCount)
+    {
+        float selectivity;
+
+        // For intersection and union we assume predicates are independent
+        // (column values are not correlated with each other).
+        // This assumption is not neccesarily true, but we have no statistical information to do any better.
+        if (iterator instanceof RangeIntersectionIterator)
+        {
+            RangeIntersectionIterator intersectionIterator = (RangeIntersectionIterator) iterator;
+            selectivity = 1.0f;
+            for (RangeIterator range : intersectionIterator.ranges)
+                selectivity *= estimateSelectivity(range, totalRowCount);
+        }
+        else if (iterator instanceof RangeUnionIterator)
+        {
+            selectivity = 0.0f;
+            RangeUnionIterator unionIterator = (RangeUnionIterator) iterator;
+            for (RangeIterator range : unionIterator.ranges)
+                selectivity = 1.0f - (1.0f - selectivity) * (1.0f - estimateSelectivity(range, totalRowCount));
+        }
+        else
+        {
+            selectivity = Math.min((float) iterator.getMaxKeys() / totalRowCount, 1.0f);
+        }
+
         return selectivity;
     }
 

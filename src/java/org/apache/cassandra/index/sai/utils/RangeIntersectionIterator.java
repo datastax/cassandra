@@ -56,7 +56,7 @@ public class RangeIntersectionIterator extends RangeIterator
         return (INTERSECTION_CLAUSE_LIMIT <= 0) || (numberOfExpressions <= INTERSECTION_CLAUSE_LIMIT);
     }
 
-    private final List<RangeIterator> ranges;
+    public final List<RangeIterator> ranges;
     private final int[] rangeStats;
 
     private RangeIntersectionIterator(Builder.Statistics statistics, List<RangeIterator> ranges)
