@@ -775,6 +775,9 @@ public class QueryController
     {
         float selectivity;
 
+        if (iterator.getMaxKeys() == 0)
+            return 0.0f;
+
         // For intersection and union we assume predicates are independent
         // (column values are not correlated with each other).
         // This assumption is not neccesarily true, but we have no statistical information to do any better.
