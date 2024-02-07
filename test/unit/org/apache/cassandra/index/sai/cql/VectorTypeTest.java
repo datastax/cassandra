@@ -1082,7 +1082,7 @@ public class VectorTypeTest extends VectorTester
 
         // Assert the opposite with these writes where the lower bound is not present. (This case actually pushes us to
         // use disk based ordinal mapping.)
-        execute("INSERT INTO %s (pk, val, vec) VALUES (2, 'A', [1, 1])");
+        execute("INSERT INTO %s (pk, val, vec) VALUES (2, 'A', [1, 2])");
         execute("INSERT INTO %s (pk, val) VALUES (1, 'A')");
 
         beforeAndAfterFlush(() -> {
