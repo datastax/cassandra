@@ -36,6 +36,7 @@ import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -62,6 +63,12 @@ import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.SensorsRegistry;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
@@ -494,6 +501,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             msg = processResults(page, options, selectors, nowInSec, userLimit);
         }
 
+        // Propagate request sensor data
+        addRequestSensorData(msg, options);
+
         // Please note that the isExhausted state of the pager only gets updated when we've closed the page, so this
         // shouldn't be moved inside the 'try' above.
         if (!pager.isExhausted())
@@ -516,6 +526,35 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     {
         ResultSet rset = process(partitions, options, selectors, nowInSec, userLimit);
         return new ResultMessage.Rows(rset);
+    }
+
+    private void addRequestSensorData(ResultMessage.Rows msg, QueryOptions options)
+    {
+        // Custom payload is not supported for protocol versions < 4
+        if (options.getProtocolVersion().isSmallerThan(ProtocolVersion.V4))
+        {
+            return;
+        }
+
+        // Not all requests are tracked (yet)
+        RequestSensors requestSensors = RequestTracker.instance.get();
+        if (requestSensors == null)
+        {
+            return;
+        }
+
+        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(Type.READ_BYTES);
+        Map<String, ByteBuffer> customPayload = new HashMap<>();
+        readRequestSensor.map(SensorsCustomParams::sensorValueAsByteBuffer)
+                         .ifPresent(bytes -> customPayload.put(SensorsCustomParams.READ_BYTES_REQUEST, bytes));
+
+        Optional<Sensor> readTableSensor = SensorsRegistry.instance.getSensor(Context.from(this.table), Type.READ_BYTES);
+        readTableSensor.map(s -> {
+                           double bytes = SensorsRegistry.instance.aggregateSensorsByType(Type.READ_BYTES);
+                           return SensorsCustomParams.sensorValueAsByteBuffer(bytes);
+                       })
+                       .ifPresent(bytes -> customPayload.put(SensorsCustomParams.READ_BYTES_RATE, bytes));
+        msg.setCustomPayload(customPayload);
     }
 
     public ResultMessage.Rows executeLocally(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException

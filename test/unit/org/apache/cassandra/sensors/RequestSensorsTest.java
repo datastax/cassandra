@@ -108,4 +108,19 @@ public class RequestSensorsTest
         verify(sensorsRegistry, times(1)).updateSensor(eq(context1), eq(type1), eq(1.0));
         verify(sensorsRegistry, times(1)).updateSensor(eq(context1), eq(type2), eq(1.0));
     }
+
+    @Test
+    public void testAutoSync()
+    {
+        boolean autoSync = true;
+        context1Sensors.registerSensor(type1, autoSync);
+        context1Sensors.registerSensor(type2, autoSync);
+
+        context1Sensors.incrementSensor(type1, 1.0);
+        context1Sensors.incrementSensor(type2, 1.0);
+
+        // don't call context1Sensors.syncAllSensors();
+        verify(sensorsRegistry, times(1)).updateSensor(eq(context1), eq(type1), eq(1.0));
+        verify(sensorsRegistry, times(1)).updateSensor(eq(context1), eq(type2), eq(1.0));
+    }
 }

@@ -57,7 +57,15 @@ public class RequestSensors
 
     public void registerSensor(Type type)
     {
-        sensors.putIfAbsent(type, new Sensor(context, type));
+        registerSensor(type, false);
+    }
+
+    /**
+     * Registers a new sensor of the given type, and optionally syncs it to the {@link SensorsRegistry} with each increment.
+     */
+    public void registerSensor(Type type, boolean autoSync)
+    {
+        sensors.putIfAbsent(type, new Sensor(context, type, autoSync));
     }
 
     public Optional<Sensor> getSensor(Type type)
@@ -67,7 +75,11 @@ public class RequestSensors
 
     public void incrementSensor(Type type, double value)
     {
-        Optional.ofNullable(sensors.get(type)).ifPresent(s -> s.increment(value));
+        Optional.ofNullable(sensors.get(type)).ifPresent(s -> {
+            s.increment(value);
+            if (s.autoSync())
+                sensorsRegistry.get().updateSensor(s.getContext(), s.getType(), s.getValue());
+        });
     }
 
     public void syncAllSensors()

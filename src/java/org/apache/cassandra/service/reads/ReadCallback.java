@@ -37,7 +37,11 @@ import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
@@ -60,6 +64,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     private volatile int failures = 0;
     private final Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint;
     private final boolean couldSpeculate;
+    private final RequestSensors requestSensors;
 
     public ReadCallback(ResponseResolver<E, P> resolver, ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime)
     {
@@ -77,6 +82,8 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
                 .metadata()
                 .params.speculativeRetry;
         this.couldSpeculate = !NeverSpeculativeRetryPolicy.INSTANCE.equals(retry);
+        this.requestSensors = RequestTracker.instance.get();
+
 
         if (logger.isTraceEnabled())
             logger.trace("Blockfor is {}; setting up requests to {}", blockFor, this.replicaPlan);
@@ -147,6 +154,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     {
         assertWaitingFor(message.from());
         resolver.preprocess(message);
+        updateSensorValues(message);
 
         /*
          * Ensure that data is present and the response accumulator has properly published the
@@ -202,5 +210,25 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         assert !replicaPlan().consistencyLevel().isDatacenterLocal()
                || DatabaseDescriptor.getLocalDataCenter().equals(DatabaseDescriptor.getEndpointSnitch().getDatacenter(from))
                : "Received read response from unexpected replica: " + from;
+    }
+
+    /**
+     * Update the {@link RequestSensors} with the number of bytes read returned by each replica.
+     */
+    private void updateSensorValues(Message<ReadResponse> msg)
+    {
+        if (this.requestSensors == null)
+            return;
+
+        Map<String, byte[]> customParams = msg.header.customParams();
+        if (customParams != null)
+        {
+            byte[] readBytes = msg.header.customParams().get(SensorsCustomParams.READ_BYTES_REQUEST);
+            if (readBytes != null)
+            {
+                double readValue = SensorsCustomParams.sensorValueFromBytes(readBytes);
+                this.requestSensors.incrementSensor(Type.READ_BYTES, readValue);
+            }
+        }
     }
 }

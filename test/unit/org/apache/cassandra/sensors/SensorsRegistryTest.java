@@ -22,6 +22,8 @@ import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 import com.google.common.collect.ImmutableSet;
 import org.junit.After;
@@ -33,9 +35,11 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.withPrecision;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.never;
@@ -48,10 +52,16 @@ public class SensorsRegistryTest
     public static final String CF1 = "Standard1";
     public static final String CF2 = "Standard2";
 
+    private static final int rateWindowInSeconds = 10;
+
     private Context context1;
     private Type type1;
     private Context context2;
     private Type type2;
+
+    static {
+        System.setProperty(SensorsRegistry.SENSORS_RATE_WINDOW_IN_SECONDS_SYSTEM_PROPERTY, "" + rateWindowInSeconds);
+    }
 
     @BeforeClass
     public static void defineSchema() throws Exception
@@ -212,5 +222,83 @@ public class SensorsRegistryTest
 
         verify(listener, never()).onSensorCreated(any());
         verify(listener, never()).onSensorRemoved(any());
+    }
+
+    @Test
+    public void testAggregateSensors()
+    {
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2).metadata());
+
+        SensorsRegistry.instance.updateSensor(context1, type1, 1.0);
+        SensorsRegistry.instance.updateSensor(context1, type1, 2.0);
+        SensorsRegistry.instance.updateSensor(context2, type1, 100.0);
+        SensorsRegistry.instance.updateSensor(context2, type2, 4.0); // should not be aggregated
+        SensorsRegistry.instance.updateSensor(context2, type2, 5.0); // should not be aggregated
+
+        SensorsRegisterAggregator aggregator = new SensorsRegisterAggregator()
+        {
+            @Override
+            public Function<Sensor, Double> aggregatorFn()
+            {
+                return s -> s.getValue() < 100 ? s.getValue() * s.getValue() : s.getValue();
+            }
+
+            @Override
+            public Predicate<Sensor> aggregatorFilter()
+            {
+                return (s) -> s.getContext() == context1 || s.getContext() == context2;
+            }
+        };
+
+        SensorsRegistry.instance.registerSensorAggregator(aggregator, type1);
+        double aggregatedValue = SensorsRegistry.instance.aggregateSensorsByType(type1);
+        double expectedContext1Type1Value = 1.0 + 2.0; // (context1, type1) summed up because of the monotonic nature of the registry
+        double expectedValue = expectedContext1Type1Value * expectedContext1Type1Value + 100.0;  // (context1, type1) is squared and (context2, type1) is not because of the aggregator definition
+        assertThat(aggregatedValue).isEqualTo(expectedValue);
+    }
+
+    @Test
+    public void testSensorsRate()
+    {
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
+
+        MonotonicClock clock = Mockito.mock(MonotonicClock.class);
+        SensorsRegistry.instance.setClock(clock);
+        Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(1));
+
+        // all the following updates should happen withing the same rate window
+        double v1 = 1.0, v2 = 2.0, v3 = 3.0, v4 = 4.0;
+        SensorsRegistry.instance.updateSensor(context1, type1, v1);
+        SensorsRegistry.instance.updateSensor(context1, type1, v2);
+        SensorsRegistry.instance.updateSensor(context1, type1, v3);
+        SensorsRegistry.instance.updateSensor(context1, type1, v4);
+
+        Sensor sensor = SensorsRegistry.instance.getSensor(context1, type1).get();
+        double rate = SensorsRegistry.instance.getSensorRate(sensor);
+        assertThat(rate).isEqualTo(v1 + v2 + v3 + v4);
+
+        // advance the clock to the next rate window
+        Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(rateWindowInSeconds + 1));
+        double v5 = 5.1;
+        SensorsRegistry.instance.updateSensor(context1, type1, v5);
+        // advance the clock again, remain in the same rate window
+        Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(rateWindowInSeconds + 2));
+        double v6 = 6.2;
+        SensorsRegistry.instance.updateSensor(context1, type1, v6);
+
+        rate = SensorsRegistry.instance.getSensorRate(sensor);
+        double epsilon = 0.00000001;
+        assertThat(rate).isEqualTo(v5 + v6, withPrecision(epsilon));
+        // make sure the value is indeed ever increasing
+        assertThat(sensor.getValue()).isEqualTo(v1 + v2 + v3 + v4 + v5 + v6, withPrecision(epsilon));
+
+        // advance the clock to the next rate window without updating the sensor
+        Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(rateWindowInSeconds * 2 + 2));
+        rate = SensorsRegistry.instance.getSensorRate(sensor);
+        assertThat(rate).isEqualTo(0D, withPrecision(epsilon));
     }
 }

@@ -19,6 +19,7 @@
 package org.apache.cassandra.sensors;
 
 import java.util.Objects;
+import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.AtomicDouble;
@@ -41,17 +42,35 @@ public class Sensor
     private final Context context;
     private final Type type;
     private final AtomicDouble value;
+    private final boolean autoSync;
+    private long lastSnapshotTime;
+    private double lastSnapshotValue;
 
     protected Sensor(Context context, Type type)
+    {
+        this(context, type, false);
+    }
+
+    protected Sensor(Context context, Type type, boolean autoSync)
     {
         this.context = context;
         this.type = type;
         this.value = new AtomicDouble();
+        this.autoSync = autoSync;
     }
 
     protected void increment(double value)
     {
-        this.value.addAndGet(value);
+        this.increment(value, (ignored) -> false, 0L);
+    }
+
+    protected void increment(double value, Predicate<Sensor> snapshotSensorValue, long now)
+    {
+        double oldValue = this.value.getAndAdd(value);
+        if (snapshotSensorValue.test(this)) {
+            this.lastSnapshotValue = oldValue;
+            this.lastSnapshotTime = now;
+        }
     }
 
     public Context getContext()
@@ -67,6 +86,21 @@ public class Sensor
     public double getValue()
     {
         return value.doubleValue();
+    }
+
+    public long getLastSnapshotTime()
+    {
+        return lastSnapshotTime;
+    }
+
+    public double getLastSnapshotValue()
+    {
+        return lastSnapshotValue;
+    }
+
+    public boolean autoSync()
+    {
+        return autoSync;
     }
 
     @VisibleForTesting
