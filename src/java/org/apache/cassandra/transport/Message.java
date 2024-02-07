@@ -403,7 +403,7 @@ public abstract class Message
             boolean isCustomPayload = inbound.header.flags.contains(Envelope.Header.Flag.CUSTOM_PAYLOAD);
             boolean hasWarning = inbound.header.flags.contains(Envelope.Header.Flag.WARNING);
 
-            // Order is matters, see https://github.com/apache/cassandra-java-driver/blob/e1f397e2ac0dad04bfe4f05fe1b78b270f41d9e8/driver-core/src/main/java/com/datastax/driver/core/Message.java#L278-L291
+            // Order matters, see https://github.com/apache/cassandra-java-driver/blob/e1f397e2ac0dad04bfe4f05fe1b78b270f41d9e8/driver-core/src/main/java/com/datastax/driver/core/Message.java#L278-L291
             UUID tracingId = isRequest || !isTracing ? null : CBUtil.readUUID(inbound.body);
             Map<String, ByteBuffer> customPayload = !isCustomPayload ? null : CBUtil.readBytesMap(inbound.body);
             List<String> warnings = isRequest || !hasWarning ? null : CBUtil.readStringList(inbound.body);

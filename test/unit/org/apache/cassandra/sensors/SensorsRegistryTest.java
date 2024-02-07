@@ -22,7 +22,6 @@ import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -53,10 +52,16 @@ public class SensorsRegistryTest
     public static final String CF1 = "Standard1";
     public static final String CF2 = "Standard2";
 
+    private static final int rateWindowInSeconds = 10;
+
     private Context context1;
     private Type type1;
     private Context context2;
     private Type type2;
+
+    static {
+        System.setProperty(SensorsRegistry.SENSORS_RATE_WINDOW_IN_SECONDS_SYSTEM_PROPERTY, "" + rateWindowInSeconds);
+    }
 
     @BeforeClass
     public static void defineSchema() throws Exception
@@ -258,41 +263,13 @@ public class SensorsRegistryTest
     @Test
     public void testSensorsRate()
     {
-        int rateWindowInSeconds = 10;
-        System.setProperty(SensorsRegistry.SENSORS_RATE_WINDOW_IN_SECONDS_SYSTEM_PROPERTY, "" + rateWindowInSeconds);
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
 
         MonotonicClock clock = Mockito.mock(MonotonicClock.class);
         SensorsRegistry.instance.setClock(clock);
-        AtomicInteger clockCalls = new AtomicInteger();
-        Mockito.doAnswer(ignored -> {
-            clockCalls.incrementAndGet();
-            /**
-             * TEST CASE 1: aggregate the first 4 sensors updates into the same window:
-             * w0 = [0, 10), now0 = 1. The 5th clock call is when rate is calculated
-             */
-            if (clockCalls.get() <= 5) //
-                return TimeUnit.SECONDS.toNanos(1);
-            /**
-             * TEST CASE 2A: advance the clock to the next rate window w1 = [10, 20), now1 = 11
-             */
-            else if (clockCalls.get() == 6)
-                return TimeUnit.SECONDS.toNanos(rateWindowInSeconds + 1);
-            /**
-             * TEST CASE 2B: advance the clock to the next rate window: w1 = [10, 20), now2 = 12. The 8th clock cal is when rate is calculated
-             */
-            else if (clockCalls.get() == 7 || (clockCalls.get() == 8))
-            /**
-             * TEST CASE 3: advance the clock to the next rate window without updating the sensor: w1 = [20, 30), now3 = 22
-             */
-                return TimeUnit.SECONDS.toNanos(rateWindowInSeconds + 2);
-            else if (clockCalls.get() == 9)
-                return TimeUnit.SECONDS.toNanos(TimeUnit.SECONDS.toNanos(rateWindowInSeconds * 2 + 2));
-            throw new IllegalStateException("Unexpected clock call");
-        }).when(clock).now();
+        Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(1));
 
-        // TEST CASE 1
         // all the following updates should happen withing the same rate window
         double v1 = 1.0, v2 = 2.0, v3 = 3.0, v4 = 4.0;
         SensorsRegistry.instance.updateSensor(context1, type1, v1);
@@ -304,11 +281,12 @@ public class SensorsRegistryTest
         double rate = SensorsRegistry.instance.getSensorRate(sensor);
         assertThat(rate).isEqualTo(v1 + v2 + v3 + v4);
 
-        // TEST CASE 2A
+        // advance the clock to the next rate window
+        Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(rateWindowInSeconds + 1));
         double v5 = 5.1;
         SensorsRegistry.instance.updateSensor(context1, type1, v5);
-
-        // TEST CASE 2B
+        // advance the clock again, remain in the same rate window
+        Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(rateWindowInSeconds + 2));
         double v6 = 6.2;
         SensorsRegistry.instance.updateSensor(context1, type1, v6);
 
@@ -318,7 +296,8 @@ public class SensorsRegistryTest
         // make sure the value is indeed ever increasing
         assertThat(sensor.getValue()).isEqualTo(v1 + v2 + v3 + v4 + v5 + v6, withPrecision(epsilon));
 
-        // TEST CASE 3
+        // advance the clock to the next rate window without updating the sensor
+        Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(rateWindowInSeconds * 2 + 2));
         rate = SensorsRegistry.instance.getSensorRate(sensor);
         assertThat(rate).isEqualTo(0D, withPrecision(epsilon));
     }
