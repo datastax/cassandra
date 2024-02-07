@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
+import org.apache.cassandra.utils.JsonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1283,6 +1284,11 @@ public class Config
 
     public static void log(Config config)
     {
+        logger.info("Node configuration:[{}]", config.toDebugString(false));
+    }
+
+    public String toDebugString(boolean json)
+    {
         Map<String, String> configMap = new TreeMap<>();
         for (Field field : Config.class.getFields())
         {
@@ -1301,7 +1307,7 @@ public class Config
             try
             {
                 // Field.get() can throw NPE if the value of the field is null
-                value = field.get(config).toString();
+                value = field.get(this).toString();
             }
             catch (NullPointerException | IllegalAccessException npe)
             {
@@ -1309,8 +1315,11 @@ public class Config
             }
             configMap.put(name, value);
         }
-
-        logger.info("Node configuration:[{}]", Joiner.on("; ").join(configMap.entrySet()));
+        if (json)
+        {
+            return JsonUtils.writeAsJsonString(configMap);
+        }
+        return Joiner.on("; ").join(configMap.entrySet());
     }
 
     public volatile boolean dump_heap_on_uncaught_exception = false;
