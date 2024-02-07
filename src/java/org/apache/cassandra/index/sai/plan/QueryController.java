@@ -775,7 +775,7 @@ public class QueryController
     {
         float selectivity;
 
-        if (iterator.getMaxKeys() == 0 || totalRowCount == 0)
+        if (iterator.getMaxKeys() == 0)
             return 0.0f;
 
         // For intersection and union we assume predicates are independent
