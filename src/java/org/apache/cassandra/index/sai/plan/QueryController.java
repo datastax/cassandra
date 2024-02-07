@@ -121,7 +121,21 @@ public class QueryController
          * In the future this should be replaced by a better model taking into account the data size
          * and number of columns.
          */
-        static final float ROW_MATERIALIZE_COST = 200.0f;
+        static final float ROW_MATERIALIZE_COST = 100.0f;
+
+        /**
+         * Additional row materialization penalty per each cell in the row.
+         * <p>
+         * The cost of a row cell depends on how the cell is used, e.g. the cost of a cell that is used in the
+         * row filter is much higher than the cost of the cell that isn't fetched from the storage. Unfortunately
+         * at the moment we don't have stats precise enough to distinguish those cases, so we just assume the column
+         * is fetched from storage and used in the filter. The cost is so low anyway that it really
+         * matters only for collections.
+         */
+        static final float CELL_MATERIALIZE_COST = 0.4f;
+
+        /** Additional row materialization penalty per each deserialized byte of the row */
+        static final float BYTE_MATERIALIZE_COST = 0.005f;
     }
 
     public static final int ORDER_CHUNK_SIZE = SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE.getInt();
@@ -309,7 +323,7 @@ public class QueryController
         return order;
     }
 
-    private double estimateFilterThenSortCost(RowFilter.FilterElement filter, RangeIterator iter)
+    private float estimateFilterThenSortCost(RowFilter.FilterElement filter, RangeIterator iter)
     {
         // Unions are cheap but intersections have higher costs because of skipping on the iterators,
         // so we add a penalty for each intersection used in the filter.
@@ -318,14 +332,49 @@ public class QueryController
         long primaryKeysFetchedFromIndex = iter.getMaxKeys();
         long materializedRows = Math.min(getExactLimit(), primaryKeysFetchedFromIndex);
         return primaryKeysFetchedFromIndex * Costs.INDEX_KEY_FETCH_COST * (1.0f + intersectionPenalty)
-               + materializedRows * Costs.ROW_MATERIALIZE_COST;
+               + estimateRowMaterializationCost(materializedRows);
     }
 
-    private double estimateSortThenFilterCost(RangeIterator iter)
+    private float estimateSortThenFilterCost(RangeIterator iter)
     {
         float selectivity = estimateSelectivity(iter);
         int materializedRows = SoftLimitUtil.softLimit(getExactLimit(), SOFT_LIMIT_CONFIDENCE, selectivity);
-        return materializedRows * Costs.ROW_MATERIALIZE_COST;
+        return estimateRowMaterializationCost(materializedRows);
+    }
+
+    private float estimateRowMaterializationCost(long rows)
+    {
+        float avgCellsPerRow = avgCellsPerRow();
+        float avgBytesPerRow = avgRowSizeInBytes();
+        return rows * (
+            Costs.ROW_MATERIALIZE_COST
+            + avgCellsPerRow * Costs.CELL_MATERIALIZE_COST
+            + avgBytesPerRow * Costs.BYTE_MATERIALIZE_COST
+        );
+    }
+
+    private float avgCellsPerRow()
+    {
+        long cells = 0;
+        long rows = 0;
+        for (SSTableReader sstable : cfs.getLiveSSTables())
+        {
+            rows += sstable.getTotalRows();
+            cells += sstable.getEstimatedCellPerPartitionCount().mean() * sstable.getEstimatedCellPerPartitionCount().count();
+        }
+        return rows == 0 ? 0.0f : ((float) cells) / rows;
+    }
+
+    private float avgRowSizeInBytes()
+    {
+        long totalLength = 0;
+        long rows = 0;
+        for (SSTableReader sstable : cfs.getLiveSSTables())
+        {
+            rows += sstable.getTotalRows();
+            totalLength += sstable.uncompressedLength();
+        }
+        return rows == 0 ? 0.0f : ((float) totalLength) / rows;
     }
 
     /**
