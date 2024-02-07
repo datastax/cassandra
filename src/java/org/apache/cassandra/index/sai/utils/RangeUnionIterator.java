@@ -31,7 +31,7 @@ import org.apache.cassandra.io.util.FileUtils;
 @SuppressWarnings("resource")
 public class RangeUnionIterator extends RangeIterator
 {
-    private final List<RangeIterator> ranges;
+    public final List<RangeIterator> ranges;
 
     private RangeUnionIterator(Builder.Statistics statistics, List<RangeIterator> ranges)
     {
