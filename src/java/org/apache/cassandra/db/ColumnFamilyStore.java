@@ -21,7 +21,20 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -54,7 +67,10 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.base.Throwables;
-import com.google.common.collect.*;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -118,9 +134,9 @@ import org.apache.cassandra.io.sstable.BloomFilterTracker;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
+import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.StorageHandler;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -147,6 +163,9 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.TableParams;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
@@ -362,6 +381,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     // BloomFilterTracker is updated from corresponding {@link SSTableReader}s. Metrics are queried via CFS instance.
     private final BloomFilterTracker bloomFilterTracker = BloomFilterTracker.createMeterTracker();
+
+    private final RequestTracker requestTracker = RequestTracker.instance;
 
     public static void shutdownPostFlushExecutor() throws InterruptedException
     {
@@ -1545,9 +1566,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             DecoratedKey key = update.partitionKey();
             invalidateCachedPartition(key);
             metric.topWritePartitionFrequency.addSample(key.getKey(), 1);
+            int dataSize = update.dataSize();
             if (metric.topWritePartitionSize.isEnabled()) // dont compute datasize if not needed
-                metric.topWritePartitionSize.addSample(key.getKey(), update.dataSize());
-            metric.bytesInserted.inc(update.dataSize());
+                metric.topWritePartitionSize.addSample(key.getKey(), dataSize);
+            metric.bytesInserted.inc(dataSize);
             StorageHook.instance.reportWrite(metadata.id, update);
             metric.writeLatency.addNano(System.nanoTime() - start);
             // CASSANDRA-11117 - certain resolution paths on memtable put can result in very
@@ -1557,6 +1579,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             // to update.
             if(timeDelta < Long.MAX_VALUE)
                 metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
+            RequestSensors sensors = requestTracker.get();
+            if (sensors != null)
+                sensors.incrementSensor(Type.WRITE_BYTES, dataSize);
         }
         catch (RuntimeException e)
         {

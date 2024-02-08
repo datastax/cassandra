@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.db;
 
+import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.ForwardingInfo;
@@ -24,6 +26,9 @@ import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParamType;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 
 public class MutationVerbHandler implements IVerbHandler<Mutation>
@@ -59,6 +64,13 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 
         try
         {
+            // Initialize the sensor and set ExecutorLocals
+            PartitionUpdate pu = message.payload.getPartitionUpdates().iterator().next();
+            RequestSensors sensors = new RequestSensors(Context.from(pu.metadata()));
+            sensors.registerSensor(Type.WRITE_BYTES);
+            ExecutorLocals locals = ExecutorLocals.create(sensors);
+            ExecutorLocals.set(locals);
+
             message.payload.applyFuture(WriteOptions.DEFAULT).thenAccept(o -> respond(message, respondToAddress)).exceptionally(wto -> {
                 failed();
                 return null;

@@ -50,6 +50,8 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -78,6 +80,7 @@ public class Mutation implements IMutation
     final AtomicLong viewLockAcquireStart = new AtomicLong(0);
 
     private final boolean cdcEnabled;
+    private final RequestTracker requestTracker;
 
     private static final int SERIALIZATION_VERSION_COUNT = MessagingService.Version.values().length;
     // Contains serialized representations of this mutation.
@@ -85,7 +88,9 @@ public class Mutation implements IMutation
     // be modified (e.g. calling add(PartitionUpdate)) when it's being serialized.
     private final Serialization[] cachedSerializations = new Serialization[SERIALIZATION_VERSION_COUNT];
 
-    /** @see CassandraRelevantProperties#CACHEABLE_MUTATION_SIZE_LIMIT */
+    /**
+     * @see CassandraRelevantProperties#CACHEABLE_MUTATION_SIZE_LIMIT
+     */
     private static final long CACHEABLE_MUTATION_SIZE_LIMIT = CassandraRelevantProperties.CACHEABLE_MUTATION_SIZE_LIMIT.getLong();
 
     public Mutation(PartitionUpdate update)
@@ -105,6 +110,7 @@ public class Mutation implements IMutation
         this.modifications = modifications;
         this.cdcEnabled = cdcEnabled;
         this.approxCreatedAtNanos = approxCreatedAtNanos;
+        this.requestTracker = RequestTracker.instance;
     }
 
     private static boolean cdcEnabled(Iterable<PartitionUpdate> modifications)
@@ -165,7 +171,7 @@ public class Mutation implements IMutation
     public void validateSize(int version, int overhead)
     {
         long totalSize = serializedSize(version) + overhead;
-        if(totalSize > MAX_MUTATION_SIZE)
+        if (totalSize > MAX_MUTATION_SIZE)
         {
             CommitLog.instance.metrics.oversizedMutations.mark();
             throw new MutationExceededMaxSizeException(this, version, totalSize);
@@ -186,12 +192,11 @@ public class Mutation implements IMutation
      * Creates a new mutation that merges all the provided mutations.
      *
      * @param mutations the mutations to merge together. All mutation must be
-     * on the same keyspace and partition key. There should also be at least one
-     * mutation.
+     *                  on the same keyspace and partition key. There should also be at least one
+     *                  mutation.
      * @return a mutation that contains all the modifications contained in {@code mutations}.
-     *
      * @throws IllegalArgumentException if not all the mutations are on the same
-     * keyspace and key.
+     *                                  keyspace and key.
      */
     public static Mutation merge(List<Mutation> mutations)
     {
@@ -237,7 +242,11 @@ public class Mutation implements IMutation
     public CompletableFuture<?> applyFuture(WriteOptions writeOptions)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
-        return ks.applyFuture(this, writeOptions, true);
+        return ks.applyFuture(this, writeOptions, true).thenRun(() -> {
+            RequestSensors sensors = requestTracker.get();
+            if (sensors != null)
+                sensors.syncAllSensors();
+        });
     }
 
     public void apply(WriteOptions writeOptions)
@@ -364,7 +373,7 @@ public class Mutation implements IMutation
          * Sets the timestamp to use for the following additions to this builder or any derived (update or row) builder.
          *
          * @param timestamp the timestamp to use for following additions. If that timestamp hasn't been set, the current
-         * time in microseconds will be used.
+         *                  time in microseconds will be used.
          * @return this builder.
          */
         public SimpleBuilder timestamp(long timestamp);
@@ -473,9 +482,9 @@ public class Mutation implements IMutation
         }
 
         static void serializeInternal(PartitionUpdate.PartitionUpdateSerializer serializer,
-                                         Mutation mutation,
-                                         DataOutputPlus out,
-                                         int version) throws IOException
+                                      Mutation mutation,
+                                      DataOutputPlus out,
+                                      int version) throws IOException
         {
             Map<TableId, PartitionUpdate> modifications = mutation.modifications;
 
