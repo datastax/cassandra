@@ -74,7 +74,6 @@ import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
-import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
@@ -363,30 +362,12 @@ public class CassandraOnHeapGraph<T>
                                                         ? x -> ordinalMap.inverse().getOrDefault(x, x)
                                                         : x -> x;
 
-            // Retrieve the first compressed vectors with more than MAX_PQ_TRAINING_SET_SIZE rows
-            var indexes = new ArrayList<>(indexContext.getView().getIndexes());
-            indexes.sort(Comparator.comparing(SSTableIndex::getSSTable, CompactionSSTable.maxTimestampDescending));
-            CompressedVectors compressedVectors = null;
-            outer:
-            for (SSTableIndex index : indexes)
-            {
-                for (Segment segment : index.getSegments())
-                {
-                    if (segment.metadata.numRows < ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
-                        continue;
-
-                    var searcher = segment.getIndexSearcher();
-                    assert searcher instanceof V2VectorIndexSearcher;
-                    compressedVectors = ((V2VectorIndexSearcher) searcher).getCompressedVectors();
-                    if (compressedVectors != null)
-                        // We take the first compressed vectors with enough vectors and stop
-                        break outer;
-                }
-            }
+            // Get a previous segment's compressed vectors if present to speed up the PQ computation
+            CompressedVectors maybeCV = getCompressedVectorsIfPresent(indexContext);
 
             // compute and write PQ
             long pqOffset = pqOutput.getFilePointer();
-            long pqPosition = writePQ(pqOutput.asSequentialWriter(), reverseOrdinalMapper, compressedVectors);
+            long pqPosition = writePQ(pqOutput.asSequentialWriter(), reverseOrdinalMapper, maybeCV);
             long pqLength = pqPosition - pqOffset;
 
             // write postings
@@ -420,6 +401,39 @@ public class CassandraOnHeapGraph<T>
         }
     }
 
+    private static CompressedVectors getCompressedVectorsIfPresent(IndexContext indexContext)
+    {
+        // Retrieve the first compressed vectors for a segment with more than MAX_PQ_TRAINING_SET_SIZE rows
+        // or the one with the most rows if none are larger than MAX_PQ_TRAINING_SET_SIZE
+        var indexes = new ArrayList<>(indexContext.getView().getIndexes());
+        indexes.sort(Comparator.comparing(SSTableIndex::getSSTable, CompactionSSTable.maxTimestampDescending));
+
+        CompressedVectors compressedVectors = null;
+        long maxRows = 0;
+        for (SSTableIndex index : indexes)
+        {
+            for (Segment segment : index.getSegments())
+            {
+                if (segment.metadata.numRows < maxRows)
+                    continue;
+
+                var searcher = segment.getIndexSearcher();
+                assert searcher instanceof V2VectorIndexSearcher;
+                var cv = ((V2VectorIndexSearcher) searcher).getCompressedVectors();
+                if (cv != null)
+                {
+                    // We can exit now because we won't find a better candidate
+                    if (segment.metadata.numRows > ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
+                        return cv;
+
+                    compressedVectors = cv;
+                    maxRows = segment.metadata.numRows;
+                }
+            }
+        }
+        return compressedVectors;
+    }
+
     private BiMap <Integer, Integer> buildOrdinalMap()
     {
         BiMap <Integer, Integer> ordinalMap = HashBiMap.create();
@@ -450,7 +464,7 @@ public class CassandraOnHeapGraph<T>
         return ordinalMap;
     }
 
-    private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper, CompressedVectors previousCompressedVectors) throws IOException
+    private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper, CompressedVectors previousCV) throws IOException
     {
         VectorCompression compressionType;
         if (vectorValues.dimension() >= 1536 && CassandraRelevantProperties.VSEARCH_11_9_UPGRADES.getBoolean())
@@ -477,8 +491,8 @@ public class CassandraOnHeapGraph<T>
         // evict from memory ASAP so better to do the PQ build (in parallel) one at a time
         synchronized (CassandraOnHeapGraph.class)
         {
-            if (previousCompressedVectors instanceof PQVectors)
-                compressor = ((ProductQuantization) previousCompressedVectors.getCompressor()).refine(vectorValues);
+            if (previousCV instanceof PQVectors)
+                compressor = ((ProductQuantization) previousCV.getCompressor()).refine(vectorValues);
             else if (vectorValues.dimension() >= 1536)
                 compressor = BinaryQuantization.compute(vectorValues);
             else
