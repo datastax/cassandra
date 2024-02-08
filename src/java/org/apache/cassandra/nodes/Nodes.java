@@ -80,6 +80,8 @@ import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.Throwables;
 import org.msgpack.jackson.dataformat.MessagePackFactory;
 
+import static com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES;
+
 /**
  * Manages information about the local node and peers.
  *
@@ -279,6 +281,7 @@ public class Nodes
         messagePackFactory.disable(JsonGenerator.Feature.AUTO_CLOSE_TARGET);
         ObjectMapper objectMapper = new ObjectMapper(messagePackFactory);
         objectMapper.registerModule(SerHelper.createMsgpackModule());
+        objectMapper.configure(FAIL_ON_UNKNOWN_PROPERTIES, false);
 
         this.local = new Local(objectMapper, storageDirectory);
         this.peers = new Peers(objectMapper, storageDirectory);
