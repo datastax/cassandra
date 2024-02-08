@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
@@ -83,6 +84,11 @@ public class SSTableIndex
     public SSTableContext getSSTableContext()
     {
         return sstableContext;
+    }
+
+    public List<Segment> getSegments()
+    {
+        return searchableIndex.getSegments();
     }
 
     public long indexFileCacheSize()

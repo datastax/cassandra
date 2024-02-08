@@ -20,8 +20,10 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
@@ -61,13 +63,16 @@ import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
+import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
@@ -356,9 +361,29 @@ public class CassandraOnHeapGraph<T>
                                                         ? x -> ordinalMap.inverse().getOrDefault(x, x)
                                                         : x -> x;
 
+            // Retrieve the first compressed vectors with more than MAX_PQ_TRAINING_SET_SIZE rows
+            var indexes = new ArrayList<>(indexContext.getView().getIndexes());
+            indexes.sort(Comparator.comparing(ssTableIndex -> ssTableIndex.getSSTable().descriptor.id));
+            CompressedVectors compressedVectors = null;
+            outer:
+            for (SSTableIndex index : indexes)
+            {
+                for (Segment segment : index.getSegments())
+                {
+                    if (segment.metadata.numRows < ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
+                        continue;
+
+                    var searcher = segment.getIndexSearcher();
+                    assert searcher instanceof CompressedVectorsSupplier;
+                    compressedVectors = ((CompressedVectorsSupplier) searcher).getCompressedVectors();
+                    // We take the first compressed vectors with enough vectors and stop
+                    break outer;
+                }
+            }
+
             // compute and write PQ
             long pqOffset = pqOutput.getFilePointer();
-            long pqPosition = writePQ(pqOutput.asSequentialWriter(), reverseOrdinalMapper);
+            long pqPosition = writePQ(pqOutput.asSequentialWriter(), reverseOrdinalMapper, compressedVectors);
             long pqLength = pqPosition - pqOffset;
 
             // write postings
@@ -422,7 +447,7 @@ public class CassandraOnHeapGraph<T>
         return ordinalMap;
     }
 
-    private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper) throws IOException
+    private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper, CompressedVectors compressedVectors) throws IOException
     {
         VectorCompression compressionType;
         if (vectorValues.dimension() >= 1536 && CassandraRelevantProperties.VSEARCH_11_9_UPGRADES.getBoolean())
@@ -449,12 +474,20 @@ public class CassandraOnHeapGraph<T>
         // evict from memory ASAP so better to do the PQ build (in parallel) one at a time
         synchronized (CassandraOnHeapGraph.class)
         {
-            if (vectorValues.dimension() >= 1536)
-                compressor = BinaryQuantization.compute(vectorValues);
+            if (compressedVectors instanceof PQVectors)
+            {
+                compressor = compressedVectors.getCompressor();
+                encoded = ((ProductQuantization) compressor).refine(vectorValues);
+            }
             else
-                compressor = ProductQuantization.compute(vectorValues, bytesPerVector, false);
-            assert !vectorValues.isValueShared();
-            encoded = compressVectors(reverseOrdinalMapper, compressor);
+            {
+                if (vectorValues.dimension() >= 1536)
+                    compressor = BinaryQuantization.compute(vectorValues);
+                else
+                    compressor = ProductQuantization.compute(vectorValues, bytesPerVector, false);
+                assert !vectorValues.isValueShared();
+                encoded = compressVectors(reverseOrdinalMapper, compressor);
+            }
         }
 
         // save (outside the synchronized block, this is io-bound not CPU)

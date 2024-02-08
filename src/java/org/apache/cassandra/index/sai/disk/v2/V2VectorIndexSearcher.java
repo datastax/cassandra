@@ -49,6 +49,7 @@ import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CloseableReranker;
+import org.apache.cassandra.index.sai.disk.vector.CompressedVectorsSupplier;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OverqueryUtils;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
@@ -74,7 +75,7 @@ import static java.lang.Math.min;
 /**
  * Executes ann search against the graph for an individual index segment.
  */
-public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrdering
+public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrdering, CompressedVectorsSupplier
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -112,6 +113,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     public long indexFileCacheSize()
     {
         return graph.ramBytesUsed();
+    }
+
+    @Override
+    public CompressedVectors getCompressedVectors()
+    {
+        return graph.getCompressedVectors();
     }
 
     @Override
