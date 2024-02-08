@@ -58,6 +58,7 @@ import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.VectorEncoding;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -69,6 +70,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
@@ -363,7 +365,7 @@ public class CassandraOnHeapGraph<T>
 
             // Retrieve the first compressed vectors with more than MAX_PQ_TRAINING_SET_SIZE rows
             var indexes = new ArrayList<>(indexContext.getView().getIndexes());
-            indexes.sort(Comparator.comparing(ssTableIndex -> ssTableIndex.getSSTable().descriptor.id));
+            indexes.sort(Comparator.comparing(SSTableIndex::getSSTable, CompactionSSTable.maxTimestampDescending));
             CompressedVectors compressedVectors = null;
             outer:
             for (SSTableIndex index : indexes)
@@ -374,10 +376,11 @@ public class CassandraOnHeapGraph<T>
                         continue;
 
                     var searcher = segment.getIndexSearcher();
-                    assert searcher instanceof CompressedVectorsSupplier;
-                    compressedVectors = ((CompressedVectorsSupplier) searcher).getCompressedVectors();
-                    // We take the first compressed vectors with enough vectors and stop
-                    break outer;
+                    assert searcher instanceof V2VectorIndexSearcher;
+                    compressedVectors = ((V2VectorIndexSearcher) searcher).getCompressedVectors();
+                    if (compressedVectors != null)
+                        // We take the first compressed vectors with enough vectors and stop
+                        break outer;
                 }
             }
 
@@ -447,7 +450,7 @@ public class CassandraOnHeapGraph<T>
         return ordinalMap;
     }
 
-    private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper, CompressedVectors compressedVectors) throws IOException
+    private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper, CompressedVectors previousCompressedVectors) throws IOException
     {
         VectorCompression compressionType;
         if (vectorValues.dimension() >= 1536 && CassandraRelevantProperties.VSEARCH_11_9_UPGRADES.getBoolean())
@@ -474,20 +477,14 @@ public class CassandraOnHeapGraph<T>
         // evict from memory ASAP so better to do the PQ build (in parallel) one at a time
         synchronized (CassandraOnHeapGraph.class)
         {
-            if (compressedVectors instanceof PQVectors)
-            {
-                compressor = compressedVectors.getCompressor();
-                encoded = ((ProductQuantization) compressor).refine(vectorValues);
-            }
+            if (previousCompressedVectors instanceof PQVectors)
+                compressor = ((ProductQuantization) previousCompressedVectors.getCompressor()).refine(vectorValues);
+            else if (vectorValues.dimension() >= 1536)
+                compressor = BinaryQuantization.compute(vectorValues);
             else
-            {
-                if (vectorValues.dimension() >= 1536)
-                    compressor = BinaryQuantization.compute(vectorValues);
-                else
-                    compressor = ProductQuantization.compute(vectorValues, bytesPerVector, false);
-                assert !vectorValues.isValueShared();
-                encoded = compressVectors(reverseOrdinalMapper, compressor);
-            }
+                compressor = ProductQuantization.compute(vectorValues, bytesPerVector, false);
+            assert !vectorValues.isValueShared();
+            encoded = compressVectors(reverseOrdinalMapper, compressor);
         }
 
         // save (outside the synchronized block, this is io-bound not CPU)
