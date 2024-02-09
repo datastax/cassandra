@@ -177,6 +177,10 @@ public class Segment implements Closeable, SegmentOrdering
         return index.orderBy(expression, keyRange, context, limit);
     }
 
+    public IndexSearcher getIndexSearcher()
+    {
+        return index;
+    }
 
     @Override
     public boolean equals(Object o)
