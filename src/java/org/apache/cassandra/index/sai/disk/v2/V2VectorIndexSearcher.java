@@ -114,6 +114,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         return graph.ramBytesUsed();
     }
 
+    public CompressedVectors getCompressedVectors()
+    {
+        return graph.getCompressedVectors();
+    }
+
     @Override
     public RangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
     {
