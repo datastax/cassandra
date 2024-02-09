@@ -33,7 +33,6 @@ import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -127,7 +126,7 @@ public class VectorMemtableIndex implements MemtableIndex
         }
         else
         {
-            different = IntStream.range(0, oldRemaining).anyMatch(i -> oldValue.get(i) != newValue.get(i));
+            different = indexContext.getValidator().compare(oldValue, newValue) != 0;
         }
 
         if (different)
