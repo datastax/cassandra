@@ -27,6 +27,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -96,6 +97,12 @@ public class EmptyIndex implements SearchableIndex
 
     @Override
     public List<CloseableIterator<ScoredPrimaryKey>> orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    {
+        return List.of();
+    }
+
+    @Override
+    public List<Segment> getSegments()
     {
         return List.of();
     }
