@@ -50,10 +50,8 @@ import org.apache.cassandra.utils.concurrent.Condition;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static java.util.concurrent.atomic.AtomicIntegerFieldUpdater.newUpdater;
 import static org.apache.cassandra.tracing.Tracing.isTracing;
-import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.utils.concurrent.Condition.newOneTimeCondition;
 
 public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>> implements RequestCallback<ReadResponse>
@@ -108,12 +106,15 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         return command;
     }
 
-    public boolean await(long timePastStart, TimeUnit unit)
+    /**
+     * await until the condition is signalled but not longer than timePastStart since startTimeNanos
+     */
+    public boolean awaitFrom(long startTimeNanos, long timePastStart, TimeUnit unit)
     {
-        long time = unit.toNanos(timePastStart) - (nanoTime() - queryStartNanoTime);
+        long deadlineNanos = unit.toNanos(timePastStart) + startTimeNanos;
         try
         {
-            return condition.await(time, NANOSECONDS);
+            return condition.awaitUntil(deadlineNanos);
         }
         catch (InterruptedException e)
         {
@@ -123,7 +124,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
 
     public void awaitResults() throws ReadFailureException, ReadTimeoutException
     {
-        boolean signaled = await(command.getTimeout(MILLISECONDS), TimeUnit.MILLISECONDS);
+        boolean signaled = awaitFrom(queryStartNanoTime, command.getTimeout(MILLISECONDS), TimeUnit.MILLISECONDS);
         /**
          * Here we are checking isDataPresent in addition to the responses size because there is a possibility
          * that an asynchronous speculative execution request could be returning after a local failure already
