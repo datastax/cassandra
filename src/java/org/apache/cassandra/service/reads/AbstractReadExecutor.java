@@ -183,8 +183,9 @@ public abstract class AbstractReadExecutor
     }
 
     /**
-     * Perform additional requests if it looks like the original will time out.  May block while it waits
-     * to see if the original requests are answered first.
+     * Perform additional requests if it looks like the original takes "too much time", as defined
+     * by the subclass.
+     * May block while it waits to see if the original requests are answered first.
      */
     public abstract void maybeTryAdditionalReplicas();
 
