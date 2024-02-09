@@ -1203,7 +1203,7 @@
       <dependency>
         <groupId>org.agrona</groupId>
         <artifactId>agrona</artifactId>
-        <version>1.17.1</version>
+        <version>1.20.0</version>
       </dependency>
       <dependency>
         <groupId>org.apache.lucene</groupId>
@@ -1218,7 +1218,7 @@
       <dependency>
         <groupId>io.github.jbellis</groupId>
         <artifactId>jvector</artifactId>
-        <version>3.0.0-alpha.2</version>
+        <version>3.0.0-alpha.5</version>
       </dependency>
       <dependency>
         <groupId>com.carrotsearch.randomizedtesting</groupId>

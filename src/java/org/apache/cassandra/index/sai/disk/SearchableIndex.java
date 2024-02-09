@@ -28,6 +28,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -76,6 +77,8 @@ public interface SearchableIndex extends Closeable
                                                                     List<PrimaryKey> keys,
                                                                     Expression exp,
                                                                     int limit) throws IOException;
+
+    List<Segment> getSegments();
 
     public void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable);
 }
