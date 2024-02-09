@@ -581,7 +581,7 @@ memtable_allocation_type: offheap_objects
 # There isn't a limit by default for backwards compatibility, but this can
 # produce OOM for  commands repairing multiple tables or multiple virtual nodes.
 # A limit of just 1 simultaneous Merkle tree request is generally recommended
-# with no virtual nodes so repair_session_space, and thereof the Merkle tree
+# with no virtual nodes so repair_session_space, and therefore the Merkle tree
 # resolution, can be high. For virtual nodes a value of 1 with the default
 # repair_session_space value will produce higher resolution Merkle trees
 # at the expense of speed. Alternatively, when working with virtual nodes it
