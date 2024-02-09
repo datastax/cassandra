@@ -34,23 +34,23 @@ import org.apache.cassandra.utils.Pair;
 /**
  * Task scheduler that limits the number of concurrent tasks across multiple executors.
  */
-public interface Scheduler
+public abstract class Scheduler
 {
-    default <T> ListenableFuture<T> schedule(Supplier<ListenableFuture<T>> task, Executor executor)
+    public final <T> ListenableFuture<T> schedule(Supplier<ListenableFuture<T>> task, Executor executor)
     {
         return schedule(new Task<>(task, executor), executor);
     }
 
-    <T> Task<T> schedule(Task<T> task, Executor executor);
+    protected abstract <T> Task<T> schedule(Task<T> task, Executor executor);
 
-    static Scheduler build(int concurrentValidations)
+    public static Scheduler build(int concurrentValidations)
     {
         return concurrentValidations <= 0
                ? new NoopScheduler()
                : new LimitedConcurrentScheduler(concurrentValidations);
     }
 
-    final class NoopScheduler implements Scheduler
+    private static final class NoopScheduler extends Scheduler
     {
         @Override
         public <T> Task<T> schedule(Task<T> task, Executor executor)
@@ -60,17 +60,17 @@ public interface Scheduler
         }
     }
 
-    final class LimitedConcurrentScheduler implements Scheduler
+    private static final class LimitedConcurrentScheduler extends Scheduler
     {
-        private final int concurrentValidations;
+        private final int concurrentTasks;
         @GuardedBy("this")
         private int inflight = 0;
         @GuardedBy("this")
         private final Queue<Pair<Task<?>, Executor>> tasks = new LinkedList<>();
 
-        LimitedConcurrentScheduler(int concurrentValidations)
+        LimitedConcurrentScheduler(int concurrentTasks)
         {
-            this.concurrentValidations = concurrentValidations;
+            this.concurrentTasks = concurrentTasks;
         }
 
         @Override
@@ -87,9 +87,10 @@ public interface Scheduler
             maybeSchedule();
         }
 
+        @SuppressWarnings("UnstableApiUsage")
         private void maybeSchedule()
         {
-            if (inflight == concurrentValidations || tasks.isEmpty())
+            if (inflight == concurrentTasks || tasks.isEmpty())
                 return;
             inflight++;
             Pair<Task<?>, Executor> pair = tasks.poll();
@@ -110,7 +111,7 @@ public interface Scheduler
         }
     }
 
-    class Task<T> extends AbstractFuture<T> implements Runnable
+    private static class Task<T> extends AbstractFuture<T> implements Runnable
     {
         private final Supplier<ListenableFuture<T>> supplier;
         private final Executor executor;
@@ -122,6 +123,7 @@ public interface Scheduler
         }
 
         @Override
+        @SuppressWarnings("UnstableApiUsage")
         public void run()
         {
             Futures.addCallback(supplier.get(), new FutureCallback<T>() {
