@@ -127,7 +127,7 @@ public class VectorMemtableIndex implements MemtableIndex
         }
         else
         {
-            different = IntStream.range(0, oldRemaining).anyMatch(i -> oldValue.get(i) != newValue.get(i));
+            different = indexContext.getValidator().compare(oldValue, newValue) != 0;
         }
 
         if (different)
