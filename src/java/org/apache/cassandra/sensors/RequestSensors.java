@@ -23,6 +23,11 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
+import javax.annotation.Nullable;
+
+import com.google.common.base.Preconditions;
+
+import org.apache.cassandra.utils.Pair;
 
 /**
  * Groups {@link Sensor}s associated to a given request/response and related {@link Context}: this is the main entry
@@ -41,33 +46,65 @@ import java.util.function.Supplier;
 public class RequestSensors
 {
     private final Supplier<SensorsRegistry> sensorsRegistry;
-    private final Context context;
-    private final ConcurrentMap<Type, Sensor> sensors = new ConcurrentHashMap<>();
+    @Nullable private Context defaultContext;
+    private final ConcurrentMap<Pair<Context, Type>, Sensor> sensors = new ConcurrentHashMap<>();
 
-    public RequestSensors(Context context)
+    public RequestSensors()
     {
-        this(() -> SensorsRegistry.instance, context);
+        this(() -> SensorsRegistry.instance);
     }
 
-    public RequestSensors(Supplier<SensorsRegistry> sensorsRegistry, Context context)
+    public RequestSensors(Context defaultContext)
+    {
+        this(() -> SensorsRegistry.instance);
+        this.defaultContext = defaultContext;
+    }
+
+    public RequestSensors(Supplier<SensorsRegistry> sensorsRegistry)
     {
         this.sensorsRegistry = sensorsRegistry;
-        this.context = context;
+    }
+
+    public RequestSensors(Supplier<SensorsRegistry> sensorsRegistry, Context defaultContext)
+    {
+        this(sensorsRegistry);
+        this.defaultContext = defaultContext;
     }
 
     public void registerSensor(Type type)
     {
-        sensors.putIfAbsent(type, new Sensor(context, type));
+        Preconditions.checkNotNull(defaultContext, "Default context not set");
+
+        registerSensor(defaultContext, type);
+    }
+
+    public void registerSensor(Context context, Type type)
+    {
+        sensors.putIfAbsent(Pair.create(context, type), new Sensor(context, type));
     }
 
     public Optional<Sensor> getSensor(Type type)
     {
-        return Optional.ofNullable(sensors.get(type));
+        Preconditions.checkNotNull(defaultContext, "Default context not set");
+
+        return getSensor(defaultContext, type);
+    }
+
+    public Optional<Sensor> getSensor(Context context, Type type)
+    {
+        return Optional.ofNullable(sensors.get(Pair.create(context, type)));
     }
 
     public void incrementSensor(Type type, double value)
     {
-        Optional.ofNullable(sensors.get(type)).ifPresent(s -> s.increment(value));
+        Preconditions.checkNotNull(defaultContext, "Default context not set");
+
+        incrementSensor(defaultContext, type, value);
+    }
+
+    public void incrementSensor(Context context, Type type, double value)
+    {
+        Optional.ofNullable(sensors.get(Pair.create(context, type))).ifPresent(s -> s.increment(value));
     }
 
     public void syncAllSensors()
@@ -81,20 +118,20 @@ public class RequestSensors
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         RequestSensors sensors1 = (RequestSensors) o;
-        return Objects.equals(context, sensors1.context) && Objects.equals(sensors, sensors1.sensors);
+        return Objects.equals(defaultContext, sensors1.defaultContext) && Objects.equals(sensors, sensors1.sensors);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(context, sensors);
+        return Objects.hash(defaultContext, sensors);
     }
 
     @Override
     public String toString()
     {
         return "RequestSensors{" +
-               "context=" + context +
+               "context=" + defaultContext +
                ", sensors=" + sensors +
                '}';
     }

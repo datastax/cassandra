@@ -65,9 +65,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         try
         {
             // Initialize the sensor and set ExecutorLocals
-            PartitionUpdate pu = message.payload.getPartitionUpdates().iterator().next();
-            RequestSensors sensors = new RequestSensors(Context.from(pu.metadata()));
-            sensors.registerSensor(Type.WRITE_BYTES);
+            RequestSensors sensors = new RequestSensors();
             ExecutorLocals locals = ExecutorLocals.create(sensors);
             ExecutorLocals.set(locals);
 

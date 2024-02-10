@@ -163,6 +163,7 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.TableParams;
+import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Type;
@@ -1580,8 +1581,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             if(timeDelta < Long.MAX_VALUE)
                 metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
             RequestSensors sensors = requestTracker.get();
-            if (sensors != null)
-                sensors.incrementSensor(Type.WRITE_BYTES, dataSize);
+            if (sensors != null) {
+                Context puContext = Context.from(this.metadata.get());
+                sensors.registerSensor(puContext, Type.WRITE_BYTES);
+                sensors.incrementSensor(puContext, Type.WRITE_BYTES, dataSize);
+            }
+
         }
         catch (RuntimeException e)
         {

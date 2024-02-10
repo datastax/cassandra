@@ -18,6 +18,9 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -40,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 public class SensorsWriterTest
 {
-    public static final String KEYSPACE1 = "SensorsWrireTest";
+    public static final String KEYSPACE1 = "SensorsWriteTest";
     public static final String CF_STANDARD = "Standard";
     public static final String CF_STANDARD_CLUSTERING = "StandardClustering";
 
@@ -80,7 +83,7 @@ public class SensorsWriterTest
     }
 
     @Test
-    public void testSingleTableMutation()
+    public void testSingleRowUpdateUpdateMutation()
     {
         store = discardSSTables(KEYSPACE1, CF_STANDARD);
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
@@ -91,8 +94,8 @@ public class SensorsWriterTest
             Mutation m = new RowUpdateBuilder(store.metadata(), j, String.valueOf(j))
             .add("val", String.valueOf(j))
             .build();
-            handleWriteCommand(m);
-            Sensor localSensor = getThreadLocalRequestSensor();
+            handleMutation(m);
+            Sensor localSensor = getThreadLocalRequestSensor(context);
             assertThat(localSensor.getValue()).isGreaterThan(0);
             Sensor registrySensor = getRegistrySensor(context);
             assertThat(registrySensor).isEqualTo(localSensor);
@@ -102,6 +105,58 @@ public class SensorsWriterTest
         // check global registry is synchronized
         Sensor registrySensor = getRegistrySensor(context);
         assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
+    }
+
+    @Test
+    public void testSingleRowUpdateUpdateMutation_WithClusteringKeys()
+    {
+        store = discardSSTables(KEYSPACE1, CF_STANDARD_CLUSTERING);
+        Context context = new Context(KEYSPACE1, CF_STANDARD_CLUSTERING, store.metadata.id.toString());
+
+        double writeSensorSum = 0;
+        for (int j = 0; j < 10; j++)
+        {
+            Mutation m = new RowUpdateBuilder(store.metadata(), j, String.valueOf(j))
+                         .clustering(String.valueOf(j))
+                         .add("val", String.valueOf(j))
+                         .build();
+            handleMutation(m);
+            Sensor localSensor = getThreadLocalRequestSensor(context);
+            assertThat(localSensor.getValue()).isGreaterThan(0);
+            Sensor registrySensor = getRegistrySensor(context);
+            assertThat(registrySensor).isEqualTo(localSensor);
+            writeSensorSum += localSensor.getValue();
+        }
+
+        // check global registry is synchronized
+        Sensor registrySensor = getRegistrySensor(context);
+        assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
+    }
+
+    @Test
+    public void testMultipleRowUpdatesMutation()
+    {
+        store = discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+
+        List<Mutation> mutations = new ArrayList<>();
+        String partitionKey = "0";
+        for (int j = 0; j < 10; j++)
+        {
+            mutations.add(new RowUpdateBuilder(store.metadata(), j, partitionKey)
+                         .add("val", String.valueOf(j))
+                         .build());
+        }
+
+        Mutation mutation = Mutation.merge(mutations);
+        handleMutation(mutation);
+
+        Sensor localSensor = getThreadLocalRequestSensor(context);
+        assertThat(localSensor.getValue()).isGreaterThan(0);
+
+        Sensor registrySensor = getRegistrySensor(context);
+        assertThat(registrySensor).isEqualTo(localSensor);
+        assertThat(registrySensor.getValue()).isEqualTo(localSensor.getValue());
     }
 
     private ColumnFamilyStore discardSSTables(String ks, String cf)
@@ -114,7 +169,7 @@ public class SensorsWriterTest
 
     private void assertRequestAndRegistrySensorsEquality(Context context)
     {
-        Sensor localSensor = getThreadLocalRequestSensor();
+        Sensor localSensor = getThreadLocalRequestSensor(context);
         assertThat(localSensor.getValue()).isGreaterThan(0);
 
         Sensor registrySensor = getRegistrySensor(context);
@@ -133,14 +188,15 @@ public class SensorsWriterTest
 
     /**
      * Returns the writer sensor registered in the thread local {@link RequestSensors}
+     * @param context the sensor context
      * @return the thread local writer sensor
      */
-    private static Sensor getThreadLocalRequestSensor()
+    private static Sensor getThreadLocalRequestSensor(Context context)
     {
-        return RequestTracker.instance.get().getSensor(Type.WRITE_BYTES).get();
+        return RequestTracker.instance.get().getSensor(context, Type.WRITE_BYTES).get();
     }
 
-    private static void handleWriteCommand(Mutation mutation)
+    private static void handleMutation(Mutation mutation)
     {
         MutationVerbHandler.instance.doVerb(Message.builder(Verb.MUTATION_REQ, mutation).build());
     }
