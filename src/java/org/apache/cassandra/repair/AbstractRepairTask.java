@@ -57,6 +57,7 @@ public abstract class AbstractRepairTask implements RepairTask
     private List<RepairSession> submitRepairSessions(TimeUUID parentSession,
                                                      boolean isIncremental,
                                                      ExecutorPlus executor,
+                                                     Scheduler validationScheduler,
                                                      List<CommonRange> commonRanges,
                                                      String... cfnames)
     {
@@ -77,6 +78,7 @@ public abstract class AbstractRepairTask implements RepairTask
                                                                                  options.repairPaxos(),
                                                                                  options.paxosOnly(),
                                                                                  executor,
+                                                                                 validationScheduler,
                                                                                  cfnames);
             if (session == null)
                 continue;
@@ -89,10 +91,11 @@ public abstract class AbstractRepairTask implements RepairTask
     protected Future<CoordinatedRepairResult> runRepair(TimeUUID parentSession,
                                                         boolean isIncremental,
                                                         ExecutorPlus executor,
+                                                        Scheduler validationScheduler,
                                                         List<CommonRange> commonRanges,
                                                         String... cfnames)
     {
-        List<RepairSession> allSessions = submitRepairSessions(parentSession, isIncremental, executor, commonRanges, cfnames);
+        List<RepairSession> allSessions = submitRepairSessions(parentSession, isIncremental, executor, validationScheduler, commonRanges, cfnames);
         List<Collection<Range<Token>>> ranges = Lists.transform(allSessions, RepairSession::ranges);
         Future<List<RepairSessionResult>> f = FutureCombiner.successfulOf(allSessions);
         return f.map(results -> {

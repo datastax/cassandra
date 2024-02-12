@@ -3961,6 +3961,16 @@ public class DatabaseDescriptor
         conf.paxos_repair_parallelism = v;
     }
 
+    public static int getConcurrentMerkleTreeRequests()
+    {
+        return conf.concurrent_merkle_tree_requests;
+    }
+
+    public static void setConcurrentMerkleTreeRequests(int value)
+    {
+        conf.concurrent_merkle_tree_requests = value;
+    }
+
     public static Float getMemtableCleanupThreshold()
     {
         return conf.memtable_cleanup_threshold;

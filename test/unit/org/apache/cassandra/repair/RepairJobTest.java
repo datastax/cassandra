@@ -130,7 +130,8 @@ public class RepairJobTest
                                         PreviewKind previewKind, boolean optimiseStreams, boolean repairPaxos, boolean paxosOnly,
                                         String... cfnames)
         {
-            super(SharedContext.Global.instance, parentRepairSession, commonRange, keyspace, parallelismDegree, isIncremental, false, pullRepair,
+            super(SharedContext.Global.instance, new Scheduler.NoopScheduler(),
+                  parentRepairSession, commonRange, keyspace, parallelismDegree, isIncremental, false, pullRepair,
                   previewKind, optimiseStreams, repairPaxos, paxosOnly, cfnames);
         }
 
