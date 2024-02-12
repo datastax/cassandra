@@ -20,6 +20,7 @@ package org.apache.cassandra.schema;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
@@ -178,6 +179,12 @@ public class TableMetadata implements SchemaElement
         clusteringColumns = ImmutableList.copyOf(builder.clusteringColumns);
         regularAndStaticColumns = RegularAndStaticColumns.builder().addAll(builder.regularAndStaticColumns).build();
         columns = ImmutableMap.copyOf(builder.columns);
+
+        assert columns.values().stream().noneMatch(ColumnMetadata::isDropped) :
+                "Invalid columns (contains dropped): " + columns.values()
+                                                                .stream()
+                                                                .map(ColumnMetadata::debugString)
+                                                                .collect(Collectors.joining(", "));
 
         indexes = builder.indexes;
         triggers = builder.triggers;
@@ -424,22 +431,7 @@ public class TableMetadata implements SchemaElement
 
         params.validate();
 
-        if (partitionKeyColumns.stream().anyMatch(c -> c.type.isCounter()))
-            except("PRIMARY KEY columns cannot contain counters");
-
-        // Mixing counter with non counter columns is not supported (#2614)
-        if (isCounter())
-        {
-            for (ColumnMetadata column : regularAndStaticColumns)
-                if (!(column.type.isCounter()) && !isSuperColumnMapColumnName(column.name))
-                    except("Cannot have a non counter column (\"%s\") in a counter table", column.name);
-        }
-        else
-        {
-            for (ColumnMetadata column : regularAndStaticColumns)
-                if (column.type.isCounter())
-                    except("Cannot have a counter column (\"%s\") in a non counter table", column.name);
-        }
+        columns().forEach(c -> c.validate(isCounter()));
 
         // All tables should have a partition key
         if (partitionKeyColumns.isEmpty())
@@ -464,9 +456,9 @@ public class TableMetadata implements SchemaElement
      *   table with counters to rename that weirdly name map to something more meaningful (it's not possible today
      *   as after renaming the validation in {@link #validate)} would trigger).
      */
-    private static boolean isSuperColumnMapColumnName(ColumnIdentifier columnName)
+    public static boolean isSuperColumnMapColumnName(ByteBuffer columnName)
     {
-        return !columnName.bytes.hasRemaining();
+        return !columnName.hasRemaining();
     }
 
     void validateCompatibility(TableMetadata previous)
@@ -776,11 +768,11 @@ public class TableMetadata implements SchemaElement
         if (partitionKeyType instanceof CompositeType)
         {
             ByteBuffer[] values = ((CompositeType) partitionKeyType).split(partitionKey);
-            int size = ((CompositeType) partitionKeyType).types.size();
+            int size = partitionKeyType.subTypes().size();
             literals = new String[size + clusteringSize];
             for (i = 0; i < size; i++)
             {
-                literals[i] = asCQLLiteral(((CompositeType) partitionKeyType).types.get(i), values[i]);
+                literals[i] = asCQLLiteral(partitionKeyType.subTypes().get(i), values[i]);
             }
         }
         else
@@ -794,7 +786,7 @@ public class TableMetadata implements SchemaElement
             literals[i++] = asCQLLiteral(clusteringColumns().get(j).type, clustering.bufferAt(j));
         }
 
-        return i == 1 ? literals[0] : "(" + String.join(", ", literals) + ")";
+        return i == 1 ? literals[0] : '(' + String.join(", ", literals) + ')';
     }
 
     private static String asCQLLiteral(AbstractType<?> type, ByteBuffer value)
@@ -1047,7 +1039,6 @@ public class TableMetadata implements SchemaElement
                     Collections.sort(partitionKeyColumns);
                     break;
                 case CLUSTERING:
-                    column.type.checkComparable();
                     clusteringColumns.add(column);
                     Collections.sort(clusteringColumns);
                     break;

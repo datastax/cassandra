@@ -19,9 +19,9 @@
 package org.apache.cassandra.index.sai;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -36,6 +36,7 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
+import org.apache.cassandra.service.ClientWarn;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -73,12 +74,14 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
@@ -92,10 +95,10 @@ public class IndexContext
     private static final Logger logger = LoggerFactory.getLogger(IndexContext.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    public static final int MAX_STRING_TERM_SIZE = Integer.getInteger("cassandra.sai.max_string_term_size_kb", 1) * 1024;
-    public static final int MAX_FROZEN_TERM_SIZE = Integer.getInteger("cassandra.sai.max_frozen_term_size_kb", 5) * 1024;
+    public static final int MAX_STRING_TERM_SIZE = Integer.getInteger("cassandra.sai.max_string_term_size_kb", 8) * 1024;
+    public static final int MAX_FROZEN_TERM_SIZE = Integer.getInteger("cassandra.sai.max_frozen_term_size_kb", 8) * 1024;
     public static final int MAX_VECTOR_TERM_SIZE = Integer.getInteger("cassandra.sai.max_vector_term_size_kb", 16) * 1024;
-    public static final int MAX_ANALYZED_SIZE = Integer.getInteger("cassandra.sai.max_analyzed_size_kb", 5) * 1024;
+    public static final int MAX_ANALYZED_SIZE = Integer.getInteger("cassandra.sai.max_analyzed_size_kb", 8) * 1024;
     private static final String TERM_OVERSIZE_LOG_MESSAGE =
     "Can't add term of column {} to index for key: {}, term size {} max allowed size {}.";
     private static final String TERM_OVERSIZE_ERROR_MESSAGE =
@@ -300,7 +303,7 @@ public class IndexContext
                 if (!validateCumulativeAnalyzedTermLimit(key, analyzer))
                 {
                     var error = String.format(ANALYZED_TERM_OVERSIZE_ERROR_MESSAGE,
-                                              column.name, FBUtilities.prettyPrintMemory(maxTermSize));
+                            column.name, FBUtilities.prettyPrintMemory(maxTermSize));
                     throw new InvalidRequestException(error);
                 }
             }
@@ -312,9 +315,9 @@ public class IndexContext
                     if (!validateMaxTermSize(key, size))
                     {
                         var error = String.format(TERM_OVERSIZE_ERROR_MESSAGE,
-                                                  column.name,
-                                                  FBUtilities.prettyPrintMemory(size),
-                                                  FBUtilities.prettyPrintMemory(maxTermSize));
+                                column.name,
+                                FBUtilities.prettyPrintMemory(size),
+                                FBUtilities.prettyPrintMemory(maxTermSize));
                         throw new InvalidRequestException(error);
                     }
                 }
@@ -341,10 +344,10 @@ public class IndexContext
         if (termSize > maxTermSize)
         {
             noSpamLogger.warn(logMessage(TERM_OVERSIZE_LOG_MESSAGE),
-                              getColumnName(),
-                              keyValidator().getString(key.getKey()),
-                              FBUtilities.prettyPrintMemory(termSize),
-                              FBUtilities.prettyPrintMemory(maxTermSize));
+                    getColumnName(),
+                    keyValidator().getString(key.getKey()),
+                    FBUtilities.prettyPrintMemory(termSize),
+                    FBUtilities.prettyPrintMemory(maxTermSize));
             return false;
         }
 
@@ -359,12 +362,12 @@ public class IndexContext
         {
             final ByteBuffer token = analyzer.next();
             bytesCount += token.remaining();
-            if (bytesCount >= maxTermSize)
+            if (bytesCount > maxTermSize)
             {
                 noSpamLogger.warn(logMessage(ANALYZED_TERM_OVERSIZE_LOG_MESSAGE),
-                                  getColumnName(),
-                                  keyValidator().getString(key.getKey()),
-                                  FBUtilities.prettyPrintMemory(maxTermSize));
+                        getColumnName(),
+                        keyValidator().getString(key.getKey()),
+                        FBUtilities.prettyPrintMemory(maxTermSize));
                 return false;
             }
         }
@@ -435,6 +438,21 @@ public class IndexContext
         return builder.build();
     }
 
+    public List<CloseableIterator<ScoredPrimaryKey>> orderMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
+    {
+        Collection<MemtableIndex> memtables = liveMemtables.values();
+
+        if (memtables.isEmpty())
+            return List.of();
+
+        var result = new ArrayList<CloseableIterator<ScoredPrimaryKey>>(memtables.size());
+
+        for (MemtableIndex index : memtables)
+            result.add(index.orderBy(context, e, keyRange, limit));
+
+        return result;
+    }
+
     private RangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
     {
         Collection<Memtable> memtables = liveMemtables.keySet();
@@ -454,23 +472,18 @@ public class IndexContext
     }
 
     // Search all memtables for all PrimaryKeys in list.
-    public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> source, Expression e, int limit)
+    public List<CloseableIterator<ScoredPrimaryKey>> orderResultsBy(QueryContext context, List<PrimaryKey> source, Expression e, int limit)
     {
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
         if (memtables.isEmpty())
-        {
-            return RangeIterator.empty();
-        }
+            return List.of();
 
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
-
+        List<CloseableIterator<ScoredPrimaryKey>> result = new ArrayList<>(memtables.size());
         for (MemtableIndex index : memtables)
-        {
-            builder.add(index.limitToTopResults(context, source, e, limit));
-        }
+            result.add(index.orderResultsBy(context, source, e, limit));
 
-        return builder.build();
+        return result;
     }
 
     public long liveMemtableWriteCount()
@@ -786,18 +799,17 @@ public class IndexContext
      */
     public Pair<Set<SSTableIndex>, Set<SSTableContext>> getBuiltIndexes(Collection<SSTableContext> sstableContexts, boolean validate)
     {
-        Set<SSTableIndex> valid = new HashSet<>(sstableContexts.size());
-        Set<SSTableContext> invalid = new HashSet<>();
+        Set<SSTableIndex> valid = ConcurrentHashMap.newKeySet();
+        Set<SSTableContext> invalid = ConcurrentHashMap.newKeySet();
 
-        for (SSTableContext context : sstableContexts)
-        {
+        sstableContexts.stream().parallel().forEach(context -> {
             if (context.sstable.isMarkedCompacted())
-                continue;
+                return;
 
             if (!context.indexDescriptor.isPerIndexBuildComplete(this))
             {
                 logger.debug(logMessage("An on-disk index build for SSTable {} has not completed."), context.descriptor());
-                continue;
+                return;
             }
 
             try
@@ -808,7 +820,7 @@ public class IndexContext
                     {
                         logger.warn(logMessage("Invalid per-column component for SSTable {}"), context.descriptor());
                         invalid.add(context);
-                        continue;
+                        return;
                     }
                 }
 
@@ -819,16 +831,14 @@ public class IndexContext
                 // This covers situation when SSTable collection has the same SSTable multiple
                 // times because we don't know what kind of collection it actually is.
                 if (!valid.add(index))
-                {
                     index.release();
-                }
             }
             catch (Throwable e)
             {
                 logger.error(logMessage("Failed to update per-column components for SSTable {}"), context.descriptor(), e);
                 invalid.add(context);
             }
-        }
+        });
 
         return Pair.create(valid, invalid);
     }

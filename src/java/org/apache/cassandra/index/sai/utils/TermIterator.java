@@ -55,19 +55,6 @@ public class TermIterator extends RangeIterator
         this.context = queryContext;
     }
 
-    public static TermIterator build(List<RangeIterator> sstableIntersections, RangeIterator memtableResults, Set<SSTableIndex> referencedIndexes, QueryContext queryContext)
-    {
-        var sstablesHit = referencedIndexes
-                                    .stream()
-                                    .map(SSTableIndex::getSSTable).collect(Collectors.toSet()).size();
-        queryContext.addSstablesHit(sstablesHit);
-        queryContext.checkpoint();
-        RangeIterator union = RangeUnionIterator.builder(sstableIntersections.size() + 1)
-                                                .add(sstableIntersections)
-                                                .add(memtableResults)
-                                                .build();
-        return new TermIterator(union, referencedIndexes, queryContext);
-    }
 
     @SuppressWarnings("resource")
     public static TermIterator build(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
@@ -103,6 +90,9 @@ public class TermIterator extends RangeIterator
             {
                 if (logger.isDebugEnabled() && !(e1 instanceof AbortedOperationException))
                     logger.debug(String.format("Failed search an index %s, skipping.", index.getSSTable()), e1);
+
+                // Close the iterators that were successfully opened before the error
+                FileUtils.closeQuietly(tokens);
 
                 throw Throwables.cleaned(e1);
             }

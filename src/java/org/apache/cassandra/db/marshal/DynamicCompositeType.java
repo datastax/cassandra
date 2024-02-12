@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -32,6 +33,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -121,10 +123,7 @@ public class DynamicCompositeType extends AbstractCompositeType
 
     public static DynamicCompositeType getInstance(Map<Byte, AbstractType<?>> aliases)
     {
-        DynamicCompositeType dct = instances.get(aliases);
-        return null == dct
-             ? instances.computeIfAbsent(aliases, DynamicCompositeType::new)
-             : dct;
+        return getInstance(instances, aliases, () -> new DynamicCompositeType(aliases));
     }
 
     @Override
@@ -135,22 +134,40 @@ public class DynamicCompositeType extends AbstractCompositeType
 
     private DynamicCompositeType(Map<Byte, AbstractType<?>> aliases)
     {
-        this.aliases = ImmutableMap.copyOf(aliases);
+        super(ImmutableList.copyOf(aliases.values()));
+        this.aliases = aliases;
         this.serializer = new Serializer(this.aliases);
         this.inverseMapping = new HashMap<>();
         for (Map.Entry<Byte, AbstractType<?>> en : aliases.entrySet())
             this.inverseMapping.put(en.getValue(), en.getKey());
     }
 
+    @Override
+    public AbstractType<?> with(ImmutableList<AbstractType<?>> subTypes, boolean isMultiCell)
+    {
+        if (isMultiCell)
+            throw new IllegalArgumentException("Cannot create a multi-cell DynamicCompositeType");
+
+        Map<Byte, AbstractType<?>> copiedAliases = new HashMap<>();
+        Iterator<Byte> keysIter = aliases.keySet().iterator();
+        Iterator<AbstractType<?>> subTypesIter = subTypes.iterator();
+        while (keysIter.hasNext())
+        {
+            if (!subTypesIter.hasNext())
+                throw new IllegalArgumentException("Not enough subtypes provided");
+
+            copiedAliases.put(keysIter.next(), subTypesIter.next());
+        }
+
+        if (subTypesIter.hasNext())
+            throw new IllegalArgumentException("Too much subtypes provided");
+
+        return new DynamicCompositeType(copiedAliases);
+    }
+
     public int size()
     {
         return aliases.size();
-    }
-
-    @Override
-    public List<AbstractType<?>> subTypes()
-    {
-        return new ArrayList<>(aliases.values());
     }
 
     @Override
@@ -576,12 +593,6 @@ public class DynamicCompositeType extends AbstractCompositeType
         return getInstance(Maps.transformValues(aliases, v -> v.withUpdatedUserType(udt)));
     }
 
-    @Override
-    public AbstractType<?> expandUserTypes()
-    {
-        return getInstance(Maps.transformValues(aliases, v -> v.expandUserTypes()));
-    }
-
     private class DynamicParsedComparator implements ParsedComparator
     {
         final AbstractType<?> type;
@@ -679,8 +690,9 @@ public class DynamicCompositeType extends AbstractCompositeType
     }
 
     @Override
-    public String toString()
+    public String toString(boolean ignoreFrozen)
     {
+        // DCT is always frozen, but implicitly so (FrozenType is never used), so we ignore our parameter
         return getClass().getName() + TypeParser.stringifyAliasesParameters(aliases);
     }
 

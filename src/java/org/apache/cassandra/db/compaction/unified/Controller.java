@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -99,19 +100,27 @@ public abstract class Controller
 
 
     /**
+     * The default number of shards defined via system property, see {@link #NUM_SHARDS_OPTION}.
+     * The property exists for backward compatibility, and is deprecated. It allows for configuring compactors, writers
+     * and replayers in CNDB without having to change the schema for each tenant.
+     */
+    @Deprecated
+    static final Optional<Integer> DEFAULT_NUM_SHARDS = Optional.ofNullable(System.getProperty(PREFIX + NUM_SHARDS_OPTION)).map(Integer::valueOf);
+
+    /**
      * The minimum sstable size. Sharded writers split sstables over shard only if they are at least as large as the
      * minimum size.
      * <p>
      * This is mainly present to support UCS V1 mode, which relies heavily on minimal SSTable
      * size, and defaults to 0 which provides minimal parallelism on all levels of the hierarchy.
-     * In UCS V1 mode (engaged by using "num_shards" above) the default is 100MiB.
+     * In UCS V1 mode (engaged by using "num_shards" above) the default 'auto'.
      */
     static final String MIN_SSTABLE_SIZE_OPTION = "min_sstable_size";
     @Deprecated
     static final String MIN_SSTABLE_SIZE_OPTION_MB = "min_sstable_size_in_mb";
     static final String MIN_SSTABLE_SIZE_OPTION_AUTO = "auto";
 
-    static final long DEFAULT_MIN_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + MIN_SSTABLE_SIZE_OPTION, "0B"));
+    static final long DEFAULT_MIN_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + MIN_SSTABLE_SIZE_OPTION, "100MiB"));
     /**
      * Value to use to set the min sstable size from the flush size.
      */
@@ -166,18 +175,20 @@ public abstract class Controller
      * applied as an exponent in the number of split points. In other words, the given value applies as a negative
      * exponent in the calculation of the number of split points.
      * <p>
-     * Using 0 (the default) applies no correction to the number of split points, resulting in SSTables close to the
+     * Using 0 applies no correction to the number of split points, resulting in SSTables close to the
      * target size. Setting this number to 1 will make UCS never split beyong the base shard count. Using 0.5 will
      * make the number of split points a square root of the required number for the target SSTable size, making
-     * the number of split points and the size of SSTables grow in lockstep as the density grows.
+     * the number of split points and the size of SSTables grow in lockstep as the density grows. Using
+     * 0.333 (the default) makes the sstable growth the cubic root of the density growth, i.e. the sstable size
+     * grows with the square root of the growth of the shard count.
      * <p>
      * For example, given a data size of 1TiB on the top density level and 1GiB target size with base shard count of 1,
-     * growth 0 would result in 1024 SSTables of ~1GiB each, 0.5 would yield 32 SSTables of ~32GiB each, and 1 would
-     * yield 1 SSTable of 1TiB.
+     * growth 0 would result in 1024 SSTables of ~1GiB each, 0.333 would result in 128 SSTables of ~8 GiB each,
+     * 0.5 would yield 32 SSTables of ~32GiB each, and 1 would yield 1 SSTable of 1TiB.
      * <p>
      * Note that this correction only applies after the base shard count is reached, so for the above example with
-     * base count of 4, the number of SSTables will be 4 (~256GiB each) for a growth value of 1, and 64 (~16GiB each)
-     * for 0.5.
+     * base count of 4, the number of SSTables will be 4 (~256GiB each) for a growth value of 1, 128 (~8GiB each) for
+     * a growth value of 0.333, and 64 (~16GiB each) for a growth value of 0.5.
      */
     static final String SSTABLE_GROWTH_OPTION = "sstable_growth";
     static final double DEFAULT_SSTABLE_GROWTH = FBUtilities.parsePercent(System.getProperty(PREFIX + SSTABLE_GROWTH_OPTION, "0.5"));
@@ -268,6 +279,7 @@ public abstract class Controller
      * Higher indexes will use the value of the last index with a W specified.
      */
     static final String SCALING_PARAMETERS_OPTION = "scaling_parameters";
+    @Deprecated
     static final String STATIC_SCALING_FACTORS_OPTION = "static_scaling_factors";
 
     protected final MonotonicClock clock;
@@ -335,7 +347,7 @@ public abstract class Controller
         this.l0ShardsEnabled = Boolean.parseBoolean(System.getProperty(PREFIX + L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
-            maxSSTablesToCompact = (int) (dataSetSize * this.maxSpaceOverhead * 0.5 / minSSTableSize);
+            maxSSTablesToCompact = (int) (dataSetSize * this.maxSpaceOverhead * 0.5 / getMinSstableSizeBytes());
 
         this.maxSSTablesToCompact = maxSSTablesToCompact;
 
@@ -443,13 +455,15 @@ public abstract class Controller
         if (minSize > 0)
         {
             double count = localDensity / minSize;
-            // Minimum size only applies if it is smaller than the base count.
+            // Minimum size only applies if the base count would result in smaller sstables.
+            // We also want to use the min size if we don't yet know the flush size (density is NaN).
             // Note: the minimum size cannot be larger than the target size's minimum.
-            if (count < baseShardCount)
+            if (!(count >= baseShardCount)) // also true for count == NaN
             {
                 // Make it a power of two, rounding down so that sstables are greater in size than the min.
                 // Setting the bottom bit to 1 ensures the result is at least 1.
-                shards = Integer.highestOneBit((int) count | 1);
+                // If baseShardCount is not a power of 2, split only to powers of two that are divisors of baseShardCount so boundaries match higher levels
+                shards = Math.min(Integer.highestOneBit((int) count | 1), baseShardCount & -baseShardCount);
                 if (logger.isDebugEnabled())
                     logger.debug("Shard count {} for density {}, {} times min size {}",
                                  shards,
@@ -854,10 +868,7 @@ public abstract class Controller
         }
         else
         {
-            if (SchemaConstants.isSystemKeyspace(realm.getKeyspaceName()) || realm.getDiskBoundaries().getNumBoundaries() > 1)
-                baseShardCount = 1;
-            else
-                baseShardCount = DEFAULT_BASE_SHARD_COUNT;
+            baseShardCount = DEFAULT_BASE_SHARD_COUNT;
         }
 
         long targetSStableSize = options.containsKey(TARGET_SSTABLE_SIZE_OPTION)
@@ -876,28 +887,35 @@ public abstract class Controller
                                                   ? Reservations.Type.valueOf(options.get(RESERVATIONS_TYPE_OPTION).toUpperCase())
                                                   : DEFAULT_RESERVED_THREADS_TYPE;
 
-        if (options.containsKey(NUM_SHARDS_OPTION))
+        if (options.containsKey(NUM_SHARDS_OPTION) || DEFAULT_NUM_SHARDS.isPresent())
         {
-            // Legacy V1 mode.
-            int numShards = Integer.parseInt(options.get(NUM_SHARDS_OPTION));
-            if (!options.containsKey(MIN_SSTABLE_SIZE_OPTION))
-                minSSTableSize = MIN_SSTABLE_SIZE_AUTO;
-            baseShardCount = numShards;
-            sstableGrowthModifier = 1.0;
-            targetSStableSize = Long.MAX_VALUE; // this no longer plays a part, the result of getNumShards before
-                                                // accounting for minimum size is always baseShardCount
+            // Legacy V1 mode is enabled when the number of shards is defined and has a positive value.
+            // Table property takes precendence over system property.
+            int numShards = options.containsKey(NUM_SHARDS_OPTION)
+                            ? Integer.parseInt(options.get(NUM_SHARDS_OPTION))
+                            : DEFAULT_NUM_SHARDS.get();
 
-            double maxSpaceOverheadLowerBound = 1.0d / numShards;
-            if (maxSpaceOverhead < maxSpaceOverheadLowerBound)
+            if (numShards > 0)
             {
-                logger.warn("{} shards are not enough to maintain the required maximum space overhead of {}!\n" +
-                            "Falling back to {}={} instead. If this limit needs to be satisfied, please increase the number" +
-                            " of shards.",
-                            numShards,
-                            maxSpaceOverhead,
-                            MAX_SPACE_OVERHEAD_OPTION,
-                            String.format("%.3f", maxSpaceOverheadLowerBound));
-                maxSpaceOverhead = maxSpaceOverheadLowerBound;
+                if (!options.containsKey(MIN_SSTABLE_SIZE_OPTION))
+                    minSSTableSize = MIN_SSTABLE_SIZE_AUTO;
+                baseShardCount = numShards;
+                sstableGrowthModifier = 1.0;
+                targetSStableSize = Long.MAX_VALUE; // this no longer plays a part, the result of getNumShards before
+                // accounting for minimum size is always baseShardCount
+
+                double maxSpaceOverheadLowerBound = 1.0d / numShards;
+                if (maxSpaceOverhead < maxSpaceOverheadLowerBound)
+                {
+                    logger.warn("{} shards are not enough to maintain the required maximum space overhead of {}!\n" +
+                                "Falling back to {}={} instead. If this limit needs to be satisfied, please increase the number" +
+                                " of shards.",
+                                numShards,
+                                maxSpaceOverhead,
+                                MAX_SPACE_OVERHEAD_OPTION,
+                                String.format("%.3f", maxSpaceOverheadLowerBound));
+                    maxSpaceOverhead = maxSpaceOverheadLowerBound;
+                }
             }
         }
 
@@ -965,7 +983,33 @@ public abstract class Controller
         long minSSTableSize = -1;
         long targetSSTableSize = DEFAULT_TARGET_SSTABLE_SIZE;
 
-        validateNoneWith(options, NUM_SHARDS_OPTION, TARGET_SSTABLE_SIZE_OPTION, SSTABLE_GROWTH_OPTION, BASE_SHARD_COUNT_OPTION);
+        s = options.remove(NUM_SHARDS_OPTION);
+        if (s != null)
+        {
+            try
+            {
+                int numShards = Integer.parseInt(s);
+                if (numShards <= 0 && numShards != -1)
+                    throw new ConfigurationException(String.format("Invalid configuration, %s should be positive: %d or -1 " +
+                                                                   "if static sharding is explicitly disabled for this table.",
+                                                                   NUM_SHARDS_OPTION,
+                                                                   numShards));
+                if (numShards != -1)
+                {
+                    List<String> incompatibleOptions = List.of(TARGET_SSTABLE_SIZE_OPTION, SSTABLE_GROWTH_OPTION, BASE_SHARD_COUNT_OPTION);
+                    if (incompatibleOptions.stream().anyMatch(options::containsKey))
+                    {
+                        throw new ConfigurationException(String.format("Option %s cannot be used in combination with %s",
+                                                                       NUM_SHARDS_OPTION,
+                                                                       incompatibleOptions.stream().filter(options::containsKey).collect(Collectors.joining(", "))));
+                    }
+                }
+            }
+            catch (NumberFormatException e)
+            {
+                throw new ConfigurationException(String.format(intParseErr, s, NUM_SHARDS_OPTION), e);
+            }
+        }
 
         s = options.remove(ADAPTIVE_OPTION);
         if (s != null)
@@ -981,22 +1025,6 @@ public abstract class Controller
         validateSizeWithAlt(options, FLUSH_SIZE_OVERRIDE_OPTION, FLUSH_SIZE_OVERRIDE_OPTION_MB, 20);
         validateSizeWithAlt(options, DATASET_SIZE_OPTION, DATASET_SIZE_OPTION_GB, 30);
 
-        s = options.remove(NUM_SHARDS_OPTION);
-        if (s != null)
-        {
-            try
-            {
-                int numShards = Integer.parseInt(s);
-                if (numShards <= 0)
-                    throw new ConfigurationException(String.format(nonPositiveErr,
-                                                                   NUM_SHARDS_OPTION,
-                                                                   numShards));
-            }
-            catch (NumberFormatException e)
-            {
-                throw new ConfigurationException(String.format(intParseErr, s, NUM_SHARDS_OPTION), e);
-            }
-        }
         s = options.remove(MAX_SSTABLES_TO_COMPACT_OPTION);
         if (s != null)
         {
@@ -1241,20 +1269,11 @@ public abstract class Controller
                                                  e);
         }
 
-        if (sizeInBytes <= 0)
+        if (sizeInBytes < 0)
             throw new ConfigurationException(String.format("Invalid configuration, %s should be positive: %s",
                                                            opt,
                                                            s));
         return sizeInBytes;
-    }
-
-    private static void validateNoneWith(Map<String, String> options, String option, String... incompatibleOptions)
-    {
-        if (!options.containsKey(option) || Arrays.stream(incompatibleOptions).noneMatch(options::containsKey))
-            return;
-        throw new ConfigurationException(String.format("Option %s cannot be used in combination with %s",
-                                                       option,
-                                                       Arrays.stream(incompatibleOptions).filter(options::containsKey).collect(Collectors.joining(", "))));
     }
 
     private static void validateOneOf(Map<String, String> options, String option1, String option2)

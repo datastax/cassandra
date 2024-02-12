@@ -54,6 +54,11 @@ public class SAICodecUtils
 
     public static Version checkHeader(DataInput in) throws IOException
     {
+        return checkHeader(in, Version.EARLIEST);
+    }
+
+    public static Version checkHeader(DataInput in, Version earliest) throws IOException
+    {
         try
         {
             final int actualMagic = readBEInt(in);
@@ -62,7 +67,7 @@ public class SAICodecUtils
                 throw new CorruptIndexException("codec header mismatch: actual header=" + actualMagic + " vs expected header=" + CODEC_MAGIC, in);
             }
             final Version actualVersion = Version.parse(in.readString());
-            if (!actualVersion.onOrAfter(Version.EARLIEST))
+            if (!actualVersion.onOrAfter(earliest))
             {
                 throw new IOException("Unsupported version: " + actualVersion);
             }
@@ -96,7 +101,12 @@ public class SAICodecUtils
 
     public static void validate(IndexInput input) throws IOException
     {
-        checkHeader(input);
+        validate(input, Version.EARLIEST);
+    }
+
+    public static void validate(IndexInput input, Version earliest) throws IOException
+    {
+        checkHeader(input, earliest);
         validateFooterAndResetPosition(input);
     }
 

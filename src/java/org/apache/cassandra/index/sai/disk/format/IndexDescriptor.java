@@ -52,6 +52,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.FBUtilities;
@@ -309,24 +310,12 @@ public class IndexDescriptor
 
     public IndexInput openPerSSTableInput(IndexComponent indexComponent)
     {
-        final File file = fileFor(indexComponent);
-        if (logger.isTraceEnabled())
-            logger.trace(logMessage("Opening blocking index input for file {} ({})"),
-                         file,
-                         FBUtilities.prettyPrintMemory(file.length()));
-
-        return IndexFileUtils.instance.openBlockingInput(file);
+        return IndexFileUtils.instance.openBlockingInput(createPerSSTableFileHandle(indexComponent));
     }
 
     public IndexInput openPerIndexInput(IndexComponent indexComponent, IndexContext indexContext)
     {
-        final File file = fileFor(indexComponent, indexContext);
-        if (logger.isTraceEnabled())
-            logger.trace(logMessage("Opening blocking index input for file {} ({})"),
-                         file,
-                         FBUtilities.prettyPrintMemory(file.length()));
-
-        return IndexFileUtils.instance.openBlockingInput(file);
+        return IndexFileUtils.instance.openBlockingInput(createPerIndexFileHandle(indexComponent, indexContext));
     }
 
     public IndexOutputWriter openPerSSTableOutput(IndexComponent component) throws IOException
@@ -373,15 +362,7 @@ public class IndexDescriptor
 
     public FileHandle createPerSSTableFileHandle(IndexComponent indexComponent)
     {
-        final File file = fileFor(indexComponent);
-
-        if (logger.isTraceEnabled())
-        {
-            logger.trace(logMessage("Opening {} file handle for {} ({})"),
-                         file, FBUtilities.prettyPrintMemory(file.length()));
-        }
-
-        try (final FileHandle.Builder builder = new FileHandle.Builder(file).mmapped(true))
+        try (final FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this, indexComponent))
         {
             return builder.complete();
         }
@@ -389,15 +370,23 @@ public class IndexDescriptor
 
     public FileHandle createPerIndexFileHandle(IndexComponent indexComponent, IndexContext indexContext)
     {
-        final File file = fileFor(indexComponent, indexContext);
-
-        if (logger.isTraceEnabled())
+        try (final FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this, indexComponent, indexContext))
         {
-            logger.trace(indexContext.logMessage("Opening file handle for {} ({})"),
-                         file, FBUtilities.prettyPrintMemory(file.length()));
+            return builder.complete();
         }
+    }
 
-        try (final FileHandle.Builder builder = new FileHandle.Builder(file).mmapped(true))
+    /**
+     * Opens a file handle for the provided index component similarly to {@link #createPerIndexFileHandle(IndexComponent, IndexContext)},
+     * but this method shoud be called instead of the aforemented one if the access is done "as part of flushing", that is
+     * before the full index that this is a part of has been finalized.
+     * <p>
+     * The use of this method can allow specific storage providers, typically tiered storage ones, to distinguish accesses
+     * that happen "at flush time" from other accesses, as the related file may be in different tier of storage.
+     */
+    public FileHandle createFlushTimePerIndexFileHandle(IndexComponent indexComponent, IndexContext indexContext)
+    {
+        try (final FileHandle.Builder builder = StorageProvider.instance.flushTimeFileHandleBuilderFor(this, indexComponent, indexContext))
         {
             return builder.complete();
         }

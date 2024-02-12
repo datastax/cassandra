@@ -39,6 +39,8 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.guardrails.UserKeyspaceFilter;
+import org.apache.cassandra.guardrails.UserKeyspaceFilterProvider;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
@@ -125,9 +127,12 @@ public final class CreateTableStatement extends AlterSchemaStatement
             if (Guardrails.tablesLimit.enabled(state))
             {
                 // guardrails on number of tables
+                UserKeyspaceFilter userKeyspaceFilter = UserKeyspaceFilterProvider.instance.get(state);
                 int totalUserTables = Schema.instance.getUserKeyspaces().stream().map(ksm -> Keyspace.open(ksm.name))
-                                                     .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
-                                                     .sum();
+                                                            .filter(userKeyspaceFilter::filter)
+                                                            .mapToInt(keyspace -> keyspace.getColumnFamilyStores().size())
+                                                            .sum();
+
                 Guardrails.tablesLimit.guard(totalUserTables + 1, tableName, false, state);
             }
 
@@ -197,19 +202,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
         Map<ColumnIdentifier, CQL3Type> columns = new TreeMap<>(comparing(o -> o.bytes));
         rawColumns.forEach((column, type) -> columns.put(column, type.prepare(keyspaceName, types)));
 
-        // check for nested non-frozen UDTs or collections in a non-frozen UDT
-        columns.forEach((column, type) ->
-        {
-            if (type.isUDT() && type.getType().isMultiCell())
-            {
-                ((UserType) type.getType()).fieldTypes().forEach(field ->
-                {
-                    if (field.isMultiCell())
-                        throw ire("Non-frozen UDTs with nested non-frozen collections are not supported");
-                });
-            }
-        });
-
         /*
          * Deal with PRIMARY KEY columns
          */
@@ -223,20 +215,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
 
             if (!primaryKeyColumns.add(column))
                 throw ire("Duplicate column '%s' in PRIMARY KEY clause for table '%s'", column, tableName);
-
-            if (type.getType().isMultiCell())
-            {
-                if (type.isCollection())
-                    throw ire("Invalid non-frozen collection type %s for PRIMARY KEY column '%s'", type, column);
-                else
-                    throw ire("Invalid non-frozen user-defined type %s for PRIMARY KEY column '%s'", type, column);
-            }
-
-            if (type.getType().isCounter())
-                throw ire("counter type is not supported for PRIMARY KEY column '%s'", column);
-
-            if (type.getType().referencesDuration())
-                throw ire("duration type is not supported for PRIMARY KEY column '%s'", column);
 
             if (staticColumns.contains(column))
                 throw ire("Static column '%s' cannot be part of the PRIMARY KEY", column);
@@ -299,11 +277,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
         boolean hasCounters = rawColumns.values().stream().anyMatch(CQL3Type.Raw::isCounter);
         if (hasCounters)
         {
-            // We've handled anything that is not a PRIMARY KEY so columns only contains NON-PK columns. So
-            // if it's a counter table, make sure we don't have non-counter types
-            if (columns.values().stream().anyMatch(t -> !t.getType().isCounter()))
-                throw ire("Cannot mix counter and non counter columns in the same table");
-
             if (params.defaultTimeToLive > 0)
                 throw ire("Cannot set %s on a table with counters", TableParams.Option.DEFAULT_TIME_TO_LIVE);
         }

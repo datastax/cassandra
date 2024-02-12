@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.google.common.collect.ImmutableList;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.Term;
@@ -242,12 +243,6 @@ public final class VectorType<T> extends AbstractType<List<T>>
     }
 
     @Override
-    public List<AbstractType<?>> subTypes()
-    {
-        return Collections.singletonList(elementType);
-    }
-
-    @Override
     public String toJSONString(ByteBuffer buffer, ProtocolVersion protocolVersion)
     {
         return toJSONString(buffer, ByteBufferAccessor.instance, protocolVersion);
@@ -309,7 +304,7 @@ public final class VectorType<T> extends AbstractType<List<T>>
     }
 
     @Override
-    public String toString()
+    public String toString(boolean ignoreFreezing)
     {
         StringBuilder sb = new StringBuilder();
         sb.append(getClass().getName());

@@ -67,6 +67,7 @@ public class CollectionIndexingTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int primary key, value map<int, text>)");
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
 
         // Test memtable index:
         execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 1, new HashMap<Integer, String>() {{

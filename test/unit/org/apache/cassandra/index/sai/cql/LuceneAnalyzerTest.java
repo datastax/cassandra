@@ -575,7 +575,7 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void testAnalyzerThatProducesTooManyBytesIsRejectedAtWriteTime() throws Throwable
+    public void testAnalyzerThatProducesTooManyBytesIsRejectedAtWriteTime()
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
 
@@ -586,7 +586,7 @@ public class LuceneAnalyzerTest extends SAITester
         waitForIndexQueryable();
 
         assertThatThrownBy(() -> execute("INSERT INTO %s (id, val) VALUES (0, 'abcdedfghijklmnopqrstuvwxyz abcdedfghijklmnopqrstuvwxyz')"))
-        .hasMessage("Term's analyzed size for column val exceeds the cumulative limit for index. Max allowed size 5.000KiB.")
+        .hasMessage("Term's analyzed size for column val exceeds the cumulative limit for index. Max allowed size 8.000KiB.")
         .isInstanceOf(InvalidRequestException.class);
     }
 }

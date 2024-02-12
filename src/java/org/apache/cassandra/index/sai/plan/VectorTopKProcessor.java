@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
@@ -65,6 +66,8 @@ import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.InMemoryPartitionIterator;
 import org.apache.cassandra.index.sai.utils.InMemoryUnfilteredPartitionIterator;
 import org.apache.cassandra.index.sai.utils.PartitionInfo;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.FBUtilities;
@@ -133,9 +136,21 @@ public class VectorTopKProcessor
 
     /**
      * Filter given partitions and keep the rows with highest scores. In case of {@link UnfilteredPartitionIterator},
-     * all tombstones will be kept.
+     * all tombstones will be kept. Caller must close the supplied iterator.
      */
     public <U extends Unfiltered, R extends BaseRowIterator<U>, P extends BasePartitionIterator<R>> BasePartitionIterator<?> filter(P partitions)
+    {
+        // filterInternal consumes the partitions iterator and creates a new one. Use a try-with-resources block
+        // to ensure the original iterator is closed. We do not expect exceptions from filterInternal, but if they
+        // happen, we want to make sure the original iterator is closed to prevent leaking resources, which could
+        // compound the effect of an exception.
+        try (partitions)
+        {
+            return filterInternal(partitions);
+        }
+    }
+
+    private <U extends Unfiltered, R extends BaseRowIterator<U>, P extends BasePartitionIterator<R>> BasePartitionIterator<?> filterInternal(P partitions)
     {
         // priority queue ordered by score in descending order
         PriorityQueue<Triple<PartitionInfo, Row, Float>> topK =
@@ -187,6 +202,26 @@ public class VectorTopKProcessor
                 for (var uf: pr.tombstones)
                     addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
             }
+        } else if (partitions instanceof StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) {
+            var retriever = (StorageAttachedIndexSearcher.ScoreOrderedResultRetriever) partitions;
+            // FilteredPartitions does not implement ParallelizablePartitionIterator.
+            // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
+            int rowsMatched = 0;
+            // Check rowsMatched first to prevent fetching one more partition than needed.
+            while (rowsMatched < limit && retriever.hasNext())
+            {
+                // have to close to move to the next partition, otherwise hasNext() fails
+                try (var partitionRowIterator = retriever.next())
+                {
+                    var iter = (StorageAttachedIndexSearcher.ScoreOrderedResultRetriever.PrimaryKeyIterator) partitionRowIterator;
+                    PartitionResults pr = processPartition(iter, iter.scoredPrimaryKey, retriever);
+                    rowsMatched += pr.rows.size();
+                    for (var row : pr.rows)
+                        addUnfiltered(unfilteredByPartition, row.getLeft(), row.getMiddle());
+                    for (var uf : pr.tombstones)
+                        addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
+                }
+            }
         } else {
             // FilteredPartitions does not implement ParallelizablePartitionIterator.
             // Realistically, this won't benefit from parallelizm as these are coming from in-memory/memtable data.
@@ -202,8 +237,6 @@ public class VectorTopKProcessor
                 }
             }
         }
-
-        partitions.close();
 
         // reorder rows in partition/clustering order
         final int numResults = min(topK.size(), limit);
@@ -262,6 +295,38 @@ public class VectorTopKProcessor
             float rowScore = getScoreForRow(null, row);
             pr.addRow(Triple.of(partitionInfo, row, keyAndStaticScore + rowScore));
         }
+
+        return pr;
+    }
+
+    /**
+     * Processes a single partition, calculating scores for rows and extracting tombstones.
+     */
+    private PartitionResults processPartition(BaseRowIterator<?> partitionRowIterator, ScoredPrimaryKey key,
+                                              StorageAttachedIndexSearcher.ScoreOrderedResultRetriever retriever) {
+        Row staticRow = partitionRowIterator.staticRow();
+        PartitionInfo partitionInfo = PartitionInfo.create(partitionRowIterator);
+        // VSTODO vector columns shouldn't be static, so can we remove this?
+        float keyAndStaticScore = getScoreForRow(key.partitionKey(), staticRow);
+        var pr = new PartitionResults(partitionInfo);
+
+        if (!partitionRowIterator.hasNext())
+            return pr;
+
+        Unfiltered unfiltered = partitionRowIterator.next();
+        assert !partitionRowIterator.hasNext() : "Only one row should be returned from vector search";
+        // Always include tombstones for coordinator. It relies on ReadCommand#withMetricsRecording to throw
+        // TombstoneOverwhelmingException to prevent OOM.
+        if (unfiltered.isRangeTombstoneMarker())
+        {
+            pr.addTombstone(unfiltered);
+            return pr;
+        }
+
+        Row row = (Row) unfiltered;
+        float rowScore = keyAndStaticScore + getScoreForRow(null, row);
+        if (retriever.shouldInclude(key, rowScore))
+            pr.addRow(Triple.of(partitionInfo, row, rowScore));
 
         return pr;
     }

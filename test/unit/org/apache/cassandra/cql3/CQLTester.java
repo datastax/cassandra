@@ -60,12 +60,12 @@ import javax.management.remote.JMXConnectorServer;
 import javax.management.remote.JMXServiceURL;
 import javax.management.remote.rmi.RMIConnectorServer;
 
+import com.datastax.shaded.netty.channel.EventLoopGroup;
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -87,8 +87,6 @@ import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.NettyOptions;
 import com.datastax.driver.core.PoolingOptions;
 import com.datastax.driver.core.ResultSet;
-
-import com.datastax.shaded.netty.channel.EventLoopGroup;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.SimpleStatement;
@@ -145,6 +143,7 @@ import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -640,6 +639,16 @@ public abstract class CQLTester
     public ColumnFamilyStore getColumnFamilyStore(String keyspace, String table)
     {
         return Keyspace.open(keyspace).getColumnFamilyStore(table);
+    }
+
+    public ColumnMetadata getColumn(String name)
+    {
+        return getCurrentColumnFamilyStore().metadata.get().getColumn(ColumnIdentifier.getInterned(name, true));
+    }
+
+    public ColumnMetadata getDroppedColumn(String name)
+    {
+        return getCurrentColumnFamilyStore().metadata.get().getDroppedColumn(ColumnIdentifier.getInterned(name, true).bytes);
     }
 
     public void flush(boolean forceFlush)
@@ -1801,6 +1810,13 @@ public abstract class CQLTester
                 assertMessageContains(errorMessage, e);
             }
         }
+    }
+
+    public static List<String> warningsFromResultSet(List<String> ignoredWarnings, ResultSet rs)
+    {
+        return rs.getExecutionInfo().getWarnings()
+                 .stream().filter(w -> ignoredWarnings.stream().noneMatch(w::contains))
+                 .collect(Collectors.toList());
     }
 
     private static String queryInfo(String query, Object[] values)
