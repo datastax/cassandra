@@ -77,12 +77,12 @@ public class RangeUnionIterator extends RangeIterator
     }
 
     @Override
-    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
         int countExhausted = 0;
         for (var range : ranges)
         {
-            switch(range.intersect(nextKey))
+            switch(range.intersect(otherKey))
             {
                 case MATCH:
                     return IntersectionResult.MATCH;

@@ -64,12 +64,12 @@ public class LongIterator extends RangeIterator
     }
 
     @Override
-    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
         for ( ; currentIdx < keys.size(); currentIdx++)
         {
             PrimaryKey token = keys.get(currentIdx);
-            int cmp = token.compareTo(nextKey);
+            int cmp = token.compareTo(otherKey);
             if (cmp == 0)
                 return IntersectionResult.MATCH;
             if (cmp > 0)

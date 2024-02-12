@@ -36,8 +36,8 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
     protected enum IntersectionResult
     {
         MATCH, // Returned when the key matches a key in the iterator
-        MISS,  // Returned when the key does not match a key in the iterator
-        EXHAUSTED // Returned when the iterator is exhausted
+        MISS,  // Returned when the key does not match a key in the iterator, and the iterator is not exhausted
+        EXHAUSTED // Returned when the key does not match a key in the iterator, and the iterator is exhausted
     }
     private static final Builder.EmptyRangeIterator EMPTY = new Builder.EmptyRangeIterator();
 
@@ -116,13 +116,27 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
      */
     protected abstract void performSkipTo(PrimaryKey nextKey);
 
-    protected final IntersectionResult intersect(PrimaryKey nextKey)
+    /**
+     * Intersect this iterator with the given {@link PrimaryKey} to determine whether this iterator contains that
+     * {@link PrimaryKey}. This method efficiently intersects multiple iterators. By pushing the comparison logic
+     * down to the lowest level, therefore skipping unnecessary {@link PrimaryKey} materialization and comparison.
+     * <p>
+     * This method is semantically the same as calling {@link #skipTo(PrimaryKey)}, then comparing the result of
+     * {@link #nextOrNull()} to the {@link PrimaryKey} passed to this method.
+     * </p>
+     * @param otherKey the {@link PrimaryKey} to use to determine the {@link IntersectionResult}
+     * @return An {@link IntersectionResult} to indicate whether this iterator contains the otherKey. See
+     * {@link IntersectionResult} for details.
+     */
+    protected final IntersectionResult intersect(PrimaryKey otherKey)
     {
         if (state == State.DONE)
             return IntersectionResult.EXHAUSTED;
         if (state == State.READY)
         {
-            int cmp = nextKey.compareTo(next);
+            // We do not expect to hit this case often. It happens because iterator creation often
+            // initializes the first entry.
+            int cmp = otherKey.compareTo(next);
             // Leave state in place since nextKey is not greater than or equal to next
             if (cmp < 0) return IntersectionResult.MISS;
             // Now we know it's either a match or we need to advance, so we can clear the state
@@ -130,13 +144,19 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             if (cmp == 0) return IntersectionResult.MATCH;
         }
 
-        var result = performIntersect(nextKey);
+        var result = performIntersect(otherKey);
         if (result == IntersectionResult.EXHAUSTED)
             state = State.DONE;
         return result;
     }
 
-    protected abstract IntersectionResult performIntersect(PrimaryKey nextKey);
+    /**
+     * Advance the iterator to determine whether it contains the given {@link PrimaryKey}.
+     * @param otherKey the {@link PrimaryKey} to use to determine the {@link IntersectionResult}
+     * @return An {@link IntersectionResult} to indicate whether this iterator contains the otherKey. See
+     * {@link IntersectionResult} for details.
+     */
+    protected abstract IntersectionResult performIntersect(PrimaryKey otherKey);
 
     public static RangeIterator empty()
     {
@@ -225,7 +245,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             EmptyRangeIterator() { super(null, null, 0); }
             public org.apache.cassandra.index.sai.utils.PrimaryKey computeNext() { return endOfData(); }
             protected void performSkipTo(org.apache.cassandra.index.sai.utils.PrimaryKey nextToken) { }
-            protected IntersectionResult performIntersect(org.apache.cassandra.index.sai.utils.PrimaryKey nextKey)
+            protected IntersectionResult performIntersect(org.apache.cassandra.index.sai.utils.PrimaryKey otherKey)
             {
                 return IntersectionResult.EXHAUSTED;
             }

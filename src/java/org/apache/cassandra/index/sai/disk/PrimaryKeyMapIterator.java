@@ -117,9 +117,9 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     }
 
     @Override
-    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
-        long result = keys.exactRowIdOrInvertedCeiling(nextKey);
+        long result = keys.exactRowIdOrInvertedCeiling(otherKey);
         if (result == Long.MIN_VALUE)
             return IntersectionResult.EXHAUSTED;
         else if (result < 0)

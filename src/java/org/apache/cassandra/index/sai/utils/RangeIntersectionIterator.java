@@ -97,11 +97,11 @@ public class RangeIntersectionIterator extends RangeIterator
     }
 
     @Override
-    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
         for (var range : ranges)
         {
-            switch(range.intersect(nextKey))
+            switch(range.intersect(otherKey))
             {
                 case MATCH:
                     continue;

@@ -165,26 +165,26 @@ public class PostingListRangeIterator extends RangeIterator
     }
 
     @Override
-    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
         // TODO is this guard valuable or too expensive? It seems like preventing unnecessary calls
         // to advance is worth it.
-        if (getMaximum().compareTo(nextKey) < 0)
+        if (getMaximum().compareTo(otherKey) < 0)
             return IntersectionResult.EXHAUSTED;
-        if (nextKey.compareTo(getMinimum()) < 0)
+        if (otherKey.compareTo(getMinimum()) < 0)
             return IntersectionResult.MISS;
         try
         {
             long targetRowID;
-            if (nextKey instanceof PrimaryKeyWithSource
-                && ((PrimaryKeyWithSource) nextKey).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
+            if (otherKey instanceof PrimaryKeyWithSource
+                && ((PrimaryKeyWithSource) otherKey).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
             {
                 // We know the row is in the sstable, but not whether it's in the postinglist.
-                targetRowID = ((PrimaryKeyWithSource) nextKey).getSourceRowId();
+                targetRowID = ((PrimaryKeyWithSource) otherKey).getSourceRowId();
             }
             else
             {
-                targetRowID = primaryKeyMap.exactRowIdOrInvertedCeiling(nextKey);
+                targetRowID = primaryKeyMap.exactRowIdOrInvertedCeiling(otherKey);
                 // nextKey is larger than max token in token file
                 if (targetRowID == Long.MIN_VALUE)
                     return IntersectionResult.EXHAUSTED;

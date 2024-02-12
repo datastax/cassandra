@@ -126,9 +126,9 @@ public class TermIterator extends RangeIterator
     }
 
     @Override
-    protected IntersectionResult performIntersect(PrimaryKey nextKey)
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
-        return union.intersect(nextKey);
+        return union.intersect(otherKey);
     }
 
     public void close()

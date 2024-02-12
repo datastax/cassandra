@@ -449,11 +449,11 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         @Override
-        protected IntersectionResult performIntersect(PrimaryKey nextKey)
+        protected IntersectionResult performIntersect(PrimaryKey otherKey)
         {
             while (!keyQueue.isEmpty())
             {
-                int cmp = keyQueue.peek().compareTo(nextKey);
+                int cmp = keyQueue.peek().compareTo(otherKey);
                 if (cmp < 0)
                     keyQueue.poll();
                 else if (cmp == 0)
