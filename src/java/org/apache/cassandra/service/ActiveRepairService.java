@@ -89,6 +89,7 @@ import org.apache.cassandra.repair.ParentRepairSessionListener;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.repair.RepairSession;
+import org.apache.cassandra.repair.Scheduler;
 import org.apache.cassandra.repair.consistent.CoordinatorSessions;
 import org.apache.cassandra.repair.consistent.LocalSessions;
 import org.apache.cassandra.repair.consistent.admin.CleanupSummary;
@@ -432,6 +433,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                                              boolean repairPaxos,
                                              boolean paxosOnly,
                                              ExecutorPlus executor,
+                                             Scheduler validationScheduler,
                                              String... cfnames)
     {
         if (repairPaxos && previewKind != PreviewKind.NONE)
@@ -443,7 +445,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         if (cfnames.length == 0)
             return null;
 
-        final RepairSession session = new RepairSession(ctx, parentRepairSession, range, keyspace,
+        final RepairSession session = new RepairSession(ctx, validationScheduler, parentRepairSession, range, keyspace,
                                                         parallelismDegree, isIncremental, pushRepair, pullRepair,
                                                         previewKind, optimiseStreams, repairPaxos, paxosOnly, cfnames);
         repairs.getIfPresent(parentRepairSession).register(session.state);
