@@ -167,15 +167,6 @@ public class SensorsWriterTest
         return cfs;
     }
 
-    private void assertRequestAndRegistrySensorsEquality(Context context)
-    {
-        Sensor localSensor = getThreadLocalRequestSensor(context);
-        assertThat(localSensor.getValue()).isGreaterThan(0);
-
-        Sensor registrySensor = getRegistrySensor(context);
-        assertThat(registrySensor).isEqualTo(localSensor);
-    }
-
     /**
      * Returns the writer sensor with the given context from the global registry
      * @param context the sensor context
