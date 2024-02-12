@@ -49,7 +49,13 @@ public final class ULIDBasedSSTableId implements SSTableId, Comparable<ULIDBased
     public ULIDBasedSSTableId(ULID.Value ulid)
     {
         this.ulid = ulid;
-        this.approximateTimeUUID = TimeUUID.approximateFromULID(ulid);
+        this.approximateTimeUUID = approximateFromULID(ulid);
+    }
+
+    public static TimeUUID approximateFromULID(ULID.Value ulid)
+    {
+        long rawTimestamp = TimeUUID.unixMillisToRawTimestamp(ulid.timestamp(), (10_000L * (ulid.getMostSignificantBits() & 0xFFFF)) >> 16);
+        return new TimeUUID(rawTimestamp, ulid.getLeastSignificantBits());
     }
 
     @Override

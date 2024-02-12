@@ -43,7 +43,6 @@ import java.util.stream.Collectors;
 import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
 
-import de.huxhorn.sulky.ulid.ULID;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -140,12 +139,6 @@ public class TimeUUID implements Serializable, Comparable<TimeUUID>
     public static TimeUUID fromBytes(long msb, long lsb)
     {
         return new TimeUUID(msbToRawTimestamp(msb), lsb);
-    }
-
-    public static TimeUUID approximateFromULID(ULID.Value ulid)
-    {
-        long rawTimestamp = unixMillisToRawTimestamp(ulid.timestamp(), (10_000L * (ulid.getMostSignificantBits() & 0xFFFF)) >> 16);
-        return new TimeUUID(rawTimestamp, ulid.getLeastSignificantBits());
     }
 
     public static TimeUUID deserialize(ByteBuffer buffer)
