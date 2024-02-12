@@ -210,8 +210,8 @@ public class PostingListRangeIterator extends RangeIterator
             else if (lastSegmentRowId == targetSegmentRowID)
                 return IntersectionResult.MATCH;
 
-            // TODO is it better to go row id to PK or to do a reverse lookup?
-            next = createPrimaryKeyWithSource(targetRowID);
+            // Create a deferred PrimaryKey.
+            next = createPrimaryKeyWithSource(lastSegmentRowId + searcherContext.getSegmentRowIdOffset());
             state = State.READY;
             return IntersectionResult.MISS;
         }
