@@ -207,10 +207,10 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         if (clusteringComparator.size() == 0)
             return skinnyExactRowIdOrInvertedCeiling(key);
 
-        long pointId = cursor.getExactPointId(v -> key.asComparableBytes(v));
+        long pointId = cursor.getExactPointId(key::asComparableBytes);
         if (pointId >= 0)
             return pointId;
-        long ceiling = cursor.ceiling(v -> key.asComparableBytesMinPrefix(v));
+        long ceiling = cursor.ceiling(key::asComparableBytesMinPrefix);
         // Use min value since -(Long.MIN_VALUE) - 1 == Long.MAX_VALUE.
         return ceiling < 0 ? Long.MIN_VALUE : -ceiling - 1;
     }

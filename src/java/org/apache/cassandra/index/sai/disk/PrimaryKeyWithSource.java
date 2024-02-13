@@ -95,6 +95,8 @@ public class PrimaryKeyWithSource implements PrimaryKey
     @Override
     public int compareTo(PrimaryKey o)
     {
+        if (this == o)
+            return 0;
         if (o instanceof PrimaryKeyWithSource)
         {
             var other = (PrimaryKeyWithSource) o;
@@ -107,6 +109,8 @@ public class PrimaryKeyWithSource implements PrimaryKey
     @Override
     public boolean equals(Object o)
     {
+        if (this == o)
+            return true;
         if (o instanceof PrimaryKeyWithSource)
         {
             var other = (PrimaryKeyWithSource) o;

@@ -68,6 +68,7 @@ public class PostingListRangeIterator extends RangeIterator
 
     private boolean needsSkipping = false;
     private PrimaryKey skipToToken = null;
+    private boolean returnSkipToToken = false;
     private long lastSegmentRowId = -1;
 
     /**
@@ -114,6 +115,12 @@ public class PostingListRangeIterator extends RangeIterator
             long rowId = getNextRowId();
             if (rowId == PostingList.END_OF_STREAM)
                 return endOfData();
+
+            if (returnSkipToToken)
+            {
+                returnSkipToToken = false;
+                return skipToToken;
+            }
 
             var primaryKey = primaryKeyMap.primaryKeyFromRowId(rowId);
             return new PrimaryKeyWithSource(primaryKey, primaryKeyMap.getSSTableId(), rowId);
@@ -168,6 +175,7 @@ public class PostingListRangeIterator extends RangeIterator
         if (needsSkipping)
         {
             long targetRowID;
+            boolean exactMatch = false;
             if (skipToToken instanceof PrimaryKeyWithSource
                 && ((PrimaryKeyWithSource) skipToToken).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
             {
@@ -175,15 +183,21 @@ public class PostingListRangeIterator extends RangeIterator
             }
             else
             {
-                targetRowID = primaryKeyMap.ceiling(skipToToken);
+                // VSTODO this method is not as efficient for ceiling on wide rows.
+                targetRowID = primaryKeyMap.exactRowIdOrInvertedCeiling(skipToToken);
                 // skipToToken is larger than max token in token file
-                if (targetRowID < 0)
-                {
+                if (targetRowID == Long.MIN_VALUE)
                     return PostingList.END_OF_STREAM;
-                }
+                if (targetRowID >= 0)
+                    exactMatch = true;
+                else
+                    targetRowID = - targetRowID - 1;
             }
 
-            segmentRowId = postingList.advance(targetRowID - searcherContext.getSegmentRowIdOffset());
+            long targetSegmentRowId = targetRowID - searcherContext.getSegmentRowIdOffset();
+            segmentRowId = postingList.advance(targetSegmentRowId);
+            if (exactMatch && segmentRowId == targetSegmentRowId)
+                returnSkipToToken = true;
             needsSkipping = false;
         }
         else
