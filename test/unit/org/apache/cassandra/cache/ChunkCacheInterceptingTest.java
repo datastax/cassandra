@@ -53,7 +53,7 @@ public class ChunkCacheInterceptingTest
             when(chunkReader.chunkSize()).thenReturn(1024);
             when(chunkReader.channel()).thenReturn(new ChannelProxy(new File("")));
 
-            RebuffererFactory rebuferrerFactory = ChunkCache.maybeWrap(chunkReader);
+            RebuffererFactory rebuferrerFactory = ChunkCache.instance.maybeWrap(chunkReader);
             assertTrue("chunk cache didn't create our interceptor?", interceptor != null);
 
             rebuferrerFactory.instantiateRebufferer();
