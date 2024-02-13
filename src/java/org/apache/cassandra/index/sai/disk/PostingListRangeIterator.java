@@ -175,7 +175,7 @@ public class PostingListRangeIterator extends RangeIterator
         if (needsSkipping)
         {
             long targetRowID;
-            boolean exactMatch = false;
+            boolean exactMatch = true;
             if (skipToToken instanceof PrimaryKeyWithSource
                 && ((PrimaryKeyWithSource) skipToToken).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
             {
@@ -188,15 +188,17 @@ public class PostingListRangeIterator extends RangeIterator
                 // skipToToken is larger than max token in token file
                 if (targetRowID == Long.MIN_VALUE)
                     return PostingList.END_OF_STREAM;
-                if (targetRowID >= 0)
-                    exactMatch = true;
-                else
-                    targetRowID = - targetRowID - 1;
+                if (targetRowID < 0)
+                {
+                    exactMatch = false;
+                    targetRowID = -targetRowID - 1;
+                }
             }
 
             long targetSegmentRowId = targetRowID - searcherContext.getSegmentRowIdOffset();
             segmentRowId = postingList.advance(targetSegmentRowId);
-            if (exactMatch && segmentRowId == targetSegmentRowId)
+            // We check the instance of the token to make sure it is not a token-only PK.
+            if (exactMatch && segmentRowId == targetSegmentRowId && skipToToken instanceof PrimaryKeyWithSource)
                 returnSkipToToken = true;
             needsSkipping = false;
         }
