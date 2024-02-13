@@ -51,11 +51,11 @@ public class ChunkCache
         implements CacheLoader<ChunkCache.Key, ChunkCache.Buffer>, RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
 {
     public static final int RESERVED_POOL_SPACE_IN_MiB = 32;
-    public static final long cacheSize = 1024L * 1024L * Math.max(0, DatabaseDescriptor.getFileCacheSizeInMiB() - RESERVED_POOL_SPACE_IN_MiB);
     public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
 
-    private static boolean enabled = DatabaseDescriptor.getFileCacheEnabled() && cacheSize > 0;
-    public static final ChunkCache instance = enabled ? new ChunkCache(BufferPools.forChunkCache()) : null;
+    public static final ChunkCache instance = DatabaseDescriptor.getFileCacheEnabled()
+                                              ? new ChunkCache(BufferPools.forChunkCache(), DatabaseDescriptor.getFileCacheSizeInMiB(), ChunkCacheMetrics::create)
+                                              : null;
 
     private final BufferPool bufferPool;
 
@@ -64,8 +64,10 @@ public class ChunkCache
     // safe for concurrent access.
     private final NonBlockingIdentityHashMap<String, NonBlockingHashSet<Key>> keysByFile;
     private final LoadingCache<Key, Buffer> cache;
+    private final long cacheSize;
     public final ChunkCacheMetrics metrics;
 
+    private boolean enabled;
     private Function<ChunkReader, RebuffererFactory> wrapper = this::wrap;
 
     static class Key
@@ -167,10 +169,12 @@ public class ChunkCache
         }
     }
 
-    private ChunkCache(BufferPool pool)
+    public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
     {
+        cacheSize = 1024L * 1024L * Math.max(0, cacheSizeInMB - RESERVED_POOL_SPACE_IN_MiB);
+        enabled = cacheSize > 0;
         bufferPool = pool;
-        metrics = ChunkCacheMetrics.create(this);
+        metrics = createMetrics.apply(this);
         keysByFile = new NonBlockingIdentityHashMap<>();
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
@@ -222,12 +226,12 @@ public class ChunkCache
         return new CachingRebufferer(file);
     }
 
-    public static RebuffererFactory maybeWrap(ChunkReader file)
+    public RebuffererFactory maybeWrap(ChunkReader file)
     {
         if (!enabled)
             return file;
 
-        return instance.wrapper.apply(file);
+        return wrapper.apply(file);
     }
 
     public void invalidateFile(String filePath)
@@ -242,7 +246,7 @@ public class ChunkCache
     @VisibleForTesting
     public void enable(boolean enabled)
     {
-        ChunkCache.enabled = enabled;
+        this.enabled = enabled;
         wrapper = this::wrap;
         cache.invalidateAll();
         metrics.reset();
