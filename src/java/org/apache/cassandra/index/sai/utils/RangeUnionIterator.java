@@ -79,14 +79,14 @@ public class RangeUnionIterator extends RangeIterator
                     candidate = range;
             }
         }
-        if (candidate == null)
-            return endOfData();
-
         if (hitSkipToKey)
         {
             hitSkipToKey = false;
             return skipToKey;
         }
+
+        if (candidate == null)
+            return endOfData();
 
         return candidate.next();
     }
