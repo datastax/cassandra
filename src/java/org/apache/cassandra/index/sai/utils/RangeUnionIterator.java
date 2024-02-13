@@ -33,6 +33,11 @@ public class RangeUnionIterator extends RangeIterator
 {
     public final List<RangeIterator> ranges;
 
+    // The skipToKey is our floor. We know we will not return a PK lower than it.
+    private PrimaryKey skipToKey = null;
+    // If one of the iterators returned the skipToKey, we enter into a fast equality loop.
+    private boolean hitSkipToKey = false;
+
     private RangeUnionIterator(Builder.Statistics statistics, List<RangeIterator> ranges)
     {
         super(statistics);
@@ -47,6 +52,18 @@ public class RangeUnionIterator extends RangeIterator
         for (RangeIterator range : ranges)
         {
             if (!range.hasNext())
+                continue;
+
+            // This optimization is fragile, but in the PostingListRangeIterator, we return the skipToKey
+            // if we have a match, and since we know that is the floor, we can skip some comparisons by
+            // checking reference equality.
+            if (skipToKey == range.peek())
+            {
+                hitSkipToKey = true;
+                range.next();
+            }
+
+            if (hitSkipToKey)
                 continue;
 
             if (candidate == null)
@@ -64,6 +81,13 @@ public class RangeUnionIterator extends RangeIterator
         }
         if (candidate == null)
             return endOfData();
+
+        if (hitSkipToKey)
+        {
+            hitSkipToKey = false;
+            return skipToKey;
+        }
+
         return candidate.next();
     }
 
@@ -72,6 +96,7 @@ public class RangeUnionIterator extends RangeIterator
         // Resist the temptation to call range.hasNext before skipTo: this is a pessimisation, hasNext will invoke
         // computeNext under the hood, which is an expensive operation to produce a value that we plan to throw away.
         // Instead, it is the responsibility of the child iterators to make skipTo fast when the iterator is exhausted.
+        skipToKey = nextKey;
         for (RangeIterator range : ranges)
             range.skipTo(nextKey);
     }
