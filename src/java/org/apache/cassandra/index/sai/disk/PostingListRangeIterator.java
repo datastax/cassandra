@@ -197,7 +197,8 @@ public class PostingListRangeIterator extends RangeIterator
             else if (targetSegmentRowID == lastSegmentRowId)
                 return IntersectionResult.MATCH;
 
-            // TODO what is the relevative cost of nextPosting vs advance?
+            // It is cheaper to get nextPosting, and since nextPosting() will return either targetSegmentRowID or
+            // something greater, just call that.
             if (lastSegmentRowId + 1 == targetSegmentRowID)
                 lastSegmentRowId = postingList.nextPosting();
             else
