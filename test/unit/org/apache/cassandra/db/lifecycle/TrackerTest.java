@@ -30,6 +30,7 @@ import com.google.common.base.Function;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.utils.TimeUUID;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -49,14 +50,12 @@ import org.apache.cassandra.notifications.InitialSSTableAddedNotification;
 import org.apache.cassandra.notifications.MemtableDiscardedNotification;
 import org.apache.cassandra.notifications.MemtableRenewedNotification;
 import org.apache.cassandra.notifications.MemtableSwitchedNotification;
-import org.apache.cassandra.notifications.MetricsNotification;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
 import org.apache.cassandra.notifications.SSTableListChangedNotification;
 import org.apache.cassandra.notifications.SSTableRepairStatusChanged;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.MockSchema;
-import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
@@ -64,7 +63,6 @@ import org.mockito.Mockito;
 
 import static com.google.common.collect.ImmutableSet.copyOf;
 import static java.util.Collections.singleton;
-import static org.mockito.Mockito.mock;
 
 @RunWith(BMUnitRunner.class)
 public class TrackerTest
@@ -481,18 +479,6 @@ public class TrackerTest
         Assert.assertNotNull(tracker.notifyAdded(singleton(r1), OperationType.UNKNOWN, Optional.empty(), true, null, null));
         Assert.assertEquals(singleton(r1), ((InitialSSTableAddedNotification) listener.received.get(0)).added);
         listener.received.clear();
-    }
-
-    @Test
-    public void testPublishMetrics()
-    {
-        ColumnFamilyStore cfs = MockSchema.newCFS();
-        MetricsNotification metricsNotification = mock(MetricsNotification.class);
-        Tracker tracker = Tracker.newDummyTracker(cfs.metadata);
-        MockListener listener = new MockListener(false);
-        tracker.subscribe(listener);
-        tracker.publishMetrics(metricsNotification);
-        assert(listener.received.get(0) instanceof MetricsNotification);
     }
 
 }

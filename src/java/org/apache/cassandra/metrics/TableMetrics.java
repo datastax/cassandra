@@ -64,7 +64,6 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.metrics.Sampler.SamplerType;
-import org.apache.cassandra.notifications.MetricsNotification;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
@@ -1062,11 +1061,6 @@ public class TableMetrics
     public void updateSSTableIteratedInRangeRead(int count)
     {
         sstablesPerRangeReadHistogram.update(count);
-    }
-
-    public MetricsNotification createMetricsNotification()
-    {
-        return new MetricsNotification(bytesInserted.getCount(), readRequests.getCount(), flushSizeOnDisk().get(), sstablePartitionReadLatency.get(), flushTimePerKb.get());
     }
 
     /**

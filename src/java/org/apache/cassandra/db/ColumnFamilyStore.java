@@ -1102,11 +1102,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return keyspace.metric;
     }
 
-    public void publishMetrics()
-    {
-        getTracker().publishMetrics(metrics().createMetricsNotification());
-    }
-
     @Override
     public Descriptor newSSTableDescriptor(File directory)
     {

@@ -19,7 +19,6 @@ package org.apache.cassandra.db.compaction;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -65,7 +64,6 @@ import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.concurrent.ExecutorFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.WrappedExecutorPlus;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -154,9 +152,6 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     public static final int NO_GC = Integer.MIN_VALUE;
     public static final int GC_ALL = Integer.MAX_VALUE;
 
-    //This is needed for Adaptive UCS to run in CNDB
-    public static final Duration PUBLISH_METRICS_INTERVAL = Duration.ofMinutes(CassandraRelevantProperties.PUBLISH_METRICS_INTERVAL_MINUTES.getInt());
-
     // A thread local that tells us if the current thread is owned by the compaction manager. Used
     // by CounterContext to figure out if it should log a warning for invalid counter shards.
     public static final FastThreadLocal<Boolean> isCompactionManager = new FastThreadLocal<Boolean>()
@@ -180,10 +175,6 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
 
         /*Store Controller Config for UCS every hour*/
         ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(CompactionManager::storeControllerConfig, 10, 60, TimeUnit.MINUTES);
-
-        /*publish metrics used by AdaptiveController for each cfs. This is needed for Adaptive Compaction to work in CNDB*/
-        if (!PUBLISH_METRICS_INTERVAL.isNegative() && !PUBLISH_METRICS_INTERVAL.isZero())
-            ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(CompactionManager::publishMetrics, 1, PUBLISH_METRICS_INTERVAL.toMillis(), TimeUnit.MILLISECONDS);
     }
     private final CompactionExecutor executor = new CompactionExecutor();
     private final ValidationExecutor validationExecutor = new ValidationExecutor();
@@ -243,23 +234,6 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
                     UnifiedCompactionStrategy ucs = (UnifiedCompactionStrategy) ((UnifiedCompactionContainer) strat).getStrategies().get(0);
                     ucs.storeControllerConfig();
                 }
-            }
-        }
-    }
-
-    @VisibleForTesting
-    public static void publishMetrics()
-    {
-        for (String keyspace : Schema.instance.getKeyspaces())
-        {
-            // don't publish metrics for system tables
-            if (SchemaConstants.isSystemKeyspace(keyspace))
-            {
-                continue;
-            }
-            for (ColumnFamilyStore cfs : Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStores())
-            {
-                cfs.publishMetrics();
             }
         }
     }
