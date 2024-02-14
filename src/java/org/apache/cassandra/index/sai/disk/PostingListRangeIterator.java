@@ -69,6 +69,7 @@ public class PostingListRangeIterator extends RangeIterator
 
     private boolean needsSkipping = false;
     private Token skipToToken = null;
+    private long skipToRowId = -1;
     private long lastSegmentRowId = -1;
 
     /**
@@ -159,12 +160,19 @@ public class PostingListRangeIterator extends RangeIterator
 
     private boolean exhausted()
     {
-        return needsSkipping && skipToToken.compareTo(getMaximum().token()) > 0;
+        return needsSkipping && skipToToken != null && skipToToken.compareTo(getMaximum().token()) > 0;
     }
 
     @Override
     protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
+        if (needsSkipping && skipToToken != null)
+        {
+            assert skipToToken.compareTo(otherKey.token()) <= 0 : "skipToToken should always be less than otherKey";
+            needsSkipping = false;
+            skipToToken = null;
+        }
+
         // TODO is this guard valuable or too expensive? It seems like preventing unnecessary calls
         // to advance is worth it.
         if (getMaximum().compareTo(otherKey) < 0)
@@ -187,15 +195,17 @@ public class PostingListRangeIterator extends RangeIterator
                 if (targetRowID == Long.MIN_VALUE)
                     return IntersectionResult.EXHAUSTED;
                 // nextKey is not in this sstable, so it cannot be in the posting list
-                else if (targetRowID < 0)
+                if (targetRowID < 0)
+                {
+                    skipToRowId = -targetRowID - 1;
+                    needsSkipping = true;
                     return IntersectionResult.MISS;
+                }
             }
 
             long targetSegmentRowID = targetRowID - searcherContext.segmentRowIdOffset;
             if (lastSegmentRowId > targetSegmentRowID)
                 return IntersectionResult.MISS;
-            if (lastSegmentRowId == targetSegmentRowID)
-                return IntersectionResult.MATCH;
 
             // It is cheaper to get nextPosting, and since nextPosting() will return either targetSegmentRowID or
             // something greater, just call that.
@@ -231,12 +241,22 @@ public class PostingListRangeIterator extends RangeIterator
         long segmentRowId;
         if (needsSkipping)
         {
-            long targetRowID = primaryKeyMap.exactRowIdOrInvertedCeiling(skipToToken);
-            // skipToToken is larger than max token in token file
-            if (targetRowID == Long.MIN_VALUE)
-                return PostingList.END_OF_STREAM;
-            if (targetRowID < 0)
-                targetRowID = -targetRowID - 1;
+            assert skipToToken != null || skipToRowId >= 0;
+            long targetRowID = skipToRowId;
+            if (skipToToken != null)
+            {
+                long tokenRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(skipToToken);
+
+                // skipToToken is larger than max token in token file
+                if (tokenRowId == Long.MIN_VALUE)
+                    return PostingList.END_OF_STREAM;
+                if (tokenRowId < 0)
+                    tokenRowId = -tokenRowId - 1;
+
+                // Take the higher of the two
+                targetRowID = Math.max(tokenRowId, skipToRowId);
+                skipToToken = null;
+            }
             segmentRowId = postingList.advance(targetRowID - searcherContext.getSegmentRowIdOffset());
             needsSkipping = false;
         }
