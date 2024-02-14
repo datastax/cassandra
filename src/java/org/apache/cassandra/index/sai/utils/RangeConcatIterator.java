@@ -74,7 +74,7 @@ public class RangeConcatIterator extends RangeIterator
     @Override
     protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
-        while(true)
+        while (true)
         {
             var result = currentRange.intersect(otherKey);
             if (result != IntersectionResult.EXHAUSTED)

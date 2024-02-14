@@ -121,13 +121,19 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     @Override
     protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
-        long result = keys.exactRowIdOrInvertedCeiling(otherKey);
-        if (result == Long.MIN_VALUE)
-            return IntersectionResult.EXHAUSTED;
-        else if (result < 0)
-            return IntersectionResult.MISS;
-        else
+        currentRowId = keys.exactRowIdOrInvertedCeiling(otherKey);
+        if (0 <= currentRowId)
+        {
+            // Move currentRowId forward by one because performIntersect consumes matches.
+            currentRowId++;
             return IntersectionResult.MATCH;
+        }
+
+        // Invert currentRowId, then determine correct result
+        currentRowId = -currentRowId - 1;
+        if (currentRowId == Long.MAX_VALUE)
+            return IntersectionResult.EXHAUSTED;
+        return IntersectionResult.MISS;
     }
 
     @Override

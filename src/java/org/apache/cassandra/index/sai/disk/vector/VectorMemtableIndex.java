@@ -51,6 +51,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.memory.KeyRangeIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -178,7 +179,7 @@ public class VectorMemtableIndex implements MemtableIndex
 
         if (keyQueue.isEmpty())
             return RangeIterator.empty();
-        return new ReorderingRangeIterator(keyQueue);
+        return new KeyRangeIterator(minimumKey, maximumKey, keyQueue);
     }
 
     @Override
@@ -429,51 +430,6 @@ public class VectorMemtableIndex implements MemtableIndex
         public int length()
         {
             return graph.size();
-        }
-    }
-
-    private class ReorderingRangeIterator extends RangeIterator
-    {
-        private final PriorityQueue<PrimaryKey> keyQueue;
-
-        ReorderingRangeIterator(PriorityQueue<PrimaryKey> keyQueue)
-        {
-            super(minimumKey, maximumKey, keyQueue.size());
-            this.keyQueue = keyQueue;
-        }
-
-        @Override
-        protected void performSkipTo(Token nextToken)
-        {
-            while (!keyQueue.isEmpty() && keyQueue.peek().token().compareTo(nextToken) < 0)
-                keyQueue.poll();
-        }
-
-        @Override
-        protected IntersectionResult performIntersect(PrimaryKey otherKey)
-        {
-            while (!keyQueue.isEmpty())
-            {
-                int cmp = keyQueue.peek().compareTo(otherKey);
-                if (cmp < 0)
-                    keyQueue.poll();
-                else if (cmp == 0)
-                    return IntersectionResult.MATCH;
-                else
-                    return IntersectionResult.MISS;
-            }
-            return IntersectionResult.EXHAUSTED;
-        }
-
-        @Override
-        public void close() {}
-
-        @Override
-        protected PrimaryKey computeNext()
-        {
-            if (keyQueue.isEmpty())
-                return endOfData();
-            return keyQueue.poll();
         }
     }
 

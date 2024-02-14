@@ -96,14 +96,16 @@ public class KeyRangeIterator extends RangeIterator
     {
         while (!keys.isEmpty())
         {
-            PrimaryKey key = keys.peek();
-            int cmp = key.compareTo(otherKey);
+            PrimaryKey primaryKey = keys.poll();
+            var cmp = primaryKey.compareTo(otherKey);
             if (cmp < 0)
-                keys.poll();
-            else if (cmp == 0)
+                continue;
+            if (cmp == 0)
                 return IntersectionResult.MATCH;
-            else
-                return IntersectionResult.MISS;
+
+            // Store the primary key
+            setNext(primaryKey);
+            return IntersectionResult.MISS;
         }
         return IntersectionResult.EXHAUSTED;
     }

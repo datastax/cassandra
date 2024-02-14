@@ -194,11 +194,13 @@ public class PostingListRangeIterator extends RangeIterator
             long targetSegmentRowID = targetRowID - searcherContext.segmentRowIdOffset;
             if (lastSegmentRowId > targetSegmentRowID)
                 return IntersectionResult.MISS;
-            else if (targetSegmentRowID == lastSegmentRowId)
+            if (lastSegmentRowId == targetSegmentRowID)
                 return IntersectionResult.MATCH;
 
             // It is cheaper to get nextPosting, and since nextPosting() will return either targetSegmentRowID or
             // something greater, just call that.
+            // VSTODO this optimization should be pushed into the advance implemenation since it has all of the relevant
+            // state.
             if (lastSegmentRowId + 1 == targetSegmentRowID)
                 lastSegmentRowId = postingList.nextPosting();
             else
@@ -206,12 +208,13 @@ public class PostingListRangeIterator extends RangeIterator
 
             if (lastSegmentRowId == PostingList.END_OF_STREAM)
                 return IntersectionResult.EXHAUSTED;
-            else if (lastSegmentRowId == targetSegmentRowID)
+            if (lastSegmentRowId == targetSegmentRowID)
                 return IntersectionResult.MATCH;
 
-            // Create a deferred PrimaryKey.
-            next = createPrimaryKeyWithSource(lastSegmentRowId + searcherContext.getSegmentRowIdOffset());
-            state = State.READY;
+            // Create a deferred PrimaryKey. We create a PK because it is O(1) to do so, but O(log(n)) to do
+            // the reverse lookup.
+            var nextPrimaryKey = createPrimaryKeyWithSource(lastSegmentRowId + searcherContext.getSegmentRowIdOffset());
+            setNext(nextPrimaryKey);
             return IntersectionResult.MISS;
         }
         catch (IOException e)

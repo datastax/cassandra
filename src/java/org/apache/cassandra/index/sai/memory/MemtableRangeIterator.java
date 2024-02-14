@@ -144,12 +144,14 @@ public class MemtableRangeIterator extends RangeIterator
             {
                 Row row = (Row) unfiltered;
                 var primaryKey = pkFactory.create(rowIterator.partitionKey(), row.clustering());
-                var cmp = otherKey.compareTo(primaryKey);
+                var cmp = primaryKey.compareTo(otherKey);
                 if (cmp < 0)
                     continue;
                 if (cmp == 0)
                     return IntersectionResult.MATCH;
 
+                // Store the primary key
+                setNext(primaryKey);
                 return IntersectionResult.MISS;
             }
         }

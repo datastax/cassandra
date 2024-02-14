@@ -147,7 +147,8 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
     }
 
     /**
-     * Advance the iterator to determine whether it contains the given {@link PrimaryKey}.
+     * Advance this iterator to the first {@link PrimaryKey} after the given {@link PrimaryKey} while determining
+     * whether this iterator contains the given {@link PrimaryKey}.
      * @param otherKey the {@link PrimaryKey} to use to determine the {@link IntersectionResult}
      * @return An {@link IntersectionResult} to indicate whether this iterator contains the otherKey. See
      * {@link IntersectionResult} for details.

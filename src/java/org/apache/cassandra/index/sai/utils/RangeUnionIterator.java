@@ -81,18 +81,24 @@ public class RangeUnionIterator extends RangeIterator
     protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
         int countExhausted = 0;
+        boolean isMatch = false;
         for (var range : ranges)
         {
             switch(range.intersect(otherKey))
             {
                 case MATCH:
-                    return IntersectionResult.MATCH;
+                    // VSTODO is it worth shortcircuiting here? If we do, we need to be able to call next() and
+                    // skipTo() safely/correctly, which essentially requires us to store the otherKey and know
+                    // which ranges to call intersect() on.
+                    isMatch = true;
                 case MISS:
                     continue;
                 case EXHAUSTED:
                     countExhausted++;
             }
         }
+        if (isMatch)
+            return IntersectionResult.MATCH;
         return countExhausted == ranges.size() ? IntersectionResult.EXHAUSTED : IntersectionResult.MISS;
     }
 

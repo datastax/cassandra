@@ -100,19 +100,22 @@ public class RangeIntersectionIterator extends RangeIterator
     @Override
     protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
+        boolean isMiss = false;
         for (var range : ranges)
         {
             switch(range.intersect(otherKey))
             {
+                case MISS:
+                    // VSTODO is it worth shortciruiting? It will add complexity, but will make this a less
+                    // eager. See comment in RangeUnionIterator for details.
+                    isMiss = true;
                 case MATCH:
                     continue;
-                case MISS:
-                    return IntersectionResult.MISS;
                 case EXHAUSTED:
                     return IntersectionResult.EXHAUSTED;
             }
         }
-        return IntersectionResult.MATCH;
+        return isMiss ? IntersectionResult.MISS : IntersectionResult.MATCH;
     }
 
     protected void performSkipTo(Token nextToken)

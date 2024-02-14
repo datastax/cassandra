@@ -71,10 +71,14 @@ public class LongIterator extends RangeIterator
         {
             PrimaryKey token = keys.get(currentIdx);
             int cmp = token.compareTo(otherKey);
+            if (cmp < 0)
+                continue;
             if (cmp == 0)
                 return IntersectionResult.MATCH;
-            if (cmp > 0)
-                return IntersectionResult.MISS;
+
+            // Store the primary key
+            setNext(token);
+            return IntersectionResult.MISS;
         }
         return IntersectionResult.EXHAUSTED;
     }
