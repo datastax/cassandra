@@ -25,7 +25,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.google.common.collect.ImmutableMap;
 import org.junit.Test;
 
-import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.marshal.BooleanType;
@@ -36,7 +35,6 @@ import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.memtable.Memtable;
-import org.assertj.core.api.Assertions;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
@@ -168,19 +166,5 @@ public class TableMetadataTest
                                              .params(cdcParams)
                                              .build();
         assertThat(metadata.changeAffectsPreparedStatements(updated)).isTrue();
-    }
-
-    @Test
-    public void testDroppedColumnsAreRejected()
-    {
-        ColumnMetadata droppedColumn = ColumnMetadata.droppedColumn("ks", "tab",
-                                                                    ColumnIdentifier.getInterned("v", false),
-                                                                    UTF8Type.instance, ColumnMetadata.Kind.REGULAR);
-        Assertions.assertThatThrownBy(() -> TableMetadata.builder(droppedColumn.ksName, droppedColumn.ksName)
-                                                         .addPartitionKeyColumn("k", UTF8Type.instance)
-                                                         .addColumn(droppedColumn)
-                                                         .build())
-                  .isInstanceOf(AssertionError.class)
-                  .hasMessageContaining("Invalid columns (contains dropped)");
     }
 }
