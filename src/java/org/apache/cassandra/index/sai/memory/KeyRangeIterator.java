@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.PriorityQueue;
 import java.util.SortedSet;
 
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 
@@ -78,12 +79,12 @@ public class KeyRangeIterator extends RangeIterator
         return next;
     }
 
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(Token nextToken)
     {
         while (!keys.isEmpty())
         {
             PrimaryKey key = keys.peek();
-            if (key.compareTo(nextKey) >= 0)
+            if (key.token().compareTo(nextToken) >= 0)
                 break;
 
             // consume smaller key

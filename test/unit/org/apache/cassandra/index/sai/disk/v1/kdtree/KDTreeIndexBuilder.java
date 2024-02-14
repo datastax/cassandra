@@ -39,6 +39,7 @@ import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.ShortType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableContext;
@@ -85,6 +86,12 @@ public class KDTreeIndexBuilder
         public PrimaryKey primaryKeyFromRowId(long sstableRowId)
         {
             return primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(sstableRowId));
+        }
+
+        @Override
+        public long exactRowIdOrInvertedCeiling(Token token)
+        {
+            return token.getLongValue();
         }
 
         @Override

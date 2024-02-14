@@ -101,7 +101,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                     final int idxToSkip = numPostings - 7;
                     // tokens are equal to their corresponding row IDs
                     final long tokenToSkip = termsEnum.get(t).right.get(idxToSkip);
-                    results.skipTo(SAITester.TEST_FACTORY.createTokenOnly(new Murmur3Partitioner.LongToken(tokenToSkip)));
+                    results.skipTo(new Murmur3Partitioner.LongToken(tokenToSkip));
 
                     for (int p = idxToSkip; p < numPostings; ++p)
                     {

@@ -146,19 +146,19 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
         RangeIterator tokens;
 
         tokens = init.get();
-        tokens.skipTo(LongIterator.fromToken(5));
+        tokens.skipTo(LongIterator.toToken(5));
         assertTrue(tokens.hasNext());
         assertEquals(5L, tokens.next().token().getLongValue());
 
         tokens = init.get();
-        tokens.skipTo(LongIterator.fromToken(7L));
+        tokens.skipTo(LongIterator.toToken(7L));
         assertTrue(tokens.hasNext());
         assertEquals(7L, tokens.next().token().getLongValue());
 
         tokens = init.get();
-        tokens.skipTo(LongIterator.fromToken(2L));
-        tokens.skipTo(LongIterator.fromToken(5L));
-        tokens.skipTo(LongIterator.fromToken(10L));
+        tokens.skipTo(LongIterator.toToken(2L));
+        tokens.skipTo(LongIterator.toToken(5L));
+        tokens.skipTo(LongIterator.toToken(10L));
         assertFalse(tokens.hasNext());
         assertEquals(1L, tokens.getMinimum().token().getLongValue());
         assertEquals(9L, tokens.getMaximum().token().getLongValue());
@@ -173,19 +173,19 @@ public class RangeConcatIteratorTest extends AbstractRangeIteratorTest
         RangeIterator tokens;
 
         tokens = init.get();
-        tokens.skipTo(LongIterator.fromToken(5L));
+        tokens.skipTo(LongIterator.toToken(5L));
         assertTrue(tokens.hasNext());
         assertEquals(6L, tokens.next().token().getLongValue());
 
         tokens = init.get();
-        tokens.skipTo(LongIterator.fromToken(7L));
+        tokens.skipTo(LongIterator.toToken(7L));
         assertTrue(tokens.hasNext());
         assertEquals(8L, tokens.next().token().getLongValue());
 
         tokens = init.get();
-        tokens.skipTo(LongIterator.fromToken(2L));
-        tokens.skipTo(LongIterator.fromToken(5L));
-        tokens.skipTo(LongIterator.fromToken(10L));
+        tokens.skipTo(LongIterator.toToken(2L));
+        tokens.skipTo(LongIterator.toToken(5L));
+        tokens.skipTo(LongIterator.toToken(10L));
         assertFalse(tokens.hasNext());
         assertEquals(1L, tokens.getMinimum().token().getLongValue());
         assertEquals(9L, tokens.getMaximum().token().getLongValue());

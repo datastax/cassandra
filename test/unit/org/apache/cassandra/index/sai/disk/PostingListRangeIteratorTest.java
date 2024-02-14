@@ -23,6 +23,7 @@ import java.io.IOException;
 import com.google.common.collect.Lists;
 import org.junit.Test;
 
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
@@ -76,10 +77,10 @@ public class PostingListRangeIteratorTest
         var plri2 = new PostingListRangeIterator(mockIndexContext, pkm, indexContext2);
         try (var union = RangeUnionIterator.builder().add(plri1).add(plri2).build();)
         {
-            union.skipTo(pkm.primaryKeyFromRowId(2));
+            union.skipTo(new Murmur3Partitioner.LongToken(2));
             assertTrue(union.hasNext());
             union.next();
-            union.skipTo(pkm.primaryKeyFromRowId(3));
+            union.skipTo(new Murmur3Partitioner.LongToken(3));
             assertFalse(union.hasNext());
         }
     }

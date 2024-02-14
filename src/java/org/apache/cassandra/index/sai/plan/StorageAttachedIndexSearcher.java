@@ -163,7 +163,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
     private static class ResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
-        private final PrimaryKey firstPrimaryKey;
+        private final Token firstToken;
         private final PrimaryKey lastPrimaryKey;
         private final Iterator<DataRange> keyRanges;
         private AbstractBounds<PartitionPosition> currentKeyRange;
@@ -193,7 +193,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.queryContext = queryContext;
             this.keyFactory = controller.primaryKeyFactory();
 
-            this.firstPrimaryKey = controller.firstPrimaryKey();
+            this.firstToken = controller.firstToken();
             this.lastPrimaryKey = controller.lastPrimaryKey();
         }
 
@@ -212,7 +212,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             // We can't put this code in the constructor because it may throw and the caller
             // may not be prepared for that.
             if (lastKey == null)
-                operation.skipTo(firstPrimaryKey);
+                skipTo(firstToken);
 
             // Theoretically we wouldn't need this if the caller of computeNext always ran the
             // returned iterators to the completion. Unfortunately, we have no control over the caller behavior here.
@@ -359,7 +359,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
          */
         private void skipTo(@Nonnull Token token)
         {
-            operation.skipTo(keyFactory.createTokenOnly(token));
+            operation.skipTo(token);
         }
 
         /**

@@ -23,6 +23,7 @@ import java.io.IOException;
 
 import javax.annotation.concurrent.NotThreadSafe;
 
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.SSTableId;
 
@@ -66,6 +67,14 @@ public interface PrimaryKeyMap extends Closeable
      * @return the {@link PrimaryKey} associated with the row Id
      */
     PrimaryKey primaryKeyFromRowId(long sstableRowId);
+
+    /**
+     * Returns the first row Id for a {@link Token}. If there is no such term, returns the `-(next row id) - 1` where
+     * `next row id` is the row id of the next greatest {@link Token} in the map.
+     * @param token the {@link Token} to lookup
+     * @return a row id
+     */
+    long exactRowIdOrInvertedCeiling(Token token);
 
     /**
      * Returns a row Id for a {@link PrimaryKey}. If there is no such term, returns the `-(next row id) - 1` where

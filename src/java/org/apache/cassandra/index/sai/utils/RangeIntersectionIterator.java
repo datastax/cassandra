@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -114,7 +115,7 @@ public class RangeIntersectionIterator extends RangeIterator
         return IntersectionResult.MATCH;
     }
 
-    protected void performSkipTo(PrimaryKey nextToken)
+    protected void performSkipTo(Token nextToken)
     {
         // Resist the temptation to call range.hasNext before skipTo: this is a pessimisation, hasNext will invoke
         // computeNext under the hood, which is an expensive operation to produce a value that we plan to throw away.

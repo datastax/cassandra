@@ -46,6 +46,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -442,9 +443,9 @@ public class VectorMemtableIndex implements MemtableIndex
         }
 
         @Override
-        protected void performSkipTo(PrimaryKey nextKey)
+        protected void performSkipTo(Token nextToken)
         {
-            while (!keyQueue.isEmpty() && keyQueue.peek().compareTo(nextKey) < 0)
+            while (!keyQueue.isEmpty() && keyQueue.peek().token().compareTo(nextToken) < 0)
                 keyQueue.poll();
         }
 

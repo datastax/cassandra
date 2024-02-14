@@ -25,6 +25,7 @@ import java.util.PriorityQueue;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -85,25 +86,20 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         return count;
     }
 
-    public final PrimaryKey nextOrNull()
-    {
-        return hasNext() ? next() : null;
-    }
-
     /**
      * When called, this iterators current position will
      * be skipped forwards until finding either:
-     *   1) an element equal to or bigger than next
+     *   1) an element with a token equal to or bigger than nextToken
      *   2) the end of the iterator
      *
      * @param nextToken value to skip the iterator forward until matching
      */
-    public final void skipTo(PrimaryKey nextToken)
+    public final void skipTo(Token nextToken)
     {
         if (state == State.DONE)
             return;
 
-        if (state == State.READY && next.compareTo(nextToken) >= 0)
+        if (state == State.READY && next.token().compareTo(nextToken) >= 0)
             return;
 
         performSkipTo(nextToken);
@@ -111,18 +107,18 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
     }
 
     /**
-     * Skip up to nextKey, but leave the internal state in a position where
-     * calling computeNext() will return nextKey or the first one after it.
+     * Skip up to nextToken, but leave the internal state in a position where
+     * calling computeNext() will return first nextKey with a token equal to nextToken or the first one after it.
      */
-    protected abstract void performSkipTo(PrimaryKey nextKey);
+    protected abstract void performSkipTo(Token nextToken);
 
     /**
      * Intersect this iterator with the given {@link PrimaryKey} to determine whether this iterator contains that
      * {@link PrimaryKey}. This method efficiently intersects multiple iterators. By pushing the comparison logic
-     * down to the lowest level, therefore skipping unnecessary {@link PrimaryKey} materialization and comparison.
+     * down to the lowest level, we potentially skip unnecessary {@link PrimaryKey} materialization and comparison.
      * <p>
-     * This method is semantically the same as calling {@link #skipTo(PrimaryKey)}, then comparing the result of
-     * {@link #nextOrNull()} to the {@link PrimaryKey} passed to this method.
+     * This method is semantically the same as calling skipping to a {@link PrimaryKey}, then comparing the result of
+     * iterator's next {@link PrimaryKey} to the {@link PrimaryKey} passed to this method.
      * </p>
      * @param otherKey the {@link PrimaryKey} to use to determine the {@link IntersectionResult}
      * @return An {@link IntersectionResult} to indicate whether this iterator contains the otherKey. See
@@ -244,7 +240,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         {
             EmptyRangeIterator() { super(null, null, 0); }
             public org.apache.cassandra.index.sai.utils.PrimaryKey computeNext() { return endOfData(); }
-            protected void performSkipTo(org.apache.cassandra.index.sai.utils.PrimaryKey nextToken) { }
+            protected void performSkipTo(Token nextToken) { }
             protected IntersectionResult performIntersect(org.apache.cassandra.index.sai.utils.PrimaryKey otherKey)
             {
                 return IntersectionResult.EXHAUSTED;

@@ -27,6 +27,7 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
@@ -67,7 +68,7 @@ public class PostingListRangeIterator extends RangeIterator
     private final AtomicBoolean isClosed = new AtomicBoolean(false);
 
     private boolean needsSkipping = false;
-    private PrimaryKey skipToToken = null;
+    private Token skipToToken = null;
     private long lastSegmentRowId = -1;
 
     /**
@@ -88,15 +89,12 @@ public class PostingListRangeIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(Token nextToken)
     {
-        // If skipToToken is equal to nextKey, we take the nextKey because in practice, it is greater than or equal
-        // to the skipToToken. This is because token only PKs are considered equal to all PKs with the same token,
-        // and for a range query, we first skip on the token-only PK.
-        if (skipToToken != null && skipToToken.compareTo(nextKey) > 0)
+        if (skipToToken != null && skipToToken.compareTo(nextToken) >= 0)
             return;
 
-        skipToToken = nextKey;
+        skipToToken = nextToken;
         needsSkipping = true;
     }
 
@@ -161,7 +159,7 @@ public class PostingListRangeIterator extends RangeIterator
 
     private boolean exhausted()
     {
-        return needsSkipping && skipToToken.compareTo(getMaximum()) > 0;
+        return needsSkipping && skipToToken.compareTo(getMaximum().token()) > 0;
     }
 
     @Override
@@ -229,22 +227,12 @@ public class PostingListRangeIterator extends RangeIterator
         long segmentRowId;
         if (needsSkipping)
         {
-            long targetRowID;
-            if (skipToToken instanceof PrimaryKeyWithSource
-                && ((PrimaryKeyWithSource) skipToToken).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
-            {
-                targetRowID = ((PrimaryKeyWithSource) skipToToken).getSourceRowId();
-            }
-            else
-            {
-                targetRowID = primaryKeyMap.ceiling(skipToToken);
-                // skipToToken is larger than max token in token file
-                if (targetRowID < 0)
-                {
-                    return PostingList.END_OF_STREAM;
-                }
-            }
-
+            long targetRowID = primaryKeyMap.exactRowIdOrInvertedCeiling(skipToToken);
+            // skipToToken is larger than max token in token file
+            if (targetRowID == Long.MIN_VALUE)
+                return PostingList.END_OF_STREAM;
+            if (targetRowID < 0)
+                targetRowID = -targetRowID - 1;
             segmentRowId = postingList.advance(targetRowID - searcherContext.getSegmentRowIdOffset());
             needsSkipping = false;
         }

@@ -102,7 +102,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
 
-        iterator.skipTo(primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(0)));
+        iterator.skipTo(new Murmur3Partitioner.LongToken(0));
 
         assertIterator(iterator, 1, 2, 3);
     }
@@ -112,7 +112,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
 
-        iterator.skipTo(primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(1)));
+        iterator.skipTo(new Murmur3Partitioner.LongToken(1));
 
         assertIterator(iterator, 1, 2, 3);
     }
@@ -122,7 +122,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
 
-        iterator.skipTo(primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(2)));
+        iterator.skipTo(new Murmur3Partitioner.LongToken(2));
 
         assertIterator(iterator, 2, 3);
     }
@@ -132,7 +132,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
 
-        iterator.skipTo(primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(3)));
+        iterator.skipTo(new Murmur3Partitioner.LongToken(3));
 
         assertIterator(iterator, 3);
     }
@@ -142,7 +142,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
 
-        iterator.skipTo(primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(4)));
+        iterator.skipTo(new Murmur3Partitioner.LongToken(4));
 
         assertIterator(iterator);
     }
@@ -152,7 +152,7 @@ public abstract class AbstractKeyRangeIteratorTest
     {
         RangeIterator iterator= makeIterator(1, 3, 1, 1, 2, 2, 3, 3);
 
-        iterator.skipTo(primaryKeyFactory.createTokenOnly(new Murmur3Partitioner.LongToken(2)));
+        iterator.skipTo(new Murmur3Partitioner.LongToken(2));
 
         assertIterator(iterator, 2, 3);
     }

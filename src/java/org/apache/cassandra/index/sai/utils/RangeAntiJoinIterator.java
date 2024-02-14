@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
 
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -46,10 +47,10 @@ public class RangeAntiJoinIterator extends RangeIterator
         return new RangeAntiJoinIterator(left, right);
     }
 
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(Token nextToken)
     {
-        left.skipTo(nextKey);
-        right.skipTo(nextKey);
+        left.skipTo(nextToken);
+        right.skipTo(nextToken);
     }
 
     @Override
@@ -69,31 +70,18 @@ public class RangeAntiJoinIterator extends RangeIterator
 
     protected PrimaryKey computeNext()
     {
-        if (nextKeyToSkip == null)
-            nextKeyToSkip = right.nextOrNull();
-
-        PrimaryKey key = left.nextOrNull();
-        int cmp = compare(key, nextKeyToSkip);
-
-        while (key != null && cmp >= 0)
+        while (left.hasNext())
         {
-            if (cmp == 0)
+            var key = left.next();
+            switch (right.intersect(key))
             {
-                key = left.nextOrNull();
+                case MATCH:
+                    continue;
+                case MISS:
+                case EXHAUSTED:
+                    return key;
             }
-            else
-            {
-                right.skipTo(key);
-            }
-            nextKeyToSkip = right.nextOrNull();
-            cmp = compare(key, nextKeyToSkip);
         }
-
-        return key != null ? key : endOfData();
-    }
-
-    private int compare(PrimaryKey key1, PrimaryKey key2)
-    {
-        return (key1 == null || key2 == null) ? -1 : key1.compareTo(key2);
+        return endOfData();
     }
 }
