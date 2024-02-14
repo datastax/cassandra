@@ -34,7 +34,7 @@ import org.apache.cassandra.io.util.FileUtils;
  */
 public abstract class RangeIterator extends AbstractIterator<PrimaryKey> implements Closeable
 {
-    protected enum IntersectionResult
+    public enum IntersectionResult
     {
         MATCH, // Returned when the key matches a key in the iterator
         MISS,  // Returned when the key does not match a key in the iterator, and the iterator is not exhausted
@@ -124,7 +124,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
      * @return An {@link IntersectionResult} to indicate whether this iterator contains the otherKey. See
      * {@link IntersectionResult} for details.
      */
-    protected final IntersectionResult intersect(PrimaryKey otherKey)
+    public final IntersectionResult intersect(PrimaryKey otherKey)
     {
         if (state == State.DONE)
             return IntersectionResult.EXHAUSTED;

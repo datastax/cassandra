@@ -29,6 +29,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 
 import static org.junit.Assert.assertEquals;
@@ -82,6 +83,65 @@ public class PostingListRangeIteratorTest
             union.next();
             union.skipTo(new Murmur3Partitioner.LongToken(3));
             assertFalse(union.hasNext());
+        }
+    }
+
+    @Test
+    public void testSeveralIntersectionsOnSameIterator() throws IOException
+    {
+        @SuppressWarnings("resource")
+        var postingList = new ArrayPostingList(new int[]{1,2,4,7,10});
+        var mockIndexContext = mock(IndexContext.class);
+        var indexContext = new IndexSearcherContext(pkm.primaryKeyFromRowId(1),
+                                                    pkm.primaryKeyFromRowId(11),
+                                                    1,
+                                                    11,
+                                                    0,
+                                                    new QueryContext(10000),
+                                                    postingList.peekable());
+        try (var iterator = new PostingListRangeIterator(mockIndexContext, pkm, indexContext))
+        {
+            assertEquals(RangeIterator.IntersectionResult.MISS, iterator.intersect(pkm.primaryKeyFromRowId(0)));
+            assertEquals(RangeIterator.IntersectionResult.MATCH, iterator.intersect(pkm.primaryKeyFromRowId(1)));
+            assertEquals(RangeIterator.IntersectionResult.MATCH, iterator.intersect(pkm.primaryKeyFromRowId(4)));
+            assertEquals(RangeIterator.IntersectionResult.MISS, iterator.intersect(pkm.primaryKeyFromRowId(5)));
+            assertEquals(RangeIterator.IntersectionResult.MISS, iterator.intersect(pkm.primaryKeyFromRowId(6)));
+            assertEquals(RangeIterator.IntersectionResult.MATCH, iterator.intersect(pkm.primaryKeyFromRowId(7)));
+            assertEquals(RangeIterator.IntersectionResult.EXHAUSTED, iterator.intersect(pkm.primaryKeyFromRowId(11)));
+            // Calling after we've already exhausted must not throw an exception.
+            assertEquals(RangeIterator.IntersectionResult.EXHAUSTED, iterator.intersect(pkm.primaryKeyFromRowId(12)));
+            assertFalse(iterator.hasNext());
+        }
+    }
+
+    @Test
+    public void testMixingIntersectionNextAndSkipToOnSameIterator() throws IOException
+    {
+        @SuppressWarnings("resource")
+        var postingList = new ArrayPostingList(new int[]{1,2,4,7,9,10});
+        var mockIndexContext = mock(IndexContext.class);
+        var indexContext = new IndexSearcherContext(pkm.primaryKeyFromRowId(1),
+                                                    pkm.primaryKeyFromRowId(11),
+                                                    1,
+                                                    11,
+                                                    0,
+                                                    new QueryContext(10000),
+                                                    postingList.peekable());
+        try (var iterator = new PostingListRangeIterator(mockIndexContext, pkm, indexContext))
+        {
+            assertEquals(RangeIterator.IntersectionResult.MISS, iterator.intersect(pkm.primaryKeyFromRowId(0)));
+            assertTrue(iterator.hasNext());
+            assertEquals(pkm.primaryKeyFromRowId(1), iterator.next());
+            // Intersecting with 4 consumes it, so the next entry is 7
+            assertEquals(RangeIterator.IntersectionResult.MATCH, iterator.intersect(pkm.primaryKeyFromRowId(4)));
+            assertTrue(iterator.hasNext());
+            assertEquals(pkm.primaryKeyFromRowId(7), iterator.next());
+            // Skipping to 9 doesn't consume it
+            iterator.skipTo(new Murmur3Partitioner.LongToken(9));
+            assertEquals(RangeIterator.IntersectionResult.MATCH, iterator.intersect(pkm.primaryKeyFromRowId(9)));
+            assertTrue(iterator.hasNext());
+            assertEquals(pkm.primaryKeyFromRowId(10), iterator.next());
+            assertFalse(iterator.hasNext());
         }
     }
 

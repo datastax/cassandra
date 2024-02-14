@@ -204,8 +204,7 @@ public class PostingListRangeIterator extends RangeIterator
             }
 
             long targetSegmentRowID = targetRowID - searcherContext.segmentRowIdOffset;
-            if (lastSegmentRowId > targetSegmentRowID)
-                return IntersectionResult.MISS;
+            assert targetSegmentRowID > lastSegmentRowId : "Intersection should always be called with a greater PrimaryKey.";
 
             // It is cheaper to get nextPosting, and since nextPosting() will return either targetSegmentRowID or
             // something greater, just call that.
