@@ -96,15 +96,21 @@ public class KeyRangeIterator extends RangeIterator
     {
         while (!keys.isEmpty())
         {
-            PrimaryKey primaryKey = keys.poll();
-            var cmp = primaryKey.compareTo(otherKey);
+            PrimaryKey key = keys.poll();
+            var cmp = key.compareTo(otherKey);
             if (cmp < 0)
                 continue;
             if (cmp == 0)
+            {
+                // Because intersection is guaranteed to be strictly ascending, we must keep
+                // track of lastKey, but do not need to actively dedupe.
+                if (!uniqueKeys)
+                    lastKey = key;
                 return IntersectionResult.MATCH;
+            }
 
-            // Store the primary key
-            setNext(primaryKey);
+            // Store the primary key as the next value for the iterator
+            setNext(key);
             return IntersectionResult.MISS;
         }
         return IntersectionResult.EXHAUSTED;

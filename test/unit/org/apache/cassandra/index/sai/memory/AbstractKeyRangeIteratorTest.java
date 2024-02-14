@@ -157,6 +157,78 @@ public abstract class AbstractKeyRangeIteratorTest
         assertIterator(iterator, 2, 3);
     }
 
+    @Test
+    public void intersectPrimaryKeyBeforeFirstKeyWillReturnAllTokens() throws Exception
+    {
+        RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
+
+        assertEquals(RangeIterator.IntersectionResult.MISS, iterator.intersect(keyForToken(0)));
+
+        assertIterator(iterator, 1, 2, 3);
+    }
+
+    @Test
+    public void intersectFirstTokenWillSubsequentTokens() throws Exception
+    {
+        RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
+
+        assertEquals(RangeIterator.IntersectionResult.MATCH, iterator.intersect(keyForToken(1)));
+
+        assertIterator(iterator, 2, 3);
+    }
+
+    @Test
+    public void intersectMiddleTokenWillReturnRemainingTokens() throws Exception
+    {
+        RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
+
+        assertEquals(RangeIterator.IntersectionResult.MATCH, iterator.intersect(keyForToken(2)));
+
+        assertIterator(iterator, 3);
+    }
+
+    @Test
+    public void intersectLastTokenWillReturnNoTokens() throws Exception
+    {
+        RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
+
+        assertEquals(RangeIterator.IntersectionResult.MATCH, iterator.intersect(keyForToken(3)));
+
+        assertIterator(iterator);
+    }
+
+    @Test
+    public void intersectAfterLastTokenWillReturnNoTokens() throws Exception
+    {
+        RangeIterator iterator= makeIterator(1, 3, 1, 2, 3);
+
+        assertEquals(RangeIterator.IntersectionResult.EXHAUSTED, iterator.intersect(keyForToken(4)));
+
+        assertIterator(iterator);
+    }
+
+    @Test
+    public void intersectWithMatchingTokensWithReturnCorrectTokens() throws Exception
+    {
+        RangeIterator iterator= makeIterator(1, 3, 1, 1, 2, 2, 3, 3);
+
+        assertEquals(RangeIterator.IntersectionResult.MATCH, iterator.intersect(keyForToken(2)));
+
+        assertIterator(iterator, 3);
+    }
+
+    @Test
+    public void skipToThenIntersectWithMatchingTokensWithReturnCorrectTokens() throws Exception
+    {
+        RangeIterator iterator= makeIterator(1, 3, 1, 1, 2, 2, 3, 3);
+
+        iterator.skipTo(new Murmur3Partitioner.LongToken(2));
+        assertEquals(RangeIterator.IntersectionResult.MATCH, iterator.intersect(keyForToken(2)));
+        iterator.skipTo(new Murmur3Partitioner.LongToken(3));
+
+        assertIterator(iterator, 3);
+    }
+
     private void assertIterator(RangeIterator iterator, long... tokens) throws Exception
     {
         for(long token : tokens)
