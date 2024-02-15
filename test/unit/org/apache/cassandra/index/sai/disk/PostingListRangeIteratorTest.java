@@ -145,6 +145,26 @@ public class PostingListRangeIteratorTest
         }
     }
 
+    @Test
+    public void testIntersectWithDuplicatesInPostingList() throws IOException
+    {
+        @SuppressWarnings("resource")
+        var postingList = new ArrayPostingList(new int[]{0, 5, 5, 6});
+        var mockIndexContext = mock(IndexContext.class);
+        var indexContext = new IndexSearcherContext(pkm.primaryKeyFromRowId(0),
+                                                    pkm.primaryKeyFromRowId(6),
+                                                    0,
+                                                    6,
+                                                    0,
+                                                    new QueryContext(10000),
+                                                    postingList.peekable());
+        try (var iterator = new PostingListRangeIterator(mockIndexContext, pkm, indexContext))
+        {
+            assertEquals(RangeIterator.IntersectionResult.MISS, iterator.intersect(pkm.primaryKeyFromRowId(2)));
+            assertEquals(RangeIterator.IntersectionResult.MATCH, iterator.intersect(pkm.primaryKeyFromRowId(6)));
+        }
+    }
+
     private IndexSearcherContext buildIndexContext(int minRowId, int maxRowId, PostingList.PeekablePostingList list) throws IOException
     {
         return new IndexSearcherContext(pkm.primaryKeyFromRowId(minRowId),

@@ -206,14 +206,9 @@ public class PostingListRangeIterator extends RangeIterator
             long targetSegmentRowID = targetRowID - searcherContext.segmentRowIdOffset;
             assert targetSegmentRowID > lastSegmentRowId : "Intersection should always be called with a greater PrimaryKey.";
 
-            // It is cheaper to get nextPosting, and since nextPosting() will return either targetSegmentRowID or
-            // something greater, just call that.
-            // VSTODO this optimization should be pushed into the advance implemenation since it has all of the relevant
-            // state.
-            if (lastSegmentRowId + 1 == targetSegmentRowID)
-                lastSegmentRowId = postingList.nextPosting();
-            else
-                lastSegmentRowId = postingList.advance(targetSegmentRowID);
+            // Advance to targetSegmentRowID. We don't need to worry about duplicates because we know
+            // targetSegmentRowID > lastSegmentRowId.
+            lastSegmentRowId = postingList.advance(targetSegmentRowID);
 
             if (lastSegmentRowId == PostingList.END_OF_STREAM)
                 return IntersectionResult.EXHAUSTED;
