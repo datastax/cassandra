@@ -94,8 +94,9 @@ public class Segment implements Closeable, SegmentOrdering
             version = version == Version.CA ? Version.BA : Version.CA;
             searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
         }
-        logger.info("Opened searcher {} for segment {}:{} at version {}",
-                    searcher.getClass().getSimpleName(), sstableContext.descriptor(), metadata.segmentRowIdOffset, version);
+        logger.info("Opened searcher {} for segment {}:{} for index [{}] on column [{}] at version {}",
+                    searcher.getClass().getSimpleName(), sstableContext.descriptor(), metadata.segmentRowIdOffset,
+                    indexContext.getIndexName(), indexContext.getColumnName(), version);
         this.index = searcher;
     }
 
