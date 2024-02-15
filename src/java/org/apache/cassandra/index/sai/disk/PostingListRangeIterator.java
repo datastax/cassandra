@@ -166,12 +166,9 @@ public class PostingListRangeIterator extends RangeIterator
     @Override
     protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
-        if (needsSkipping && skipToToken != null)
-        {
-            assert skipToToken.compareTo(otherKey.token()) <= 0 : "skipToToken should always be less than otherKey";
-            needsSkipping = false;
-            skipToToken = null;
-        }
+        assert skipToToken == null || skipToToken.compareTo(otherKey.token()) <= 0 : "skipToToken should always be less than otherKey";
+        needsSkipping = false;
+        skipToToken = null;
 
         // TODO is this guard valuable or too expensive? It seems like preventing unnecessary calls
         // to advance is worth it.
