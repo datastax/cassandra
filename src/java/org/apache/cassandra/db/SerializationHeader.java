@@ -324,7 +324,7 @@ public class SerializationHeader
             boolean dropped = table.getDroppedColumn(columnName) != null;
             if (!dropped && type.isTuple() && type.isMultiCell())
             {
-                logger.error("Error reading SSTable header {}, the type for column {} in {} is not-frozen {}, " +
+                logger.debug("Error reading SSTable header {}, the type for column {} in {} is not-frozen {}, " +
                              "but the column isn't marked as dropped, which is invalid; " +
                              "Will continue with that type, but something may break.",
                              descriptor, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type().toSchemaString());
@@ -343,18 +343,18 @@ public class SerializationHeader
                 {
                     // We don't know how to fix. We log an error here, so we know where the problem is coming from. But we
                     // otherwise use the type verbatim in the off chance that the type breakage doesn't impact anything.
-                    logger.error("Error reading SSTable header {}, the type for column {} in {} is {}, which is " +
+                    logger.debug("Error reading SSTable header {}, the type for column {} in {} is {}, which is " +
                                  "invalid ({}); Will continue with that type, but something may break.",
-                                 descriptor, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type(),
+                                 descriptor, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type().toSchemaString(),
                                  e.getMessage());
                     return type;
                 }
                 else
                 {
-                    logger.warn("Error reading SSTable header {}, the type for column {} in {} is {}, which is " +
+                    logger.debug("Error reading SSTable header {}, the type for column {} in {} is {}, which is " +
                                 "invalid ({}); Will continue with modified valid type {}, but please contact " +
                                 "support if this is incorrect.",
-                                descriptor, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type(),
+                                descriptor, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type().toSchemaString(),
                                 e.getMessage(), fixed.asCQL3Type());
                     return fixed;
                 }
