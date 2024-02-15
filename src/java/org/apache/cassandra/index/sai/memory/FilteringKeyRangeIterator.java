@@ -36,11 +36,21 @@ public class FilteringKeyRangeIterator extends KeyRangeIterator
         this.keyRange = keyRange;
     }
 
+    @Override
     protected PrimaryKey computeNext()
     {
         PrimaryKey key = computeNextKey();
         while (key != null && !keyRange.contains(key.partitionKey()))
             key = computeNextKey();
         return key == null ? endOfData() : key;
+    }
+
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey key)
+    {
+         var result = super.performIntersect(key);
+         if (result == IntersectionResult.MATCH && !keyRange.contains(key.partitionKey()))
+             return IntersectionResult.MISS;
+         return result;
     }
 }
