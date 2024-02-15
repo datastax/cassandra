@@ -36,6 +36,7 @@ import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
@@ -61,7 +62,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
-    private final CachingGraphIndex graph;
+    private volatile GraphIndex<float[]> graph;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
@@ -74,16 +75,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
         SegmentMetadata.ComponentMetadata termsMetadata = getComponentMetadata(IndexComponent.TERMS_DATA);
         graphHandle = indexFiles.termsData();
-        var graphIndex = new OnDiskGraphIndex<float[]>(graphHandle::createReader, termsMetadata.offset);
-
-        // try to reduce cache distance from default 3 to reduce memory usage.
-        // let's have astra target 1% of the vectors
-        int distance = Math.min(logBaseX(0.01d * graphIndex.size(), graphIndex.maxDegree()), 3);
-
-        if (distance < 3 && logger.isDebugEnabled())
-            logger.debug("Reducing cache distance from 3 to {} for {}", distance, graphHandle.path());
-
-        graph = new CachingGraphIndex(graphIndex, distance);
+        graph = new OnDiskGraphIndex<>(graphHandle::createReader, termsMetadata.offset);
 
         long pqSegmentOffset = getComponentMetadata(IndexComponent.PQ).offset;
         try (var pqFile = indexFiles.pq();
@@ -112,7 +104,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     @Override
     public long ramBytesUsed()
     {
-        return graph.ramBytesUsed();
+        return graph instanceof CachingGraphIndex ? ((CachingGraphIndex) graph).ramBytesUsed() : Long.BYTES * 4;
     }
 
     @Override
@@ -143,7 +135,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
         // We cannot use try-with-resources here because AutoResumingNodeScoreIterator might need to resume the search,
         // which relies on the graph view.
-        var view = graph.getView();
+        var view = getView();
         try
         {
             NodeSimilarity.ScoreFunction scoreFunction;
@@ -206,7 +198,27 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     @Override
     public VectorSupplier getVectorSupplier()
     {
-        return new ANNVectorSupplier(graph.getView());
+        return new ANNVectorSupplier(getView());
+    }
+
+    private GraphIndex.View<float[]> getView()
+    {
+        // asynchronously cache the most-accessed parts of the graph
+        if (!(graph instanceof CachingGraphIndex))
+        {
+            Stage.IO.executor().execute(() -> {
+                synchronized (this)
+                {
+                    if (graph instanceof CachingGraphIndex)
+                        return;
+                    // target 1% of the vectors with a max distance of 3
+                    int distance = Math.min(logBaseX(0.01d * graph.size(), graph.maxDegree()), 3);
+                    logger.debug("Caching {} to distance {}", graphHandle.path(), distance);
+                    graph = new CachingGraphIndex((OnDiskGraphIndex<float[]>) graph, distance);
+                }
+            });
+        }
+        return graph.getView();
     }
 
     private static class ANNVectorSupplier implements VectorSupplier
