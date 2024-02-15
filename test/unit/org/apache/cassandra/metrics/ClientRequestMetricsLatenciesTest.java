@@ -204,6 +204,15 @@ public class ClientRequestMetricsLatenciesTest
                                    ksName, cfName);
         QueryProcessor.process(cql, ONE);
 
+        // Unfortunately, accesses to the system keyspaces are counted as client requests in ClientRequestsMetrics.
+        // To work around this let's wait until the view build is finished and system writes complete.
+        await().atMost(5, TimeUnit.SECONDS).pollDelay(0, TimeUnit.SECONDS).until(
+            () -> QueryProcessor.process(String.format("SELECT status FROM system_distributed.view_build_status WHERE keyspace_name='%1$s' AND view_name='example_view';", ksName),
+                                         ONE)
+                                .one().getString("status").equals("SUCCESS")
+
+        );
+
         try {
             List.of(ONE, QUORUM, LOCAL_QUORUM, ALL, ANY).forEach(cl -> {
                 QueryProcessor.process(String.format("TRUNCATE %1$s.%2$s;", ksName, cfName), ALL);
@@ -324,7 +333,7 @@ public class ClientRequestMetricsLatenciesTest
 
             // check if the metrics were bumped
             // since MV update is async, let's allow waiting for the metrics to settle
-            await().atMost(1, TimeUnit.SECONDS).pollDelay(0, TimeUnit.SECONDS).untilAsserted(() -> {
+            await().atMost(5, TimeUnit.SECONDS).pollDelay(0, TimeUnit.SECONDS).untilAsserted(() -> {
                 // get metrics snapshot
                 HashMap<NamedMetric, Long> afterExecution = getMetricsSnapshot(m -> m.executionTimeMetrics);
                 HashMap<NamedMetric, Long> afterServiceTime = getMetricsSnapshot(m -> m.serviceTimeMetrics);
