@@ -213,7 +213,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
                         return;
                     // target 1% of the vectors with a max distance of 3
                     int distance = Math.min(logBaseX(0.01d * graph.size(), graph.maxDegree()), 3);
-                    logger.debug("Caching {} to distance {}", graphHandle.path(), distance);
+                    logger.debug("Caching {}@{} to distance {}", this, graphHandle.path(), distance);
                     graph = new CachingGraphIndex((OnDiskGraphIndex<float[]>) graph, distance);
                 }
             });
