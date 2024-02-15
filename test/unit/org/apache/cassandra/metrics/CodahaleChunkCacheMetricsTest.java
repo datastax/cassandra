@@ -96,7 +96,7 @@ public class CodahaleChunkCacheMetricsTest
         assertEquals(0.0, chunkCacheMetrics.missLatency(), 0.0);
 
         // Cache size was statically initialized 
-        assertEquals(ChunkCache.cacheSize, chunkCacheMetrics.capacity());
+        assertEquals(ChunkCache.instance.capacity(), chunkCacheMetrics.capacity());
 
         assertEquals(0, chunkCacheMetrics.size());
 

@@ -991,7 +991,7 @@ public final class SchemaKeyspace
                             .flags(flags)
                             .params(createTableParamsFromRow(row))
                             .addColumns(fetchColumns(keyspaceName, tableName, types, isCounter))
-                            .droppedColumns(fetchDroppedColumns(keyspaceName, tableName, isCounter))
+                            .droppedColumns(fetchDroppedColumns(keyspaceName, tableName))
                             .indexes(fetchIndexes(keyspaceName, tableName))
                             .triggers(fetchTriggers(keyspaceName, tableName))
                             .build();
@@ -1044,12 +1044,11 @@ public final class SchemaKeyspace
                                             ByteBuffer name,
                                             AbstractType<?> type,
                                             boolean isPrimaryKeyColumn,
-                                            boolean isCounterTable,
-                                            boolean isDroppedColumn)
+                                            boolean isCounterTable)
     {
         try
         {
-            type.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isDroppedColumn);
+            type.validateForColumn(name, isPrimaryKeyColumn, isCounterTable);
             return type;
         }
         catch (InvalidColumnTypeException e)
@@ -1083,42 +1082,43 @@ public final class SchemaKeyspace
             type = ReversedType.getInstance(type);
 
         ByteBuffer columnNameBytes = row.getBytes("column_name_bytes");
-        type = validate(keyspace, table, columnNameBytes, type, kind.isPrimaryKeyKind(), isCounterTable, false);
+        type = validate(keyspace, table, columnNameBytes, type, kind.isPrimaryKeyKind(), isCounterTable);
 
         ColumnIdentifier name = new ColumnIdentifier(columnNameBytes, row.getString("column_name"));
 
         return new ColumnMetadata(keyspace, table, name, type, position, kind);
     }
 
-    private static Map<ByteBuffer, DroppedColumn> fetchDroppedColumns(String keyspace, String table, boolean isCounterTable)
+    private static Map<ByteBuffer, DroppedColumn> fetchDroppedColumns(String keyspace, String table)
     {
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ?", SchemaConstants.SCHEMA_KEYSPACE_NAME, DROPPED_COLUMNS);
         Map<ByteBuffer, DroppedColumn> columns = new HashMap<>();
         for (UntypedResultSet.Row row : query(query, keyspace, table))
         {
-            DroppedColumn column = createDroppedColumnFromRow(row, isCounterTable);
+            DroppedColumn column = createDroppedColumnFromRow(row);
             columns.put(column.column.name.bytes, column);
         }
         return columns;
     }
 
-    private static DroppedColumn createDroppedColumnFromRow(UntypedResultSet.Row row, boolean isCounterTable)
+    private static DroppedColumn createDroppedColumnFromRow(UntypedResultSet.Row row)
     {
         String keyspace = row.getString("keyspace_name");
         String table = row.getString("table_name");
         String name = row.getString("column_name");
-
-        // Note that it's important we call parseDroppedType, not parse, see the method javadoc for details.
-        AbstractType<?> type = CQLTypeParser.parseDroppedType(keyspace, row.getString("type"));
+        /*
+         * we never store actual UDT names in dropped column types (so that we can safely drop types if nothing refers to
+         * them anymore), so before storing dropped columns in schema we expand UDTs to tuples. See expandUserTypes method.
+         * Because of that, we can safely pass Types.none() to parse()
+         */
+        AbstractType<?> type = CQLTypeParser.parse(keyspace, row.getString("type"), org.apache.cassandra.schema.Types.none());
         ColumnMetadata.Kind kind = row.has("kind")
                                  ? ColumnMetadata.Kind.valueOf(row.getString("kind").toUpperCase())
                                  : ColumnMetadata.Kind.REGULAR;
         assert kind == ColumnMetadata.Kind.REGULAR || kind == ColumnMetadata.Kind.STATIC
             : "Unexpected dropped column kind: " + kind;
 
-        type = validate(keyspace, table, UTF8Type.instance.decompose(name), type, false, isCounterTable, true);
-
-        ColumnMetadata column = ColumnMetadata.droppedColumn(keyspace, table, ColumnIdentifier.getInterned(name, true), type, kind);
+        ColumnMetadata column = new ColumnMetadata(keyspace, table, ColumnIdentifier.getInterned(name, true), type, ColumnMetadata.NO_POSITION, kind);
         long droppedTime = TimeUnit.MILLISECONDS.toMicros(row.getLong("dropped_time"));
         return new DroppedColumn(column, droppedTime);
     }
@@ -1183,7 +1183,7 @@ public final class SchemaKeyspace
             TableMetadata.builder(keyspaceName, viewName, TableId.fromUUID(row.getUUID("id")))
                          .kind(TableMetadata.Kind.VIEW)
                          .addColumns(columns)
-                         .droppedColumns(fetchDroppedColumns(keyspaceName, viewName, false))
+                         .droppedColumns(fetchDroppedColumns(keyspaceName, viewName))
                          .params(createTableParamsFromRow(row))
                          .build();
 

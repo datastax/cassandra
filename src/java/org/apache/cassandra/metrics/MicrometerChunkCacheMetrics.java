@@ -35,35 +35,40 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements ChunkCacheMetrics
 {
-    public static final String CHUNK_CACHE_MISS_LATENCY = "chunk_cache_miss_latency_seconds";
-    public static final String CHUNK_CACHE_EVICTIONS = "chunk_cache_evictions";
-
     private final CacheSize cache;
+    private final String metricsPrefix;
 
     private volatile MicrometerCacheMetrics metrics;
     private volatile Timer missLatency;
     private volatile Counter evictions;
 
-    MicrometerChunkCacheMetrics(CacheSize cache)
+    public MicrometerChunkCacheMetrics(CacheSize cache)
+    {
+        this(cache, "chunk_cache");
+    }
+
+    public MicrometerChunkCacheMetrics(CacheSize cache, String metricsPrefix)
     {
         this.cache = cache;
-        this.metrics = new MicrometerCacheMetrics("chunk_cache", cache);
-        this.metrics.register(registryWithTags().left, registryWithTags().right);
+        this.metricsPrefix = metricsPrefix;
 
-        this.missLatency = timer(CHUNK_CACHE_MISS_LATENCY);
-        this.evictions = counter(CHUNK_CACHE_EVICTIONS);
+        registerMetrics(registryWithTags().left, registryWithTags().right);
+    }
+
+    private void registerMetrics(MeterRegistry registry, Tags tags)
+    {
+        this.metrics = new MicrometerCacheMetrics(metricsPrefix, cache);
+        this.metrics.register(registry, tags);
+
+        this.missLatency = timer(metricsPrefix + "_miss_latency_seconds");
+        this.evictions = counter(metricsPrefix + "_evictions");
     }
 
     @Override
     public synchronized void register(MeterRegistry newRegistry, Tags newTags)
     {
         super.register(newRegistry, newTags);
-
-        this.metrics = new MicrometerCacheMetrics("chunk_cache", cache);
-        this.metrics.register(newRegistry, newTags);
-
-        this.missLatency = timer(CHUNK_CACHE_MISS_LATENCY);
-        this.evictions = counter(CHUNK_CACHE_EVICTIONS);
+        registerMetrics(newRegistry, newTags);
     }
 
     @Override
