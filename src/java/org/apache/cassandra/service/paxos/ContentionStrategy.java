@@ -318,8 +318,8 @@ public class ContentionStrategy
             this.modifier = modifier;
             this.selector = selector;
             ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(null);
-            this.reads = new TimeLimitedLatencySupplier(metrics.casReadMetrics.latency::getSnapshot, 10L, SECONDS);
-            this.writes = new TimeLimitedLatencySupplier(metrics.casWriteMetrics.latency::getSnapshot, 10L, SECONDS);
+            this.reads = new TimeLimitedLatencySupplier(metrics.casReadMetrics.executionTimeMetrics.latency::getSnapshot, 10L, SECONDS);
+            this.writes = new TimeLimitedLatencySupplier(metrics.casWriteMetrics.executionTimeMetrics.latency::getSnapshot, 10L, SECONDS);
         }
 
         long get(int attempts)
