@@ -20,6 +20,8 @@ package org.apache.cassandra.cql3.validation.entities;
 
 import java.math.BigInteger;
 
+import com.google.common.primitives.Floats;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -121,6 +123,94 @@ public class CQLVectorTest extends CQLTester
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, ?)",
                                   vector(BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE), BigInteger.ONE));
+    }
+
+    @Test
+    public void randomVectorFunction() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
+
+        // correct usage
+        execute("INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1, 1))");
+        Assert.assertEquals(1, execute("SELECT value FROM %s WHERE pk = 0").size());
+
+        // wrong number of arguments
+        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(INTEGER, [float|double|int], [float|double|int])",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector())");
+        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(INTEGER, [float|double|int], [float|double|int])",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1))");
+        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(INTEGER, [float|double|int], [float|double|int])",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1, 1, 0))");
+
+        // mandatory arguments
+        assertInvalidThrowMessage("Function system.random_float_vector requires a INTEGER literal argument, but found NULL",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(null, null, null))");
+        assertInvalidThrowMessage("Function system.random_float_vector requires a INTEGER literal argument, but found NULL",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(null, -1, 1))");
+        assertInvalidThrowMessage("Min argument of function system.random_float_vector must not be null",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, null, null))");
+        assertInvalidThrowMessage("Max argument of function system.random_float_vector must not be null",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1, null))");
+        assertInvalidThrowMessage("Min argument of function system.random_float_vector must not be null",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, null, 1))");
+
+        // wrong argument types
+        assertInvalidThrowMessage("Function system.random_float_vector requires a INTEGER literal argument, but found 'a'",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector('a', -1, 1))");
+        assertInvalidThrowMessage("Function system.random_float_vector requires a INTEGER literal argument, but found system.\"_add\"(1, 1)",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(1 + 1, -1, 1))");
+        assertInvalidThrowMessage("Function system.random_float_vector requires a INTEGER literal argument, but found value",
+                                  InvalidRequestException.class,
+                                  "SELECT random_float_vector(value, -1, 1) FROM %s");
+
+        // wrong argument values
+        assertInvalidThrowMessage("Max value must be greater than min value",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, 1, -1))");
+
+        // correct function with wrong receiver type
+        assertInvalidThrowMessage("Type error: cannot assign result of function system.random_float_vector " +
+                                  "(type vector<float, 1>) to value (type vector<float, 2>)",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(1, -1, 1))");
+    }
+
+    @Test
+    public void normalizeL2Function() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>)");
+
+        float[] components = new float[]{3.0f, 4.0f};
+        execute("INSERT INTO %s (k, v) VALUES (0, ?)", floatVector(components));
+
+        assertRows(execute("SELECT normalize_l2(v) FROM %s"), row(floatVector(0.6f, 0.8f)));
+        assertRows(execute("SELECT k, normalize_l2((vector<float, 2>) null) FROM %s"), row(0, null));
+
+        assertInvalidThrowMessage("Invalid number of arguments for function system.normalize_l2(vector<float, n>)",
+                                  InvalidRequestException.class,
+                                  "SELECT normalize_l2() FROM %s");
+        assertInvalidThrowMessage("Invalid number of arguments for function system.normalize_l2(vector<float, n>)",
+                                  InvalidRequestException.class,
+                                  "SELECT normalize_l2(v, 1) FROM %s");
+        assertInvalidThrowMessage("Function system.normalize_l2(vector<float, n>) requires a float vector argument, " +
+                                  "but found argument 123 of type int",
+                                  InvalidRequestException.class,
+                                  "SELECT normalize_l2(123) FROM %s");
+    }
+
+    protected final Vector<Float> floatVector(float... values)
+    {
+        return new Vector<>(Floats.asList(values).toArray(new Float[values.length]));
     }
 
     @SafeVarargs
