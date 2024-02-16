@@ -173,13 +173,13 @@ public class ClientRequestMetricsTest
     {
         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics("system");
         clearHistogram(metrics.rangeMetrics.roundTrips);
-        long latencyCount = metrics.rangeMetrics.latency.getCount();
+        long latencyCount = metrics.rangeMetrics.executionTimeMetrics.latency.getCount();
 
         session.execute("SELECT * FROM system.peers");
 
         assertThat(metrics.rangeMetrics.roundTrips.getCount()).isGreaterThan(0);
         assertThat(metrics.rangeMetrics.roundTrips.getSnapshot().getMax()).isEqualTo(1);
-        assertThat(metrics.rangeMetrics.latency.getCount()).isEqualTo(latencyCount + 1);
+        assertThat(metrics.rangeMetrics.executionTimeMetrics.latency.getCount()).isEqualTo(latencyCount + 1);
     }
 
     private void clearHistogram(Histogram histogram)
