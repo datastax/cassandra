@@ -29,7 +29,7 @@ import org.apache.cassandra.exceptions.TombstoneAbortException;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 
-public class ClientRequestMetrics extends LatencyMetrics
+public class ClientRequestMetrics
 {
     public final Meter timeouts;
     public final Meter unavailables;
@@ -40,10 +40,25 @@ public class ClientRequestMetrics extends LatencyMetrics
     public final Meter localRequests;
     public final Meter remoteRequests;
 
-    public ClientRequestMetrics(String scope, String namePrefix)
-    {
-        super("ClientRequest", namePrefix, scope);
+    /**
+     * this is the metric that measures the actual execution time of a certain request;
+     * for example, the duration of StorageProxy::readRegular method for regular reads
+     */
+    public final LatencyMetrics executionTimeMetrics;
 
+    /**
+     * this is the metric that measures the time a request spent in the system;
+     * for example, the duration between queryStartNanoTime and the end of StorageProxy::readRegular method for regular reads
+     */
+    public final LatencyMetrics serviceTimeMetrics;
+
+    protected final String namePrefix;
+    protected final MetricNameFactory factory;
+
+    public ClientRequestMetrics(String scope, String prefix)
+    {
+        namePrefix = prefix;
+        factory = new DefaultNameFactory("ClientRequest", scope);
         timeouts = Metrics.meter(factory.createMetricName(namePrefix + "Timeouts"));
         unavailables = Metrics.meter(factory.createMetricName(namePrefix + "Unavailables"));
         failures = Metrics.meter(factory.createMetricName(namePrefix + "Failures"));
@@ -52,6 +67,8 @@ public class ClientRequestMetrics extends LatencyMetrics
         readSizeAborts = Metrics.meter(factory.createMetricName(namePrefix + "ReadSizeAborts"));
         localRequests = Metrics.meter(factory.createMetricName(namePrefix + "LocalRequests"));
         remoteRequests = Metrics.meter(factory.createMetricName(namePrefix + "RemoteRequests"));
+        executionTimeMetrics = new LatencyMetrics(factory, namePrefix);
+        serviceTimeMetrics = new LatencyMetrics(factory, namePrefix + "ServiceTime");
     }
 
     public void markAbort(Throwable cause)
@@ -71,7 +88,6 @@ public class ClientRequestMetrics extends LatencyMetrics
 
     public void release()
     {
-        super.release();
         Metrics.remove(factory.createMetricName(namePrefix + "Timeouts"));
         Metrics.remove(factory.createMetricName(namePrefix + "Unavailables"));
         Metrics.remove(factory.createMetricName(namePrefix + "Failures"));
@@ -80,5 +96,7 @@ public class ClientRequestMetrics extends LatencyMetrics
         Metrics.remove(factory.createMetricName(namePrefix + "ReadSizeAborts"));
         Metrics.remove(factory.createMetricName(namePrefix + "LocalRequests"));
         Metrics.remove(factory.createMetricName(namePrefix + "RemoteRequests"));
+        executionTimeMetrics.release();
+        serviceTimeMetrics.release();
     }
 }

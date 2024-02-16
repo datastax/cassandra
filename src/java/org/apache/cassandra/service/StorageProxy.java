@@ -302,10 +302,13 @@ public class StorageProxy implements StorageProxyMBean
             }
             finally
             {
-                long latency = nanoTime() - startTime;
-                metrics.writeMetrics.addNano(latency);
-                metrics.writeMetricsForLevel(consistencyLevel).addNano(latency);
-                updateCoordinatorWriteLatencyTableMetric(mutations, latency);
+                long endTime = nanoTime();
+                long latency = endTime - startTime;
+                metrics.writeMetrics.executionTimeMetrics.addNano(latency);
+                metrics.writeMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
+                metrics.writeMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
+                metrics.writeMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
+                StorageProxy.updateCoordinatorWriteLatencyTableMetric(mutations, latency);
             }
         }
 
@@ -619,9 +622,12 @@ public class StorageProxy implements StorageProxyMBean
         }
         finally
         {
-            final long latency = nanoTime() - startTimeForMetrics;
-            metrics.casWriteMetrics.addNano(latency);
-            metrics.writeMetricsForLevel(consistencyForPaxos).addNano(latency);
+            final long endTime = nanoTime();
+            final long latency = endTime - startTimeForMetrics;
+            metrics.casWriteMetrics.executionTimeMetrics.addNano(latency);
+            metrics.casWriteMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
+            metrics.writeMetricsForLevel(consistencyForPaxos).executionTimeMetrics.addNano(latency);
+            metrics.writeMetricsForLevel(consistencyForPaxos).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
         }
     }
 
@@ -1158,9 +1164,12 @@ public class StorageProxy implements StorageProxyMBean
         }
         finally
         {
-            long latency = nanoTime() - startTime;
-            metrics.writeMetrics.addNano(latency);
-            metrics.writeMetricsForLevel(consistencyLevel).addNano(latency);
+            long endTime = nanoTime();
+            long latency = endTime - startTime;
+            metrics.writeMetrics.executionTimeMetrics.addNano(latency);
+            metrics.writeMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
+            metrics.writeMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
+            metrics.writeMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
         }
     }
@@ -1319,7 +1328,9 @@ public class StorageProxy implements StorageProxyMBean
         }
         finally
         {
-            metrics.viewWriteMetrics.addNano(nanoTime() - startTime);
+            final long endTime = nanoTime();
+            metrics.viewWriteMetrics.executionTimeMetrics.addNano(endTime - startTime);
+            metrics.viewWriteMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
         }
     }
 
@@ -2149,10 +2160,14 @@ public class StorageProxy implements StorageProxyMBean
         }
         finally
         {
-            long latency = nanoTime() - start;
-            metrics.readMetrics.addNano(latency);
-            metrics.casReadMetrics.addNano(latency);
-            metrics.readMetricsForLevel(consistencyLevel).addNano(latency);
+            long endTime = nanoTime();
+            long latency = endTime - start;
+            metrics.readMetrics.executionTimeMetrics.addNano(latency);
+            metrics.readMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
+            metrics.casReadMetrics.executionTimeMetrics.addNano(latency);
+            metrics.casReadMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
+            metrics.readMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
+            metrics.readMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
         }
         return result;
@@ -2209,9 +2224,12 @@ public class StorageProxy implements StorageProxyMBean
         }
         finally
         {
-            long latency = nanoTime() - start;
-            metrics.readMetrics.addNano(latency);
-            metrics.readMetricsForLevel(consistencyLevel).addNano(latency);
+            long endTime = nanoTime();
+            long latency = endTime - start;
+            metrics.readMetrics.executionTimeMetrics.addNano(latency);
+            metrics.readMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
+            metrics.readMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
+            metrics.readMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             // TODO avoid giving every command the same latency number.  Can fix this in CASSADRA-5329
             for (ReadCommand command : group.queries)
                 Keyspace.openAndGetStore(command.metadata()).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
