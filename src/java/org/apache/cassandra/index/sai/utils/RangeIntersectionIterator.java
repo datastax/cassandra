@@ -67,21 +67,24 @@ public class RangeIntersectionIterator extends RangeIterator
 
     protected PrimaryKey computeNext()
     {
-        // The highest primary key seen on any range iterator so far.
-        // It can become null when we reach the end of the iterator.
-
         outer:
         while (true)
         {
-            PrimaryKey highestKey = ranges.get(0).hasNext() ? ranges.get(0).next() : null;
-            if (highestKey == null)
+            if (!ranges.get(0).hasNext())
                 return endOfData();
-            // Try advance all iterators to the highest key seen so far.
-            // Once this inner loop finishes normally, all iterators are guaranteed to be at the same value.
+
+            // VSTODO - when we skip on a PostingsList, we know how many postings we skipped. Can we tie that
+            // information back into the IntersectionResult and then order the ranges based on the remaining
+            // number of postings? Then, we would always call next on the range with the fewest remaining postings.
+            PrimaryKey maybeNextKey = ranges.get(0).next();
+
+            // Iterate over each range and check if each range contains the maybeNextKey. If it does, the
+            // maybeNextKey is our next key. Otherwise, we continue to the next key in the first range until
+            // one of the ranges runs out of keys.
             for (int index = 1; index < ranges.size(); index++)
             {
                 RangeIterator range = ranges.get(index);
-                switch (range.intersect(highestKey))
+                switch (range.intersect(maybeNextKey))
                 {
                     case MATCH:
                         continue;
@@ -91,9 +94,8 @@ public class RangeIntersectionIterator extends RangeIterator
                         return endOfData();
                 }
             }
-            // If we reached here, next() has been called at least once on each range iterator and
-            // the last call to next() on each iterator returned a value equal to the highestKey.
-            return highestKey;
+            // If we reached here, maybeNextKey is our nextKey.
+            return maybeNextKey;
         }
     }
 
