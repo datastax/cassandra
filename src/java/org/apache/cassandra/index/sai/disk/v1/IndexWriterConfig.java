@@ -25,6 +25,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.disk.vector.OptimizeFor;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
@@ -44,7 +45,8 @@ public class IndexWriterConfig
     public static final String MAXIMUM_NODE_CONNECTIONS = "maximum_node_connections";
     public static final String CONSTRUCTION_BEAM_WIDTH = "construction_beam_width";
     public static final String SIMILARITY_FUNCTION = "similarity_function";
-    public static final String OPTIMIZE_FOR = "optimize_for";
+    public static final String SOURCE_MODEL = "source_model";
+    public static final String OPTIMIZE_FOR = "optimize_for"; // unused, retained for compatibility w/ old schemas
 
     public static final int MAXIMUM_MAXIMUM_NODE_CONNECTIONS = 512;
     public static final int MAXIMUM_CONSTRUCTION_BEAM_WIDTH = 3200;
@@ -60,12 +62,15 @@ public class IndexWriterConfig
                                                                 .map(e -> e.name())
                                                                 .collect(Collectors.joining(", "));
 
-    private static final OptimizeFor DEFAULT_OPTIMIZE_FOR = OptimizeFor.LATENCY;
-    private static final String validOptimizeFor = Arrays.stream(OptimizeFor.values())
-                                                         .map(Enum::name)
-                                                         .collect(Collectors.joining(", "));
+    private static final VectorSourceModel DEFAULT_SOURCE_MODEL = VectorSourceModel.OTHER;
+    private static final String validSourceModels = Arrays.stream(VectorSourceModel.values())
+                                                          .map(Enum::name)
+                                                          .collect(Collectors.joining(", "));
 
-    private static final IndexWriterConfig EMPTY_CONFIG = new IndexWriterConfig(null, -1, -1, -1, -1, null, null);
+    // no longer used
+    private static final OptimizeFor DEFAULT_OPTIMIZE_FOR = OptimizeFor.LATENCY;
+
+    private static final IndexWriterConfig EMPTY_CONFIG = new IndexWriterConfig(null, -1, -1, -1, -1, null, DEFAULT_SOURCE_MODEL, null);
 
     /**
      * Fully qualified index name, in the format "<keyspace>.<table>.<index_name>".
@@ -85,10 +90,10 @@ public class IndexWriterConfig
     private final int bkdPostingsMinLeaves;
 
     private final int maximumNodeConnections;
-
     private final int constructionBeamWidth;
-
     private final VectorSimilarityFunction similarityFunction;
+    private final VectorSourceModel sourceModel;
+
     private final OptimizeFor optimizeFor;
 
     public IndexWriterConfig(String indexName,
@@ -101,6 +106,7 @@ public class IndexWriterConfig
              DEFAULT_MAXIMUM_NODE_CONNECTIONS,
              DEFAULT_CONSTRUCTION_BEAM_WIDTH,
              DEFAULT_SIMILARITY_FUNCTION,
+             DEFAULT_SOURCE_MODEL,
              DEFAULT_OPTIMIZE_FOR);
     }
 
@@ -110,6 +116,7 @@ public class IndexWriterConfig
                              int maximumNodeConnections,
                              int constructionBeamWidth,
                              VectorSimilarityFunction similarityFunction,
+                             VectorSourceModel defaultSourceModel,
                              OptimizeFor optimizeFor)
     {
         this.indexName = indexName;
@@ -118,6 +125,7 @@ public class IndexWriterConfig
         this.maximumNodeConnections = maximumNodeConnections;
         this.constructionBeamWidth = constructionBeamWidth;
         this.similarityFunction = similarityFunction;
+        this.sourceModel = defaultSourceModel;
         this.optimizeFor = optimizeFor;
     }
 
@@ -151,6 +159,11 @@ public class IndexWriterConfig
         return similarityFunction;
     }
 
+    public VectorSourceModel getSourceModel()
+    {
+        return sourceModel;
+    }
+
     public static IndexWriterConfig fromOptions(String indexName, AbstractType<?> type, Map<String, String> options)
     {
         int minLeaves = DEFAULT_POSTING_LIST_MIN_LEAVES;
@@ -158,6 +171,7 @@ public class IndexWriterConfig
         int maximumNodeConnections = DEFAULT_MAXIMUM_NODE_CONNECTIONS;
         int queueSize = DEFAULT_CONSTRUCTION_BEAM_WIDTH;
         VectorSimilarityFunction similarityFunction = DEFAULT_SIMILARITY_FUNCTION;
+        VectorSourceModel sourceModel = DEFAULT_SOURCE_MODEL;
         OptimizeFor optimizeFor = DEFAULT_OPTIMIZE_FOR;
 
         if (options.get(POSTING_LIST_LVL_MIN_LEAVES) != null || options.get(POSTING_LIST_LVL_SKIP_OPTION) != null)
@@ -200,7 +214,8 @@ public class IndexWriterConfig
         else if (options.get(MAXIMUM_NODE_CONNECTIONS) != null ||
                  options.get(CONSTRUCTION_BEAM_WIDTH) != null ||
                  options.get(OPTIMIZE_FOR) != null ||
-                 options.get(SIMILARITY_FUNCTION) != null)
+                 options.get(SIMILARITY_FUNCTION) != null ||
+                 options.get(SOURCE_MODEL) != null)
         {
             if (!type.isVector())
                 throw new InvalidRequestException(String.format("CQL type %s cannot have vector options", type.asCQL3Type()));
@@ -251,23 +266,22 @@ public class IndexWriterConfig
                     throw new InvalidRequestException(String.format("Similarity function %s was not recognized for index %s. Valid values are: %s",
                                                                     option, indexName, validSimilarityFunctions));
                 }
-
             }
-            if (options.containsKey(OPTIMIZE_FOR))
+            if (options.containsKey(SOURCE_MODEL))
             {
-                String option = options.get(OPTIMIZE_FOR).toUpperCase();
+                String option = options.get(SOURCE_MODEL).toUpperCase();
                 try
                 {
-                    optimizeFor = OptimizeFor.valueOf(option);
+                    sourceModel = VectorSourceModel.valueOf(option);
                 }
                 catch (IllegalArgumentException e)
                 {
-                    throw new InvalidRequestException(String.format("optimize_for '%s' was not recognized for index %s. Valid values are: %s",
-                                                                    option, indexName, validOptimizeFor));
+                    throw new InvalidRequestException(String.format("source_model '%s' was not recognized for index %s. Valid values are: %s",
+                                                                    option, indexName, validSourceModels));
                 }
             }
         }
-        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize, similarityFunction, optimizeFor);
+        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize, similarityFunction, sourceModel, optimizeFor);
     }
 
     public static IndexWriterConfig defaultConfig(String indexName)
@@ -278,6 +292,7 @@ public class IndexWriterConfig
                                      DEFAULT_MAXIMUM_NODE_CONNECTIONS,
                                      DEFAULT_CONSTRUCTION_BEAM_WIDTH,
                                      DEFAULT_SIMILARITY_FUNCTION,
+                                     DEFAULT_SOURCE_MODEL,
                                      DEFAULT_OPTIMIZE_FOR);
     }
 
@@ -295,6 +310,6 @@ public class IndexWriterConfig
                              MAXIMUM_NODE_CONNECTIONS, maximumNodeConnections,
                              CONSTRUCTION_BEAM_WIDTH, constructionBeamWidth,
                              SIMILARITY_FUNCTION, similarityFunction,
-                             OPTIMIZE_FOR, optimizeFor);
+                             SOURCE_MODEL, sourceModel);
     }
 }

@@ -202,6 +202,7 @@ public class StorageAttachedIndex implements Index
                                                                      IndexWriterConfig.MAXIMUM_NODE_CONNECTIONS,
                                                                      IndexWriterConfig.CONSTRUCTION_BEAM_WIDTH,
                                                                      IndexWriterConfig.SIMILARITY_FUNCTION,
+                                                                     IndexWriterConfig.SOURCE_MODEL,
                                                                      IndexWriterConfig.OPTIMIZE_FOR,
                                                                      LuceneAnalyzer.INDEX_ANALYZER,
                                                                      LuceneAnalyzer.QUERY_ANALYZER);
