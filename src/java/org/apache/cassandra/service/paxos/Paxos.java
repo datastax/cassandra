@@ -811,8 +811,8 @@ public class Paxos
             }
 
 
-            metrics.casWriteMetrics.addNano(latency);
-            metrics.writeMetricsForLevel(consistencyForConsensus).addNano(latency);
+            metrics.casWriteMetrics.executionTimeMetrics.addNano(latency);
+            metrics.writeMetricsForLevel(consistencyForConsensus).executionTimeMetrics.addNano(latency);
         }
     }
 
@@ -911,9 +911,9 @@ public class Paxos
             // client request. This is a measure of how long this specific individual read took, not total time since
             // processing of the client began.
             long latency = nanoTime() - start;
-            metrics.readMetrics.addNano(latency);
-            metrics.casReadMetrics.addNano(latency);
-            metrics.readMetricsForLevel(consistencyForConsensus).addNano(latency);
+            metrics.readMetrics.executionTimeMetrics.addNano(latency);
+            metrics.casReadMetrics.executionTimeMetrics.addNano(latency);
+            metrics.readMetricsForLevel(consistencyForConsensus).executionTimeMetrics.addNano(latency);
             TableMetadata table = read.metadata();
             Keyspace.open(table.keyspace).getColumnFamilyStore(table.name).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
             if (failedAttemptsDueToContention > 0)
