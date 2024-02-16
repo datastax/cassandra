@@ -304,10 +304,14 @@ public class StorageProxy implements StorageProxyMBean
             }
             finally
             {
-                long latency = nanoTime() - startTime;
-                metrics.writeMetrics.addNano(latency);
-                metrics.writeMetricsForLevel(consistencyLevel).addNano(latency);
-                updateCoordinatorWriteLatencyTableMetric(mutations, latency);
+                long endTime = nanoTime();
+                long latency = endTime - startTime;
+                long serviceLatency = endTime - requestTime.startedAtNanos();
+                metrics.writeMetrics.executionTimeMetrics.addNano(latency);
+                metrics.writeMetrics.serviceTimeMetrics.addNano(serviceLatency);
+                metrics.writeMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
+                metrics.writeMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(serviceLatency);
+                StorageProxy.updateCoordinatorWriteLatencyTableMetric(mutations, latency);
             }
         }
 
@@ -507,6 +511,7 @@ public class StorageProxy implements StorageProxyMBean
                                         Dispatcher.RequestTime requestTime)
     throws UnavailableException, IsBootstrappingException, RequestFailureException, RequestTimeoutException, InvalidRequestException
     {
+        final long startTimeForMetrics = nanoTime();
         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspaceName);
         TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
         QueryInfoTracker.LWTWriteTracker lwtTracker = queryTracker().onLWTWrite(clientState,
@@ -623,8 +628,10 @@ public class StorageProxy implements StorageProxyMBean
             // We track latency based on request processing time, since the amount of time that request spends in the queue
             // is not a representative metric of replica performance.
             long latency = nanoTime() - requestTime.startedAtNanos();
-            metrics.casWriteMetrics.addNano(latency);
-            metrics.writeMetricsForLevel(consistencyForPaxos).addNano(latency);
+            metrics.casWriteMetrics.executionTimeMetrics.addNano(latency);
+            metrics.casWriteMetrics.serviceTimeMetrics.addNano(latency);
+            metrics.writeMetricsForLevel(consistencyForPaxos).executionTimeMetrics.addNano(latency);
+            metrics.writeMetricsForLevel(consistencyForPaxos).serviceTimeMetrics.addNano(latency);
         }
     }
 
@@ -1164,8 +1171,10 @@ public class StorageProxy implements StorageProxyMBean
             // We track latency based on request processing time, since the amount of time that request spends in the queue
             // is not a representative metric of replica performance.
             long latency = nanoTime() - requestTime.startedAtNanos();
-            metrics.writeMetrics.addNano(latency);
-            metrics.writeMetricsForLevel(consistencyLevel).addNano(latency);
+            metrics.writeMetrics.executionTimeMetrics.addNano(latency);
+            metrics.writeMetrics.serviceTimeMetrics.addNano(latency);
+            metrics.writeMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
+            metrics.writeMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(latency);
             updateCoordinatorWriteLatencyTableMetric(mutations, latency);
         }
     }
@@ -1323,7 +1332,9 @@ public class StorageProxy implements StorageProxyMBean
         }
         finally
         {
-            metrics.viewWriteMetrics.addNano(nanoTime() - startTime);
+            final long endTime = nanoTime();
+            metrics.viewWriteMetrics.executionTimeMetrics.addNano(endTime - startTime);
+            metrics.viewWriteMetrics.serviceTimeMetrics.addNano(endTime - requestTime.startedAtNanos());
         }
     }
 
@@ -2170,10 +2181,15 @@ public class StorageProxy implements StorageProxyMBean
             // internal paging may be composed of multiple distinct reads, whereas RequestTime relates to the single
             // client request. This is a measure of how long this specific individual read took, not total time since
             // processing of the client began.
-            long latency = nanoTime() - start;
-            metrics.readMetrics.addNano(latency);
-            metrics.casReadMetrics.addNano(latency);
-            metrics.readMetricsForLevel(consistencyLevel).addNano(latency);
+            long endTime = nanoTime();
+            long latency = endTime - start;
+            long serviceLatency = endTime - requestTime.startedAtNanos();
+            metrics.readMetrics.executionTimeMetrics.addNano(latency);
+            metrics.readMetrics.serviceTimeMetrics.addNano(serviceLatency);
+            metrics.casReadMetrics.executionTimeMetrics.addNano(latency);
+            metrics.casReadMetrics.serviceTimeMetrics.addNano(serviceLatency);
+            metrics.readMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
+            metrics.readMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(serviceLatency);
             Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
         }
         return result;
@@ -2234,9 +2250,13 @@ public class StorageProxy implements StorageProxyMBean
             // internal paging may be composed of multiple distinct reads, whereas RequestTime relates to the single
             // client request. This is a measure of how long this specific individual read took, not total time since
             // processing of the client began.
-            long latency = nanoTime() - start;
-            metrics.readMetrics.addNano(latency);
-            metrics.readMetricsForLevel(consistencyLevel).addNano(latency);
+            long endTime = nanoTime();
+            long latency = endTime - start;
+            long serviceLatency = endTime - requestTime.startedAtNanos();
+            metrics.readMetrics.executionTimeMetrics.addNano(latency);
+            metrics.readMetrics.serviceTimeMetrics.addNano(serviceLatency);
+            metrics.readMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
+            metrics.readMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(serviceLatency);
             // TODO avoid giving every command the same latency number.  Can fix this in CASSADRA-5329
             for (ReadCommand command : group.queries)
                 Keyspace.openAndGetStore(command.metadata()).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
