@@ -222,11 +222,12 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
         }
         finally
         {
+            rangeMetrics.roundTrips.update(batchesRequested);
             // We track latency based on request processing time, since the amount of time that request spends in the queue
             // is not a representative metric of replica performance.
             long latency = nanoTime() - requestTime.startedAtNanos();
-            rangeMetrics.addNano(latency);
-            rangeMetrics.roundTrips.update(batchesRequested);
+            rangeMetrics.executionTimeMetrics.addNano(latency);
+            rangeMetrics.serviceTimeMetrics.addNano(latency);
             Keyspace.openAndGetStore(command.metadata()).metric.coordinatorScanLatency.update(latency, TimeUnit.NANOSECONDS);
         }
     }
