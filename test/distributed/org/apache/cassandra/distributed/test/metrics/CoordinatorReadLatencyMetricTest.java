@@ -99,13 +99,13 @@ public class CoordinatorReadLatencyMetricTest extends TestBaseImpl
                                                 ConsistencyLevel consistencyLevel)
     {
         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(null);
-        long countBefore = cluster.get(1).callOnInstance(() -> metrics.readMetrics.latency.getCount());
-        long totalLatencyBefore = cluster.get(1).callOnInstance(() -> metrics.readMetrics.totalLatency.getCount());
+        long countBefore = cluster.get(1).callOnInstance(() -> metrics.readMetrics.executionTimeMetrics.latency.getCount());
+        long totalLatencyBefore = cluster.get(1).callOnInstance(() -> metrics.readMetrics.executionTimeMetrics.totalLatency.getCount());
         long startTime = System.nanoTime();
         cluster.coordinator(1).executeWithPaging(query, consistencyLevel, pagesize);
         long elapsedTime = System.nanoTime() - startTime;
-        long countAfter = cluster.get(1).callOnInstance(() -> metrics.readMetrics.latency.getCount());
-        long totalLatencyAfter = cluster.get(1).callOnInstance(() -> metrics.readMetrics.totalLatency.getCount());
+        long countAfter = cluster.get(1).callOnInstance(() -> metrics.readMetrics.executionTimeMetrics.latency.getCount());
+        long totalLatencyAfter = cluster.get(1).callOnInstance(() -> metrics.readMetrics.executionTimeMetrics.totalLatency.getCount());
 
         long latenciesRecorded = countAfter - countBefore;
         assertTrue("Expected to have recorded at least 1 latency measurement per-individual read", latenciesRecorded >= expectedQueries);
