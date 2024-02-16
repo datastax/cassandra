@@ -21,12 +21,10 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
-import com.google.common.collect.ImmutableList;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.Term;
@@ -344,6 +342,7 @@ public final class VectorType<T> extends AbstractType<List<T>>
         public abstract <V> List<V> split(V buffer, ValueAccessor<V> accessor);
         public abstract <V> V serializeRaw(List<V> elements, ValueAccessor<V> accessor);
         public abstract float[] deserializeFloatArray(ByteBuffer input);
+        public abstract ByteBuffer serializeFloatArray(float[] value);
 
         @Override
         public String toString(List<T> value)
@@ -478,6 +477,21 @@ public final class VectorType<T> extends AbstractType<List<T>>
             floatBuffer.get(floatArray);
 
             return floatArray;
+        }
+
+        @Override
+        public ByteBuffer serializeFloatArray(float[] value)
+        {
+            if (elementType != FloatType.instance)
+                throw new UnsupportedOperationException();
+
+            if (value.length != dimension)
+                throw new MarshalException(String.format("Required %d elements, but saw %d", dimension, value.length));
+
+            var fb = FloatBuffer.wrap(value);
+            var bb = ByteBuffer.allocate(fb.capacity() * Float.BYTES);
+            bb.asFloatBuffer().put(fb);
+            return bb;
         }
 
         @Override
@@ -617,6 +631,12 @@ public final class VectorType<T> extends AbstractType<List<T>>
         }
 
         public float[] deserializeFloatArray(ByteBuffer input)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ByteBuffer serializeFloatArray(float[] value)
         {
             throw new UnsupportedOperationException();
         }

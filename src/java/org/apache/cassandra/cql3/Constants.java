@@ -213,7 +213,7 @@ public abstract class Constants
 
     public static class Literal extends Term.Raw
     {
-        private final Type type;
+        public final Type type;
         private final String text;
         private final AbstractType<?> preferedType;
 

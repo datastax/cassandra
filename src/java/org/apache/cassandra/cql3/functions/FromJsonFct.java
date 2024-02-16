@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 
 import org.apache.cassandra.cql3.Json;
@@ -95,7 +96,9 @@ public class FromJsonFct extends NativeScalarFunction
         }
 
         @Override
-        protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+        protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,
+                                                       List<AbstractType<?>> argTypes,
+                                                       AbstractType<?> receiverType)
         {
             if (receiverType == null)
                 throw new InvalidRequestException(format("%s() cannot be used in the selection clause of a SELECT statement", name.name));
