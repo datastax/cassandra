@@ -279,19 +279,19 @@ if os.path.exists(OLD_HISTORY):
     os.rename(OLD_HISTORY, HISTORY)
 # END history/config definition
 
-CQL_TRACED_ERRORS = [
+CQL_TRACED_ERRORS = (
     cassandra.CoordinationFailure,  # superclass of ReadFailure
     cassandra.Timeout,              # superclass of ReadTimeout
     cassandra.OperationTimedOut,
     cassandra.protocol.InternalError,
     cassandra.cluster.NoHostAvailable
-]
-CQL_ERRORS = CQL_TRACED_ERRORS + [
+)
+CQL_ERRORS = CQL_TRACED_ERRORS + (
     cassandra.AlreadyExists, cassandra.AuthenticationFailed,
     cassandra.InvalidRequest, cassandra.Unauthorized,
     cassandra.connection.ConnectionBusy, cassandra.connection.ProtocolError, cassandra.connection.ConnectionException,
     cassandra.protocol.ErrorMessage, cassandra.query.TraceUnavailable
-]
+)
 
 debug_completion = bool(os.environ.get('CQLSH_DEBUG_COMPLETION', '') == 'YES')
 trace_all_errors = bool(os.environ.get('CQLSH_TRACE_ALL_ERRORS', '') == 'YES')
