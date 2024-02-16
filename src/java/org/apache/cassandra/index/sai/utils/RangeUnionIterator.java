@@ -87,9 +87,11 @@ public class RangeUnionIterator extends RangeIterator
             switch(range.intersect(otherKey))
             {
                 case MATCH:
-                    // VSTODO is it worth shortcircuiting here? If we do, we need to be able to call next() and
-                    // skipTo() safely/correctly, which essentially requires us to store the otherKey and know
-                    // which ranges to call intersect() on.
+                    // VSTODO is it worth returning early here? We know we have a match. However, if we do, we
+                    // need to keep track of some state to make sure calls to next() and skipTo() are correct.
+                    // We would need to store the otherKey and know which ranges still need intersect() called on them.
+                    // It could be more efficient though because if the next call is to intersect(), then we avoid
+                    // eagerly calling intersect() on the remaining ranges with a lesser PrimaryKey.
                     isMatch = true;
                 case MISS:
                     continue;

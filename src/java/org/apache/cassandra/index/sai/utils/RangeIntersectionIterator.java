@@ -106,7 +106,7 @@ public class RangeIntersectionIterator extends RangeIterator
             switch(range.intersect(otherKey))
             {
                 case MISS:
-                    // VSTODO is it worth shortciruiting? It will add complexity, but will make this a less
+                    // VSTODO is it worth returning early here? It will add complexity, but will make this a less
                     // eager. See comment in RangeUnionIterator for details.
                     isMiss = true;
                 case MATCH:
