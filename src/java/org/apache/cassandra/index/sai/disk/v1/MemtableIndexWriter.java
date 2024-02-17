@@ -43,6 +43,9 @@ import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.TableSensor;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -58,6 +61,8 @@ public class MemtableIndexWriter implements PerIndexWriter
     private final IndexContext indexContext;
     private final MemtableIndex memtable;
     private final RowMapping rowMapping;
+    private final TableSensor tableSensor;
+
 
     public MemtableIndexWriter(MemtableIndex memtable,
                                IndexDescriptor indexDescriptor,
@@ -70,6 +75,7 @@ public class MemtableIndexWriter implements PerIndexWriter
         this.indexContext = indexContext;
         this.memtable = memtable;
         this.rowMapping = rowMapping;
+        this.tableSensor = new TableSensor(Context.from(indexContext), Type.SAI_WRITE_BYTES);
     }
 
     @Override
@@ -140,6 +146,10 @@ public class MemtableIndexWriter implements PerIndexWriter
 
             throw t;
         }
+        finally
+        {
+            tableSensor.syncSensor();
+        }
     }
 
     private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, long maxSegmentRowId) throws IOException
@@ -177,6 +187,8 @@ public class MemtableIndexWriter implements PerIndexWriter
             indexDescriptor.deleteColumnIndex(indexContext);
             return 0;
         }
+        double segmentBytes = indexMetas.indexSize();
+        tableSensor.incrementSensor(segmentBytes);
 
         // During index memtable flush, the data is sorted based on terms.
         SegmentMetadata metadata = new SegmentMetadata(0,

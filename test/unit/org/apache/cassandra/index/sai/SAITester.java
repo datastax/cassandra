@@ -212,6 +212,7 @@ public class SAITester extends CQLTester
     {
         return new IndexContext(cfs.getKeyspaceName(),
                                 cfs.getTableName(),
+                                "uuid",
                                 UTF8Type.instance,
                                 new ClusteringComparator(),
                                 ColumnMetadata.regularColumn("sai", "internal", name, validator),
@@ -224,6 +225,7 @@ public class SAITester extends CQLTester
     {
         return new IndexContext("test_ks",
                                 "test_cf",
+                                "uuid",
                                 UTF8Type.instance,
                                 new ClusteringComparator(),
                                 ColumnMetadata.regularColumn("sai", "internal", name, validator),
@@ -236,6 +238,7 @@ public class SAITester extends CQLTester
     {
         return new IndexContext("test_ks",
                                 "test_cf",
+                                "uuid",
                                 UTF8Type.instance,
                                 new ClusteringComparator(),
                                 ColumnMetadata.regularColumn("sai", "internal", columnName, validator),

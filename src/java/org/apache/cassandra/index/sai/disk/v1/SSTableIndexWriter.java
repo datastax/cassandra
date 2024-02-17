@@ -40,6 +40,9 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.TableSensor;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 
@@ -58,6 +61,7 @@ public class SSTableIndexWriter implements PerIndexWriter
     private final AbstractAnalyzer analyzer;
     private final NamedMemoryLimiter limiter;
     private final BooleanSupplier isIndexValid;
+    private final TableSensor tableSensor;
 
     private boolean aborted = false;
 
@@ -73,6 +77,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         this.analyzer = indexContext.getAnalyzerFactory().create();
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;
+        this.tableSensor = new TableSensor(Context.from(indexContext), Type.SAI_WRITE_BYTES);
     }
 
     @Override
@@ -148,6 +153,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
         finally
         {
+            tableSensor.syncSensor();
             if (indexContext.getIndexMetrics() != null)
             {
                 indexContext.getIndexMetrics().segmentsPerCompaction.update(segments.size());
@@ -274,6 +280,7 @@ public class SSTableIndexWriter implements PerIndexWriter
                     indexContext.getIndexMetrics().compactionSegmentCellsPerSecond.update((long)(rowCount / flushMillis * 1000.0));
 
                 double segmentBytes = segmentMetadata.componentMetadatas.indexSize();
+                tableSensor.incrementSensor(segmentBytes);
                 if (indexContext.getIndexMetrics() != null)
                     indexContext.getIndexMetrics().compactionSegmentBytesPerSecond.update((long)(segmentBytes / flushMillis * 1000.0));
 

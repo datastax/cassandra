@@ -120,6 +120,7 @@ public class SegmentFlushTest
 
         IndexContext indexContext = new IndexContext("ks",
                                                      "cf",
+                                                     "uuid",
                                                      UTF8Type.instance,
                                                      new ClusteringComparator(),
                                                      column,
