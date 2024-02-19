@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.index.sai.plan;
 
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -28,15 +27,17 @@ import com.google.common.collect.ImmutableSet;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
-import org.apache.cassandra.schema.TableMetadata;
 
 public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
 {
@@ -45,26 +46,29 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
 
     private final ColumnFamilyStore cfs;
     private final TableQueryMetrics queryMetrics;
+
+    /**
+     * postIndexFilter comprised by those expressions in the read command row filter that can't be handled by
+     * {@link FilterTree#isSatisfiedBy(DecoratedKey, Unfiltered, Row)}. That includes expressions targeted
+     * at {@link RowFilter.UserExpression}s like those used by RLAC.
+     */
     private final RowFilter postIndexFilter;
-    private final RowFilter.FilterElement filterOperation;
     private final Set<Index> indexes;
     private final boolean isTopK;
     private final IndexFeatureSet indexFeatureSet;
 
     private StorageAttachedIndexQueryPlan(ColumnFamilyStore cfs,
                                           TableQueryMetrics queryMetrics,
-                                          RowFilter postIndexFilter,
-                                          RowFilter.FilterElement filterOperation,
+                                          RowFilter filter,
                                           ImmutableSet<Index> indexes,
                                           IndexFeatureSet indexFeatureSet)
     {
         this.cfs = cfs;
         this.queryMetrics = queryMetrics;
-        this.postIndexFilter = postIndexFilter;
-        this.filterOperation = filterOperation;
+        this.postIndexFilter = filter.restrict(RowFilter.Expression::isUserDefined);
         this.indexes = indexes;
         this.indexFeatureSet = indexFeatureSet;
-        this.isTopK = filterOperation.expressions().stream().anyMatch(p -> p.operator() == Operator.ANN);
+        this.isTopK = filter.root().expressions().stream().anyMatch(p -> p.operator() == Operator.ANN);
     }
 
     @Nullable
@@ -116,7 +120,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         if (selectedIndexes.isEmpty())
             return null;
 
-        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, postIndexFilter, preIndexFilter.root(), selectedIndexes, accumulator.complete());
+        return new StorageAttachedIndexQueryPlan(cfs, queryMetrics, filter, selectedIndexes, accumulator.complete());
     }
 
     @Override
@@ -146,7 +150,6 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         return new StorageAttachedIndexSearcher(cfs,
                                                 queryMetrics,
                                                 command,
-                                                filterOperation,
                                                 indexFeatureSet,
                                                 DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
     }
@@ -165,9 +168,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     }
 
     /**
-     * @return a filter with all the expressions that are user-defined or for a non-indexed partition key column
-     * <p>
-     * (currently index on partition columns is not supported, see {@link StorageAttachedIndex#validateOptions(Map, TableMetadata)})
+     * @return a filter with all the expressions that are user-defined
      */
     @Override
     public RowFilter postIndexQueryFilter()
