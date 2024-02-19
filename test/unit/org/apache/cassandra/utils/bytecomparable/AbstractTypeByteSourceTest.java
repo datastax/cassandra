@@ -708,7 +708,7 @@ public class AbstractTypeByteSourceTest
     {
         // Test how ReversedType handles null ByteSource.Peekable - here the choice of base type is important, as
         // the base type should also be able to handle null ByteSource.Peekable.
-        ReversedType<BigInteger> reversedVarintType = ReversedType.getInstance(IntegerType.instance);
+        AbstractType<?> reversedVarintType = ReversedType.getInstance(IntegerType.instance);
         ByteBuffer decodedNull = reversedVarintType.fromComparableBytes(null, ByteComparable.Version.OSS50);
         Assert.assertEquals(ByteBufferUtil.EMPTY_BYTE_BUFFER, decodedNull);
 
@@ -745,7 +745,7 @@ public class AbstractTypeByteSourceTest
         Random prng = new Random();
         for (Map.Entry<AbstractType<?>, BiFunction<Random, Integer, ByteBuffer>> entry : bufferGeneratorByType.entrySet())
         {
-            ReversedType<?> reversedType = ReversedType.getInstance(entry.getKey());
+            AbstractType<?> reversedType = ReversedType.getInstance(entry.getKey());
             for (int length = 32; length <= 512; length *= 4)
             {
                 for (int i = 0; i < 100; ++i)
