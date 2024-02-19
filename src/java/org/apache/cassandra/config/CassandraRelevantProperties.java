@@ -549,6 +549,7 @@ public enum CassandraRelevantProperties
 
     SAI_NUMERIC_VALUES_BLOCK_SIZE("dse.sai.numeric_values.block_size", "128"),
     SAI_NUMERIC_VALUES_MONOTONIC_BLOCK_SIZE("dse.sai.numeric_values.monotonic_block_size", "16384"),
+    SAI_QUERY_OPT_LEVEL("cassandra.sai.query.optimization.level", "1"),
     SAI_TEST_DISABLE_TIMEOUT("cassandra.sai.test.timeout_disabled", "false"),
     SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT("cassandra.test.sai.segment_build_memory_limit"),
     /** Whether to validate terms that will be SAI indexed at the coordinator */
