@@ -79,14 +79,13 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     public StorageAttachedIndexSearcher(ColumnFamilyStore cfs,
                                         TableQueryMetrics tableQueryMetrics,
                                         ReadCommand command,
-                                        RowFilter.FilterElement filterOperation,
                                         IndexFeatureSet indexFeatureSet,
                                         long executionQuotaMs)
     {
         this.command = command;
         this.cfs = cfs;
         this.queryContext = new QueryContext(executionQuotaMs);
-        this.controller = new QueryController(cfs, command, filterOperation, indexFeatureSet, queryContext, tableQueryMetrics);
+        this.controller = new QueryController(cfs, command, indexFeatureSet, queryContext, tableQueryMetrics);
     }
 
     @Override
@@ -117,35 +116,27 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
-        if (!command.isTopK())
-            return new ResultRetriever(analyze(), analyzeFilter(), controller, executionController, queryContext);
+        FilterTree filterTree = analyzeFilter();
+        Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator();
 
-        var result = new ScoreOrderedResultRetriever(buildScoredPrimaryKeyIterator(), analyzeFilter(), controller,
-                                                     executionController, queryContext);
-        return (UnfilteredPartitionIterator) new VectorTopKProcessor(command).filter(result);
+        if (command.isTopK())
+        {
+            assert !(keysIterator instanceof RangeIterator);
+            var scoredKeysIterator = (CloseableIterator<ScoredPrimaryKey>) keysIterator;
+            var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, controller,
+                                                         executionController, queryContext);
+            return (UnfilteredPartitionIterator) new VectorTopKProcessor(command).filter(result);
+        }
+        else
+        {
+            assert keysIterator instanceof RangeIterator;
+            return new ResultRetriever((RangeIterator) keysIterator, filterTree, controller, executionController, queryContext);
+        }
     }
 
-    /**
-     * Converts expressions into filter tree and reference {@link SSTableIndex}s used for query.
-     *
-     * @return operation
-     */
-    private RangeIterator analyze()
-    {
-        return controller.buildIterator();
-    }
-
-    /**
-     * Converts expressions into an iterator over {@link ScoredPrimaryKey} that contains a superset of the keys that
-     * satisfy the query. The {@link ScoredPrimaryKey} iterator is sorted by score, so the top k keys can be
-     * retrieved by iterating the iterator until a sufficient number of valid rows are found.
-     */
-    private CloseableIterator<ScoredPrimaryKey> buildScoredPrimaryKeyIterator()
-    {
-        return controller.buildScoredPrimaryKeyIterator();
-    }
 
     /**
      * Converts expressions into filter tree (which is currently just a single AND).

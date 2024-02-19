@@ -20,24 +20,20 @@ package org.apache.cassandra.index.sai.utils;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
-import java.util.Arrays;
+
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.tracing.Tracing;
 
 /**
  * A simple intersection iterator that makes no real attempts at optimising the iteration apart from
  * initially sorting the ranges. This implementation also supports an intersection limit which limits
  * the number of ranges that will be included in the intersection. This currently defaults to 2.
  */
-@SuppressWarnings("resource")
 public class RangeIntersectionIterator extends RangeIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -164,44 +160,32 @@ public class RangeIntersectionIterator extends RangeIterator
         ranges.forEach(FileUtils::closeQuietly);
     }
 
-    public static Builder builder(List<RangeIterator> ranges, int limit)
+    public static Builder builder(List<RangeIterator> ranges)
     {
-        var builder = new Builder(ranges.size(), limit);
+        var builder = new Builder(ranges.size());
         for (var range : ranges)
             builder.add(range);
         return builder;
     }
 
-    public static Builder builder(int size, int limit)
+    public static Builder builder(int size)
     {
-        return new Builder(size, limit);
-    }
-
-    public static Builder builder(int limit)
-    {
-        return builder(10, limit);
-    }
-
-    public static Builder sizedBuilder(int size)
-    {
-        return builder(size, INTERSECTION_CLAUSE_LIMIT);
+        return new Builder(size);
     }
 
     public static Builder builder()
     {
-        return builder(Integer.MAX_VALUE);
+        return builder(4);
     }
 
     public static class Builder extends RangeIterator.Builder
     {
-        private final int limit;
         protected List<RangeIterator> rangeIterators;
 
-        private Builder(int size, int limit)
+        private Builder(int size)
         {
             super(IteratorType.INTERSECTION);
             rangeIterators = new ArrayList<>(size);
-            this.limit = limit;
         }
 
         public RangeIterator.Builder add(RangeIterator range)
@@ -234,32 +218,6 @@ public class RangeIntersectionIterator extends RangeIterator
 
         protected RangeIterator buildIterator()
         {
-            rangeIterators.sort(Comparator.comparingLong(RangeIterator::getMaxKeys));
-            int initialSize = rangeIterators.size();
-            // all ranges will be included
-            if (limit >= rangeIterators.size() || limit <= 0)
-                return buildIterator(statistics, rangeIterators);
-
-            // Apply most selective iterators during intersection, because larger number of iterators will result lots of disk seek.
-            Statistics selectiveStatistics = new Statistics(IteratorType.INTERSECTION);
-            for (int i = rangeIterators.size() - 1; i >= 0 && i >= limit; i--)
-                FileUtils.closeQuietly(rangeIterators.remove(i));
-
-            for (var iterator : rangeIterators)
-                selectiveStatistics.update(iterator);
-
-            if (Tracing.isTracing())
-                Tracing.trace("Selecting {} {} of {} out of {} indexes",
-                              rangeIterators.size(),
-                              rangeIterators.size() > 1 ? "indexes with cardinalities" : "index with cardinality",
-                              rangeIterators.stream().map(RangeIterator::getMaxKeys).map(Object::toString).collect(Collectors.joining(", ")),
-                              initialSize);
-
-            return buildIterator(selectiveStatistics, rangeIterators);
-        }
-
-        private static RangeIterator buildIterator(Statistics statistics, List<RangeIterator> ranges)
-        {
             // if the range is disjoint or we have an intersection with an empty set,
             // we can simply return an empty iterator, because it's not going to produce any results.
             if (statistics.isDisjoint())
@@ -270,9 +228,9 @@ public class RangeIntersectionIterator extends RangeIterator
             }
 
             if (ranges.size() == 1)
-                return ranges.get(0);
+                return rangeIterators.get(0);
 
-            return new RangeIntersectionIterator(statistics, ranges);
+            return new RangeIntersectionIterator(statistics, rangeIterators);
         }
     }
 }

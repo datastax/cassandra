@@ -24,7 +24,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
@@ -37,10 +36,6 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
@@ -273,7 +268,7 @@ public class Operation
 
         abstract FilterTree filterTree();
 
-        abstract RangeIterator rangeIterator(QueryController controller);
+        abstract Plan.KeysIteration plan(QueryController controller);
 
         static Node buildTree(List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
         {
@@ -324,7 +319,7 @@ public class Operation
 
         void doTreeAnalysis(Node node, List<RowFilter.Expression> expressions, QueryController controller)
         {
-            if (node.children().isEmpty())
+            if (node instanceof ExpressionNode)
                 expressions.add(node.expression());
             else
             {
@@ -378,14 +373,14 @@ public class Operation
         }
 
         @Override
-        RangeIterator rangeIterator(QueryController controller)
+        Plan.KeysIteration plan(QueryController controller)
         {
-            var builder = RangeIntersectionIterator.sizedBuilder(1 + children.size());
+            var builder = controller.planFactory.intersectionBuilder();
             if (!expressionMap.isEmpty())
-                builder.add(controller.buildRangeIteratorForExpressions(OperationType.AND, expressionMap.values()));
+                controller.buildPlanForExpressions(builder, expressionMap.values());
             for (Node child : children)
                 if (child.canFilter())
-                    builder.add(child.rangeIterator(controller));
+                    builder.add(child.plan(controller));
             return builder.build();
         }
     }
@@ -405,14 +400,14 @@ public class Operation
         }
 
         @Override
-        RangeIterator rangeIterator(QueryController controller)
+        Plan.KeysIteration plan(QueryController controller)
         {
-            var builder = RangeUnionIterator.<PrimaryKey>builder(1 + children.size());
+            var builder = controller.planFactory.unionBuilder();
             if (!expressionMap.isEmpty())
-                builder.add(controller.buildRangeIteratorForExpressions(OperationType.OR, expressionMap.values()));
+                controller.buildPlanForExpressions(builder, expressionMap.values());
             for (Node child : children)
                 if (child.canFilter())
-                    builder.add(child.rangeIterator(controller));
+                    builder.add(child.plan(controller));
             return builder.build();
         }
     }
@@ -445,10 +440,12 @@ public class Operation
         }
 
         @Override
-        RangeIterator rangeIterator(QueryController controller)
+        Plan.KeysIteration plan(QueryController controller)
         {
             assert canFilter() : "Cannot process query with no expressions";
-            return controller.buildRangeIteratorForExpressions(OperationType.AND, expressionMap.values());
+            Plan.Builder builder = controller.planFactory.intersectionBuilder();
+            controller.buildPlanForExpressions(builder, expressionMap.values());
+            return builder.build();
         }
     }
 }

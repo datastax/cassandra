@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
@@ -29,9 +30,10 @@ import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,6 +57,8 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
@@ -66,10 +70,8 @@ import org.apache.cassandra.index.sai.utils.OrderingFilterRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.MergeScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
-import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TermIterator;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -84,67 +86,25 @@ import org.apache.cassandra.utils.concurrent.Ref;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE;
 
-public class QueryController
+public class QueryController implements Plan.Executor
 {
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
-    /**
-     * How likely we want the soft limit to be high enough, so that we get sufficient number of rows
-     * without having to retry. The closer this is to 1.0, the higher the soft limit will be relative to
-     * the exact limit (i.e. we'll ask for more rows speculatively in case we would have to throw some of them out due
-     * to tombstones / updates / expired TTLs / not matching the post-filter).
-     * Setting it too high may cause the queries to be more expensive, because they would be fetching too many rows.
-     * Setting it too low will cause frequent retries.
-     */
-    private static final double SOFT_LIMIT_CONFIDENCE = 0.90;
-
-    /**
-     * Constants used in cost-based query optimization.
-     * Those costs are abstract, they don't represent any physical resource unit.
-     * What matters are ratios between them, not the absolute values.
-     */
-    static class Costs
-    {
-        /**
-         * The cost to get a single PrimaryKey from the index, *without* looking it up in the sstable.
-         */
-        static final float INDEX_KEY_FETCH_COST = 1.0f;
-        /**
-         * How much additional effort it costs to get a PrimaryKey from the index if we have to intersect indexes.
-         * Intersections are more costly because of index skipping.
-         */
-        static final float INDEX_INTERSECTION_PENALTY = 4.0f;
-        /**
-         * The cost to fetch a full row from the storage and apply filters to it.
-         * Deserializing rows is costly.
-         * In the future this should be replaced by a better model taking into account the data size
-         * and number of columns.
-         */
-        static final float ROW_MATERIALIZE_COST = 100.0f;
-
-        /**
-         * Additional row materialization penalty per each cell in the row.
-         * <p>
-         * The cost of a row cell depends on how the cell is used, e.g. the cost of a cell that is used in the
-         * row filter is much higher than the cost of the cell that isn't fetched from the storage. Unfortunately
-         * at the moment we don't have stats precise enough to distinguish those cases, so we just assume the column
-         * is fetched from storage and used in the filter. The cost is so low anyway that it really
-         * matters only for collections.
-         */
-        static final float CELL_MATERIALIZE_COST = 0.4f;
-
-        /** Additional row materialization penalty per each deserialized byte of the row */
-        static final float BYTE_MATERIALIZE_COST = 0.005f;
-    }
-
     public static final int ORDER_CHUNK_SIZE = SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE.getInt();
+
+    /**
+     * Controls whether we optimize query plans.
+     * 0 disables the optimizer.
+     * 1 enables the optimizer and tells the optimizer to respect the intersection clause limit.
+     * Higher values enable the optimizer and disable the hard intersection clause limit.
+     */
+    public static final int QUERY_OPT_LEVEL = Integer.getInteger("cassandra.sai.query.optimization.level", 1);
 
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
     private final int limit;
     private final QueryContext queryContext;
     private final TableQueryMetrics tableQueryMetrics;
-    private final RowFilter.FilterElement filterOperation;
     private final IndexFeatureSet indexFeatureSet;
     private final List<DataRange> ranges;
     private final AbstractBounds<PartitionPosition> mergeRange;
@@ -152,9 +112,32 @@ public class QueryController
     private final PrimaryKey.Factory keyFactory;
     private final PrimaryKey firstPrimaryKey;
 
+    final Plan.Factory planFactory;
+
+    /**
+     * Holds the primary key iterators for indexed expressions in the query (i.e. leaves of the expression tree).
+     * We will construct the final iterator from those.
+     * We need a MultiMap because the same Expression can occur more than once in a query.
+     * <p>
+     * Longer explanation why this is needed:
+     * In order to construct a Plan for a query, we need predicate selectivity estimates. But at the moment
+     * of writing this code, the only way to estimate an index predicate selectivity is to look at the posting
+     * list(s) in the index, by obtaining a {@link RangeIterator} and callling {@link RangeIterator#getMaxKeys()} on it.
+     * Hence, we need to create the iterators before creating the Plan.
+     * But later when we assemble the final key iterator according to the optimized Plan, we need those iterators
+     * again. In order to avoid recreating them, which would be costly, we just keep them here in this map.
+     */
+    private final Multimap<Expression, RangeIterator> keyIterators = ArrayListMultimap.create();
+
+    static
+    {
+        logger.info(String.format("Query plan optimization is %s (level = %d)",
+                                  QUERY_OPT_LEVEL > 0 ? "enabled" : "disabled",
+                                  QUERY_OPT_LEVEL));
+    }
+
     public QueryController(ColumnFamilyStore cfs,
                            ReadCommand command,
-                           RowFilter.FilterElement filterOperation,
                            IndexFeatureSet indexFeatureSet,
                            QueryContext queryContext,
                            TableQueryMetrics tableQueryMetrics)
@@ -164,7 +147,6 @@ public class QueryController
         this.queryContext = queryContext;
         this.limit = command.limits().count();
         this.tableQueryMetrics = tableQueryMetrics;
-        this.filterOperation = filterOperation;
         this.indexFeatureSet = indexFeatureSet;
         this.ranges = dataRanges(command);
         DataRange first = ranges.get(0);
@@ -173,6 +155,11 @@ public class QueryController
 
         this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
+        var tableMetrics = new Plan.TableMetrics(estimateTotalAvailableRows(ranges),
+                                                 avgCellsPerRow(),
+                                                 avgRowSizeInBytes(),
+                                                 cfs.getLiveSSTables().size());
+        this.planFactory = new Plan.Factory(tableMetrics);
     }
 
     public PrimaryKey.Factory primaryKeyFactory()
@@ -193,7 +180,7 @@ public class QueryController
 
     RowFilter.FilterElement filterOperation()
     {
-        return this.filterOperation;
+        return this.command.rowFilter().root();
     }
 
     /**
@@ -263,87 +250,83 @@ public class QueryController
         return command.queryMemtableAndDisk(cfs, executionController);
     }
 
-    public RangeIterator buildIterator()
+    private Plan buildPlan()
+    {
+        Plan.KeysIteration keysIterationPlan = buildKeysIterationPlan();
+        Plan.RowsIteration rowsIteration = planFactory.fetch(keysIterationPlan);
+        rowsIteration = planFactory.recheckFilter(command.rowFilter(), rowsIteration);
+        rowsIteration = planFactory.limit(rowsIteration, limit);
+
+        Plan optimizedPlan;
+        optimizedPlan = QUERY_OPT_LEVEL > 0
+                        ? rowsIteration.optimize()
+                        : rowsIteration;
+        optimizedPlan = RangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT > 0 && QUERY_OPT_LEVEL <= 1
+                        ? optimizedPlan.limitIntersectedClauses(RangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT)
+                        : optimizedPlan;
+
+        if (optimizedPlan.contains(node -> node instanceof Plan.AnnScan))
+            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SORT_THEN_FILTER);
+        if (optimizedPlan.contains(node -> node instanceof Plan.AnnSort))
+            queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.FILTER_THEN_SORT);
+
+        if (logger.isTraceEnabled())
+            logger.trace("Query execution plan:\n" + optimizedPlan.toStringRecursive());
+
+        if (Tracing.isTracing())
+        {
+            List<Plan.IndexScan> origIndexScans = keysIterationPlan.nodesOfType(Plan.IndexScan.class);
+            List<Plan.IndexScan> selectedIndexScans = optimizedPlan.nodesOfType(Plan.IndexScan.class);
+            Tracing.trace("Selecting {} {} of {} out of {} indexes",
+                          selectedIndexScans.size(),
+                          selectedIndexScans.size() > 1 ? "indexes with cardinalities" : "index with cardinality",
+                          selectedIndexScans.stream().map(s -> "" + ((long) s.expectedKeys())).collect(Collectors.joining(", ")),
+                          origIndexScans.size());
+        }
+        return optimizedPlan;
+    }
+
+    private Plan.KeysIteration buildKeysIterationPlan()
     {
         // VSTODO we can clean this up when we break ordering out
-        var nonOrderingExpressions = filterOperation.expressions().stream()
-                                                    .filter(e -> e.operator() != Operator.ANN)
-                                                    .collect(Collectors.toList());
-        if (nonOrderingExpressions.isEmpty() && filterOperation.children().isEmpty())
-            return RangeIterator.empty();
-        return Operation.Node.buildTree(nonOrderingExpressions, filterOperation.children(), filterOperation.isDisjunction())
-                             .analyzeTree(this)
-                             .rangeIterator(this);
-    }
+        var filterRoot = command.rowFilter().root();
+        var nonOrderingExpressions = filterRoot.expressions().stream()
+                                               .filter(e -> e.operator() != Operator.ANN)
+                                               .collect(Collectors.toList());
 
-    public CloseableIterator<ScoredPrimaryKey> buildScoredPrimaryKeyIterator()
-    {
-        var filterOperation = filterOperation();
-        var orderings = filterOperation.expressions()
-                                       .stream().filter(e -> e.operator() == Operator.ANN).collect(Collectors.toList());
-        assert orderings.size() == 1;
-        if (filterOperation.expressions().size() == 1 && filterOperation.children().isEmpty() && orderings.size() == 1)
-            // If we only have one expression, we just use the ANN index to order and limit.
-            return getTopKRows(orderings.get(0));
+        Plan.KeysIteration keysIterationPlan = Operation.Node.buildTree(nonOrderingExpressions, filterRoot.children(), filterRoot.isDisjunction())
+                                                             .analyzeTree(this)
+                                                             .plan(this);
 
-        var whereClauseIter = buildIterator();
-
-        // A query is no longer re-run, so this method is always called before initializing the query context's
-        // filter sort order.
-        assert queryContext.filterSortOrder() == null;
-        QueryContext.FilterSortOrder order = decideFilterSortOrder(filterOperation, whereClauseIter);
-        queryContext.setFilterSortOrder(order);
-
-        if (queryContext.filterSortOrder() == QueryContext.FilterSortOrder.SORT_THEN_FILTER)
+        var orderings = filterRoot.expressions().stream()
+                                  .filter(e -> e.operator() == Operator.ANN)
+                                  .collect(Collectors.toList());
+        if (!orderings.isEmpty())
         {
-            queryContext.setPostFilterSelectivityEstimate(estimateSelectivity(whereClauseIter));
-            FileUtils.closeQuietly(whereClauseIter);
-            return getTopKRows(orderings.get(0));
+            assert orderings.size() == 1;
+            keysIterationPlan = planFactory.annSort(keysIterationPlan, orderings.get(0));
         }
 
-        return getTopKRows(whereClauseIter, orderings.get(0));
+        assert keysIterationPlan != planFactory.everything; // This would mean we have no WHERE nor ANN clauses at all
+        return keysIterationPlan;
     }
 
-    private QueryContext.FilterSortOrder decideFilterSortOrder(RowFilter.FilterElement filter, RangeIterator iter)
+    public Iterator<? extends PrimaryKey> buildIterator()
     {
-        double sortThenFilterCost = estimateSortThenFilterCost(iter);
-        double filterThenSortCost = estimateFilterThenSortCost(filter, iter);
-        QueryContext.FilterSortOrder order = sortThenFilterCost < filterThenSortCost
-               ? QueryContext.FilterSortOrder.SORT_THEN_FILTER
-               : QueryContext.FilterSortOrder.FILTER_THEN_SORT;
-        logger.debug("Decided filter sort order {} (costs: SORT_THEN_FILTER = {}, FILTER_THEN_SORT = {})",
-                     order, sortThenFilterCost, filterThenSortCost);
-        return order;
-    }
-
-    private float estimateFilterThenSortCost(RowFilter.FilterElement filter, RangeIterator iter)
-    {
-        // Unions are cheap but intersections have higher costs because of skipping on the iterators,
-        // so we add a penalty for each intersection used in the filter.
-        float intersectionPenalty = intersectionPenalty(filter);
-        // TODO: account for shadowed keys once we collect stats
-        long primaryKeysFetchedFromIndex = iter.getMaxKeys();
-        long materializedRows = Math.min(getExactLimit(), primaryKeysFetchedFromIndex);
-        return primaryKeysFetchedFromIndex * Costs.INDEX_KEY_FETCH_COST * (1.0f + intersectionPenalty)
-               + estimateRowMaterializationCost(materializedRows);
-    }
-
-    private float estimateSortThenFilterCost(RangeIterator iter)
-    {
-        float selectivity = estimateSelectivity(iter);
-        int materializedRows = SoftLimitUtil.softLimit(getExactLimit(), SOFT_LIMIT_CONFIDENCE, selectivity);
-        return estimateRowMaterializationCost(materializedRows);
-    }
-
-    private float estimateRowMaterializationCost(long rows)
-    {
-        float avgCellsPerRow = avgCellsPerRow();
-        float avgBytesPerRow = avgRowSizeInBytes();
-        return rows * (
-            Costs.ROW_MATERIALIZE_COST
-            + avgCellsPerRow * Costs.CELL_MATERIALIZE_COST
-            + avgBytesPerRow * Costs.BYTE_MATERIALIZE_COST
-        );
+        try
+        {
+            Plan plan = buildPlan();
+            Plan.KeysIteration keysIteration = plan.firstNodeOfType(Plan.KeysIteration.class);
+            assert keysIteration != null : "No index scan found";
+            return keysIteration.execute(this);
+        }
+        finally
+        {
+            // Because we optimize the plan, it is possible that there exist iterators that we
+            // constructed but which weren't used by the final plan.
+            // Let's close them here, so they don't hold the resources.
+            closeUnusedIterators();
+        }
     }
 
     private float avgCellsPerRow()
@@ -370,42 +353,6 @@ public class QueryController
         return rows == 0 ? 0.0f : ((float) totalLength) / rows;
     }
 
-    /**
-     * Estimates additional cost of performing index intersections (AND operator).
-     * If there are no intersections in the filter tree, returns 0.0.
-     */
-    private static float intersectionPenalty(RowFilter.FilterElement elem)
-    {
-        // TODO: This is very crude cost estimation. Ideally we should take into account the selectivity of each
-        // individual filter expression. The worst case can be when there are multiple intersected predicates, where
-        // each has low selectivity (selects many keys), but only very few keys match all of them. Then many posting
-        // list entries must be traversed before we get a key and the cost is high. This code does not take it into
-        // account.
-       return intersectionsCount(elem) * Costs.INDEX_INTERSECTION_PENALTY;
-    }
-
-    /**
-     * Returns the number of intersections in the filter expression tree (includes children).
-     * <p>
-     * Examples:
-     * <ul>
-     *     <li>A OR B is counted as 0</li>
-     *     <li>A AND B is counted as 1</li>
-     *     <li>A AND B AND C is counted as 2</li>
-     *     <li>A OR B AND C is counted as 1</li>
-     * </ul>
-     */
-    private static int intersectionsCount(RowFilter.FilterElement elem)
-    {
-        int nonOrderingExpressionsCount = (int) elem.expressions().stream().filter(e -> e.operator() != Operator.ANN).count();
-        int intersectedExpressionsCount = elem.isDisjunction() ? 0 : nonOrderingExpressionsCount;
-        int intersectionsCount = Math.max(0, intersectedExpressionsCount - 1);
-
-        for (RowFilter.FilterElement child : elem.children())
-            intersectionsCount += intersectionsCount(child);
-
-        return intersectionsCount;
-    }
 
     public FilterTree buildFilter()
     {
@@ -413,48 +360,67 @@ public class QueryController
     }
 
     /**
-     * Build a {@link RangeIterator.Builder} from the given list of expressions by applying given operation (OR/AND).
+     * Build a {@link Plan} from the given list of expressions by applying given operation (OR/AND).
      * Building of such builder involves index search, results of which are persisted in the internal resources list
      *
-     * @param op The operation type to coalesce expressions with.
-     * @param expressions The expressions to build range iterator from (expressions with not results are ignored).
-     *
-     * @return range iterator builder based on given expressions and operation type.
+     * @param builder The plan node builder which receives the built index scans
+     * @param expressions The expressions to build the plan from
      */
-    public RangeIterator buildRangeIteratorForExpressions(Operation.OperationType op, Collection<Expression> expressions)
+    public void buildPlanForExpressions(Plan.Builder builder, Collection<Expression> expressions)
     {
-        assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + filterOperation;
+        Operation.OperationType op = builder.type;
+        assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + command.rowFilter().root();
 
         // VSTODO move ANN out of expressions and into its own abstraction? That will help get generic ORDER BY support
         Collection<Expression> exp = expressions.stream().filter(e -> e.operation != Expression.Op.ANN).collect(Collectors.toList());
-        boolean defer = op == Operation.OperationType.OR || RangeIntersectionIterator.shouldDefer(exp.size());
-        RangeIterator.Builder builder = op == Operation.OperationType.OR
-                                        ? RangeUnionIterator.builder()
-                                        : RangeIntersectionIterator.builder(RangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT);
+        boolean defer = builder.type == Operation.OperationType.OR || RangeIntersectionIterator.shouldDefer(exp.size());
 
         Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view = referenceAndGetView(op, exp).entrySet();
-
         try
         {
-            for (Map.Entry<Expression, NavigableSet<SSTableIndex>> e : view)
+            var viewIterator = view.iterator();
+            while (viewIterator.hasNext())
             {
-                @SuppressWarnings("resource") // RangeIterators are closed by releaseIndexes
-                RangeIterator index = TermIterator.build(e.getKey(), e.getValue(), mergeRange, queryContext, defer, Integer.MAX_VALUE);
+                var e = viewIterator.next();
+                Expression predicate = e.getKey();
+                RangeIterator iterator = TermIterator.build(predicate, e.getValue(), mergeRange, queryContext, defer, Integer.MAX_VALUE);
 
-                builder.add(index);
+                // The returned iterator owns the set of indexes now and will release them on close,
+                // so let's remove it from the view to avoid double-release.
+                viewIterator.remove();
+
+                // Cache the iterator for when the plan node needs it for the execution
+                keyIterators.put(predicate, iterator);
+
+                long keysCount = Math.min(iterator.getMaxKeys(), planFactory.tableMetrics.rows);
+                Plan.KeysIteration plan = predicate.isLiteral()
+                                          ? planFactory.literalIndexScan(predicate, keysCount)
+                                          : planFactory.numericIndexScan(predicate, keysCount);
+                builder.add(plan);
             }
         }
         catch (Throwable t)
         {
-            // all sstable indexes in view have been referenced, need to clean up when exception is thrown
-            FileUtils.closeQuietly(builder.ranges());
+            // Release the references to the indexes that we didn't get the iterator for
             view.forEach(e -> e.getValue().forEach(SSTableIndex::release));
             throw t;
         }
-        return builder.build();
+    }
+
+    @Override
+    public Iterator<? extends PrimaryKey> getKeysFromIndex(Expression predicate)
+    {
+        Collection<RangeIterator> rangeIterators = keyIterators.get(predicate);
+        // This should be never empty, because we put iterators in this map when we create the IndexScan nodes of the Plan
+        assert !rangeIterators.isEmpty() : "No iterator found for predicate: " + predicate;
+
+        RangeIterator iterator = rangeIterators.iterator().next();
+        keyIterators.remove(predicate, iterator);  // remove so we never accidentally reuse the same iterator
+        return iterator;
     }
 
     // This is an ANN only query
+    @Override
     public CloseableIterator<ScoredPrimaryKey> getTopKRows(RowFilter.Expression expression)
     {
         assert expression.operator() == Operator.ANN;
@@ -572,11 +538,6 @@ public class QueryController
         return results;
     }
 
-    public int getExactLimit()
-    {
-        return command.limits().count();
-    }
-
     public IndexFeatureSet indexFeatureSet()
     {
         return indexFeatureSet;
@@ -638,7 +599,18 @@ public class QueryController
      */
     public void finish()
     {
+        closeUnusedIterators();
         if (tableQueryMetrics != null) tableQueryMetrics.record(queryContext);
+    }
+
+    private void closeUnusedIterators()
+    {
+        Iterator<Map.Entry<Expression, RangeIterator>> entries = keyIterators.entries().iterator();
+        while (entries.hasNext())
+        {
+            FileUtils.closeQuietly(entries.next().getValue());
+            entries.remove();
+        }
     }
 
     /**
@@ -803,66 +775,27 @@ public class QueryController
     }
 
     /**
-     * Returns the fraction of the total rows of the table returned by the index
-     *
-     * @param iterator iterator over the keys from the index(es)
+     * Returns the total count of rows in the sstables which overlap with any of the given ranges
+     * and all live memtables.
      */
-    private float estimateSelectivity(RangeIterator iterator)
+    private long estimateTotalAvailableRows(List<DataRange> ranges)
     {
-        long totalRowCount = estimateTotalAvailableRows();
-        return estimateSelectivity(iterator, totalRowCount);
-    }
+        long rows = 0;
 
-    private float estimateSelectivity(RangeIterator iterator, long totalRowCount)
-    {
-        float selectivity;
+        for (Memtable memtable : cfs.getAllMemtables())
+            rows += memtable.rowCount();
 
-        if (iterator.getMaxKeys() == 0)
-            return 0.0f;
+        List<Range<Token>> tokenRanges = ranges.stream()
+                                               .map(r -> new Range<>(r.startKey().getToken(), r.stopKey().getToken()))
+                                               .collect(Collectors.toList());
 
-        // For intersection and union we assume predicates are independent
-        // (column values are not correlated with each other).
-        // This assumption is not neccesarily true, but we have no statistical information to do any better.
-        if (iterator instanceof RangeIntersectionIterator)
+        for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            RangeIntersectionIterator intersectionIterator = (RangeIntersectionIterator) iterator;
-            selectivity = 1.0f;
-            for (RangeIterator range : intersectionIterator.ranges)
-                selectivity *= estimateSelectivity(range, totalRowCount);
-        }
-        else if (iterator instanceof RangeUnionIterator)
-        {
-            selectivity = 0.0f;
-            RangeUnionIterator unionIterator = (RangeUnionIterator) iterator;
-            for (RangeIterator range : unionIterator.ranges)
-                selectivity = 1.0f - (1.0f - selectivity) * (1.0f - estimateSelectivity(range, totalRowCount));
-        }
-        else
-        {
-            selectivity = Math.min((float) iterator.getMaxKeys() / totalRowCount, 1.0f);
+            if (sstable.intersects(tokenRanges))
+                rows += sstable.getTotalRows();
         }
 
-        return selectivity;
-    }
-
-    /**
-     * Returns number of rows indexed accross all ssables and memtables
-     */
-    private long estimateTotalAvailableRows()
-    {
-        if (queryContext.totalAvailableRows() != null)
-            return queryContext.totalAvailableRows();
-
-        long memtableRows = StreamSupport.stream(cfs.getAllMemtables().spliterator(), false)
-                                         .mapToLong(Memtable::rowCount)
-                                         .sum();
-        long sstableRows = cfs.getLiveSSTables()
-                              .stream()
-                              .mapToLong(SSTableReader::getTotalRows)
-                              .sum();
-        long totalRows = memtableRows + sstableRows;
-        queryContext.setTotalAvailableRows(totalRows);
-        return totalRows;
+        return rows;
     }
 
     private static class IteratorsAndIndexes
