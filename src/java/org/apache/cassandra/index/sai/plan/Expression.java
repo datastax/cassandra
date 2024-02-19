@@ -156,6 +156,11 @@ public class Expression
         this.validator = indexContext.getValidator();
     }
 
+    public boolean isLiteral()
+    {
+        return context.isLiteral();
+    }
+
     public Expression add(Operator op, ByteBuffer value)
     {
         boolean lowerInclusive, upperInclusive;
@@ -456,6 +461,11 @@ public class Expression
                              upper == null ? "null" : validator.getString(upper.value.raw),
                              upper != null && upper.inclusive,
                              Iterators.toString(Iterators.transform(exclusions.iterator(), validator::getString)));
+    }
+
+    public String getIndexName()
+    {
+        return context.getIndexName();
     }
 
     public int hashCode()

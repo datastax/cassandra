@@ -133,7 +133,6 @@ public class MergePostingList implements PostingList
             }
         }
 
-
         if (lastRowId == targetRowID) {
             // we're asking for the next row, past the current row, which an arbitrary
             // number of our child posting lists may be pointing to.  In this case we
