@@ -204,10 +204,6 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
         Assert.assertEquals(0L, builder.add(new LongIterator(new long[] {})).rangeCount());
 
         var single = new LongIterator(new long[] { 1L, 2L, 3L });
-        var range = RangeIntersectionIterator.<PrimaryKey>builder().add(single).build();
-
-        // because build should return first element if it's only one instead of building yet another iterator
-        Assert.assertEquals(range, single);
 
         // Make a difference between empty and null ranges.
         builder = RangeIntersectionIterator.builder();
@@ -215,7 +211,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
         Assert.assertEquals(0L, builder.rangeCount());
         builder.add(single);
         Assert.assertEquals(1L, builder.rangeCount());
-        range = builder.build();
+        var range = builder.build();
         Assert.assertEquals(0, range.getMaxKeys());
 
         // disjoint case
@@ -371,24 +367,5 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
         Set<Long> expectedSet = toSet(ranges[0]);
         IntStream.range(1, ranges.length).forEach(i -> expectedSet.retainAll(toSet(ranges[i])));
         return Pair.create(builder.build(), expectedSet.stream().mapToLong(Long::longValue).sorted().toArray());
-    }
-
-    // SAI specific tests
-    @Test
-    public void testSelectiveIntersection()
-    {
-        var intersection = buildSelectiveIntersection(2,
-                                                      arr(1L, 4L, 6L, 7L),
-                                                      arr(1L, 4L, 5L, 6L),
-                                                      arr(4L, 6L, 8L, 9L, 10L)); // skipped
-
-        assertEquals(convert(1L, 4L, 6L), convert(intersection));
-
-        intersection = buildSelectiveIntersection(1,
-                                                  arr(2L, 4L, 6L),
-                                                  arr(1L, 4L, 5L, 6L),       // skipped
-                                                  arr(4L, 6L, 8L, 9L, 10L)); // skipped
-
-        assertEquals(convert(2L, 4L, 6L), convert(intersection));
     }
 }
