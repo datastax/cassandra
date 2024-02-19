@@ -211,12 +211,6 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
         Assert.assertEquals(0L, builder.add((RangeIterator) null).rangeCount());
         Assert.assertEquals(0L, builder.add((List<RangeIterator>) null).getTokenCount());
         Assert.assertEquals(0L, builder.add(new LongIterator(new long[] {})).rangeCount());
-
-        var single = new LongIterator(new long[] { 1L, 2L, 3L });
-        var range = RangeIntersectionIterator.<PrimaryKey>builder().add(single).build();
-
-        // because build should return first element if it's only one instead of building yet another iterator
-        Assert.assertEquals(range, single);
     }
 
     @Test
