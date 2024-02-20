@@ -189,6 +189,7 @@ public class CommitLogReplayer implements CommitLogReadHandler
     {
         Preconditions.checkArgument(!replayed, "CommitlogReplayer can only replay once");
 
+        logger.warn("Inside replayFiles");
         List<File> filteredLogs = CommitLogReader.filterCommitLogFiles(clogs);
         int i = 0;
         for (File file: filteredLogs)

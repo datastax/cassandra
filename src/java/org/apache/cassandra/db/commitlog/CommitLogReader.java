@@ -172,6 +172,7 @@ public class CommitLogReader
                                      int mutationLimit,
                                      boolean tolerateTruncation) throws IOException
     {
+        logger.info("inside readCommitLogSegment()");
         // just transform from the file name (no reading of headers) to determine version
         CommitLogDescriptor desc = CommitLogDescriptor.fromFileName(file.name());
 
