@@ -271,7 +271,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
     private CloseableIterator<ScoredRowId> orderByBruteForce(float[] queryVector, IntArrayList segmentRowIds, int limit, int topK) throws IOException
     {
-        if (graph.getCompressedVectors() != null)
+        // If we use compressed vectors, we still have to order the topK results using full resolution similarity
+        // scores, so only use the compressed vectors when there are enough vectors to make it worthwhile.
+        // VSTODO is there a multiplier for topK that makes sense? Does it depend on vector length? Further
+        // testing needed. Initial testing suggests the difference in these two paths is less than a millisecond.
+        if (graph.getCompressedVectors() != null && segmentRowIds.size() > topK)
             return orderByBruteForce(graph.getCompressedVectors(), queryVector, segmentRowIds, limit, topK);
         return orderByBruteForce(queryVector, segmentRowIds);
     }
