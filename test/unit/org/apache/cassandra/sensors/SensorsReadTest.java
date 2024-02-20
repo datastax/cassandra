@@ -123,7 +123,7 @@ public class SensorsReadTest
         handleReadCommand(command);
 
         assertRequestAndRegistrySensorsEquality(context);
-        Sensor requestSensor = getThreadLocalRequestSensor();
+        Sensor requestSensor = getThreadLocalRequestSensor(context);
         assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
     }
 
@@ -150,7 +150,7 @@ public class SensorsReadTest
         handleReadCommand(command);
 
         assertRequestAndRegistrySensorsEquality(context);
-        Sensor requestSensor = getThreadLocalRequestSensor();
+        Sensor requestSensor = getThreadLocalRequestSensor(context);
         assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
     }
 
@@ -179,7 +179,7 @@ public class SensorsReadTest
 
         assertRequestAndRegistrySensorsEquality(context);
 
-        Sensor requestSensor = getThreadLocalRequestSensor();
+        Sensor requestSensor = getThreadLocalRequestSensor(context);
         assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
     }
 
@@ -206,7 +206,7 @@ public class SensorsReadTest
         ReadCommand command1 = Util.cmd(store, key).includeRow("0").build();
         handleReadCommand(command1);
 
-        Sensor request1Sensor = getThreadLocalRequestSensor();
+        Sensor request1Sensor = getThreadLocalRequestSensor(context);
         // Extract the value as later we will reset the thread local and the sensor value will be lost
         long request1Bytes = (long) request1Sensor.getValue();
 
@@ -214,13 +214,13 @@ public class SensorsReadTest
         assertThat(request1Sensor).isEqualTo(getRegistrySensor(context));
         assertResponseSensors(request1Sensor.getValue(), request1Sensor.getValue());
 
-        getThreadLocalRequestSensor().reset();
+        getThreadLocalRequestSensor(context).reset();
         capturedOutboundMessages.clear();
 
         ReadCommand command2 = Util.cmd(store, key).filterOn("val", Operator.EQ, "9").build();
         handleReadCommand(command2);
 
-        Sensor request2Sensor = getThreadLocalRequestSensor();
+        Sensor request2Sensor = getThreadLocalRequestSensor(context);
         assertThat(request2Sensor.getValue()).isEqualTo(request1Bytes * 10);
         assertThat(getRegistrySensor(context).getValue()).isEqualTo(request1Bytes + request2Sensor.getValue());
         assertResponseSensors(request2Sensor.getValue(), request1Bytes + request2Sensor.getValue());
@@ -248,7 +248,7 @@ public class SensorsReadTest
         ReadCommand command1 = Util.cmd(store, key).build();
         handleReadCommand(command1);
 
-        Sensor request1Sensor = getThreadLocalRequestSensor();
+        Sensor request1Sensor = getThreadLocalRequestSensor(context);
         // Extract the value as later we will reset the thread local and the sensor value will be lost
         long request1Bytes = (long) request1Sensor.getValue();
 
@@ -256,13 +256,13 @@ public class SensorsReadTest
         assertThat(request1Sensor).isEqualTo(getRegistrySensor(context));
         assertResponseSensors(request1Bytes, request1Bytes);
 
-        getThreadLocalRequestSensor().reset();
+        getThreadLocalRequestSensor(context).reset();
         capturedOutboundMessages.clear();
 
         ReadCommand command2 = Util.cmd(store).fromKeyIncl("0").toKeyIncl("9").build();
         handleReadCommand(command2);
 
-        Sensor request2Sensor = getThreadLocalRequestSensor();
+        Sensor request2Sensor = getThreadLocalRequestSensor(context);
         assertThat(request2Sensor.getValue()).isEqualTo(request1Bytes * 10);
         assertThat(getRegistrySensor(context).getValue()).isEqualTo(request1Bytes + request2Sensor.getValue());
         assertResponseSensors(request2Sensor.getValue(), request1Bytes + request2Sensor.getValue());
@@ -283,7 +283,7 @@ public class SensorsReadTest
 
     private void assertRequestAndRegistrySensorsEquality(Context context)
     {
-        Sensor localSensor = getThreadLocalRequestSensor();
+        Sensor localSensor = getThreadLocalRequestSensor(context);
         assertThat(localSensor.getValue()).isGreaterThan(0);
 
         Sensor registrySensor = getRegistrySensor(context);
@@ -363,8 +363,8 @@ public class SensorsReadTest
      * Returns the read sensor registered in the thread local {@link RequestSensors}
      * @return the thread local read sensor
      */
-    private static Sensor getThreadLocalRequestSensor()
+    private static Sensor getThreadLocalRequestSensor(Context context)
     {
-        return RequestTracker.instance.get().getSensor(Type.READ_BYTES).get();
+        return RequestTracker.instance.get().getSensor(context, Type.READ_BYTES).get();
     }
 }

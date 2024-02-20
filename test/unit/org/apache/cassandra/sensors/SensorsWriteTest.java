@@ -41,7 +41,7 @@ import org.apache.cassandra.utils.BloomFilter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-public class SensorsWriterTest
+public class SensorsWriteTest
 {
     public static final String KEYSPACE1 = "SensorsWriteTest";
     public static final String CF_STANDARD = "Standard";
