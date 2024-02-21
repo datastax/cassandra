@@ -245,10 +245,10 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         final byte[] scratchPackedValue1 = new byte[packedBytesLength];
 
         final SeekingRandomAccessInput randoInput = new SeekingRandomAccessInput(bkdInput);
+        LongValues orderMapReader = DirectReader.getInstance(randoInput, bitsPerValue, orderMapPointer);
         for (int x = 0; x < count; x++)
         {
-            LongValues orderMapReader = DirectReader.getInstance(randoInput, DirectWriter.unsignedBitsRequired(maxPointsInLeafNode - 1), orderMapPointer);
-            final short idx = (short) LeafOrderMap.getValue(x, orderMapReader);
+            final short idx = LeafOrderMap.getValue(x, orderMapReader);
             origIndex[x] = idx;
         }
 
@@ -367,6 +367,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         final QueryContext context;
 
         final IndexInput bkdInput;
+        final SeekingRandomAccessInput bkdRandomInput;
         final IndexInput postingsInput;
         final IndexInput postingsSummaryInput;
         final IndexTree index;
@@ -376,6 +377,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                      IndexTree index, QueryEventListener.BKDIndexEventListener listener, QueryContext context)
         {
             this.bkdInput = bkdInput;
+            this.bkdRandomInput = new SeekingRandomAccessInput(bkdInput);
             this.postingsInput = postingsInput;
             this.postingsSummaryInput = postingsSummaryInput;
             this.index = index;
@@ -694,11 +696,10 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
             final long orderMapPointer = bkdInput.getFilePointer();
 
-            final SeekingRandomAccessInput randoInput = new SeekingRandomAccessInput(bkdInput);
+            LongValues orderMapReader = DirectReader.getInstance(bkdRandomInput, bitsPerValue, orderMapPointer);
             for (int x = 0; x < count; x++)
             {
-                LongValues orderMapReader = DirectReader.getInstance(randoInput, DirectWriter.unsignedBitsRequired(maxPointsInLeafNode - 1), orderMapPointer);
-                origIndex[x] = (short) orderMapReader.get(x);
+                origIndex[x] = LeafOrderMap.getValue(x, orderMapReader);
             }
 
             // seek beyond the ordermap
