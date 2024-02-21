@@ -30,6 +30,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.HashMultiset;
@@ -366,36 +367,47 @@ public class BatchStatement implements CQLStatement
         if (mutations.size() <= 1)
             return;
 
-        long size = batchSize(mutations);
+        long baseSize = baseBatchSize(mutations);
+        long primaryKeysSize = primaryKeysSize(mutations);
 
-        if (Guardrails.batchSize.triggersOn(size, queryState))
+        if (Guardrails.batchSize.triggersOn(baseSize, queryState))
         {
-            Set<String> tableNames = new HashSet<>();
-            for (IMutation mutation : mutations)
-            {
-                for (PartitionUpdate update : mutation.getPartitionUpdates())
-                    tableNames.add(update.metadata().toString());
-            }
+            String tableNames = extractTableNames(mutations);
+            Guardrails.batchSize.guard(baseSize, tableNames, false, queryState);
+        }
 
-            Guardrails.batchSize.guard(size, tableNames.toString(), false, queryState);
+        if (Guardrails.batchSizeWithPK.triggersOn(baseSize + primaryKeysSize, queryState))
+        {
+            String tableNames = extractTableNames(mutations);
+            Guardrails.batchSizeWithPK.guard(baseSize + primaryKeysSize, tableNames, false, queryState);
         }
     }
 
     /**
-     * Returns the size of the batch mutations,
-     * this method includes the primary key size in the size calculation formula.
+     * Returns the size of the batch mutations
      *
      * @param mutations - the batch mutations.
-     * @return the total size of the batch mutations.
+     * @return the size of the batch mutations.
      */
-    private static long batchSize(Collection<? extends IMutation> mutations)
+    private static long baseBatchSize(Collection<? extends IMutation> mutations)
     {
-        return IMutation.dataSize(mutations) + primaryKeysSize(mutations);
+        return IMutation.dataSize(mutations);
     }
 
     private static long primaryKeysSize(Collection<? extends IMutation> mutations)
     {
         return mutations.stream().map(IMutation::key).mapToLong(DecoratedKey::getKeyLength).sum();
+    }
+
+    private static String extractTableNames(Collection<? extends IMutation> mutations)
+    {
+        Set<String> tableNames = new HashSet<>();
+        for (IMutation mutation : mutations)
+        {
+            for (PartitionUpdate update : mutation.getPartitionUpdates())
+                tableNames.add(update.metadata().toString());
+        }
+        return tableNames.toString();
     }
 
     private void verifyBatchType(Collection<? extends IMutation> mutations, QueryState queryState)

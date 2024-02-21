@@ -1440,13 +1440,24 @@ enable_drop_compact_storage: false
   # partition_size_warn_threshold_in_mb: 100
 
   # Log WARN on any multiple-partition batch size that exceeds this value. 64kb per batch by default.
+  # Note that this guardrail does not take into account the size of the partition key when calculating the batch size.
   # Use caution when increasing the size of this threshold as it can lead to node instability.
   # Default value is 64kb, may differ if emulate_dbaas_defaults is enabled
   # batch_size_warn_threshold_in_kb: 64
 
   # Fail any multiple-partition batch that exceeds this value. The calculated default is 640kb (10x warn threshold).
+  # Note that this guardrail does not take into account the size of the partition key when calculating the batch size.
   # Default value is 640kb, may differ if emulate_dbaas_defaults is enabled
   # batch_size_fail_threshold_in_kb: 640
+
+  # Log WARN on any multiple-partition batch size that exceeds this value. -1 by default (disabled).
+  # In contrast to batch_size_warn_threshold_in_kb this guardrail takes into account the size of the partition key when calculating the batch size.
+  # Use caution when increasing the size of this threshold as it can lead to node instability.
+  # batch_size_with_pk_warn_threshold_in_kb: -1
+
+  # Fail any multiple-partition batch that exceeds this value. -1 by default (disabled), when enabling should be greater than the batch_size_with_pk_warn_threshold_in_kb.
+  # In contrast to batch_size_warn_threshold_in_kb this guardrail takes into account the size of the partition key when calculating the batch size.
+  # batch_size_with_pk_fail_threshold_in_kb: -1
 
   # Log WARN on any batches not of type LOGGED than span across more partitions than this limit.
   # Default value is 10, may differ if emulate_dbaas_defaults is enabled

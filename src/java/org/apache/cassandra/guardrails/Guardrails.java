@@ -234,6 +234,14 @@ public abstract class Guardrails
                                                 ? format("Batch for %s is of size %s, exceeding specified warning threshold %s", what, formatSize(v), formatSize(t))
                                                 : format("Batch for %s is of size %s, exceeding specified failure threshold %s", what, formatSize(v), formatSize(t)));
 
+    public static final Threshold batchSizeWithPK =
+            factory.threshold("batch_size_witk_pk",
+                    config::getBatchSizeWithPKWarnThreshold,
+                    config::getBatchSizeWithPKFailThreshold,
+                    (isWarning, what, v, t) -> isWarning
+                                               ? format("Batch for %s is of size %s including the primary key, exceeding specified warning threshold %s", what, formatSize(v), formatSize(t))
+                                               : format("Batch for %s is of size %s including the primary key, exceeding specified failure threshold %s", what, formatSize(v), formatSize(t)));
+
     public static final Threshold unloggedBatchAcrossPartitions =
             factory.threshold("unlogged_batch_across_partitions",
                           () -> config.unlogged_batch_across_partitions_warn_threshold,

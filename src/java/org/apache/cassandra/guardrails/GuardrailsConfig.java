@@ -134,6 +134,12 @@ public class GuardrailsConfig
     public volatile Integer batch_size_warn_threshold_in_kb;
     // Fail any multiple-partition batch that exceeds this value. The calculated default is 640kb (10x warn threshold).
     public volatile Integer batch_size_fail_threshold_in_kb;
+
+
+    public volatile Integer batch_size_with_pk_warn_threshold_in_kb;
+    public volatile Integer batch_size_with_pk_fail_threshold_in_kb;
+
+
     // Log WARN on any batches not of type LOGGED than span across more partitions than this limit.
     public volatile Integer unlogged_batch_across_partitions_warn_threshold;
 
@@ -159,6 +165,8 @@ public class GuardrailsConfig
         enforceDefault(logged_batch_enabled, v -> logged_batch_enabled = v, true, true);
         enforceDefault(batch_size_warn_threshold_in_kb, v -> batch_size_warn_threshold_in_kb = v, 64, 64);
         enforceDefault(batch_size_fail_threshold_in_kb, v -> batch_size_fail_threshold_in_kb = v, 640, 640);
+        enforceDefault(batch_size_with_pk_warn_threshold_in_kb, v -> batch_size_with_pk_warn_threshold_in_kb = v, NO_LIMIT, NO_LIMIT);
+        enforceDefault(batch_size_with_pk_fail_threshold_in_kb, v -> batch_size_with_pk_fail_threshold_in_kb = v, NO_LIMIT, NO_LIMIT);
         enforceDefault(unlogged_batch_across_partitions_warn_threshold, v -> unlogged_batch_across_partitions_warn_threshold = v, 10, 10);
 
         enforceDefault(truncate_table_enabled, v -> truncate_table_enabled = v, true, true);
@@ -266,6 +274,7 @@ public class GuardrailsConfig
         validateTombstoneThreshold(tombstone_warn_threshold, tombstone_failure_threshold);
 
         validateBatchSizeThreshold(batch_size_warn_threshold_in_kb, batch_size_fail_threshold_in_kb);
+        validateBatchSizeWithPKThreshold(batch_size_with_pk_warn_threshold_in_kb, batch_size_with_pk_fail_threshold_in_kb);
         validateStrictlyPositiveInteger(unlogged_batch_across_partitions_warn_threshold, "unlogged_batch_across_partitions_warn_threshold");
 
         for (String rawCL : write_consistency_levels_disallowed)
@@ -427,6 +436,13 @@ public class GuardrailsConfig
         validateWarnLowerThanFail(warnThreshold, failureThreshold, "batch_size_threshold");
     }
 
+    public void validateBatchSizeWithPKThreshold(long warnThreshold, long failureThreshold)
+    {
+        validateStrictlyPositiveInteger(warnThreshold, "batch_size_with_pk_warn_threshold_in_kb");
+        validateStrictlyPositiveInteger(failureThreshold, "batch_size_with_pk_fail_threshold_in_kb");
+        validateWarnLowerThanFail(warnThreshold, failureThreshold, "batch_size_threshold");
+    }
+
     public int getBatchSizeWarnThreshold()
     {
         return batch_size_warn_threshold_in_kb * 1024;
@@ -435,6 +451,16 @@ public class GuardrailsConfig
     public int getBatchSizeFailThreshold()
     {
         return batch_size_fail_threshold_in_kb * 1024;
+    }
+
+    public int getBatchSizeWithPKWarnThreshold()
+    {
+        return batch_size_with_pk_warn_threshold_in_kb != NO_LIMIT ? batch_size_with_pk_warn_threshold_in_kb * 1024 : NO_LIMIT;
+    }
+
+    public int getBatchSizeWithPKFailThreshold()
+    {
+        return batch_size_with_pk_fail_threshold_in_kb != NO_LIMIT ? batch_size_with_pk_fail_threshold_in_kb * 1024 : NO_LIMIT;
     }
 
     public void setBatchSizeWarnThresholdInKB(int threshold)
@@ -447,5 +473,17 @@ public class GuardrailsConfig
     {
         validateBatchSizeThreshold(batch_size_warn_threshold_in_kb, threshold);
         batch_size_fail_threshold_in_kb = threshold;
+    }
+
+    public void setBatchSizeWithPKWarnThresholdInKB(int threshold)
+    {
+        validateBatchSizeWithPKThreshold(threshold, batch_size_with_pk_fail_threshold_in_kb);
+        batch_size_with_pk_warn_threshold_in_kb = threshold;
+    }
+
+    public void setBatchSizeWithPKFailThresholdInKB(int threshold)
+    {
+        validateBatchSizeWithPKThreshold(batch_size_with_pk_warn_threshold_in_kb, threshold);
+        batch_size_with_pk_fail_threshold_in_kb = threshold;
     }
 }
