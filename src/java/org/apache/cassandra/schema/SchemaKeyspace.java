@@ -163,6 +163,7 @@ public final class SchemaKeyspace
               + "speculative_retry text,"
               + "additional_write_policy text,"
               + "cdc boolean,"
+              + "schema_type text,"
               + "read_repair text,"
               + "PRIMARY KEY ((keyspace_name), table_name))");
 
@@ -233,6 +234,7 @@ public final class SchemaKeyspace
               + "speculative_retry text,"
               + "additional_write_policy text,"
               + "cdc boolean,"
+              + "schema_type text,"
               + "version int,"
               + "read_repair text,"
               + "PRIMARY KEY ((keyspace_name), view_name))");
@@ -602,6 +604,7 @@ public final class SchemaKeyspace
                .add("compression", params.compression.asMap())
                .add("memtable", params.memtable.asMap())
                .add("read_repair", params.readRepair.toString())
+               .add("schema_type", params.schemaType.toString())
                .add("extensions", params.extensions);
 
         // Only add CDC-enabled flag to schema if it's enabled on the node. This is to work around RTE's post-8099 if a 3.8+
@@ -1019,6 +1022,7 @@ public final class SchemaKeyspace
                                                      SpeculativeRetryPolicy.fromString(row.getString("additional_write_policy")) :
                                                      SpeculativeRetryPolicy.fromString("99PERCENTILE"))
                           .cdc(row.has("cdc") && row.getBoolean("cdc"))
+                          .schemaType(row.has("schema_type") ? SchemaType.fromString(row.getString("schema_type")) : SchemaType.TABLE)
                           .readRepair(getReadRepairStrategy(row))
                           .build();
     }
