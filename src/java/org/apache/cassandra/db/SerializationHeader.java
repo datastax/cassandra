@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +30,6 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Iterators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -415,29 +413,29 @@ public class SerializationHeader
 
         private static AbstractType<?> validatePartitionKeyType(String descriptor,
                                                                 TableMetadata table,
-                                                                Version sstableVersion,
                                                                 AbstractType<?> fullType,
+                                                                boolean allowImplicitlyFrozenTuples,
                                                                 boolean isForOfflineTool)
         {
             List<ColumnMetadata> pkColumns = table.partitionKeyColumns();
             int pkCount = pkColumns.size();
 
             if (pkCount == 1)
-                return validateType(descriptor, table, pkColumns.get(0).name.bytes, fullType, !sstableVersion.hasExplicitlyFrozenTuples(), isForOfflineTool);
+                return validateType(descriptor, table, pkColumns.get(0).name.bytes, fullType, allowImplicitlyFrozenTuples, isForOfflineTool);
 
             List<AbstractType<?>> subTypes = fullType.subTypes();
             assert fullType instanceof CompositeType && subTypes.size() == pkCount
                     : String.format("In %s, got %s as table %s partition key type but partition key is %s",
                                     descriptor, fullType, table, pkColumns);
 
-            return CompositeType.getInstance(validatePKTypes(descriptor, table, sstableVersion, pkColumns, subTypes, isForOfflineTool));
+            return CompositeType.getInstance(validatePKTypes(descriptor, table, pkColumns, subTypes, allowImplicitlyFrozenTuples, isForOfflineTool));
         }
 
         private static List<AbstractType<?>> validatePKTypes(String descriptor,
                                                              TableMetadata table,
-                                                             Version sstableVersion,
                                                              List<ColumnMetadata> columns,
                                                              List<AbstractType<?>> types,
+                                                             boolean allowImplicitlyFrozenTuples,
                                                              boolean isForOfflineTool)
         {
             int count = types.size();
@@ -448,7 +446,7 @@ public class SerializationHeader
                                          table,
                                          columns.get(i).name.bytes,
                                          types.get(i),
-                                         !sstableVersion.hasExplicitlyFrozenTuples(),
+                                         allowImplicitlyFrozenTuples,
                                          isForOfflineTool));
             }
             return updated;
@@ -494,12 +492,12 @@ public class SerializationHeader
                 }
             }
 
-            AbstractType<?> partitionKeys = validatePartitionKeyType(descriptor, metadata, sstableVersion, keyType, isForOfflineTool);
+            AbstractType<?> partitionKeys = validatePartitionKeyType(descriptor, metadata, keyType, !sstableVersion.hasExplicitlyFrozenTuples(), isForOfflineTool);
             List<AbstractType<?>> clusterings = validatePKTypes(descriptor,
                                                                 metadata,
-                                                                sstableVersion,
                                                                 metadata.clusteringColumns(),
                                                                 clusteringTypes,
+                                                                !sstableVersion.hasExplicitlyFrozenTuples(),
                                                                 isForOfflineTool);
 
             return new SerializationHeader(true,
