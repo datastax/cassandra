@@ -17,17 +17,23 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Optional;
+import java.util.Set;
+
 import org.apache.cassandra.concurrent.ExecutorLocals;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.ForwardingInfo;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.ParamType;
-import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -38,7 +44,26 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
     private void respond(Message<?> respondTo, InetAddressAndPort respondToAddress)
     {
         Tracing.trace("Enqueuing response to {}", respondToAddress);
-        MessagingService.instance().send(respondTo.emptyResponse(), respondToAddress);
+
+        Set<Sensor> writeRequestSensors = RequestTracker.instance.get().getSensors(Type.WRITE_BYTES);
+        Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
+        writeRequestSensors.forEach(s -> {
+            String param = SensorsCustomParams.encodeKeyspaceAndTableInWriteByteRequestParam(s);
+            byte[] bytes = SensorsCustomParams.sensorValueAsBytes(s.getValue());
+            response.withCustomParam(param, bytes);
+        });
+
+        // for each table in the mutation, send the global per table write bytes as observed by the registry
+        writeRequestSensors.forEach(requestSensor -> {
+            Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(requestSensor.getContext(), Type.WRITE_BYTES);
+            registrySensor.ifPresent(s -> {
+                String param = SensorsCustomParams.encodeKeyspaceAndTableInWriteByteTableParam(s);
+                byte[] bytes = SensorsCustomParams.sensorValueAsBytes(s.getValue());
+                response.withCustomParam(param, bytes);
+            });
+        });
+
+        MessagingService.instance().send(response.build(), respondToAddress);
     }
 
     private void failed()

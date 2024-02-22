@@ -251,6 +251,10 @@ public class Mutation implements IMutation
     public void apply(WriteOptions writeOptions)
     {
         Keyspace.open(keyspaceName).apply(this, writeOptions);
+
+        RequestSensors sensors = requestTracker.get();
+        if (sensors != null)
+            sensors.syncAllSensors();
     }
 
     /*

@@ -167,4 +167,19 @@ public class RequestSensorsTest
         verify(sensorsRegistry, times(1)).updateSensor(eq(context2), eq(type1), eq(1.0));
         verify(sensorsRegistry, times(1)).updateSensor(eq(context2), eq(type2), eq(1.0));
     }
+
+    @Test
+    public void testGetSensors()
+    {
+        sensors.registerSensor(context1, type1);
+        sensors.registerSensor(context1, type2);
+        sensors.registerSensor(context2, type1);
+        sensors.registerSensor(context2, type2);
+
+        assertThat(sensors.getSensors(type1)).hasSize(2);
+        assertThat(sensors.getSensors(type1)).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context2, type1).get());
+
+        assertThat(sensors.getSensors(type2)).hasSize(2);
+        assertThat(sensors.getSensors(type2)).containsExactlyInAnyOrder(sensors.getSensor(context1, type2).get(), sensors.getSensor(context2, type2).get());
+    }
 }

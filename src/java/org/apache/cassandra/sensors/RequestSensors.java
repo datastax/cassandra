@@ -20,9 +20,11 @@ package org.apache.cassandra.sensors;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.utils.Pair;
 
@@ -63,6 +65,11 @@ public class RequestSensors
     public Optional<Sensor> getSensor(Context context, Type type)
     {
         return Optional.ofNullable(sensors.get(Pair.create(context, type)));
+    }
+
+    public Set<Sensor> getSensors(Type type)
+    {
+        return sensors.values().stream().filter(s -> s.getType() == type).collect(Collectors.toSet());
     }
 
     public void incrementSensor(Context context, Type type, double value)

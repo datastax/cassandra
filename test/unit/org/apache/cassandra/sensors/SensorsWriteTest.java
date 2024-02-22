@@ -20,6 +20,7 @@ package org.apache.cassandra.sensors;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.junit.After;
 import org.junit.Before;
@@ -34,7 +35,10 @@ import org.apache.cassandra.db.MutationVerbHandler;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.BloomFilter;
@@ -47,7 +51,12 @@ public class SensorsWriteTest
     public static final String CF_STANDARD = "Standard";
     public static final String CF_STANDARD_CLUSTERING = "StandardClustering";
 
+    public static final String KEYSPACE2 = "SensorsWriteTest2";
+    public static final String CF_STANDARD2 = "Standard2";
+
     private ColumnFamilyStore store;
+    private CopyOnWriteArrayList<Message> capturedOutboundMessages;
+
     @BeforeClass
     public static void defineSchema() throws Exception
     {
@@ -56,8 +65,14 @@ public class SensorsWriteTest
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD,
                                                               1, AsciiType.instance, AsciiType.instance, null),
+                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD2,
+                                                              1, AsciiType.instance, AsciiType.instance, null),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_CLUSTERING,
                                                               1, AsciiType.instance, AsciiType.instance, AsciiType.instance));
+        SchemaLoader.createKeyspace(KEYSPACE2,
+                                    KeyspaceParams.simple(1),
+                                    SchemaLoader.standardCFMD(KEYSPACE2, CF_STANDARD2,
+                                                              1, AsciiType.instance, AsciiType.instance, null));
 
         CompactionManager.instance.disableAutoCompaction();
     }
@@ -67,7 +82,15 @@ public class SensorsWriteTest
     {
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE1).getMetadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).metadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).metadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_CLUSTERING).metadata());
+
+        capturedOutboundMessages = new CopyOnWriteArrayList<>();
+        MessagingService.instance().outboundSink.add((message, to) ->
+                                                     {
+                                                         capturedOutboundMessages.add(message);
+                                                         return false;
+                                                     });
     }
 
     @After
@@ -85,7 +108,7 @@ public class SensorsWriteTest
     @Test
     public void testSingleRowUpdateUpdateMutation()
     {
-        store = discardSSTables(KEYSPACE1, CF_STANDARD);
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
 
         double writeSensorSum = 0;
@@ -95,22 +118,22 @@ public class SensorsWriteTest
             .add("val", String.valueOf(j))
             .build();
             handleMutation(m);
-            Sensor localSensor = getThreadLocalRequestSensor(context);
+            Sensor localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
             assertThat(localSensor.getValue()).isGreaterThan(0);
-            Sensor registrySensor = getRegistrySensor(context);
+            Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
             assertThat(registrySensor).isEqualTo(localSensor);
             writeSensorSum += localSensor.getValue();
-        }
 
-        // check global registry is synchronized
-        Sensor registrySensor = getRegistrySensor(context);
-        assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
+            // check global registry is synchronized
+            assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
+            assertResponseSensors(localSensor.getValue(), writeSensorSum, KEYSPACE1, CF_STANDARD);
+        }
     }
 
     @Test
-    public void testSingleRowUpdateUpdateMutation_WithClusteringKeys()
+    public void testSingleRowUpdateUpdateMutationWithClusteringKeys()
     {
-        store = discardSSTables(KEYSPACE1, CF_STANDARD_CLUSTERING);
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_CLUSTERING);
         Context context = new Context(KEYSPACE1, CF_STANDARD_CLUSTERING, store.metadata.id.toString());
 
         double writeSensorSum = 0;
@@ -121,22 +144,22 @@ public class SensorsWriteTest
                          .add("val", String.valueOf(j))
                          .build();
             handleMutation(m);
-            Sensor localSensor = getThreadLocalRequestSensor(context);
+            Sensor localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
             assertThat(localSensor.getValue()).isGreaterThan(0);
-            Sensor registrySensor = getRegistrySensor(context);
+            Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
             assertThat(registrySensor).isEqualTo(localSensor);
             writeSensorSum += localSensor.getValue();
-        }
 
-        // check global registry is synchronized
-        Sensor registrySensor = getRegistrySensor(context);
-        assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
+            // check global registry is synchronized
+            assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
+            assertResponseSensors(localSensor.getValue(), writeSensorSum, KEYSPACE1, CF_STANDARD_CLUSTERING);
+        }
     }
 
     @Test
     public void testMultipleRowUpdatesMutation()
     {
-        store = discardSSTables(KEYSPACE1, CF_STANDARD);
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
 
         List<Mutation> mutations = new ArrayList<>();
@@ -151,44 +174,86 @@ public class SensorsWriteTest
         Mutation mutation = Mutation.merge(mutations);
         handleMutation(mutation);
 
-        Sensor localSensor = getThreadLocalRequestSensor(context);
+        Sensor localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
         assertThat(localSensor.getValue()).isGreaterThan(0);
 
-        Sensor registrySensor = getRegistrySensor(context);
+        Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registrySensor).isEqualTo(localSensor);
         assertThat(registrySensor.getValue()).isEqualTo(localSensor.getValue());
+        assertResponseSensors(localSensor.getValue(), registrySensor.getValue(), KEYSPACE1, CF_STANDARD);
     }
 
-    private ColumnFamilyStore discardSSTables(String ks, String cf)
+    @Test
+    public void testMultipleTableMutations()
     {
-        Keyspace keyspace = Keyspace.open(ks);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cf);
-        cfs.discardSSTables(System.currentTimeMillis());
-        return cfs;
-    }
+        ColumnFamilyStore store1 = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
+        Context context1 = new Context(KEYSPACE1, CF_STANDARD, store1.metadata.id.toString());
 
-    /**
-     * Returns the writer sensor with the given context from the global registry
-     * @param context the sensor context
-     * @return the requested write sensor from the global registry
-     */
-    private static Sensor getRegistrySensor(Context context)
-    {
-        return SensorsRegistry.instance.getOrCreateSensor(context, Type.WRITE_BYTES).get();
-    }
+        ColumnFamilyStore store2 = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD2);
+        Context context2 = new Context(KEYSPACE1, CF_STANDARD2, store2.metadata.id.toString());
 
-    /**
-     * Returns the writer sensor registered in the thread local {@link RequestSensors}
-     * @param context the sensor context
-     * @return the thread local writer sensor
-     */
-    private static Sensor getThreadLocalRequestSensor(Context context)
-    {
-        return RequestTracker.instance.get().getSensor(context, Type.WRITE_BYTES).get();
+        List<Mutation> mutations = new ArrayList<>();
+        String partitionKey = "0";
+        for (int j = 0; j < 5; j++)
+        {
+            mutations.add(new RowUpdateBuilder(store1.metadata(), j, partitionKey)
+                          .add("val", String.valueOf(j))
+                          .build());
+            mutations.add(new RowUpdateBuilder(store2.metadata(), j, partitionKey)
+                          .add("val", String.valueOf(j))
+                          .build());
+        }
+
+        Mutation mutation = Mutation.merge(mutations);
+        handleMutation(mutation);
+
+        Sensor localSensor1 = SensorsTestUtil.getThreadLocalRequestSensor(context1, Type.WRITE_BYTES);
+        assertThat(localSensor1.getValue()).isGreaterThan(0);
+
+        Sensor localSensor2 = SensorsTestUtil.getThreadLocalRequestSensor(context2, Type.WRITE_BYTES);
+        assertThat(localSensor2.getValue()).isGreaterThan(0);
+
+        Sensor registrySensor1 = SensorsTestUtil.getRegistrySensor(context1, Type.WRITE_BYTES);
+        assertThat(registrySensor1).isEqualTo(localSensor1);
+        assertThat(registrySensor1.getValue()).isEqualTo(localSensor1.getValue());
+
+        Sensor registrySensor2 = SensorsTestUtil.getRegistrySensor(context2, Type.WRITE_BYTES);
+        assertThat(registrySensor2).isEqualTo(localSensor2);
+        assertThat(registrySensor2.getValue()).isEqualTo(localSensor1.getValue());
+
+        assertResponseSensors(localSensor1.getValue(), registrySensor1.getValue(), KEYSPACE1, CF_STANDARD);
+        assertResponseSensors(localSensor2.getValue(), registrySensor2.getValue(), KEYSPACE1, CF_STANDARD2);
     }
 
     private static void handleMutation(Mutation mutation)
     {
         MutationVerbHandler.instance.doVerb(Message.builder(Verb.MUTATION_REQ, mutation).build());
+    }
+
+    private void assertResponseSensors(double requestValue, double registryValue, String keyspace, String table)
+    {
+        // verify against the last message to enable testing of multiple mutations in a for loop
+        Message message = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
+        assertResponseSensors(message, requestValue, registryValue, keyspace, table);
+
+        // make sure messages with sensor values can be deserialized on the receiving node
+        DataOutputBuffer out = SensorsTestUtil.serialize(message);
+        Message deserializedMessage = SensorsTestUtil.deserialize(out, message.from());
+        assertResponseSensors(deserializedMessage, requestValue, registryValue, keyspace, table);
+    }
+
+    private void assertResponseSensors(Message message, double requestValue, double registryValue, String keyspace, String table)
+    {
+        assertThat(message.header.customParams()).isNotNull();
+        String expectedRequestParam = String.format(SensorsCustomParams.WRITE_BYTES_REQUEST_TEMPLATE, keyspace, table);
+        String expectedTableParam = String.format(SensorsCustomParams.WRITE_BYTES_TABLE_TEMPLATE, keyspace, table);
+
+        assertThat(message.header.customParams()).containsKey(expectedRequestParam);
+        assertThat(message.header.customParams()).containsKey(expectedTableParam);
+
+        double requestWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedRequestParam));
+        double tableWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedTableParam));
+        assertThat(requestWriteBytes).isEqualTo(requestValue);
+        assertThat(tableWriteBytes).isEqualTo(registryValue);
     }
 }
