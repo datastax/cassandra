@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,8 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Iterators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -323,13 +326,13 @@ public class SerializationHeader
 
         private static AbstractType<?> validateType(String description,
                                                     TableMetadata table,
-                                                    Version sstableVersion,
                                                     ByteBuffer columnName,
                                                     AbstractType<?> type,
-                                                    boolean isPrimaryKeyColumn,
+                                                    boolean allowImplicitlyFrozenTuples,
                                                     boolean isForOfflineTool)
         {
             boolean dropped = table.getDroppedColumn(columnName) != null;
+            boolean isPrimaryKeyColumn = Iterables.any(table.primaryKeyColumns(), cd -> cd.name.bytes.equals(columnName));
 
             try
             {
@@ -338,12 +341,10 @@ public class SerializationHeader
             }
             catch (InvalidColumnTypeException e)
             {
-                logger.debug("Error reading SSTable header", e);
-                AbstractType<?> fixed = e.tryFix(!sstableVersion.hasExplicitlyFrozenTuples(), isForOfflineTool);
+                AbstractType<?> fixed = allowImplicitlyFrozenTuples ? tryFix(type, columnName, isPrimaryKeyColumn, table.isCounter(), dropped, isForOfflineTool) : null;
                 if (fixed == null)
                 {
-                    // We don't know how to fix. We log an error here, so we know where the problem is coming from. But we
-                    // otherwise use the type verbatim in the off chance that the type breakage doesn't impact anything.
+                    // We don't know how to fix. We throw an error here because reading such table may result in corruption
                     String msg = String.format("Error reading SSTable header %s, the type for column %s in %s is %s, which is invalid (%s); " +
                                                "The type could not be automatically fixed.",
                                                description, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type().toSchemaString(),
@@ -362,6 +363,56 @@ public class SerializationHeader
             }
         }
 
+        /**
+         * Attempts to return a "fixed" (and thus valid) version of the type. Doing is so is only possible in restrained
+         * case where we know why the type is invalid and are confident we know what it should be.
+         *
+         * @return if we know how to auto-magically fix the invalid type that triggered this exception, the hopefully
+         * fixed version of said type. Otherwise, {@code null}.
+         */
+        public static AbstractType<?> tryFix(AbstractType<?> invalidType, ByteBuffer name, boolean isPrimaryKeyColumn, boolean isCounterTable, boolean isDroppedColumn, boolean isForOfflineTool)
+        {
+            AbstractType<?> fixed = tryFixInternal(invalidType, isPrimaryKeyColumn, isDroppedColumn);
+            if (fixed != null)
+            {
+                try
+                {
+                    // Make doubly sure the fixed type is valid before returning it.
+                    fixed.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isDroppedColumn, isForOfflineTool);
+                    return fixed;
+                }
+                catch (InvalidColumnTypeException e2)
+                {
+                    // Continue as if we hadn't been able to fix, since we haven't
+                }
+            }
+            return null;
+        }
+
+        private static AbstractType<?> tryFixInternal(AbstractType<?> invalidType, boolean isPrimaryKeyColumn, boolean isDroppedColumn)
+        {
+            if (isPrimaryKeyColumn)
+            {
+                // The only issue we have a fix to in that case if the type is not frozen; we can then just freeze it.
+                if (invalidType.isMultiCell())
+                    return invalidType.freeze();
+            }
+            else
+            {
+                // Here again, it's mainly issues of frozen-ness that are fixable, namely multi-cell types that either:
+                // - are tuples, yet not for a dropped column (and so _should_ be frozen). In which case we freeze it.
+                // - has non-frozen subtypes. In which case, we just freeze all subtypes.
+                if (invalidType.isMultiCell())
+                {
+                    boolean isMultiCell = !invalidType.isTuple() || isDroppedColumn;
+                    return invalidType.with(AbstractType.freeze(invalidType.subTypes()), isMultiCell);
+                }
+
+            }
+            // In other case, we don't know how to fix (at least somewhat auto-magically) and will have to fail.
+            return null;
+        }
+
         private static AbstractType<?> validatePartitionKeyType(String descriptor,
                                                                 TableMetadata table,
                                                                 Version sstableVersion,
@@ -372,7 +423,7 @@ public class SerializationHeader
             int pkCount = pkColumns.size();
 
             if (pkCount == 1)
-                return validateType(descriptor, table, sstableVersion, pkColumns.get(0).name.bytes, fullType, true, isForOfflineTool);
+                return validateType(descriptor, table, pkColumns.get(0).name.bytes, fullType, !sstableVersion.hasExplicitlyFrozenTuples(), isForOfflineTool);
 
             List<AbstractType<?>> subTypes = fullType.subTypes();
             assert fullType instanceof CompositeType && subTypes.size() == pkCount
@@ -395,10 +446,9 @@ public class SerializationHeader
             {
                 updated.add(validateType(descriptor,
                                          table,
-                                         sstableVersion,
                                          columns.get(i).name.bytes,
                                          types.get(i),
-                                         true,
+                                         !sstableVersion.hasExplicitlyFrozenTuples(),
                                          isForOfflineTool));
             }
             return updated;
@@ -420,7 +470,7 @@ public class SerializationHeader
                 for (Map.Entry<ByteBuffer, AbstractType<?>> e : map.entrySet())
                 {
                     ByteBuffer name = e.getKey();
-                    AbstractType<?> type = validateType(descriptor, metadata, sstableVersion, name, e.getValue(), false, isForOfflineTool);
+                    AbstractType<?> type = validateType(descriptor, metadata, name, e.getValue(), !sstableVersion.hasExplicitlyFrozenTuples(), isForOfflineTool);
                     AbstractType<?> other = typeMap.put(name, type);
                     if (other != null && !other.equals(type))
                         throw new IllegalStateException("Column " + name + " occurs as both regular and static with types " + other + "and " + e.getValue());

@@ -319,7 +319,6 @@ public class TrieIndexFormat implements SSTableFormat
         private final boolean hasOriginatingHostId;
         private final boolean hasMaxColumnValueLengths;
 
-
         private final int correspondingMessagingVersion;
         private final boolean hasExplicitlyFrozenTuples;
 
