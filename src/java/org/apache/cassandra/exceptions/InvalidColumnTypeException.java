@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.io.sstable.format.Version;
 
 /**
  * Exception thrown when a configured column type is invalid.
@@ -66,9 +67,9 @@ public class InvalidColumnTypeException extends ConfigurationException
      * @return if we know how to auto-magically fix the invalid type that triggered this exception, the hopefully
      * fixed version of said type. Otherwise, {@code null}.
      */
-    public AbstractType<?> tryFix()
+    public AbstractType<?> tryFix(boolean mayBeImplicitlyFrozen)
     {
-        AbstractType<?> fixed = tryFixInternal();
+        AbstractType<?> fixed = tryFixInternal(mayBeImplicitlyFrozen);
         if (fixed != null)
         {
             try
@@ -85,12 +86,12 @@ public class InvalidColumnTypeException extends ConfigurationException
         return null;
     }
 
-    private AbstractType<?> tryFixInternal()
+    private AbstractType<?> tryFixInternal(boolean mayBeImplicitlyFrozen)
     {
         if (isPrimaryKeyColumn)
         {
             // The only issue we have a fix to in that case if the type is not frozen; we can then just freeze it.
-            if (invalidType.isMultiCell())
+            if (invalidType.isMultiCell() && mayBeImplicitlyFrozen)
                 return invalidType.freeze();
         }
         else
@@ -98,7 +99,7 @@ public class InvalidColumnTypeException extends ConfigurationException
             // Here again, it's mainly issues of frozen-ness that are fixable, namely multi-cell types that either:
             // - are tuples, yet not for a dropped column (and so _should_ be frozen). In which case we freeze it.
             // - has non-frozen subtypes. In which case, we just freeze all subtypes.
-            if (invalidType.isMultiCell())
+            if (invalidType.isMultiCell() && mayBeImplicitlyFrozen)
             {
                 boolean isMultiCell = !invalidType.isTuple() || isDroppedColumn;
                 return invalidType.with(AbstractType.freeze(invalidType.subTypes()), isMultiCell);

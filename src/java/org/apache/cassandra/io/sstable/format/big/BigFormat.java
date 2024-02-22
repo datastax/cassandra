@@ -172,7 +172,7 @@ public class BigFormat implements SSTableFormat
                 SerializationHeader.Component headerComponent = (SerializationHeader.Component)
                                                                 descriptor.getMetadataSerializer()
                                                                           .deserialize(descriptor, MetadataType.HEADER);
-                SerializationHeader header = headerComponent.toHeader(descriptor.toString(), metadata);
+                SerializationHeader header = headerComponent.toHeader(descriptor.toString(), metadata, descriptor.version);
                 BigTableRowIndexEntry.Serializer serializer = new BigTableRowIndexEntry.Serializer(descriptor.version, header);
                 return BigTablePartitionIndexIterator.create(iFile, serializer);
             }
@@ -357,6 +357,12 @@ public class BigFormat implements SSTableFormat
 
         @Override
         public boolean hasMaxColumnValueLengths()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean hasExplicitlyFrozenTuples()
         {
             return false;
         }

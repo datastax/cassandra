@@ -19,11 +19,16 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,7 +37,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.exceptions.InvalidColumnTypeException;
 import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -315,21 +320,14 @@ public class SerializationHeader
             return MetadataType.HEADER;
         }
 
-        private static AbstractType<?> validateType(String descriptor,
+        private static AbstractType<?> validateType(String description,
                                                     TableMetadata table,
+                                                    Version sstableVersion,
                                                     ByteBuffer columnName,
                                                     AbstractType<?> type,
                                                     boolean isPrimaryKeyColumn)
         {
             boolean dropped = table.getDroppedColumn(columnName) != null;
-            if (!dropped && type.isTuple() && type.isMultiCell())
-            {
-                logger.debug("Error reading SSTable header {}, the type for column {} in {} is not-frozen {}, " +
-                             "but the column isn't marked as dropped, which is invalid; " +
-                             "Will continue with that type, but something may break.",
-                             descriptor, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type().toSchemaString());
-                dropped = true;
-            }
 
             try
             {
@@ -338,24 +336,24 @@ public class SerializationHeader
             }
             catch (InvalidColumnTypeException e)
             {
-                AbstractType<?> fixed = e.tryFix();
+                AbstractType<?> fixed = e.tryFix(!sstableVersion.hasExplicitlyFrozenTuples());
                 if (fixed == null)
                 {
                     // We don't know how to fix. We log an error here, so we know where the problem is coming from. But we
                     // otherwise use the type verbatim in the off chance that the type breakage doesn't impact anything.
-                    logger.debug("Error reading SSTable header {}, the type for column {} in {} is {}, which is " +
-                                 "invalid ({}); Will continue with that type, but something may break.",
-                                 descriptor, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type().toSchemaString(),
-                                 e.getMessage());
-                    return type;
+                    String msg = String.format("Error reading SSTable header %s, the type for column %s in %s is %s, which is invalid (%s); " +
+                                               "The type could not be automatically fixed.",
+                                               description, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type().toSchemaString(),
+                                               e.getMessage());
+                    throw new IllegalArgumentException(msg, e);
                 }
                 else
                 {
                     logger.debug("Error reading SSTable header {}, the type for column {} in {} is {}, which is " +
-                                "invalid ({}); Will continue with modified valid type {}, but please contact " +
-                                "support if this is incorrect.",
-                                descriptor, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type().toSchemaString(),
-                                e.getMessage(), fixed.asCQL3Type());
+                                 "invalid ({}); The type has been automatically fixed to {}, but please contact " +
+                                 "support if this is incorrect.",
+                                 description, ColumnIdentifier.toCQLString(columnName), table, type.asCQL3Type().toSchemaString(),
+                                 e.getMessage(), fixed.asCQL3Type().toSchemaString());
                     return fixed;
                 }
             }
@@ -363,24 +361,26 @@ public class SerializationHeader
 
         private static AbstractType<?> validatePartitionKeyType(String descriptor,
                                                                 TableMetadata table,
+                                                                Version sstableVersion,
                                                                 AbstractType<?> fullType)
         {
             List<ColumnMetadata> pkColumns = table.partitionKeyColumns();
             int pkCount = pkColumns.size();
 
             if (pkCount == 1)
-                return validateType(descriptor, table, pkColumns.get(0).name.bytes, fullType, true);
+                return validateType(descriptor, table, sstableVersion, pkColumns.get(0).name.bytes, fullType, true);
 
             List<AbstractType<?>> subTypes = fullType.subTypes();
             assert fullType instanceof CompositeType && subTypes.size() == pkCount
                     : String.format("In %s, got %s as table %s partition key type but partition key is %s",
                                     descriptor, fullType, table, pkColumns);
 
-            return CompositeType.getInstance(validatePKTypes(descriptor, table, pkColumns, subTypes));
+            return CompositeType.getInstance(validatePKTypes(descriptor, table, sstableVersion, pkColumns, subTypes));
         }
 
         private static List<AbstractType<?>> validatePKTypes(String descriptor,
                                                              TableMetadata table,
+                                                             Version sstableVersion,
                                                              List<ColumnMetadata> columns,
                                                              List<AbstractType<?>> types)
         {
@@ -390,6 +390,7 @@ public class SerializationHeader
             {
                 updated.add(validateType(descriptor,
                                          table,
+                                         sstableVersion,
                                          columns.get(i).name.bytes,
                                          types.get(i),
                                          true));
@@ -397,7 +398,7 @@ public class SerializationHeader
             return updated;
         }
 
-        public SerializationHeader toHeader(String descriptor, TableMetadata metadata) throws UnknownColumnException
+        public SerializationHeader toHeader(String descriptor, TableMetadata metadata, Version sstableVersion) throws UnknownColumnException
         {
             Map<ByteBuffer, AbstractType<?>> typeMap = new HashMap<>(staticColumns.size() + regularColumns.size());
             RegularAndStaticColumns.Builder builder = RegularAndStaticColumns.builder();
@@ -408,7 +409,7 @@ public class SerializationHeader
                 for (Map.Entry<ByteBuffer, AbstractType<?>> e : map.entrySet())
                 {
                     ByteBuffer name = e.getKey();
-                    AbstractType<?> type = validateType(descriptor, metadata, name, e.getValue(), false);
+                    AbstractType<?> type = validateType(descriptor, metadata, sstableVersion, name, e.getValue(), false);
                     AbstractType<?> other = typeMap.put(name, type);
                     if (other != null && !other.equals(type))
                         throw new IllegalStateException("Column " + name + " occurs as both regular and static with types " + other + "and " + e.getValue());
@@ -432,9 +433,10 @@ public class SerializationHeader
                 }
             }
 
-            AbstractType<?> partitionKeys = validatePartitionKeyType(descriptor, metadata, keyType);
+            AbstractType<?> partitionKeys = validatePartitionKeyType(descriptor, metadata, sstableVersion, keyType);
             List<AbstractType<?>> clusterings = validatePKTypes(descriptor,
                                                                 metadata,
+                                                                sstableVersion,
                                                                 metadata.clusteringColumns(),
                                                                 clusteringTypes);
 

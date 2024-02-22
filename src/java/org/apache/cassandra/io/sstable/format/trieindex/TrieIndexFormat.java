@@ -289,7 +289,7 @@ public class TrieIndexFormat implements SSTableFormat
     //
     static class TrieIndexVersion extends Version
     {
-        public static final String current_version = "cb";
+        public static final String current_version = "cc";
         public static final String earliest_supported_version = "aa";
 
         // aa (DSE 6.0): trie index format
@@ -319,7 +319,9 @@ public class TrieIndexFormat implements SSTableFormat
         private final boolean hasOriginatingHostId;
         private final boolean hasMaxColumnValueLengths;
 
+
         private final int correspondingMessagingVersion;
+        private final boolean hasExplicitlyFrozenTuples;
 
         TrieIndexVersion(String version)
         {
@@ -331,6 +333,7 @@ public class TrieIndexFormat implements SSTableFormat
             hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])") || version.compareTo("ca") >= 0;
             hasMaxColumnValueLengths = version.matches("b[a-z]"); // DSE only field
             correspondingMessagingVersion = version.compareTo("ca") >= 0 ? MessagingService.VERSION_SG_10 : MessagingService.VERSION_3014;
+            hasExplicitlyFrozenTuples = version.compareTo("cc") >= 0 && version.compareTo("da") < 0; // we don't know if what DA is going to be eventually, but it is almost certain it will not include explicitly frozen tuples
         }
 
         // this is for the ab version which was used in the LABS, and then has been renamed to ba
@@ -455,6 +458,12 @@ public class TrieIndexFormat implements SSTableFormat
         public boolean hasIsTransient()
         {
             return version.compareTo("ca") >= 0;
+        }
+
+        @Override
+        public boolean hasExplicitlyFrozenTuples()
+        {
+            return hasExplicitlyFrozenTuples;
         }
     }
 }

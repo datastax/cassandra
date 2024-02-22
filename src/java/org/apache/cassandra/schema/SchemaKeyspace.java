@@ -1054,7 +1054,7 @@ public final class SchemaKeyspace
         }
         catch (InvalidColumnTypeException e)
         {
-            AbstractType<?> fixed = e.tryFix();
+            AbstractType<?> fixed = e.tryFix(false);
             if (fixed == null)
                 throw e;
 

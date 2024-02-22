@@ -758,7 +758,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
 
             if (comparisonType == ComparisonType.NOT_COMPARABLE)
                 throw columnException(columnName, true, isCounterTable, isDroppedColumn,
-                                      "type %s is not comparable and cannot be used for PRIMARY KEY columns", asCQL3Type());
+                                      "type %s is not comparable and cannot be used for PRIMARY KEY columns", asCQL3Type().toSchemaString());
         }
         else
         {
@@ -767,7 +767,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
                 if (isTuple() && !isDroppedColumn)
                     throw columnException(columnName, false, isCounterTable, false,
                                           "tuple type %s is not frozen, which should not have happened",
-                                          asCQL3Type());
+                                          asCQL3Type().toSchemaString());
 
                 for (AbstractType<?> subType : subTypes())
                 {
@@ -775,7 +775,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
                     {
                         throw columnException(columnName, false, isCounterTable, isDroppedColumn,
                                               "non-frozen %s are only supported at top-level: subtype %s of %s must be frozen",
-                                              subType.category(), subType.asCQL3Type(), asCQL3Type());
+                                              subType.category(), subType.asCQL3Type().toSchemaString(), asCQL3Type().toSchemaString());
                     }
                 }
 

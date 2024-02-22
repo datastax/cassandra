@@ -55,8 +55,10 @@ import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
+import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -65,14 +67,24 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 public class SerializationHeaderTest
 {
     private static String KEYSPACE = "SerializationHeaderTest";
 
+    private final static Version versionWithExplicitFrozenTuples;
+    private final static Version versionWithImplicitFrozenTuples;
+
     static
     {
         DatabaseDescriptor.daemonInitialization();
+
+        versionWithImplicitFrozenTuples = TrieIndexFormat.instance.getVersion("cb");
+        assertThat(versionWithImplicitFrozenTuples.hasExplicitlyFrozenTuples()).isFalse();
+
+        versionWithExplicitFrozenTuples = TrieIndexFormat.instance.getVersion("cc");
+        assertThat(versionWithExplicitFrozenTuples.hasExplicitlyFrozenTuples()).isTrue();
     }
     
     @Test
@@ -174,11 +186,13 @@ public class SerializationHeaderTest
                                                                                                        new LinkedHashMap<>(Map.of(ByteBufferUtil.bytes("v"), multicellTupleType)),
                                                                                                        EncodingStats.NO_STATS);
 
-        SerializationHeader header = component.toHeader("asdfa", metadata);
+        SerializationHeader header = component.toHeader("asdfa", metadata, versionWithImplicitFrozenTuples);
         assertThat(header.keyType().isMultiCell()).isFalse();
         assertThat(header.clusteringTypes().get(0).isMultiCell()).isFalse();
         assertThat(header.columns().statics.iterator().next().type.isMultiCell()).isFalse();
         assertThat(header.columns().regulars.iterator().next().type.isMultiCell()).isFalse();
+
+        assertThatIllegalArgumentException().isThrownBy(() -> component.toHeader("asdfa", metadata, versionWithExplicitFrozenTuples));
     }
 
     @Test
@@ -203,9 +217,11 @@ public class SerializationHeaderTest
                                                                                                                                   ByteBufferUtil.bytes("dv"), multicellTupleType)),
                                                                                                        EncodingStats.NO_STATS);
 
-        SerializationHeader header = component.toHeader("tab", metadata);
+        SerializationHeader header = component.toHeader("tab", metadata, versionWithImplicitFrozenTuples);
         assertThat(Iterables.find(header.columns().regulars, md -> md.name.toString().equals("dv")).type.isMultiCell()).isTrue();
         assertThat(Iterables.find(header.columns().statics, md -> md.name.toString().equals("ds")).type.isMultiCell()).isTrue();
+
+        assertThatIllegalArgumentException().isThrownBy(() -> component.toHeader("tab", metadata, versionWithExplicitFrozenTuples));
     }
 
 }
