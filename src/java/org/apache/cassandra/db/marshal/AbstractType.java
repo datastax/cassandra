@@ -739,7 +739,8 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public void validateForColumn(ByteBuffer columnName,
                                   boolean isPrimaryKeyColumn,
                                   boolean isCounterTable,
-                                  boolean isDroppedColumn)
+                                  boolean isDroppedColumn,
+                                  boolean isForOfflineTool)
     {
         if (isPrimaryKeyColumn)
         {
@@ -764,7 +765,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         {
             if (isMultiCell())
             {
-                if (isTuple() && !isDroppedColumn)
+                if (isTuple() && !isDroppedColumn && !isForOfflineTool)
                     throw columnException(columnName, false, isCounterTable, false,
                                           "tuple type %s is not frozen, which should not have happened",
                                           asCQL3Type().toSchemaString());

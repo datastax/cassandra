@@ -186,13 +186,13 @@ public class SerializationHeaderTest
                                                                                                        new LinkedHashMap<>(Map.of(ByteBufferUtil.bytes("v"), multicellTupleType)),
                                                                                                        EncodingStats.NO_STATS);
 
-        SerializationHeader header = component.toHeader("asdfa", metadata, versionWithImplicitFrozenTuples);
+        SerializationHeader header = component.toHeader("asdfa", metadata, versionWithImplicitFrozenTuples, false);
         assertThat(header.keyType().isMultiCell()).isFalse();
         assertThat(header.clusteringTypes().get(0).isMultiCell()).isFalse();
         assertThat(header.columns().statics.iterator().next().type.isMultiCell()).isFalse();
         assertThat(header.columns().regulars.iterator().next().type.isMultiCell()).isFalse();
 
-        assertThatIllegalArgumentException().isThrownBy(() -> component.toHeader("asdfa", metadata, versionWithExplicitFrozenTuples));
+        assertThatIllegalArgumentException().isThrownBy(() -> component.toHeader("asdfa", metadata, versionWithExplicitFrozenTuples, false));
     }
 
     @Test
@@ -217,11 +217,11 @@ public class SerializationHeaderTest
                                                                                                                                   ByteBufferUtil.bytes("dv"), multicellTupleType)),
                                                                                                        EncodingStats.NO_STATS);
 
-        SerializationHeader header = component.toHeader("tab", metadata, versionWithImplicitFrozenTuples);
+        SerializationHeader header = component.toHeader("tab", metadata, versionWithImplicitFrozenTuples, false);
         assertThat(Iterables.find(header.columns().regulars, md -> md.name.toString().equals("dv")).type.isMultiCell()).isTrue();
         assertThat(Iterables.find(header.columns().statics, md -> md.name.toString().equals("ds")).type.isMultiCell()).isTrue();
 
-        assertThatIllegalArgumentException().isThrownBy(() -> component.toHeader("tab", metadata, versionWithExplicitFrozenTuples));
+        assertThatIllegalArgumentException().isThrownBy(() -> component.toHeader("tab", metadata, versionWithExplicitFrozenTuples, false));
     }
 
 }

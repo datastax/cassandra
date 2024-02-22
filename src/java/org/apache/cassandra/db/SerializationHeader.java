@@ -40,6 +40,7 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.exceptions.InvalidColumnTypeException;
 import org.apache.cassandra.exceptions.UnknownColumnException;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.IMetadataComponentSerializer;
@@ -325,18 +326,20 @@ public class SerializationHeader
                                                     Version sstableVersion,
                                                     ByteBuffer columnName,
                                                     AbstractType<?> type,
-                                                    boolean isPrimaryKeyColumn)
+                                                    boolean isPrimaryKeyColumn,
+                                                    boolean isForOfflineTool)
         {
             boolean dropped = table.getDroppedColumn(columnName) != null;
 
             try
             {
-                type.validateForColumn(columnName, isPrimaryKeyColumn, table.isCounter(), dropped);
+                type.validateForColumn(columnName, isPrimaryKeyColumn, table.isCounter(), dropped, isForOfflineTool);
                 return type;
             }
             catch (InvalidColumnTypeException e)
             {
-                AbstractType<?> fixed = e.tryFix(!sstableVersion.hasExplicitlyFrozenTuples());
+                logger.debug("Error reading SSTable header", e);
+                AbstractType<?> fixed = e.tryFix(!sstableVersion.hasExplicitlyFrozenTuples(), isForOfflineTool);
                 if (fixed == null)
                 {
                     // We don't know how to fix. We log an error here, so we know where the problem is coming from. But we
@@ -362,27 +365,29 @@ public class SerializationHeader
         private static AbstractType<?> validatePartitionKeyType(String descriptor,
                                                                 TableMetadata table,
                                                                 Version sstableVersion,
-                                                                AbstractType<?> fullType)
+                                                                AbstractType<?> fullType,
+                                                                boolean isForOfflineTool)
         {
             List<ColumnMetadata> pkColumns = table.partitionKeyColumns();
             int pkCount = pkColumns.size();
 
             if (pkCount == 1)
-                return validateType(descriptor, table, sstableVersion, pkColumns.get(0).name.bytes, fullType, true);
+                return validateType(descriptor, table, sstableVersion, pkColumns.get(0).name.bytes, fullType, true, isForOfflineTool);
 
             List<AbstractType<?>> subTypes = fullType.subTypes();
             assert fullType instanceof CompositeType && subTypes.size() == pkCount
                     : String.format("In %s, got %s as table %s partition key type but partition key is %s",
                                     descriptor, fullType, table, pkColumns);
 
-            return CompositeType.getInstance(validatePKTypes(descriptor, table, sstableVersion, pkColumns, subTypes));
+            return CompositeType.getInstance(validatePKTypes(descriptor, table, sstableVersion, pkColumns, subTypes, isForOfflineTool));
         }
 
         private static List<AbstractType<?>> validatePKTypes(String descriptor,
                                                              TableMetadata table,
                                                              Version sstableVersion,
                                                              List<ColumnMetadata> columns,
-                                                             List<AbstractType<?>> types)
+                                                             List<AbstractType<?>> types,
+                                                             boolean isForOfflineTool)
         {
             int count = types.size();
             List<AbstractType<?>> updated = new ArrayList<>(count);
@@ -393,12 +398,18 @@ public class SerializationHeader
                                          sstableVersion,
                                          columns.get(i).name.bytes,
                                          types.get(i),
-                                         true));
+                                         true,
+                                         isForOfflineTool));
             }
             return updated;
         }
 
-        public SerializationHeader toHeader(String descriptor, TableMetadata metadata, Version sstableVersion) throws UnknownColumnException
+        public SerializationHeader toHeader(Descriptor descriptor, TableMetadata metadata) throws UnknownColumnException
+        {
+            return toHeader(descriptor.toString(), metadata, descriptor.version, false);
+        }
+
+        public SerializationHeader toHeader(String descriptor, TableMetadata metadata, Version sstableVersion, boolean isForOfflineTool) throws UnknownColumnException
         {
             Map<ByteBuffer, AbstractType<?>> typeMap = new HashMap<>(staticColumns.size() + regularColumns.size());
             RegularAndStaticColumns.Builder builder = RegularAndStaticColumns.builder();
@@ -409,7 +420,7 @@ public class SerializationHeader
                 for (Map.Entry<ByteBuffer, AbstractType<?>> e : map.entrySet())
                 {
                     ByteBuffer name = e.getKey();
-                    AbstractType<?> type = validateType(descriptor, metadata, sstableVersion, name, e.getValue(), false);
+                    AbstractType<?> type = validateType(descriptor, metadata, sstableVersion, name, e.getValue(), false, isForOfflineTool);
                     AbstractType<?> other = typeMap.put(name, type);
                     if (other != null && !other.equals(type))
                         throw new IllegalStateException("Column " + name + " occurs as both regular and static with types " + other + "and " + e.getValue());
@@ -433,12 +444,13 @@ public class SerializationHeader
                 }
             }
 
-            AbstractType<?> partitionKeys = validatePartitionKeyType(descriptor, metadata, sstableVersion, keyType);
+            AbstractType<?> partitionKeys = validatePartitionKeyType(descriptor, metadata, sstableVersion, keyType, isForOfflineTool);
             List<AbstractType<?>> clusterings = validatePKTypes(descriptor,
                                                                 metadata,
                                                                 sstableVersion,
                                                                 metadata.clusteringColumns(),
-                                                                clusteringTypes);
+                                                                clusteringTypes,
+                                                                isForOfflineTool);
 
             return new SerializationHeader(true,
                                            partitionKeys,

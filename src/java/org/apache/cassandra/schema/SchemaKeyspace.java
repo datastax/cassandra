@@ -1049,12 +1049,12 @@ public final class SchemaKeyspace
     {
         try
         {
-            type.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isDroppedColumn);
+            type.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isDroppedColumn, false);
             return type;
         }
         catch (InvalidColumnTypeException e)
         {
-            AbstractType<?> fixed = e.tryFix(false);
+            AbstractType<?> fixed = e.tryFix(false, false);
             if (fixed == null)
                 throw e;
 

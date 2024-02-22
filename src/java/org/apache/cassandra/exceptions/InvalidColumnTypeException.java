@@ -67,7 +67,7 @@ public class InvalidColumnTypeException extends ConfigurationException
      * @return if we know how to auto-magically fix the invalid type that triggered this exception, the hopefully
      * fixed version of said type. Otherwise, {@code null}.
      */
-    public AbstractType<?> tryFix(boolean mayBeImplicitlyFrozen)
+    public AbstractType<?> tryFix(boolean mayBeImplicitlyFrozen, boolean isForOfflineTool)
     {
         AbstractType<?> fixed = tryFixInternal(mayBeImplicitlyFrozen);
         if (fixed != null)
@@ -75,7 +75,7 @@ public class InvalidColumnTypeException extends ConfigurationException
             try
             {
                 // Make doubly sure the fixed type is valid before returning it.
-                fixed.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isDroppedColumn);
+                fixed.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isDroppedColumn, isForOfflineTool);
                 return fixed;
             }
             catch (InvalidColumnTypeException e2)
