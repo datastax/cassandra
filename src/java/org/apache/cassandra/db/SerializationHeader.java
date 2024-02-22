@@ -468,7 +468,7 @@ public class SerializationHeader
                 for (Map.Entry<ByteBuffer, AbstractType<?>> e : map.entrySet())
                 {
                     ByteBuffer name = e.getKey();
-                    AbstractType<?> type = validateType(descriptor, metadata, name, e.getValue(), !sstableVersion.hasExplicitlyFrozenTuples(), isForOfflineTool);
+                    AbstractType<?> type = validateType(descriptor, metadata, name, e.getValue(), sstableVersion.hasImplicitlyFrozenTuples(), isForOfflineTool);
                     AbstractType<?> other = typeMap.put(name, type);
                     if (other != null && !other.equals(type))
                         throw new IllegalStateException("Column " + name + " occurs as both regular and static with types " + other + "and " + e.getValue());
@@ -492,12 +492,12 @@ public class SerializationHeader
                 }
             }
 
-            AbstractType<?> partitionKeys = validatePartitionKeyType(descriptor, metadata, keyType, !sstableVersion.hasExplicitlyFrozenTuples(), isForOfflineTool);
+            AbstractType<?> partitionKeys = validatePartitionKeyType(descriptor, metadata, keyType, sstableVersion.hasImplicitlyFrozenTuples(), isForOfflineTool);
             List<AbstractType<?>> clusterings = validatePKTypes(descriptor,
                                                                 metadata,
                                                                 metadata.clusteringColumns(),
                                                                 clusteringTypes,
-                                                                !sstableVersion.hasExplicitlyFrozenTuples(),
+                                                                sstableVersion.hasImplicitlyFrozenTuples(),
                                                                 isForOfflineTool);
 
             return new SerializationHeader(true,

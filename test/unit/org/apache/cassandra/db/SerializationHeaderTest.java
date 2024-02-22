@@ -81,10 +81,10 @@ public class SerializationHeaderTest
         DatabaseDescriptor.daemonInitialization();
 
         versionWithImplicitFrozenTuples = TrieIndexFormat.instance.getVersion("cb");
-        assertThat(versionWithImplicitFrozenTuples.hasExplicitlyFrozenTuples()).isFalse();
+        assertThat(versionWithImplicitFrozenTuples.hasImplicitlyFrozenTuples()).isTrue();
 
         versionWithExplicitFrozenTuples = TrieIndexFormat.instance.getVersion("cc");
-        assertThat(versionWithExplicitFrozenTuples.hasExplicitlyFrozenTuples()).isTrue();
+        assertThat(versionWithExplicitFrozenTuples.hasImplicitlyFrozenTuples()).isFalse();
     }
     
     @Test

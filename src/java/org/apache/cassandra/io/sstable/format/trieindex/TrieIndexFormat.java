@@ -460,7 +460,7 @@ public class TrieIndexFormat implements SSTableFormat
         }
 
         @Override
-        public boolean hasExplicitlyFrozenTuples()
+        public boolean hasImplicitlyFrozenTuples()
         {
             return hasExplicitlyFrozenTuples;
         }

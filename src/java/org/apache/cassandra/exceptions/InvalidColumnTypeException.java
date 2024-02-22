@@ -22,32 +22,17 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.io.sstable.format.Version;
 
 /**
  * Exception thrown when a configured column type is invalid.
  */
 public class InvalidColumnTypeException extends ConfigurationException
 {
-    private final ByteBuffer name;
-    private final AbstractType<?> invalidType;
-    private final boolean isPrimaryKeyColumn;
-    private final boolean isCounterTable;
-    private final boolean isDroppedColumn;
-
     public InvalidColumnTypeException(ByteBuffer name,
                                       AbstractType<?> invalidType,
-                                      boolean isPrimaryKeyColumn,
-                                      boolean isCounterTable,
-                                      boolean isDroppedColumn,
                                       String reason)
     {
         super(msg(name, invalidType, reason));
-        this.name = name;
-        this.invalidType = invalidType;
-        this.isPrimaryKeyColumn = isPrimaryKeyColumn;
-        this.isCounterTable = isCounterTable;
-        this.isDroppedColumn = isDroppedColumn;
     }
 
     private static String msg(ByteBuffer name,
