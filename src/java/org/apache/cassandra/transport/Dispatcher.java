@@ -32,7 +32,9 @@ import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
 import io.netty.util.AttributeKey;
 import org.apache.cassandra.concurrent.DebuggableTask;
+import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.concurrent.LocalAwareExecutorPlus;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.metrics.ClientMetrics;
@@ -55,10 +57,7 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
     private static final Logger logger = LoggerFactory.getLogger(Dispatcher.class);
 
     @VisibleForTesting
-    static final LocalAwareExecutorPlus requestExecutor = SHARED.newExecutor(DatabaseDescriptor.getNativeTransportMaxThreads(),
-                                                                             DatabaseDescriptor::setNativeTransportMaxThreads,
-                                                                             "transport",
-                                                                             "Native-Transport-Requests");
+    static final ExecutorPlus requestExecutor = Stage.NATIVE_TRANSPORT_REQUESTS.executor();
 
     /** CASSANDRA-17812: Rate-limit new client connection setup to avoid overwhelming during bcrypt
      *
@@ -122,7 +121,7 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
                               (request.type == Message.Type.AUTH_RESPONSE || request.type == Message.Type.CREDENTIALS);
 
         // Importantly, the authExecutor will handle the AUTHENTICATE message which may be CPU intensive.
-        LocalAwareExecutorPlus executor = isAuthQuery ? authExecutor : requestExecutor;
+        ExecutorPlus executor = isAuthQuery ? authExecutor : requestExecutor;
 
         executor.submit(new RequestProcessor(channel, request, forFlusher, backpressure));
         ClientMetrics.instance.markRequestDispatched();
