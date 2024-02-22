@@ -185,7 +185,6 @@ public class SerializationHeaderTest
     public void testDecodeDroppedUTDsEncodedAsNonFrozenTuples() throws UnknownColumnException
     {
         TupleType multicellTupleType = new TupleType(Arrays.asList(Int32Type.instance, Int32Type.instance), true);
-        AbstractType<?> frozenTupleType = multicellTupleType.freeze();
 
         TableMetadata metadata = TableMetadata.builder("ks", "tab")
                                               .addPartitionKeyColumn("k", Int32Type.instance)
