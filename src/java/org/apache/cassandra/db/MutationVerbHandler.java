@@ -48,7 +48,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         Set<Sensor> writeRequestSensors = RequestTracker.instance.get().getSensors(Type.WRITE_BYTES);
         Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
         writeRequestSensors.forEach(s -> {
-            String param = SensorsCustomParams.encodeKeyspaceAndTableInWriteByteRequestParam(s);
+            String param = SensorsCustomParams.encodeTableInWriteByteRequestParam(s.getContext().getTable());
             byte[] bytes = SensorsCustomParams.sensorValueAsBytes(s.getValue());
             response.withCustomParam(param, bytes);
         });
@@ -57,7 +57,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         writeRequestSensors.forEach(requestSensor -> {
             Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(requestSensor.getContext(), Type.WRITE_BYTES);
             registrySensor.ifPresent(s -> {
-                String param = SensorsCustomParams.encodeKeyspaceAndTableInWriteByteTableParam(s);
+                String param = SensorsCustomParams.encodeTableInWriteByteTableParam(s.getContext().getTable());
                 byte[] bytes = SensorsCustomParams.sensorValueAsBytes(s.getValue());
                 response.withCustomParam(param, bytes);
             });

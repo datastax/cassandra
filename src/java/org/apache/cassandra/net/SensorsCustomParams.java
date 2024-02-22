@@ -38,14 +38,14 @@ public final class SensorsCustomParams
     public static final String READ_BYTES_TABLE = "READ_BYTES_TABLE";
     /**
      * The per-request write bytes value for a given keyspace and table.
-     * To support batch writer, the keyspace and table are encoded in the following format: WRITE_BYTES_REQUEST.<keyspace>_<table>
+     * To support batch writes, table name is encoded in the following format: WRITE_BYTES_REQUEST.<table>
      */
-    public static final String WRITE_BYTES_REQUEST_TEMPLATE = "WRITE_BYTES_REQUEST.%s_%s";
+    public static final String WRITE_BYTES_REQUEST_TEMPLATE = "WRITE_BYTES_REQUEST.%s";
     /**
      * The total write bytes value for a given keyspace and table, across all requests.
-     * To support batch writer, the keyspace and table are encoded in the following format: WRITE_BYTES_TABLE.<keyspace>_<table>
+     * To support batch writes, table name is encoded in the following format: WRITE_BYTES_TABLE.<table>
      */
-    public static final String WRITE_BYTES_TABLE_TEMPLATE = "WRITE_BYTES_TABLE.%s_%s";
+    public static final String WRITE_BYTES_TABLE_TEMPLATE = "WRITE_BYTES_TABLE.%s";
 
     private SensorsCustomParams()
     {
@@ -62,13 +62,13 @@ public final class SensorsCustomParams
         return buffer.array();
     }
 
-    public static String encodeKeyspaceAndTableInWriteByteRequestParam(Sensor sensor)
+    public static String encodeTableInWriteByteRequestParam(String tableName)
     {
-        return String.format(WRITE_BYTES_REQUEST_TEMPLATE, sensor.getContext().getKeyspace(), sensor.getContext().getTable());
+        return String.format(WRITE_BYTES_REQUEST_TEMPLATE, tableName);
     }
 
-    public static String encodeKeyspaceAndTableInWriteByteTableParam(Sensor sensor)
+    public static String encodeTableInWriteByteTableParam(String tableName)
     {
-        return String.format(WRITE_BYTES_TABLE_TEMPLATE, sensor.getContext().getKeyspace(), sensor.getContext().getTable());
+        return String.format(WRITE_BYTES_TABLE_TEMPLATE, tableName);
     }
 }

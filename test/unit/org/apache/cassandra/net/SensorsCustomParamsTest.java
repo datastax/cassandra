@@ -22,10 +22,6 @@ import java.nio.ByteBuffer;
 
 import org.junit.Test;
 
-import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.Sensor;
-import org.apache.cassandra.sensors.Type;
-
 import static org.junit.Assert.assertEquals;
 
 public class SensorsCustomParamsTest
@@ -40,28 +36,20 @@ public class SensorsCustomParamsTest
     }
 
     @Test
-    public void testEncodeKeyspaceAndTableInWriteByteRequestParam()
+    public void testEncodeTableInWriteByteRequestParam()
     {
-        Sensor sensor = new TestSensor("ks1", "t1");
-        String expectedParam = String.format("WRITE_BYTES_REQUEST.%s_%s", "ks1", "t1");
-        String actualParam = SensorsCustomParams.encodeKeyspaceAndTableInWriteByteRequestParam(sensor);
+        String table = "t1";
+        String expectedParam = String.format("WRITE_BYTES_REQUEST.%s", "t1");
+        String actualParam = SensorsCustomParams.encodeTableInWriteByteRequestParam(table);
         assertEquals(expectedParam, actualParam);
     }
 
     @Test
-    public void testEncodeKeyspaceAndTableInWriteByteTableParam()
+    public void testEncodeTableInWriteByteTableParam()
     {
-        Sensor sensor = new TestSensor("ks1", "t1");
-        String expectedParam = String.format("WRITE_BYTES_TABLE.%s_%s", "ks1", "t1");
-        String actualParam = SensorsCustomParams.encodeKeyspaceAndTableInWriteByteTableParam(sensor);
+        String table = "t1";
+        String expectedParam = String.format("WRITE_BYTES_TABLE.%s", "t1");
+        String actualParam = SensorsCustomParams.encodeTableInWriteByteTableParam(table);
         assertEquals(expectedParam, actualParam);
-    }
-
-    private static class TestSensor extends Sensor
-    {
-        public TestSensor(String keyspace, String table)
-        {
-            super(new Context(keyspace, table, "UUID"), Type.WRITE_BYTES);
-        }
     }
 }

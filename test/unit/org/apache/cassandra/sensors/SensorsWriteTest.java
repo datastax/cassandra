@@ -126,7 +126,7 @@ public class SensorsWriteTest
 
             // check global registry is synchronized
             assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
-            assertResponseSensors(localSensor.getValue(), writeSensorSum, KEYSPACE1, CF_STANDARD);
+            assertResponseSensors(localSensor.getValue(), writeSensorSum, CF_STANDARD);
         }
     }
 
@@ -152,7 +152,7 @@ public class SensorsWriteTest
 
             // check global registry is synchronized
             assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
-            assertResponseSensors(localSensor.getValue(), writeSensorSum, KEYSPACE1, CF_STANDARD_CLUSTERING);
+            assertResponseSensors(localSensor.getValue(), writeSensorSum, CF_STANDARD_CLUSTERING);
         }
     }
 
@@ -180,7 +180,7 @@ public class SensorsWriteTest
         Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registrySensor).isEqualTo(localSensor);
         assertThat(registrySensor.getValue()).isEqualTo(localSensor.getValue());
-        assertResponseSensors(localSensor.getValue(), registrySensor.getValue(), KEYSPACE1, CF_STANDARD);
+        assertResponseSensors(localSensor.getValue(), registrySensor.getValue(), CF_STANDARD);
     }
 
     @Test
@@ -221,8 +221,8 @@ public class SensorsWriteTest
         assertThat(registrySensor2).isEqualTo(localSensor2);
         assertThat(registrySensor2.getValue()).isEqualTo(localSensor1.getValue());
 
-        assertResponseSensors(localSensor1.getValue(), registrySensor1.getValue(), KEYSPACE1, CF_STANDARD);
-        assertResponseSensors(localSensor2.getValue(), registrySensor2.getValue(), KEYSPACE1, CF_STANDARD2);
+        assertResponseSensors(localSensor1.getValue(), registrySensor1.getValue(), CF_STANDARD);
+        assertResponseSensors(localSensor2.getValue(), registrySensor2.getValue(), CF_STANDARD2);
     }
 
     private static void handleMutation(Mutation mutation)
@@ -230,23 +230,23 @@ public class SensorsWriteTest
         MutationVerbHandler.instance.doVerb(Message.builder(Verb.MUTATION_REQ, mutation).build());
     }
 
-    private void assertResponseSensors(double requestValue, double registryValue, String keyspace, String table)
+    private void assertResponseSensors(double requestValue, double registryValue, String table)
     {
         // verify against the last message to enable testing of multiple mutations in a for loop
         Message message = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
-        assertResponseSensors(message, requestValue, registryValue, keyspace, table);
+        assertResponseSensors(message, requestValue, registryValue, table);
 
         // make sure messages with sensor values can be deserialized on the receiving node
         DataOutputBuffer out = SensorsTestUtil.serialize(message);
         Message deserializedMessage = SensorsTestUtil.deserialize(out, message.from());
-        assertResponseSensors(deserializedMessage, requestValue, registryValue, keyspace, table);
+        assertResponseSensors(deserializedMessage, requestValue, registryValue, table);
     }
 
-    private void assertResponseSensors(Message message, double requestValue, double registryValue, String keyspace, String table)
+    private void assertResponseSensors(Message message, double requestValue, double registryValue, String table)
     {
         assertThat(message.header.customParams()).isNotNull();
-        String expectedRequestParam = String.format(SensorsCustomParams.WRITE_BYTES_REQUEST_TEMPLATE, keyspace, table);
-        String expectedTableParam = String.format(SensorsCustomParams.WRITE_BYTES_TABLE_TEMPLATE, keyspace, table);
+        String expectedRequestParam = String.format(SensorsCustomParams.WRITE_BYTES_REQUEST_TEMPLATE, table);
+        String expectedTableParam = String.format(SensorsCustomParams.WRITE_BYTES_TABLE_TEMPLATE, table);
 
         assertThat(message.header.customParams()).containsKey(expectedRequestParam);
         assertThat(message.header.customParams()).containsKey(expectedTableParam);
