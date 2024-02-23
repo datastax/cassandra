@@ -184,7 +184,26 @@ public class Descriptor
 
     public File fileFor(Component component)
     {
-        return componentFileMap.computeIfAbsent(component, c -> component.getFile(baseFileUri()));
+        return componentFileMap.computeIfAbsent(component, c -> {
+            // STAR-1892 - CNDB depdends on using Component.getFile here to be able to create a RemotePath if the
+            // URI matches. However, tests that extend CQLTester.InMemory (using the jimfs file system) will fail
+            // with an UnsupportedOperationException. One such test is CQLVectorTest.
+            //
+            // Because Component.getFile uses the file URI to create a new Path object, it will not be wrapped by 
+            // ListenablePath. That leads to an UnsupportedOperationException because ListenablePath implements certain 
+            // methods that are not implemented by jimfs.
+            //
+            // Using the resolve method on the directory to create a new Path object keeps it wrapped by ListenablePath 
+            // and will prevent an UnsupportedOperationException.
+            if (baseFileUri().startsWith("jimfs:"))
+            {
+                return new File(directory.toPath().resolve(filenameFor(component)));
+            }
+            else {
+                return component.getFile(baseFileUri());
+            }
+
+        });
     }
 
     public File baseFile()
