@@ -275,10 +275,21 @@ public class Descriptor
 
     public static Component componentFromFile(File file)
     {
-        String name = file.name();
-        List<String> tokens = filenameTokens(name);
+        return validFilenameWithComponent(file.name());
+    }
+    
+    public static Component validFilenameWithComponent(String name)
+    {
+        try
+        {
+            List<String> tokens = filenameTokens(name);
 
-        return Component.parse(tokens.get(3), formatFromName(name, tokens));
+            return Component.parse(tokens.get(3), formatFromName(name, tokens));
+        }
+        catch (Exception e)
+        {
+            return null;
+        }
     }
 
     private static SSTableFormat<?, ?> formatFromName(String fileName, List<String> tokens)

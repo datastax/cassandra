@@ -109,6 +109,8 @@ public class DescriptorTest
         assertEquals(original.id, desc.id);
         assertEquals(original.fileFor(Components.DATA).toPath(), desc.pathFor(Components.DATA));
         assertEquals(Components.DATA, pair.right);
+
+        assertEquals(Components.DATA, Descriptor.validFilenameWithComponent(file.name()));
     }
 
     @Test
@@ -134,7 +136,12 @@ public class DescriptorTest
                                };
 
         for (String fileName : fileNames)
-            assertNotNull(Descriptor.fromFileWithComponent(new File(fileName), false).left);
+        {
+            Descriptor descriptor = Descriptor.fromFileWithComponent(new File(fileName), false).left;
+            assertNotNull(descriptor);
+            assertNotNull(fileName, Descriptor.componentFromFile(new File(fileName)));
+            assertNotNull(fileName, Descriptor.validFilenameWithComponent(fileName));
+        }
     }
 
     @Test
