@@ -204,6 +204,11 @@ public class Descriptor
         return baseFileURI;
     }
 
+    public String filenamePart()
+    {
+        return prefix;
+    }
+
     public String relativeFilenameFor(Component component)
     {
         final StringBuilder buff = new StringBuilder();
