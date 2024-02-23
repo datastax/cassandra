@@ -284,6 +284,21 @@ public class Descriptor
         return fromFileWithComponent(file).left;
     }
 
+    public static Descriptor fromFilename(String filename)
+    {
+        return fromFile(new File(filename));
+    }
+
+    public static Descriptor fromFilename(File file)
+    {
+        return fromFileWithComponent(file).left;
+    }
+
+    public static Pair<Descriptor, Component> fromFilenameWithComponent(File file)
+    {
+        return fromFileWithComponent(file);
+    }
+
     public static Component componentFromFile(File file)
     {
         return validFilenameWithComponent(file.name());
