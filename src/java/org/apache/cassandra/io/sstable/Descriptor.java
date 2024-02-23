@@ -101,6 +101,7 @@ public class Descriptor
     private final int hashCode;
     private final String prefix;
     private final File baseFile;
+    private final String baseFileURI;
     private final ConcurrentMap<Component, File> componentFileMap;
 
     /**
@@ -146,6 +147,11 @@ public class Descriptor
 
         // directory is unnecessary for hashCode, and for simulator consistency we do not include it
         hashCode = Objects.hashCode(version, id, ksname, cfname);
+
+        String locationURI = directory.toUri().toString();
+        if (!locationURI.endsWith(java.io.File.separator))
+            locationURI = locationURI + java.io.File.separatorChar;
+        baseFileURI = locationURI + prefix;
 
         componentFileMap = new ConcurrentHashMap<>();
     }
@@ -195,7 +201,7 @@ public class Descriptor
 
     public String baseFileUri()
     {
-        return baseFile.toUri().toString();
+        return baseFileURI;
     }
 
     public String relativeFilenameFor(Component component)
