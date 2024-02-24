@@ -21,20 +21,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -67,10 +54,7 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.base.Throwables;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
+import com.google.common.collect.*;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -134,9 +118,9 @@ import org.apache.cassandra.io.sstable.BloomFilterTracker;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
-import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.StorageHandler;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -1580,13 +1564,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             // to update.
             if(timeDelta < Long.MAX_VALUE)
                 metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
-            RequestSensors sensors = requestTracker.get();
-            if (sensors != null) {
-                Context puContext = Context.from(this.metadata.get());
-                sensors.registerSensor(puContext, Type.WRITE_BYTES);
-                sensors.incrementSensor(puContext, Type.WRITE_BYTES, dataSize);
-            }
 
+            if (!isIndex())
+            {
+                RequestSensors sensors = requestTracker.get();
+                if (sensors != null)
+                {
+                    Context puContext = Context.from(this.metadata.get());
+                    sensors.registerSensor(puContext, Type.WRITE_BYTES);
+                    sensors.incrementSensor(puContext, Type.WRITE_BYTES, dataSize);
+                }
+            }
         }
         catch (RuntimeException e)
         {

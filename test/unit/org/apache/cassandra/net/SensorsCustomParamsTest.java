@@ -34,4 +34,22 @@ public class SensorsCustomParamsTest
         ByteBuffer bb = ByteBuffer.wrap(bytes);
         assertEquals(Double.MAX_VALUE, bb.getDouble(), 0.0);
     }
+
+    @Test
+    public void testEncodeTableInWriteByteRequestParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("WRITE_BYTES_REQUEST.%s", "t1");
+        String actualParam = SensorsCustomParams.encodeTableInWriteByteRequestParam(table);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInWriteByteTableParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("WRITE_BYTES_TABLE.%s", "t1");
+        String actualParam = SensorsCustomParams.encodeTableInWriteByteTableParam(table);
+        assertEquals(expectedParam, actualParam);
+    }
 }

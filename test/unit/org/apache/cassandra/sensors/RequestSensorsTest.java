@@ -51,28 +51,28 @@ public class RequestSensorsTest
         context2 = new Context("ks2", "t2", "id2");
         type2 = Type.SEARCH_BYTES;
 
-        context1Sensors = new RequestSensors(() -> sensorsRegistry, context1);
-        context2Sensors = new RequestSensors(() -> sensorsRegistry, context2);
+        context1Sensors = new RequestSensors(() -> sensorsRegistry);
+        context2Sensors = new RequestSensors(() -> sensorsRegistry);
         sensors = new RequestSensors(() -> sensorsRegistry);
     }
 
     @Test
     public void testRegistration()
     {
-        Optional<Sensor> sensor = context1Sensors.getSensor(type1);
+        Optional<Sensor> sensor = context1Sensors.getSensor(context1, type1);
         assertThat(sensor).isEmpty();
 
-        context1Sensors.registerSensor(type1);
+        context1Sensors.registerSensor(context1, type1);
 
-        sensor = context1Sensors.getSensor(type1);
+        sensor = context1Sensors.getSensor(context1, type1);
         assertThat(sensor).isPresent();
 
-        context1Sensors.registerSensor(type1);
-        assertThat(context1Sensors.getSensor(type1)).isEqualTo(sensor);
+        context1Sensors.registerSensor(context1, type1);
+        assertThat(context1Sensors.getSensor(context1, type1)).isEqualTo(sensor);
     }
 
     @Test
-    public void testRegistration_MultipleContexts()
+    public void testRegistrationWithMultipleContexts()
     {
         Optional<Sensor> context1Sensor = sensors.getSensor(context1, type1);
         Optional<Sensor> context2Sensor = sensors.getSensor(context2, type1);
@@ -100,31 +100,31 @@ public class RequestSensorsTest
     @Test
     public void testRegistrationWithDifferentType()
     {
-        context1Sensors.registerSensor(type1);
-        context1Sensors.registerSensor(type2);
+        context1Sensors.registerSensor(context1, type1);
+        context1Sensors.registerSensor(context2, type2);
 
-        assertThat(context1Sensors.getSensor(type1)).isNotEqualTo(context1Sensors.getSensor(type2));
+        assertThat(context1Sensors.getSensor(context1, type1)).isNotEqualTo(context1Sensors.getSensor(context2, type2));
     }
 
     @Test
     public void testRegistrationWithDifferentContext()
     {
-        context1Sensors.registerSensor(type1);
-        context2Sensors.registerSensor(type1);
+        context1Sensors.registerSensor(context1, type1);
+        context2Sensors.registerSensor(context2, type1);
 
-        assertThat(context1Sensors.getSensor(type1)).isNotEqualTo(context2Sensors.getSensor(type1));
+        assertThat(context1Sensors.getSensor(context1, type1)).isNotEqualTo(context2Sensors.getSensor(context2, type1));
     }
 
     @Test
     public void testIncrement()
     {
-        context1Sensors.registerSensor(type1);
-        context1Sensors.getSensor(type1).ifPresent(s -> s.increment(1.0));
-        assertThat(context1Sensors.getSensor(type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(1.0));
+        context1Sensors.registerSensor(context1, type1);
+        context1Sensors.getSensor(context1, type1).ifPresent(s -> s.increment(1.0));
+        assertThat(context1Sensors.getSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(1.0));
     }
 
     @Test
-    public void testIncrement_MultipleContexts()
+    public void testIncrementWithMultipleContexts()
     {
         sensors.registerSensor(context1, type1);
         sensors.getSensor(context1, type1).ifPresent(s -> s.increment(1.0));
@@ -137,11 +137,11 @@ public class RequestSensorsTest
     @Test
     public void testSyncAll()
     {
-        context1Sensors.registerSensor(type1);
-        context1Sensors.registerSensor(type2);
+        context1Sensors.registerSensor(context1, type1);
+        context1Sensors.registerSensor(context1, type2);
 
-        context1Sensors.getSensor(type1).get().increment(1.0);
-        context1Sensors.getSensor(type2).get().increment(1.0);
+        context1Sensors.getSensor(context1, type1).get().increment(1.0);
+        context1Sensors.getSensor(context1, type2).get().increment(1.0);
 
         context1Sensors.syncAllSensors();
         verify(sensorsRegistry, times(1)).updateSensor(eq(context1), eq(type1), eq(1.0));
@@ -149,7 +149,7 @@ public class RequestSensorsTest
     }
 
     @Test
-    public void testSyncAll_MultipleContexts()
+    public void testSyncAllWithMultipleContexts()
     {
         sensors.registerSensor(context1, type1);
         sensors.registerSensor(context1, type2);
@@ -166,5 +166,20 @@ public class RequestSensorsTest
         verify(sensorsRegistry, times(1)).updateSensor(eq(context1), eq(type2), eq(1.0));
         verify(sensorsRegistry, times(1)).updateSensor(eq(context2), eq(type1), eq(1.0));
         verify(sensorsRegistry, times(1)).updateSensor(eq(context2), eq(type2), eq(1.0));
+    }
+
+    @Test
+    public void testGetSensors()
+    {
+        sensors.registerSensor(context1, type1);
+        sensors.registerSensor(context1, type2);
+        sensors.registerSensor(context2, type1);
+        sensors.registerSensor(context2, type2);
+
+        assertThat(sensors.getSensors(type1)).hasSize(2);
+        assertThat(sensors.getSensors(type1)).containsExactlyInAnyOrder(sensors.getSensor(context1, type1).get(), sensors.getSensor(context2, type1).get());
+
+        assertThat(sensors.getSensors(type2)).hasSize(2);
+        assertThat(sensors.getSensors(type2)).containsExactlyInAnyOrder(sensors.getSensor(context1, type2).get(), sensors.getSensor(context2, type2).get());
     }
 }

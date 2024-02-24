@@ -20,12 +20,11 @@ package org.apache.cassandra.sensors;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
-import javax.annotation.Nullable;
-
-import com.google.common.base.Preconditions;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.utils.Pair;
 
@@ -33,8 +32,8 @@ import org.apache.cassandra.utils.Pair;
  * Groups {@link Sensor}s associated to a given request/response and related {@link Context}: this is the main entry
  * point to create and modify sensors. More specifically:
  * <ul>
- *     <li>Create a new sensor associated to the request/response via {@link #registerSensor(Type)}.</li>
- *     <li>Increment the sensor value for the request/response via {@link #incrementSensor(Type, double)}.</li>
+ *     <li>Create a new sensor associated to the request/response via {@link #registerSensor(Context, Type)}.</li>
+ *     <li>Increment the sensor value for the request/response via {@link #incrementSensor(Context, Type, double)}.</li>
  *     <li>Sync this request/response sensor value to the {@link SensorsRegistry} via {@link #syncAllSensors()}.</li>
  * </ul>
  * Sensor values related to a given request/response are isolated from other sensors, and the "same" sensor
@@ -46,7 +45,6 @@ import org.apache.cassandra.utils.Pair;
 public class RequestSensors
 {
     private final Supplier<SensorsRegistry> sensorsRegistry;
-    @Nullable private Context defaultContext;
     private final ConcurrentMap<Pair<Context, Type>, Sensor> sensors = new ConcurrentHashMap<>();
 
     public RequestSensors()
@@ -54,28 +52,9 @@ public class RequestSensors
         this(() -> SensorsRegistry.instance);
     }
 
-    public RequestSensors(Context defaultContext)
-    {
-        this(() -> SensorsRegistry.instance);
-        this.defaultContext = defaultContext;
-    }
-
     public RequestSensors(Supplier<SensorsRegistry> sensorsRegistry)
     {
         this.sensorsRegistry = sensorsRegistry;
-    }
-
-    public RequestSensors(Supplier<SensorsRegistry> sensorsRegistry, Context defaultContext)
-    {
-        this(sensorsRegistry);
-        this.defaultContext = defaultContext;
-    }
-
-    public void registerSensor(Type type)
-    {
-        Preconditions.checkNotNull(defaultContext, "Default context not set");
-
-        registerSensor(defaultContext, type);
     }
 
     public void registerSensor(Context context, Type type)
@@ -83,23 +62,14 @@ public class RequestSensors
         sensors.putIfAbsent(Pair.create(context, type), new Sensor(context, type));
     }
 
-    public Optional<Sensor> getSensor(Type type)
-    {
-        Preconditions.checkNotNull(defaultContext, "Default context not set");
-
-        return getSensor(defaultContext, type);
-    }
-
     public Optional<Sensor> getSensor(Context context, Type type)
     {
         return Optional.ofNullable(sensors.get(Pair.create(context, type)));
     }
 
-    public void incrementSensor(Type type, double value)
+    public Set<Sensor> getSensors(Type type)
     {
-        Preconditions.checkNotNull(defaultContext, "Default context not set");
-
-        incrementSensor(defaultContext, type, value);
+        return sensors.values().stream().filter(s -> s.getType() == type).collect(Collectors.toSet());
     }
 
     public void incrementSensor(Context context, Type type, double value)
@@ -118,21 +88,20 @@ public class RequestSensors
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         RequestSensors sensors1 = (RequestSensors) o;
-        return Objects.equals(defaultContext, sensors1.defaultContext) && Objects.equals(sensors, sensors1.sensors);
+        return Objects.equals(sensors, sensors1.sensors);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(defaultContext, sensors);
+        return Objects.hash(sensors);
     }
 
     @Override
     public String toString()
     {
         return "RequestSensors{" +
-               "context=" + defaultContext +
-               ", sensors=" + sensors +
+               "sensors=" + sensors +
                '}';
     }
 }
