@@ -221,7 +221,7 @@ public class StorageProxy implements StorageProxyMBean
                 }
 
                 String keyspace = mutations.iterator().next().getKeyspaceName();
-                ReplicaPlan.ForTokenWrite replicaPlan = ReplicaPlans.forBatchlogWrite(batchConsistencyLevel == ConsistencyLevel.ANY, false, keyspace);
+                ReplicaPlan.ForTokenWrite replicaPlan = ReplicaPlans.forBatchlogWrite(batchConsistencyLevel, keyspace);
 
                 final UUID batchUUID = UUIDGen.getTimeUUID();
 

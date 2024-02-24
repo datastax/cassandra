@@ -19,24 +19,19 @@ package org.apache.cassandra.batchlog;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.*;
+import java.util.concurrent.*;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.ListMultimap;
+import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.RateLimiter;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.gms.FailureDetector;
+import org.apache.cassandra.locator.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,11 +57,6 @@ import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.locator.Replica;
-import org.apache.cassandra.locator.ReplicaLayout;
-import org.apache.cassandra.locator.ReplicaPlan;
-import org.apache.cassandra.locator.Replicas;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
@@ -94,6 +84,9 @@ public class BatchlogManager implements BatchlogManagerMBean
     private static final Logger logger = LoggerFactory.getLogger(BatchlogManager.class);
     public static final BatchlogManager instance = new BatchlogManager();
     public static final long BATCHLOG_REPLAY_TIMEOUT = Long.getLong("cassandra.batchlog.replay_timeout_in_ms", DatabaseDescriptor.getWriteRpcTimeout(MILLISECONDS) * 2);
+
+    // number of replicas required to store batchlog for atomicity, at most 2
+    private static final int REQUIRED_BATCHLOG_REPLICA_COUNT = Math.min(2, Integer.getInteger("dse.batchlog.required_replica_count", 2));
 
     private volatile long totalBatchesReplayed = 0; // no concurrency protection necessary as only written by replay thread.
     private volatile UUID lastReplayedUuid = UUIDGen.minTimeUUID(0);
@@ -552,6 +545,322 @@ public class BatchlogManager implements BatchlogManagerMBean
                 assert removed;
                 super.onResponse(m);
             }
+        }
+    }
+
+    /**
+     * There are three strategies to select the "best" batchlog store candidates. See the descriptions
+     * of the strategies in {@link Config.BatchlogEndpointStrategy}.
+     *
+     *
+     * @param consistencyLevel
+     * @param localRack the name of the local rack
+     * @param localDcEndpoints the endpoints as a multimap of rack to endpoints.
+     *                  Implementation note: this one comes directly from
+     *                  {@link TokenMetadata.Topology#getDatacenterRacks() TokenMetadata.Topology.getDatacenterRacks().get(LOCAL_DC)}.
+     * @return list of endpoints to store the batchlog
+     */
+    public static Collection<InetAddressAndPort> filterEndpoints(ConsistencyLevel consistencyLevel, String localRack, Multimap<String, InetAddressAndPort> localDcEndpoints)
+    {
+        EndpointFilter filter = endpointFilter(consistencyLevel, localRack, localDcEndpoints);
+        return filter.filter();
+    }
+
+    @VisibleForTesting
+    static EndpointFilter endpointFilter(ConsistencyLevel consistencyLevel, String localRack, Multimap<String, InetAddressAndPort> localDcEndpoints)
+    {
+        return DatabaseDescriptor.getBatchlogEndpointStrategy().dynamicSnitch
+                && DatabaseDescriptor.isDynamicEndpointSnitch()
+                ? new DynamicEndpointFilter(consistencyLevel, localRack, localDcEndpoints)
+                : new RandomEndpointFilter(consistencyLevel, localRack, localDcEndpoints);
+    }
+
+    /**
+     * Picks endpoints for batchlög storage according to {@link org.apache.cassandra.locator.DynamicEndpointSnitch}.
+     *
+     * Unlike the default ({@link RandomEndpointFilter}) implementation, this one allows batchlog replicas in
+     * the local rack.
+     *
+     * The implementation picks the fastest endpoint of one rack, the 2nd fastest node from another rack,
+     * until {@link #REQUIRED_BATCHLOG_REPLICA_COUNT} endpoints have been collected. Endpoints in the same
+     * rack are avoided.
+     *
+     * It can either try to prevent the local rack {@link Config.BatchlogEndpointStrategy#dynamic_remote}
+     * or not ({@link Config.BatchlogEndpointStrategy#dynamic}).
+     *
+     * The tradeoff here is performance over availability (local rack is eligible for batchlog storage).
+     */
+    public static class DynamicEndpointFilter extends EndpointFilter
+    {
+        DynamicEndpointFilter(ConsistencyLevel consistencyLevel, String localRack, Multimap<String, InetAddressAndPort> endpoints)
+        {
+            super(consistencyLevel, localRack, endpoints);
+        }
+
+        public Collection<InetAddressAndPort> filter()
+        {
+            Collection<InetAddressAndPort> allEndpoints = endpoints.values();
+            int endpointCount = allEndpoints.size();
+            if (endpointCount <= REQUIRED_BATCHLOG_REPLICA_COUNT)
+                return checkFewEndpoints(allEndpoints, endpointCount);
+
+            // strip out dead endpoints and localhost
+            ListMultimap<String, InetAddressAndPort> validated = validatedNodes(endpointCount);
+
+            // Return all validated endpoints, if we cannot achieve REQUIRED_BATCHLOG_REPLICA_COUNT.
+            // This step is mandatory _before_ we filter the local rack.
+            int numValidated = validated.size();
+            if (numValidated <= REQUIRED_BATCHLOG_REPLICA_COUNT)
+                return notEnoughAvailableEndpoints(validated);
+
+            if (!DatabaseDescriptor.getBatchlogEndpointStrategy().allowLocalRack)
+            {
+                filterLocalRack(validated);
+
+                // Return all validated endpoints, if we cannot achieve REQUIRED_BATCHLOG_REPLICA_COUNT.
+                // This is a mandatory step - otherwise the for-loop below could loop forever, if
+                // REQUIRED_BATCHLOG_REPLICA_COUNT can't be achieved.
+                numValidated = validated.size();
+                if (numValidated <= REQUIRED_BATCHLOG_REPLICA_COUNT)
+                    return notEnoughAvailableEndpoints(validated);
+            }
+
+            // sort _all_ nodes to pick the best racks
+            List<InetAddressAndPort> sorted = reorder(validated.values());
+
+            List<InetAddressAndPort> result = new ArrayList<>(REQUIRED_BATCHLOG_REPLICA_COUNT);
+            Set<String> racks = new HashSet<>();
+
+            while (result.size() < REQUIRED_BATCHLOG_REPLICA_COUNT)
+            {
+                for (InetAddressAndPort endpoint : sorted)
+                {
+                    if (result.size() == REQUIRED_BATCHLOG_REPLICA_COUNT)
+                        break;
+
+                    if (racks.isEmpty())
+                        racks.addAll(validated.keySet());
+
+                    String rack = DatabaseDescriptor.getEndpointSnitch().getRack(endpoint);
+                    if (!racks.remove(rack))
+                        continue;
+                    if (result.contains(endpoint))
+                        continue;
+
+                    result.add(endpoint);
+                }
+            }
+
+            return result;
+        }
+
+        List<InetAddressAndPort> reorder(Collection<InetAddressAndPort> endpoints)
+        {
+            EndpointsForRange endpointsForRange = SystemReplicas.getSystemReplicas(endpoints);
+            Endpoints sorted = DatabaseDescriptor.getEndpointSnitch().sortedByProximity(FBUtilities.getBroadcastAddressAndPort(), endpointsForRange);
+            return sorted.endpointList();
+        }
+    }
+
+    /**
+     * This is the default endpoint-filter implementation for logged batches.
+     *
+     * It picks random endpoints from random racks. Endpoints from non-local racks are preferred.
+     * Also prefers to pick endpoints from as many different racks as possible.
+     *
+     * The tradeoff here is performance over availability (local rack is eligible for batchlog storage).
+     */
+    public static class RandomEndpointFilter extends EndpointFilter
+    {
+        RandomEndpointFilter(ConsistencyLevel consistencyLevel, String localRack, Multimap<String, InetAddressAndPort> endpoints)
+        {
+            super(consistencyLevel, localRack, endpoints);
+        }
+
+        public Collection<InetAddressAndPort> filter()
+        {
+            Collection<InetAddressAndPort> allEndpoints = endpoints.values();
+            int endpointCount = allEndpoints.size();
+            if (endpointCount <= REQUIRED_BATCHLOG_REPLICA_COUNT)
+                return checkFewEndpoints(allEndpoints, endpointCount);
+
+            // strip out dead endpoints and localhost
+            ListMultimap<String, InetAddressAndPort> validated = validatedNodes(endpointCount);
+
+            // Return all validated endpoints, if we cannot achieve REQUIRED_BATCHLOG_REPLICA_COUNT.
+            // This step is mandatory _before_ we filter the local rack.
+            int numValidated = validated.size();
+            if (numValidated <= REQUIRED_BATCHLOG_REPLICA_COUNT)
+                return notEnoughAvailableEndpoints(validated);
+
+            if (!DatabaseDescriptor.getBatchlogEndpointStrategy().allowLocalRack)
+            {
+                filterLocalRack(validated);
+
+                // Return all validated endpoints, if we cannot achieve REQUIRED_BATCHLOG_REPLICA_COUNT.
+                // This is a mandatory step - otherwise the for-loop below could loop forever, if
+                // REQUIRED_BATCHLOG_REPLICA_COUNT can't be achieved.
+                numValidated = validated.size();
+                if (numValidated <= REQUIRED_BATCHLOG_REPLICA_COUNT)
+                    return notEnoughAvailableEndpoints(validated);
+            }
+
+            // Randomize the racks - all we need is the collections of the endpoints per rack.
+            List<Collection<InetAddressAndPort>> rackNodes = new ArrayList<>(validated.asMap().values());
+            Collections.shuffle(rackNodes, ThreadLocalRandom.current());
+
+            // Now iterate over the racks (one after each other) and randomly pick one node
+            // from each rack. Repeat that until we've reached REQUIRED_BATCHLOG_REPLICA_COUNT.
+            List<InetAddressAndPort> result = new ArrayList<>(REQUIRED_BATCHLOG_REPLICA_COUNT);
+            for (int i = 0; result.size() < REQUIRED_BATCHLOG_REPLICA_COUNT; )
+            {
+                // cast to List is safe in this case, because it's an ArrayListMultimap
+                List<InetAddressAndPort> singleRack = (List) rackNodes.get(i);
+                InetAddressAndPort endpoint = singleRack.get(ThreadLocalRandom.current().nextInt(singleRack.size()));
+                if (result.contains(endpoint))
+                    continue;
+
+                result.add(endpoint);
+
+                i++;
+                if (i == rackNodes.size())
+                    i = 0;
+            }
+
+            return result;
+        }
+    }
+
+    public static abstract class EndpointFilter
+    {
+        final ConsistencyLevel consistencyLevel;
+        final String localRack;
+        final Multimap<String, InetAddressAndPort> endpoints;
+
+        @VisibleForTesting
+        EndpointFilter(ConsistencyLevel consistencyLevel, String localRack, Multimap<String, InetAddressAndPort> endpoints)
+        {
+            this.consistencyLevel = batchlogConsistencyLevel(consistencyLevel);
+            this.localRack = localRack;
+            this.endpoints = endpoints;
+        }
+
+        static ConsistencyLevel batchlogConsistencyLevel(ConsistencyLevel consistencyLevel)
+        {
+            if (consistencyLevel == ConsistencyLevel.ANY)
+                return ConsistencyLevel.ANY;
+            return REQUIRED_BATCHLOG_REPLICA_COUNT == 2 ? ConsistencyLevel.TWO : ConsistencyLevel.ONE;
+        }
+
+        /**
+         * Generate the list of endpoints for batchlog hosting. If possible these will be
+         * {@code REQUIRED_BATCHLOG_REPLICA_COUNT} nodes from different racks.
+         */
+        public abstract Collection<InetAddressAndPort> filter();
+
+        ListMultimap<String, InetAddressAndPort> validatedNodes(int endpointCount)
+        {
+            int rackCount = endpoints.keySet().size();
+
+            ListMultimap<String, InetAddressAndPort> validated = ArrayListMultimap.create(rackCount, endpointCount / rackCount);
+            for (Map.Entry<String, InetAddressAndPort> entry : endpoints.entries())
+                if (isValid(entry.getValue()))
+                    validated.put(entry.getKey(), entry.getValue());
+
+            return validated;
+        }
+
+        void filterLocalRack(ListMultimap<String, InetAddressAndPort> validated)
+        {
+            // If there are at least REQUIRED_BATCHLOG_REPLICA_COUNT nodes in _other_ racks,
+            // then exclude the local rack
+            if (validated.size() - validated.get(localRack).size() >= REQUIRED_BATCHLOG_REPLICA_COUNT)
+                validated.removeAll(localRack);
+        }
+
+        /**
+         * Called when there are not enough endpoints <em>commissioned</em>
+         * to achieve {@link #REQUIRED_BATCHLOG_REPLICA_COUNT}.
+         */
+        Collection<InetAddressAndPort> checkFewEndpoints(Collection<InetAddressAndPort> allEndpoints, int totalEndpointCount)
+        {
+            int available = 0;
+            for (InetAddressAndPort ep : allEndpoints)
+                if (isAlive(ep))
+                    available++;
+
+            allEndpoints = maybeThrowUnavailableException(allEndpoints, totalEndpointCount, available);
+
+            return allEndpoints;
+        }
+
+        /**
+         * Called when there are not enough commissioned endpoints <em>available</em>
+         * to achieve {@link #REQUIRED_BATCHLOG_REPLICA_COUNT}.
+         */
+        Collection<InetAddressAndPort> notEnoughAvailableEndpoints(ListMultimap<String, InetAddressAndPort> validated)
+        {
+            Collection<InetAddressAndPort> validatedEndpoints = validated.values();
+            int validatedCount = validatedEndpoints.size();
+
+            validatedEndpoints = maybeThrowUnavailableException(validatedEndpoints, REQUIRED_BATCHLOG_REPLICA_COUNT, validatedCount);
+
+            return validatedEndpoints;
+        }
+
+        Collection<InetAddressAndPort> maybeThrowUnavailableException(Collection<InetAddressAndPort> endpoints,
+                                                                      int totalEndpointCount,
+                                                                      int available)
+        {
+            // This is exactly what the pre DB-1367 code does (one exception):
+            // - If there are no available nodes AND batchlog-consistency == ANY, then use
+            //   the local node as the batchlog endpoint.
+            // - If there are no available nodes AND batchlog-consistency, then ...
+            //   return *NO* batchlog endpoints, causing the batchlog write to timeout
+            //   (waiting for noting - nothing can trigger the condition in the write handler).
+            //   Changed to immediately throw an UnavailableException.
+            // - If there are less batchlog endpoint candidates available than required,
+            //   just use those (despite the "usual" guarantee of two batchlog-replicas).
+            // - The batchlog-consistency is not respected (beside the CL ANY check
+            //   if there are no available endpoints).
+            // - Batchlog endpoints are always chosen from the local DC. The exact racks
+            //   and endpoints depend on the strategy. The "random_remote" strategy is what's
+            //   been in since forever.
+
+            if (available == 0)
+            {
+                if (consistencyLevel == ConsistencyLevel.ANY)
+                    return Collections.singleton(FBUtilities.getBroadcastAddressAndPort());
+
+                // New/changed since DB-1367: we immediately throw an UnavailableException here instead
+                // of letting the batchlog write unnecessarily timeout.
+                throw new UnavailableException("Cannot achieve consistency level " + consistencyLevel
+                                               + " for batchlog in local DC, required:" + totalEndpointCount
+                                               + ", available:" + available,
+                                               consistencyLevel,
+                                               totalEndpointCount,
+                                               available);
+            }
+
+            return endpoints;
+        }
+
+        @VisibleForTesting
+        protected boolean isValid(InetAddressAndPort input)
+        {
+            return !input.equals(getCoordinator()) && isAlive(input);
+        }
+
+        @VisibleForTesting
+        protected boolean isAlive(InetAddressAndPort input)
+        {
+            return FailureDetector.instance.isAlive(input);
+        }
+
+        @VisibleForTesting
+        protected InetAddressAndPort getCoordinator()
+        {
+            return FBUtilities.getBroadcastAddressAndPort();
         }
     }
 }

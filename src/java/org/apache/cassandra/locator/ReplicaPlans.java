@@ -18,26 +18,15 @@
 
 package org.apache.cassandra.locator;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.HashMultimap;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.ListMultimap;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
-import com.google.common.collect.Sets;
+import org.apache.cassandra.batchlog.BatchlogManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -213,10 +202,9 @@ public class ReplicaPlans
      * Returns endpoint for a batchlog write.
      *
      * @param isAny if batch consistency level is ANY, in which case a local node will be picked
-     * @param preferLocalRack if true, a random endpoint from the local rack will be preferred for batch storage
      * @param keyspaceName the name of the keyspace used to compute batch storage endpoints
      */
-    public static ReplicaPlan.ForTokenWrite forBatchlogWrite(boolean isAny, boolean preferLocalRack, String keyspaceName) throws UnavailableException
+    public static ReplicaPlan.ForTokenWrite forBatchlogWrite(ConsistencyLevel batchConsistencyLevel, String keyspaceName) throws UnavailableException
     {
         // A single case we write not for range or token, but multiple mutations to many tokens
         Token token = DatabaseDescriptor.getPartitioner().getMinimumToken();
@@ -230,9 +218,9 @@ public class ReplicaPlans
         //  - replicas should be in the local datacenter
         //  - choose min(2, number of qualifying candiates above)
         //  - allow the local node to be the only replica only if it's a single-node DC
-        Collection<InetAddressAndPort> chosenEndpoints = filterBatchlogEndpoints(preferLocalRack, snitch.getLocalRack(), localEndpoints);
+        Collection<InetAddressAndPort> chosenEndpoints = BatchlogManager.filterEndpoints(batchConsistencyLevel, snitch.getLocalRack(), localEndpoints);
 
-        if (chosenEndpoints.isEmpty() && isAny)
+        if (chosenEndpoints.isEmpty() && batchConsistencyLevel == ConsistencyLevel.ANY)
             chosenEndpoints = Collections.singleton(FBUtilities.getBroadcastAddressAndPort());
 
         Keyspace systemKeypsace = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME);
@@ -247,90 +235,6 @@ public class ReplicaPlans
         return forWrite(systemKeypsace, consistencyLevel, liveAndDown, liveAndDown, writeAll);
     }
 
-    private static Collection<InetAddressAndPort> filterBatchlogEndpoints(boolean preferLocalRack, String localRack,
-                                                                          Multimap<String, InetAddressAndPort> endpoints)
-    {
-        return filterBatchlogEndpoints(preferLocalRack, localRack,
-                                       endpoints,
-                                       Collections::shuffle,
-                                       IFailureDetector.isEndpointAlive,
-                                       ThreadLocalRandom.current()::nextInt);
-    }
-
-    // Collect a list of candidates for batchlog hosting. If possible these will be two nodes from different racks.
-    @VisibleForTesting
-    public static Collection<InetAddressAndPort> filterBatchlogEndpoints(boolean preferLocalRack, String localRack,
-                                                                         Multimap<String, InetAddressAndPort> endpoints,
-                                                                         Consumer<List<?>> shuffle,
-                                                                         Predicate<InetAddressAndPort> isAlive,
-                                                                         Function<Integer, Integer> indexPicker)
-    {
-        // special case for single-node data centers
-        if (endpoints.values().size() == 1)
-            return endpoints.values();
-
-        // strip out dead endpoints and localhost
-        ListMultimap<String, InetAddressAndPort> validated = ArrayListMultimap.create();
-        for (Map.Entry<String, InetAddressAndPort> entry : endpoints.entries())
-        {
-            InetAddressAndPort addr = entry.getValue();
-            if (!addr.equals(FBUtilities.getBroadcastAddressAndPort()) && isAlive.test(addr))
-                validated.put(entry.getKey(), entry.getValue());
-        }
-
-        // return early if no more than 2 nodes:
-        if (validated.size() <= 2)
-            return validated.values();
-
-        // if the local rack should not be preferred and there are enough nodes in other racks, remove it:
-        if (!preferLocalRack && validated.size() - validated.get(localRack).size() >= 2)
-        {
-            validated.removeAll(localRack);
-        }
-
-        /*
-         * if we have only 1 `other` rack to select replicas from (whether it be the local rack or a single non-local rack),
-         * pick two random nodes from there and return early;
-         * we are guaranteed to have at least two nodes in the single remaining rack because of the above if block.
-         */
-        if (validated.keySet().size() == 1)
-        {
-            List<InetAddressAndPort> otherRack = Lists.newArrayList(validated.values());
-            shuffle.accept(otherRack);
-            return otherRack.subList(0, 2);
-        }
-
-        // randomize which racks we pick from if more than 2 remaining
-
-        Collection<String> racks;
-        if (validated.keySet().size() == 2)
-        {
-            racks = validated.keySet();
-        }
-        else if (preferLocalRack)
-        {
-            List<String> nonLocalRacks = Lists.newArrayList(Sets.difference(validated.keySet(), ImmutableSet.of(localRack)));
-            racks = new LinkedHashSet<>();
-            racks.add(localRack);
-            racks.add(nonLocalRacks.get(indexPicker.apply(nonLocalRacks.size())));
-        }
-        else
-        {
-            racks = Lists.newArrayList(validated.keySet());
-            shuffle.accept((List<?>) racks);
-        }
-
-        // grab two random nodes from two different racks
-
-        List<InetAddressAndPort> result = new ArrayList<>(2);
-        for (String rack : Iterables.limit(racks, 2))
-        {
-            List<InetAddressAndPort> rackMembers = validated.get(rack);
-            result.add(rackMembers.get(indexPicker.apply(rackMembers.size())));
-        }
-
-        return result;
-    }
 
     public static ReplicaPlan.ForTokenWrite forReadRepair(Token token, ReplicaPlan.ForRead<?> readPlan) throws UnavailableException
     {
