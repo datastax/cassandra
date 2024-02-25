@@ -23,12 +23,19 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.commons.lang3.ObjectUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 
 public final class VirtualKeyspaceRegistry
 {
+    private static final Logger logger = LoggerFactory.getLogger(VirtualKeyspaceRegistry.class);
+
     public static final VirtualKeyspaceRegistry instance = new VirtualKeyspaceRegistry();
 
     private final Map<String, VirtualKeyspace> virtualKeyspaces = new ConcurrentHashMap<>();
@@ -66,6 +73,7 @@ public final class VirtualKeyspaceRegistry
     @Nullable
     public TableMetadata getTableMetadataNullable(TableId id)
     {
+        logger.info("inside getTableMetadataNullable");
         VirtualTable table = virtualTables.get(id);
         return null != table ? table.metadata() : null;
     }

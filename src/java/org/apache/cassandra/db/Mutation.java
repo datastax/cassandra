@@ -34,10 +34,18 @@ import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableMap;
 import org.apache.commons.lang3.StringUtils;
 
+
+import com.google.common.annotations.VisibleForTesting;
+import org.apache.cassandra.io.util.File;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.commitlog.CommitLogReader;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -62,6 +70,8 @@ import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 public class Mutation implements IMutation
 {
+    private static final Logger logger = LoggerFactory.getLogger(Mutation.class);
+
     public static final MutationSerializer serializer = new MutationSerializer(PartitionUpdate.serializer);
 
     // todo this is redundant
@@ -492,6 +502,7 @@ public class Mutation implements IMutation
 
         public Mutation deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag) throws IOException
         {
+            logger.info("inside deserialize of Mutation");
             Mutation m;
             TeeDataInputPlus teeIn;
             try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
@@ -502,12 +513,15 @@ public class Mutation implements IMutation
                 assert size > 0;
 
                 PartitionUpdate update = partitionUpdateSerializer.deserialize(teeIn, version, flag);
+                logger.info("PartitionUpdate deserializes successfully (who knows)");
                 if (size == 1)
                 {
+                    logger.info("1 mutation");
                     m = new Mutation(update);
                 }
                 else
                 {
+                    logger.info("many mutations");
                     ImmutableMap.Builder<TableId, PartitionUpdate> modifications = new ImmutableMap.Builder<>();
                     DecoratedKey dk = update.partitionKey();
 
@@ -519,7 +533,7 @@ public class Mutation implements IMutation
                     }
                     m = new Mutation(update.metadata().keyspace, dk, modifications.build(), approxTime.now());
                 }
-
+                logger.info("processed all mutations");
                 //Only cache serializations that don't hit the limit
                 if (!teeIn.isLimitReached())
                     m.cachedSerializations[MessagingService.getVersionOrdinal(version)] = new CachedSerialization(dob.toByteArray());

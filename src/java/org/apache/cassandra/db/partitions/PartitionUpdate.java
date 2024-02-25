@@ -660,19 +660,24 @@ public class PartitionUpdate extends AbstractBTreePartition
 
         public PartitionUpdate deserialize(DataInputPlus in, int version, DeserializationHelper.Flag flag) throws IOException
         {
+            logger.info("inside deserialize of PartitionUpdate");
             TableMetadata metadata = tableMetadataResolver.apply(TableId.deserialize(in));
+            logger.info("got table metadata");
             if (version == MessagingService.VERSION_DSE_68)
             {
                 // ignore maxTimestamp
                 in.readLong();
             }
+            logger.info("after version if");
             UnfilteredRowIteratorSerializer.Header header = UnfilteredRowIteratorSerializer.serializer.deserializeHeader(metadata, null, in, version, flag);
             if (header.isEmpty)
                 return emptyUpdate(metadata, header.key);
+            logger.info("header not empty");
 
             assert !header.isReversed;
             assert header.rowEstimate >= 0;
 
+            logger.info("header processed inside deserialize of PartitionUpdate");
             MutableDeletionInfo.Builder deletionBuilder = MutableDeletionInfo.builder(header.partitionDeletion, metadata.comparator, false);
             Object[] rows;
             try (BTree.FastBuilder<Row> builder = BTree.fastBuilder();
@@ -690,6 +695,7 @@ public class PartitionUpdate extends AbstractBTreePartition
             }
 
             MutableDeletionInfo deletionInfo = deletionBuilder.build();
+            logger.info("finished deserialize of PartitionUpdate");
             return new PartitionUpdate(metadata,
                                        header.key,
                                        new BTreePartitionData(header.sHeader.columns(), rows, deletionInfo, header.staticRow, header.sHeader.stats()),

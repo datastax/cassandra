@@ -295,12 +295,17 @@ public class CommitLogReplayer implements CommitLogReadHandler
     @VisibleForTesting
     public static class MutationInitiator
     {
+        protected void onInvalidMutation(TableId id)
+        {
+            logger.info("Invalid mutation detected by Cassandra for table {}", id);
+        }
         protected Future<Integer> initiateMutation(final Mutation mutation,
                                                    final long segmentId,
                                                    final int serializedSize,
                                                    final int entryLocation,
                                                    final CommitLogReplayer commitLogReplayer)
         {
+            logger.info("Cassandra Replaying {}", mutation);
             Runnable runnable = new WrappedRunnable()
             {
                 public void runMayThrow()
@@ -541,6 +546,12 @@ public class CommitLogReplayer implements CommitLogReadHandler
                 return true;
         }
         return false;
+    }
+
+    public void handleInvalidMutation(TableId id)
+    {
+        logger.info("Inside handleInvalidMutation of Cassandra");
+        mutationInitiator.onInvalidMutation(id);
     }
 
     public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc)

@@ -29,10 +29,18 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 
+import com.google.common.annotations.VisibleForTesting;
+import org.apache.cassandra.io.util.File;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.db.commitlog.CommitLogReader;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 
 public final class Keyspaces implements Iterable<KeyspaceMetadata>
 {
+    private static final Logger logger = LoggerFactory.getLogger(Keyspaces.class);
     private static final Keyspaces NONE = builder().build();
 
     private final ImmutableMap<String, KeyspaceMetadata> keyspaces;
@@ -99,6 +107,8 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
     @Nullable
     public TableMetadata getTableOrViewNullable(TableId id)
     {
+        logger.info("inside getTableOrViewNullable -> result is {}", tables.get(id));
+        logger.info("map is {}", tables);
         return tables.get(id);
     }
 

@@ -57,6 +57,7 @@ public class CommitLogReader
     public static final int ALL_MUTATIONS = -1;
     private final CRC32 checksum;
     private final Map<TableId, AtomicInteger> invalidMutations;
+    public final List<String> segmentsWithInvalidMutations;
 
     private byte[] buffer;
 
@@ -64,6 +65,7 @@ public class CommitLogReader
     {
         checksum = new CRC32();
         invalidMutations = new HashMap<>();
+        segmentsWithInvalidMutations = new ArrayList<String>();
         buffer = new byte[4096];
     }
 
@@ -175,9 +177,10 @@ public class CommitLogReader
         logger.info("inside readCommitLogSegment()");
         // just transform from the file name (no reading of headers) to determine version
         CommitLogDescriptor desc = CommitLogDescriptor.fromFileName(file.name());
-
+        logger.info("desc call returned");
         try(RandomAccessReader reader = RandomAccessReader.open(file))
         {
+            logger.info("file opened");
             final long segmentIdFromFilename = desc.id;
             try
             {
@@ -187,10 +190,12 @@ public class CommitLogReader
             }
             catch (Exception e)
             {
+                logger.info("inside catch of desc");
                 desc = null;
             }
             if (desc == null)
             {
+                logger.info("desc is null");
                 // don't care about whether or not the handler thinks we can continue. We can't w/out descriptor.
                 // whether or not we can continue depends on whether this is the last segment
                 handler.handleUnrecoverableError(new CommitLogReadException(
@@ -199,7 +204,8 @@ public class CommitLogReader
                     tolerateTruncation));
                 return;
             }
-
+            logger.info("desc is not null");
+            logger.info(String.format("segmentIdFromFilename: %d, desc.id: %d", segmentIdFromFilename, desc.id));
             if (segmentIdFromFilename != desc.id)
             {
                 if (handler.shouldSkipSegmentOnError(new CommitLogReadException(String.format(
@@ -213,14 +219,16 @@ public class CommitLogReader
 
             if (shouldSkipSegmentId(file, desc, minPosition))
                 return;
-
+            logger.info("shouldSkipSegmentId returned false");
             CommitLogSegmentReader segmentReader;
             try
             {
+                logger.info("try of segmentReader");
                 segmentReader = new CommitLogSegmentReader(handler, desc, reader, tolerateTruncation);
             }
             catch(Exception e)
             {
+                logger.info("catch of segmentReader");
                 handler.handleUnrecoverableError(new CommitLogReadException(
                     String.format("Unable to create segment reader for commit log file: %s", e),
                     CommitLogReadErrorReason.UNRECOVERABLE_UNKNOWN_ERROR,
@@ -230,6 +238,7 @@ public class CommitLogReader
 
             try
             {
+                logger.info("try before statusTracker");
                 ReadStatusTracker statusTracker = new ReadStatusTracker(mutationLimit, tolerateTruncation);
                 for (CommitLogSegmentReader.SyncSegment syncSegment : segmentReader)
                 {
@@ -251,6 +260,7 @@ public class CommitLogReader
             // is wrapping an IOException.
             catch (RuntimeException re)
             {
+                logger.info("catch after statusTracker");
                 if (re.getCause() instanceof IOException)
                     throw (IOException) re.getCause();
                 throw re;
@@ -295,6 +305,7 @@ public class CommitLogReader
                              ReadStatusTracker statusTracker,
                              CommitLogDescriptor desc) throws IOException
     {
+        logger.info("inside readSection()");
         // seek rather than deserializing mutation-by-mutation to reach the desired minPosition in this SyncSegment
         if (desc.id == minPosition.segmentId && reader.getFilePointer() < minPosition.position)
             reader.seek(minPosition.position);
@@ -422,22 +433,28 @@ public class CommitLogReader
                                 final int entryLocation,
                                 final CommitLogDescriptor desc) throws IOException
     {
+        logger.info("inside readMutation");
         // For now, we need to go through the motions of deserializing the mutation to determine its size and move
         // the file pointer forward accordingly, even if we're behind the requested minPosition within this SyncSegment.
         boolean shouldReplay = entryLocation > minPosition.position;
 
+        logger.info("shouldReplay: {}", shouldReplay);
         final Mutation mutation;
         try (RebufferingInputStream bufIn = new DataInputBuffer(inputBuffer, 0, size))
         {
+            logger.info("buffer created");
             mutation = Mutation.serializer.deserialize(bufIn,
                                                        desc.getMessagingVersion(),
                                                        DeserializationHelper.Flag.LOCAL);
+            logger.info("mutation deserialized");
             // doublecheck that what we read is still] valid for the current schema
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
                 upd.validate();
+            logger.info("never reached here?");
         }
         catch (UnknownTableException ex)
         {
+            logger.info("inside UnknownTableException with exception id: {} and message: {}", ex.id, ex.getMessage());
             if (ex.id == null)
                 return;
             AtomicInteger i = invalidMutations.get(ex.id);
@@ -445,9 +462,12 @@ public class CommitLogReader
             {
                 i = new AtomicInteger(1);
                 invalidMutations.put(ex.id, i);
+                segmentsWithInvalidMutations.add(desc.fileName());
             }
             else
                 i.incrementAndGet();
+
+            handler.handleInvalidMutation(ex.id);
             return;
         }
         catch (Throwable t)
@@ -477,6 +497,8 @@ public class CommitLogReader
 
         if (shouldReplay)
             handler.handleMutation(mutation, size, entryLocation, desc);
+
+        segmentsWithInvalidMutations.remove(desc.fileName());
     }
 
     /**

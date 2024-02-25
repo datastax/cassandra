@@ -95,6 +95,7 @@ public class CommitLog implements CommitLogMBean
 
     volatile Configuration configuration;
     private boolean started = false;
+    public List<String> segmentsWithInvalidMutations = new ArrayList<>();
 
     @VisibleForTesting
     final MonotonicClock clock;
@@ -234,7 +235,18 @@ public class CommitLog implements CommitLogMBean
             logger.info("Log replay complete, {} replayed mutations", replayedKeyspaces.values().stream().reduce(Integer::sum).orElse(0));
 
             for (File f : files)
-                segmentManager.handleReplayedSegment(f);
+            {
+                if(segmentsWithInvalidMutations.contains(f.name()))
+                {
+                    logger.info("File {} should not be deleted as it contains invalid mutations", f.name());
+                }
+                else
+                {
+                    logger.info("Okay to delete file {} after replay", f.name());
+                    segmentManager.handleReplayedSegment(f);
+                }
+                //segmentManager.handleReplayedSegment(f);
+            }
         }
 
         return replayedKeyspaces;
@@ -253,6 +265,12 @@ public class CommitLog implements CommitLogMBean
     {
         CommitLogReplayer replayer = CommitLogReplayer.construct(this, getLocalHostId());
         replayer.replayFiles(clogs);
+        segmentsWithInvalidMutations = new ArrayList<>();
+        replayer.commitLogReader.segmentsWithInvalidMutations.forEach((file) ->
+        {
+            logger.warn("Skipped invalid mutations from file {}", file);
+            segmentsWithInvalidMutations.add(file);
+        });
         return replayer.blockForWrites(flushReason);
     }
 

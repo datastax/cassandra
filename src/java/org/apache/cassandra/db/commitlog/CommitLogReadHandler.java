@@ -21,6 +21,7 @@ package org.apache.cassandra.db.commitlog;
 import java.io.IOException;
 
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.schema.TableId;
 
 public interface CommitLogReadHandler
 {
@@ -73,4 +74,5 @@ public interface CommitLogReadHandler
      * @param desc CommitLogDescriptor for mutation being processed
      */
     void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc);
+    void handleInvalidMutation(TableId id);
 }
