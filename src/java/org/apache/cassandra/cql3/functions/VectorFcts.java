@@ -21,10 +21,10 @@ import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Random;
 
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorUtil;
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -32,7 +32,6 @@ import org.apache.cassandra.db.marshal.NumberType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.transport.ProtocolVersion;
-import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
 import static java.lang.String.format;
 
@@ -93,10 +92,7 @@ public abstract class VectorFcts
 
         private RandomFloatVectorFunctionFactory()
         {
-            super(NAME,
-                  FunctionParameter.literal(Constants.Type.INTEGER, Int32Type.instance),
-                  FunctionParameter.fixed(CQL3Type.Native.FLOAT, CQL3Type.Native.DOUBLE, CQL3Type.Native.INT),
-                  FunctionParameter.fixed(CQL3Type.Native.FLOAT, CQL3Type.Native.DOUBLE, CQL3Type.Native.INT));
+            super(NAME, FunctionParameter.literalInteger(), FunctionParameter.float32(), FunctionParameter.float32());
         }
 
         @Override
@@ -118,23 +114,25 @@ public abstract class VectorFcts
                 private final Random random = new Random();
 
                 @Override
-                public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> args) throws InvalidRequestException
+                public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> args)
                 {
                     // get the min argument
                     ByteBuffer arg1 = args.get(1);
                     if (arg1 == null || !arg1.hasRemaining())
-                        throw new InvalidRequestException(format("Min argument of function %s must not be null", name));
+                        throw new InvalidRequestException(format("Min argument of function %s must not be null",
+                                                                 RandomFloatVectorFunctionFactory.this));
                     float min = minType.compose(arg1).floatValue();
 
                     // get the max argument
                     ByteBuffer arg2 = args.get(2);
                     if (arg2 == null || !arg2.hasRemaining())
-                        throw new InvalidRequestException(format("Max argument of function %s must not be null", name));
+                        throw new InvalidRequestException(format("Max argument of function %s must not be null",
+                                                                 RandomFloatVectorFunctionFactory.this));
                     float max = maxType.compose(arg2).floatValue();
                     if (max <= min)
                         throw new InvalidRequestException("Max value must be greater than min value");
 
-                    // generate the random vector within the ranges
+                    // generate the random vector within the range defined by min and max
                     float[] vector = new float[dimension];
                     for (int i = 0; i < dimension; i++)
                     {
@@ -170,7 +168,7 @@ public abstract class VectorFcts
             return new NativeScalarFunction(name.name, vectorType, vectorType)
             {
                 @Override
-                public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> args) throws InvalidRequestException
+                public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> args)
                 {
                     // get the vector argument
                     ByteBuffer arg0 = args.get(0);

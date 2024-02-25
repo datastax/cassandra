@@ -135,41 +135,46 @@ public class CQLVectorTest extends CQLTester
         Assert.assertEquals(1, execute("SELECT value FROM %s WHERE pk = 0").size());
 
         // wrong number of arguments
-        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(INTEGER, [float|double|int], [float|double|int])",
+        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(literal_int, float, float)",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector())");
-        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(INTEGER, [float|double|int], [float|double|int])",
+        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(literal_int, float, float)",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1))");
-        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(INTEGER, [float|double|int], [float|double|int])",
+        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(literal_int, float, float)",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1, 1, 0))");
 
         // mandatory arguments
-        assertInvalidThrowMessage("Function system.random_float_vector requires a INTEGER literal argument, but found NULL",
+        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
+                                  "but found NULL",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(null, null, null))");
-        assertInvalidThrowMessage("Function system.random_float_vector requires a INTEGER literal argument, but found NULL",
+        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
+                                  "but found NULL",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(null, -1, 1))");
-        assertInvalidThrowMessage("Min argument of function system.random_float_vector must not be null",
+        assertInvalidThrowMessage("Min argument of function system.random_float_vector(literal_int, float, float) must not be null",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, null, null))");
-        assertInvalidThrowMessage("Max argument of function system.random_float_vector must not be null",
+        assertInvalidThrowMessage("Max argument of function system.random_float_vector(literal_int, float, float) must not be null",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1, null))");
-        assertInvalidThrowMessage("Min argument of function system.random_float_vector must not be null",
+        assertInvalidThrowMessage("Min argument of function system.random_float_vector(literal_int, float, float) must not be null",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, null, 1))");
 
         // wrong argument types
-        assertInvalidThrowMessage("Function system.random_float_vector requires a INTEGER literal argument, but found 'a'",
+        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
+                                  "but found 'a'",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector('a', -1, 1))");
-        assertInvalidThrowMessage("Function system.random_float_vector requires a INTEGER literal argument, but found system.\"_add\"(1, 1)",
+        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
+                                  "but found system.\"_add\"(1, 1)",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(1 + 1, -1, 1))");
-        assertInvalidThrowMessage("Function system.random_float_vector requires a INTEGER literal argument, but found value",
+        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
+                                  "but found value",
                                   InvalidRequestException.class,
                                   "SELECT random_float_vector(value, -1, 1) FROM %s");
 
