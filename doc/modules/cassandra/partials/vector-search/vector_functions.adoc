@@ -51,7 +51,7 @@ Examples:
 
 `random_float_vector(2, 0.0, 1.0)` -> `[0.468159, 0.283808]`
 
-| `normalize_l2(vector, float, float)` | Applies L2 normalization to the input vector.
+| `normalize_l2(vector)` | Applies L2 normalization to the input vector.
 The result is a vector with the same direction but with a magnitude of 1.
 
 Examples:
