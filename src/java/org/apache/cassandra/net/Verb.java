@@ -220,7 +220,7 @@ public class Verb
     public static Verb PAXOS2_CLEANUP_COMPLETE_REQ      = new Verb("PAXOS2_CLEANUP_COMPLETE_REQ", 48, P2, repairTimeout, PAXOS_REPAIR, () -> PaxosCleanupComplete.serializer, () -> PaxosCleanupComplete.verbHandler,  PAXOS2_CLEANUP_COMPLETE_RSP);
 
     // generic failure response
-    public static Verb FAILURE_RSP            = new Verb("FAILURE_RSP",            99,  P0, noTimeout,       REQUEST_RESPONSE,  () -> RequestFailureReason.serializer,      () -> ResponseVerbHandler.instance                             );
+    public static Verb FAILURE_RSP            = new Verb("FAILURE_RSP",            99,  P0, noTimeout,       REQUEST_RESPONSE,  () -> RequestFailureReason.serializer,      CustomResponseVerbHandlerProvider.instance                     );
 
     // dummy verbs
     public static Verb _TRACE                 = new Verb("_TRACE",                 30,  P1, rpcTimeout,      TRACING,           () -> NoPayload.serializer,                 () -> null                                                     );
@@ -230,7 +230,7 @@ public class Verb
 
     /** @deprecated See CASSANDRA-15066 */
     @Deprecated(since = "4.0")
-    public static Verb REQUEST_RSP            = new Verb("REQUEST_RSP",            4,   P1, rpcTimeout,      REQUEST_RESPONSE,  () -> null,                                 () -> ResponseVerbHandler.instance                             );
+    public static Verb REQUEST_RSP            = new Verb("REQUEST_RSP",            4,   P1, rpcTimeout,      REQUEST_RESPONSE,  () -> null,                                 CustomResponseVerbHandlerProvider.instance                     );
     /** @deprecated See CASSANDRA-15066 */
     @Deprecated(since = "4.0")
     public static Verb INTERNAL_RSP           = new Verb("INTERNAL_RSP",           23,  P1, rpcTimeout,      INTERNAL_RESPONSE, () -> null,                                 () -> ResponseVerbHandler.instance                             );
