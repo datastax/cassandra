@@ -221,6 +221,11 @@ public enum CassandraRelevantProperties
     CUSTOM_QUERY_HANDLER_CLASS("cassandra.custom_query_handler_class"),
     CUSTOM_READ_OBSERVER_FACTORY("cassandra.custom_read_observer_factory_class"),
     CUSTOM_REPLAY_FILTER_CLASS("cassandra.custom_replay_filter_class"),
+    /**
+     * Allows to set a custom response messages handler for verbs {@link org.apache.cassandra.net.Verb#REQUEST_RSP} and
+     * {@link org.apache.cassandra.net.Verb#FAILURE_RSP}.
+     */
+    CUSTOM_RESPONSE_VERB_HANDLER_PROVIDER("cassandra.custom_response_verb_handler_provider_class"),
     /** Watcher used when opening sstables to discover extra components, eg. archive component */
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
