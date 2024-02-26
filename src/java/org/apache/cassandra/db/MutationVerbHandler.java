@@ -47,21 +47,20 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 
         Set<Sensor> writeRequestSensors = RequestTracker.instance.get().getSensors(Type.WRITE_BYTES);
         Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
-        writeRequestSensors.forEach(s -> {
-            String param = SensorsCustomParams.encodeTableInWriteByteRequestParam(s.getContext().getTable());
-            byte[] bytes = SensorsCustomParams.sensorValueAsBytes(s.getValue());
-            response.withCustomParam(param, bytes);
-        });
+        for (Sensor requestSensor : writeRequestSensors)
+        {
+            String requestBytesParam = SensorsCustomParams.encodeTableInWriteByteRequestParam(requestSensor.getContext().getTable());
+            byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(requestSensor.getValue());
+            response.withCustomParam(requestBytesParam, requestBytes);
 
-        // for each table in the mutation, send the global per table write bytes as observed by the registry
-        writeRequestSensors.forEach(requestSensor -> {
+            // for each table in the mutation, send the global per table write bytes as observed by the registry
             Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(requestSensor.getContext(), Type.WRITE_BYTES);
-            registrySensor.ifPresent(s -> {
-                String param = SensorsCustomParams.encodeTableInWriteByteTableParam(s.getContext().getTable());
-                byte[] bytes = SensorsCustomParams.sensorValueAsBytes(s.getValue());
-                response.withCustomParam(param, bytes);
+            registrySensor.ifPresent(sensor -> {
+                String tableBytesParam = SensorsCustomParams.encodeTableInWriteByteTableParam(sensor.getContext().getTable());
+                byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
+                response.withCustomParam(tableBytesParam, tableBytes);
             });
-        });
+        }
 
         MessagingService.instance().send(response.build(), respondToAddress);
     }

@@ -49,10 +49,9 @@ public class SensorsWriteTest
 {
     public static final String KEYSPACE1 = "SensorsWriteTest";
     public static final String CF_STANDARD = "Standard";
+    public static final String CF_STANDARD2 = "Standard2";
     public static final String CF_STANDARD_CLUSTERING = "StandardClustering";
 
-    public static final String KEYSPACE2 = "SensorsWriteTest2";
-    public static final String CF_STANDARD2 = "Standard2";
 
     private ColumnFamilyStore store;
     private CopyOnWriteArrayList<Message> capturedOutboundMessages;
@@ -69,10 +68,6 @@ public class SensorsWriteTest
                                                               1, AsciiType.instance, AsciiType.instance, null),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_CLUSTERING,
                                                               1, AsciiType.instance, AsciiType.instance, AsciiType.instance));
-        SchemaLoader.createKeyspace(KEYSPACE2,
-                                    KeyspaceParams.simple(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE2, CF_STANDARD2,
-                                                              1, AsciiType.instance, AsciiType.instance, null));
 
         CompactionManager.instance.disableAutoCompaction();
     }
@@ -106,7 +101,7 @@ public class SensorsWriteTest
     }
 
     @Test
-    public void testSingleRowUpdateUpdateMutation()
+    public void testSingleRowMutation()
     {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
@@ -115,8 +110,8 @@ public class SensorsWriteTest
         for (int j = 0; j < 10; j++)
         {
             Mutation m = new RowUpdateBuilder(store.metadata(), j, String.valueOf(j))
-            .add("val", String.valueOf(j))
-            .build();
+                         .add("val", String.valueOf(j))
+                         .build();
             handleMutation(m);
             Sensor localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
             assertThat(localSensor.getValue()).isGreaterThan(0);
@@ -131,7 +126,7 @@ public class SensorsWriteTest
     }
 
     @Test
-    public void testSingleRowUpdateUpdateMutationWithClusteringKeys()
+    public void testSingleRowMutationWithClusteringKey()
     {
         store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_CLUSTERING);
         Context context = new Context(KEYSPACE1, CF_STANDARD_CLUSTERING, store.metadata.id.toString());
@@ -157,30 +152,52 @@ public class SensorsWriteTest
     }
 
     @Test
-    public void testMultipleRowUpdatesMutation()
+    public void testMultipleRowsMutationWithClusteringKey()
     {
-        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
-        Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_CLUSTERING);
+        Context context = new Context(KEYSPACE1, CF_STANDARD_CLUSTERING, store.metadata.id.toString());
 
         List<Mutation> mutations = new ArrayList<>();
         String partitionKey = "0";
-        for (int j = 0; j < 10; j++)
-        {
-            mutations.add(new RowUpdateBuilder(store.metadata(), j, partitionKey)
-                         .add("val", String.valueOf(j))
-                         .build());
-        }
 
-        Mutation mutation = Mutation.merge(mutations);
+        // record the written bytes for a single row update
+        String oneCharString = "0"; // a single char string to establish a baseline for the sensor
+        Mutation mutation = new RowUpdateBuilder(store.metadata(), 0, partitionKey)
+                            .clustering(oneCharString)
+                            .add("val", oneCharString)
+                            .build();
+
         handleMutation(mutation);
-
         Sensor localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
         assertThat(localSensor.getValue()).isGreaterThan(0);
+        double singleRowWriteBytes = localSensor.getValue();
+
+        // build a list of mutations equivalent in written bytes to the single row update but targeting different rows
+        // so we can actually tell if the sensor accommodated for all of them
+        int rowsNum = 10;
+        for (int j = 0; j < rowsNum; j++)
+        {
+            oneCharString = String.valueOf(j);
+            // verify that columns are updated with single char values to match the established singleRowWriteBytes baseline
+            // it is important that each value is different, to enforce proportionality between written bytes and the number of rows
+            // if the values were the same, the mutations will optimize/collapse to a single write
+            assertThat(oneCharString).hasSize(1);
+            mutations.add(new RowUpdateBuilder(store.metadata(), j, partitionKey)
+                          .clustering(String.valueOf(j))
+                          .add("val", String.valueOf(j))
+                          .build());
+        }
+
+        mutation = Mutation.merge(mutations);
+        handleMutation(mutation);
+
+        localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(localSensor.getValue()).isEqualTo(10 * singleRowWriteBytes);
 
         Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registrySensor).isEqualTo(localSensor);
-        assertThat(registrySensor.getValue()).isEqualTo(localSensor.getValue());
-        assertResponseSensors(localSensor.getValue(), registrySensor.getValue(), CF_STANDARD);
+        assertThat(registrySensor.getValue()).isEqualTo(localSensor.getValue() + singleRowWriteBytes);
+        assertResponseSensors(localSensor.getValue(), registrySensor.getValue(), CF_STANDARD_CLUSTERING);
     }
 
     @Test
@@ -194,15 +211,16 @@ public class SensorsWriteTest
 
         List<Mutation> mutations = new ArrayList<>();
         String partitionKey = "0";
-        for (int j = 0; j < 5; j++)
-        {
-            mutations.add(new RowUpdateBuilder(store1.metadata(), j, partitionKey)
-                          .add("val", String.valueOf(j))
+
+        // first table mutation
+        mutations.add(new RowUpdateBuilder(store1.metadata(), 0, partitionKey)
+                          .add("val", "value")
                           .build());
-            mutations.add(new RowUpdateBuilder(store2.metadata(), j, partitionKey)
-                          .add("val", String.valueOf(j))
+
+        // second table mutation
+        mutations.add(new RowUpdateBuilder(store2.metadata(), 0, partitionKey)
+                          .add("val", "another value")
                           .build());
-        }
 
         Mutation mutation = Mutation.merge(mutations);
         handleMutation(mutation);
@@ -219,7 +237,7 @@ public class SensorsWriteTest
 
         Sensor registrySensor2 = SensorsTestUtil.getRegistrySensor(context2, Type.WRITE_BYTES);
         assertThat(registrySensor2).isEqualTo(localSensor2);
-        assertThat(registrySensor2.getValue()).isEqualTo(localSensor1.getValue());
+        assertThat(registrySensor2.getValue()).isEqualTo(localSensor2.getValue());
 
         assertResponseSensors(localSensor1.getValue(), registrySensor1.getValue(), CF_STANDARD);
         assertResponseSensors(localSensor2.getValue(), registrySensor2.getValue(), CF_STANDARD2);
