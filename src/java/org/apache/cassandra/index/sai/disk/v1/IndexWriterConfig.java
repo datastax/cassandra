@@ -116,7 +116,7 @@ public class IndexWriterConfig
                              int maximumNodeConnections,
                              int constructionBeamWidth,
                              VectorSimilarityFunction similarityFunction,
-                             VectorSourceModel defaultSourceModel,
+                             VectorSourceModel sourceModel,
                              OptimizeFor optimizeFor)
     {
         this.indexName = indexName;
@@ -125,7 +125,7 @@ public class IndexWriterConfig
         this.maximumNodeConnections = maximumNodeConnections;
         this.constructionBeamWidth = constructionBeamWidth;
         this.similarityFunction = similarityFunction;
-        this.sourceModel = defaultSourceModel;
+        this.sourceModel = sourceModel;
         this.optimizeFor = optimizeFor;
     }
 

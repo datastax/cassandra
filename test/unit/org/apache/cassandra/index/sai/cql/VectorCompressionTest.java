@@ -115,17 +115,26 @@ public class VectorCompressionTest extends VectorTester
         waitForIndexQueryable();
 
         for (int i = 0; i < rows; i++)
-            execute("INSERT INTO %s (pk, v) VALUES (0, ?)", randomVector(originalDimension));
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, randomVector(originalDimension));
         flush();
-        // also need to compact -- the larger models may flush mid-test automatically
+        // the larger models may flush mid-test automatically, so compact to make sure that we
+        // end up with a single sstable (otherwise PQ might conclude there aren't enough vectors to train on)
         compact();
         waitForCompactionsFinished();
 
-        // good lord what a chore
+        // get a View of the sstables that contain indexed data
         var sim = getCurrentColumnFamilyStore().indexManager;
         var index = (StorageAttachedIndex) sim.listIndexes().iterator().next();
-        var ssti = index.getIndexContext().getView().iterator().next();
-        try (var segment = ssti.getSegments().iterator().next();
+        var view = index.getIndexContext().getView();
+
+        // there should be one sstable with one segment
+        assert view.size() == 1 : "Expected a single sstable after compaction";
+        var ssti = view.iterator().next();
+        var segments = ssti.getSegments();
+        assert segments.size() == 1 : "Expected a single segment";
+
+        // open a Searcher for the segment so we can check that its compression is what we expected
+        try (var segment = segments.iterator().next();
              var searcher = (V3VectorIndexSearcher) segment.getIndexSearcher())
         {
             var cv = searcher.getCompressedVectors();
