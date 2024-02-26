@@ -94,6 +94,12 @@ public final class JVMStabilityInspector
     {
         globalHandler = errorHandler;
     }
+    
+    @VisibleForTesting
+    public static Consumer<Throwable> getGlobalErrorHandler()
+    {
+        return globalHandler;
+    } 
 
     public static void setDiskErrorHandler(Consumer<Throwable> errorHandler)
     {
@@ -133,8 +139,8 @@ public final class JVMStabilityInspector
     {
         if (t == null)
             return;
-        additionalHandler.accept(t);
         globalHandler.accept(t);
+        additionalHandler.accept(t);
 
         for (Throwable suppressed : t.getSuppressed())
             inspectThrowable(suppressed, additionalHandler);
