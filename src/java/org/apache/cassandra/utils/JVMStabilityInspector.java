@@ -94,6 +94,12 @@ public final class JVMStabilityInspector
     {
         globalHandler = errorHandler;
     }
+    
+    @VisibleForTesting
+    public static Consumer<Throwable> getGlobalErrorHandler()
+    {
+        return globalHandler;
+    } 
 
     public static void setDiskErrorHandler(Consumer<Throwable> errorHandler)
     {
@@ -131,8 +137,8 @@ public final class JVMStabilityInspector
 
     public static void inspectThrowable(Throwable t, Consumer<Throwable> additionalHandler) throws OutOfMemoryError
     {
-        additionalHandler.accept(t);
         globalHandler.accept(t);
+        additionalHandler.accept(t);
 
         if (t.getSuppressed() != null)
             for (Throwable suppressed : t.getSuppressed())
