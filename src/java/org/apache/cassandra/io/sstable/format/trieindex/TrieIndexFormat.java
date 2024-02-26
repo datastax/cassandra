@@ -289,7 +289,7 @@ public class TrieIndexFormat implements SSTableFormat
     //
     static class TrieIndexVersion extends Version
     {
-        public static final String current_version = "cb";
+        public static final String current_version = "cc";
         public static final String earliest_supported_version = "aa";
 
         // aa (DSE 6.0): trie index format
