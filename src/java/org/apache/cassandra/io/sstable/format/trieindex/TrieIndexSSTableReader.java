@@ -1043,7 +1043,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                                                                   System.currentTimeMillis(),
                                                                   statsMetadata,
                                                                   OpenReason.NORMAL,
-                                                                  header.toHeader(descriptor.toString(), metadata.get()));
+                                                                  header.toHeader(descriptor.toString(), metadata.get(), descriptor.version, isOffline));
                 }
             }
             else
@@ -1056,7 +1056,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                                                               System.currentTimeMillis(),
                                                               statsMetadata,
                                                               OpenReason.NORMAL,
-                                                              header.toHeader(descriptor.toString(), metadata.get()));
+                                                              header.toHeader(descriptor.toString(), metadata.get(), descriptor.version, isOffline));
             }
             if (validate)
                 sstable.validate();
