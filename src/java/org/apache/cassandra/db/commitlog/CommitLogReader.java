@@ -467,7 +467,7 @@ public class CommitLogReader
             else
                 i.incrementAndGet();
 
-            handler.handleInvalidMutation(ex.id);
+            handler.handleInvalidMutation(ex.id, desc.fileName());
             return;
         }
         catch (Throwable t)

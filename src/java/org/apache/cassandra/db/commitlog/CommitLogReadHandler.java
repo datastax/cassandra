@@ -74,5 +74,5 @@ public interface CommitLogReadHandler
      * @param desc CommitLogDescriptor for mutation being processed
      */
     void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc);
-    void handleInvalidMutation(TableId id);
+    void handleInvalidMutation(TableId id, String filename);
 }

@@ -295,9 +295,9 @@ public class CommitLogReplayer implements CommitLogReadHandler
     @VisibleForTesting
     public static class MutationInitiator
     {
-        protected void onInvalidMutation(TableId id)
+        protected void onInvalidMutation(TableId id, String filename)
         {
-            logger.info("Invalid mutation detected by Cassandra for table {}", id);
+            logger.info("Invalid mutation detected by Cassandra for table {} from file {}", id, filename);
         }
         protected Future<Integer> initiateMutation(final Mutation mutation,
                                                    final long segmentId,
@@ -548,10 +548,10 @@ public class CommitLogReplayer implements CommitLogReadHandler
         return false;
     }
 
-    public void handleInvalidMutation(TableId id)
+    public void handleInvalidMutation(TableId id, String filename)
     {
         logger.info("Inside handleInvalidMutation of Cassandra");
-        mutationInitiator.onInvalidMutation(id);
+        mutationInitiator.onInvalidMutation(id, filename);
     }
 
     public void handleMutation(Mutation m, int size, int entryLocation, CommitLogDescriptor desc)
