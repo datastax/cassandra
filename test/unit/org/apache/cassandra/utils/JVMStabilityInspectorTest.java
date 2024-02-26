@@ -40,6 +40,7 @@ import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 
 import static java.util.Arrays.asList;
+import static org.apache.cassandra.utils.JVMStabilityInspector.getGlobalErrorHandler;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
@@ -238,6 +239,7 @@ public class JVMStabilityInspectorTest
     public void testSettingCustomGlobalHandler()
     {
         Consumer<Throwable> globalHandler = Mockito.mock(Consumer.class);
+        Consumer<Throwable> previous = getGlobalErrorHandler();
         JVMStabilityInspector.setGlobalErrorHandler(globalHandler);
 
         Throwable causeThrowable = new Throwable("cause");
@@ -250,5 +252,7 @@ public class JVMStabilityInspectorTest
         Mockito.verify(globalHandler).accept(Mockito.eq(topThrowable));
         Mockito.verify(globalHandler).accept(Mockito.eq(suppressedThrowable));
         Mockito.verify(globalHandler).accept(Mockito.eq(causeThrowable));
+        
+        JVMStabilityInspector.setGlobalErrorHandler(previous);
     }
 }
