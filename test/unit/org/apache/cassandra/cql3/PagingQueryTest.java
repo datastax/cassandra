@@ -61,7 +61,7 @@ import static org.junit.Assert.assertTrue;
 @RunWith(Parameterized.class)
 public class PagingQueryTest extends CQLTester
 {
-    final int ROW_SIZE = 49; // size of internal representation
+    final int ROW_SIZE = 53; // size of internal representation
 
     @Parameterized.Parameters(name = "aggregation_sub_page_size={0}")
     public static Collection<Object[]> generateParameters()
