@@ -36,7 +36,6 @@ import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
-import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.FutureCallback;
@@ -86,6 +85,7 @@ import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.NonThrowingCloseable;
 import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.concurrent.Transactional;
+import org.assertj.core.api.Assertions;
 
 import static java.util.Collections.emptyList;
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
@@ -435,7 +435,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                         {
                             protected void runMayThrow()
                             {
-                                throw new CompactionInterruptedException("antiCompactionExceptionTest");
+                                throw new CompactionInterruptedException("antiCompactionExceptionTest", TableOperation.StopTrigger.UNIT_TESTS);
                             }
                         };
                         return es.submit(r);
@@ -444,14 +444,9 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
             }
         };
         ListenableFuture<?> fut = pac.run();
-        try
-        {
-            fut.get();
-            fail("Should throw exception");
-        }
-        catch(Throwable t)
-        {
-        }
+        Assertions.assertThatThrownBy(fut::get)
+                  .hasRootCauseInstanceOf(CompactionInterruptedException.class)
+                  .hasMessageContaining("Compaction interrupted due to unit tests");
     }
 
     @Test
@@ -663,7 +658,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                 return false;
             }
         };
-        try (Closeable c = CompactionManager.instance.active.onOperationStart(operation))
+        try
         {
             PendingAntiCompaction.AntiCompactionPredicate acp = new PendingAntiCompaction.AntiCompactionPredicate(FULL_RANGE, nextTimeUUID())
             {
@@ -673,14 +668,22 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
                     return true;
                 }
             };
-            PendingAntiCompaction.AcquisitionCallable acquisitionCallable = new PendingAntiCompaction.AcquisitionCallable(cfs, nextTimeUUID(), 10, 1, acp);
+            NonThrowingCloseable closeable = CompactionManager.instance.active.onOperationStart(operation);
+            PendingAntiCompaction.AcquisitionCallable acquisitionCallable = new PendingAntiCompaction.AcquisitionCallable(cfs, nextTimeUUID(), 10, 1, acp)
+            {
+                protected PendingAntiCompaction.AcquireResult acquireSSTables()
+                {
+                    cdl.countDown();
+                    if (cdl.getCount() > 0)
+                        throw new PendingAntiCompaction.SSTableAcquisitionException("blah");
+                    else 
+                        closeable.close();
+                    return super.acquireSSTables();
+                }
+            };
             Future f = es.submit(acquisitionCallable);
             cdl.await();
             assertNotNull(f.get());
-        }
-        catch (IOException ex)
-        {
-            throw Throwables.propagate(ex);
         }
         finally
         {
