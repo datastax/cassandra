@@ -49,6 +49,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.cql.GeoDistanceAccuracyTest;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
@@ -68,7 +69,7 @@ public class VectorDistributedTest extends TestBaseImpl
     private static final String CREATE_TABLE_TWO_VECTORS = "CREATE TABLE %%s (pk int primary key, val1 vector<float, %d>, val2 vector<float, %d>)";
     private static final String CREATE_INDEX = "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'";
 
-    private static final VectorSimilarityFunction function = IndexWriterConfig.DEFAULT_SIMILARITY_FUNCTION;
+    private static final VectorSimilarityFunction function = VectorSourceModel.OTHER.defaultSimilarityFunction();
 
     private static final String INVALID_LIMIT_MESSAGE = "Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than 1000";
 
