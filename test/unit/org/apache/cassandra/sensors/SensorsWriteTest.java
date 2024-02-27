@@ -26,6 +26,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
 
@@ -66,6 +67,7 @@ public class SensorsWriteTest
     private ColumnFamilyStore store;
     private CopyOnWriteArrayList<Message> capturedOutboundMessages;
 
+    @BeforeClass
     public static void defineSchema() throws Exception
     {
         SchemaLoader.prepareServer();
