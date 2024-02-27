@@ -100,6 +100,7 @@ public class IndexContext
 
     private final String keyspace;
     private final String table;
+    private final String tableId;
     private final ColumnMetadata column;
     private final IndexTarget.Type indexType;;
     private final AbstractType<?> validator;
@@ -122,6 +123,7 @@ public class IndexContext
 
     public IndexContext(@Nonnull String keyspace,
                         @Nonnull String table,
+                        @Nonnull String tableId,
                         @Nonnull AbstractType<?> partitionKeyType,
                         @Nonnull ClusteringComparator clusteringComparator,
                         @Nonnull ColumnMetadata column,
@@ -131,6 +133,7 @@ public class IndexContext
     {
         this.keyspace = keyspace;
         this.table = table;
+        this.tableId = tableId;
         this.partitionKeyType = partitionKeyType;
         this.clusteringComparator = clusteringComparator;
         this.column = column;
@@ -199,6 +202,11 @@ public class IndexContext
     public String getTable()
     {
         return table;
+    }
+
+    public String getTableId()
+    {
+        return tableId;
     }
 
     public Memtable.Owner owner()
