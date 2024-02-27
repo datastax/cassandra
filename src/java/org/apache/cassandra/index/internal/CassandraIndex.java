@@ -33,6 +33,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.compaction.TableOperation;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -45,7 +47,6 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
-import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.dht.LocalPartitioner;
@@ -650,7 +651,7 @@ public abstract class CassandraIndex implements Index
     {
         // interrupt in-progress compactions
         Collection<ColumnFamilyStore> cfss = Collections.singleton(indexCfs);
-        CompactionManager.instance.interruptCompactionForCFs(cfss, (sstable) -> true, true);
+        CompactionManager.instance.interruptCompactionForCFs(cfss, (sstable) -> true, true, TableOperation.StopTrigger.INVALIDATE_INDEX);
         CompactionManager.instance.waitForCessation(cfss, (sstable) -> true);
         Keyspace.writeOrder.awaitNewBarrier();
         indexCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.INDEX_REMOVED);

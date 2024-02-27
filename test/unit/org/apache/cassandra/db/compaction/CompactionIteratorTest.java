@@ -28,6 +28,8 @@ import java.util.NavigableMap;
 import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
+import static org.apache.cassandra.db.transform.DuplicateRowCheckerTest.assertCommandIssued;
+import static org.apache.cassandra.db.transform.DuplicateRowCheckerTest.makeRow;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -62,8 +64,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.DIAGNOSTIC_SNAPSHOT_INTERVAL_NANOS;
-import static org.apache.cassandra.db.transform.DuplicateRowCheckerTest.assertCommandIssued;
-import static org.apache.cassandra.db.transform.DuplicateRowCheckerTest.makeRow;
 import static org.apache.cassandra.db.transform.DuplicateRowCheckerTest.partition;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -343,7 +343,7 @@ public class CompactionIteratorTest extends CQLTester
             assertTrue(rows.hasNext());
             assertNotNull(rows.next());
 
-            op.stop();
+            op.stop(TableOperation.StopTrigger.UNIT_TESTS);
             try
             {
                 // Will call Transformation#applyToRow
@@ -372,7 +372,7 @@ public class CompactionIteratorTest extends CQLTester
                                                               controller, NOW, null))
         {
             TableOperation op = iter.getOperation();
-            op.stop();
+            op.stop(TableOperation.StopTrigger.UNIT_TESTS);
             try
             {
                 // Will call Transformation#applyToPartition

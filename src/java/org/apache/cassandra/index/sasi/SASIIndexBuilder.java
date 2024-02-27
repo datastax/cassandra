@@ -28,7 +28,6 @@ import java.util.SortedMap;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
@@ -88,8 +87,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
                 {
                     while (!keys.isExhausted())
                     {
-                        if (isStopRequested())
-                            throw new CompactionInterruptedException(getProgress());
+                        throwIfStopRequested();
 
                         final DecoratedKey key = sstable.decorateKey(keys.key());
                         final long keyPosition = keys.keyPositionForSecondaryIndex();
