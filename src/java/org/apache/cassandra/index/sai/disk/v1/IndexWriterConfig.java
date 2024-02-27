@@ -21,13 +21,12 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.sai.disk.vector.OptimizeFor;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR_SEARCH_MAX_TOP_K;
 
@@ -56,10 +55,8 @@ public class IndexWriterConfig
 
     public static final int MAX_TOP_K = SAI_VECTOR_SEARCH_MAX_TOP_K.getInt();
 
-    public static final VectorSimilarityFunction DEFAULT_SIMILARITY_FUNCTION = VectorSimilarityFunction.COSINE;
-
     public static final String validSimilarityFunctions = Arrays.stream(VectorSimilarityFunction.values())
-                                                                .map(e -> e.name())
+                                                                .map(Enum::name)
                                                                 .collect(Collectors.joining(", "));
 
     private static final VectorSourceModel DEFAULT_SOURCE_MODEL = VectorSourceModel.OTHER;
@@ -67,10 +64,7 @@ public class IndexWriterConfig
                                                           .map(Enum::name)
                                                           .collect(Collectors.joining(", "));
 
-    // no longer used
-    private static final OptimizeFor DEFAULT_OPTIMIZE_FOR = OptimizeFor.LATENCY;
-
-    private static final IndexWriterConfig EMPTY_CONFIG = new IndexWriterConfig(null, -1, -1, -1, -1, null, DEFAULT_SOURCE_MODEL, null);
+    private static final IndexWriterConfig EMPTY_CONFIG = new IndexWriterConfig(null, -1, -1, -1, -1, null, DEFAULT_SOURCE_MODEL);
 
     /**
      * Fully qualified index name, in the format "<keyspace>.<table>.<index_name>".
@@ -94,8 +88,6 @@ public class IndexWriterConfig
     private final VectorSimilarityFunction similarityFunction;
     private final VectorSourceModel sourceModel;
 
-    private final OptimizeFor optimizeFor;
-
     public IndexWriterConfig(String indexName,
                              int bkdPostingsSkip,
                              int bkdPostingsMinLeaves)
@@ -105,9 +97,9 @@ public class IndexWriterConfig
              bkdPostingsMinLeaves,
              DEFAULT_MAXIMUM_NODE_CONNECTIONS,
              DEFAULT_CONSTRUCTION_BEAM_WIDTH,
-             DEFAULT_SIMILARITY_FUNCTION,
-             DEFAULT_SOURCE_MODEL,
-             DEFAULT_OPTIMIZE_FOR);
+             DEFAULT_SOURCE_MODEL.defaultSimilarityFunction(),
+             DEFAULT_SOURCE_MODEL
+        );
     }
 
     public IndexWriterConfig(String indexName,
@@ -116,8 +108,7 @@ public class IndexWriterConfig
                              int maximumNodeConnections,
                              int constructionBeamWidth,
                              VectorSimilarityFunction similarityFunction,
-                             VectorSourceModel sourceModel,
-                             OptimizeFor optimizeFor)
+                             VectorSourceModel sourceModel)
     {
         this.indexName = indexName;
         this.bkdPostingsSkip = bkdPostingsSkip;
@@ -126,7 +117,6 @@ public class IndexWriterConfig
         this.constructionBeamWidth = constructionBeamWidth;
         this.similarityFunction = similarityFunction;
         this.sourceModel = sourceModel;
-        this.optimizeFor = optimizeFor;
     }
 
     public String getIndexName()
@@ -170,9 +160,8 @@ public class IndexWriterConfig
         int skip = DEFAULT_POSTING_LIST_LVL_SKIP;
         int maximumNodeConnections = DEFAULT_MAXIMUM_NODE_CONNECTIONS;
         int queueSize = DEFAULT_CONSTRUCTION_BEAM_WIDTH;
-        VectorSimilarityFunction similarityFunction = DEFAULT_SIMILARITY_FUNCTION;
         VectorSourceModel sourceModel = DEFAULT_SOURCE_MODEL;
-        OptimizeFor optimizeFor = DEFAULT_OPTIMIZE_FOR;
+        VectorSimilarityFunction similarityFunction = sourceModel.defaultSimilarityFunction(); // don't leave null in case no options at all are given
 
         if (options.get(POSTING_LIST_LVL_MIN_LEAVES) != null || options.get(POSTING_LIST_LVL_SKIP_OPTION) != null)
         {
@@ -254,19 +243,6 @@ public class IndexWriterConfig
                 if (queueSize <= 0 || queueSize > MAXIMUM_CONSTRUCTION_BEAM_WIDTH)
                     throw new InvalidRequestException(String.format("Construction beam width for index %s cannot be <= 0 or > %s, was %s", indexName, MAXIMUM_CONSTRUCTION_BEAM_WIDTH, queueSize));
             }
-            if (options.containsKey(SIMILARITY_FUNCTION))
-            {
-                String option = options.get(SIMILARITY_FUNCTION).toUpperCase();
-                try
-                {
-                    similarityFunction = VectorSimilarityFunction.valueOf(option);
-                }
-                catch (IllegalArgumentException e)
-                {
-                    throw new InvalidRequestException(String.format("Similarity function %s was not recognized for index %s. Valid values are: %s",
-                                                                    option, indexName, validSimilarityFunctions));
-                }
-            }
             if (options.containsKey(SOURCE_MODEL))
             {
                 String option = options.get(SOURCE_MODEL).toUpperCase();
@@ -280,8 +256,26 @@ public class IndexWriterConfig
                                                                     option, indexName, validSourceModels));
                 }
             }
+            if (options.containsKey(SIMILARITY_FUNCTION))
+            {
+                String option = options.get(SIMILARITY_FUNCTION).toUpperCase();
+                try
+                {
+                    similarityFunction = VectorSimilarityFunction.valueOf(option);
+                }
+                catch (IllegalArgumentException e)
+                {
+                    throw new InvalidRequestException(String.format("Similarity function %s was not recognized for index %s. Valid values are: %s",
+                                                                    option, indexName, validSimilarityFunctions));
+                }
+            }
+            else
+            {
+                similarityFunction = sourceModel.defaultSimilarityFunction();
+            }
         }
-        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize, similarityFunction, sourceModel, optimizeFor);
+
+        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize, similarityFunction, sourceModel);
     }
 
     public static IndexWriterConfig defaultConfig(String indexName)
@@ -291,9 +285,9 @@ public class IndexWriterConfig
                                      DEFAULT_POSTING_LIST_MIN_LEAVES,
                                      DEFAULT_MAXIMUM_NODE_CONNECTIONS,
                                      DEFAULT_CONSTRUCTION_BEAM_WIDTH,
-                                     DEFAULT_SIMILARITY_FUNCTION,
-                                     DEFAULT_SOURCE_MODEL,
-                                     DEFAULT_OPTIMIZE_FOR);
+                                     DEFAULT_SOURCE_MODEL.defaultSimilarityFunction(),
+                                     DEFAULT_SOURCE_MODEL
+        );
     }
 
     public static IndexWriterConfig emptyConfig()
