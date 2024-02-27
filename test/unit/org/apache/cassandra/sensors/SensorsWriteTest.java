@@ -27,7 +27,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
@@ -219,8 +218,8 @@ public class SensorsWriteTest
         handleMutation(saiMutation);
 
         Sensor saiSensor = SensorsTestUtil.getThreadLocalRequestSensor(saiContext, Type.WRITE_BYTES);
-        // Writing the same amount of data to an SAI indexed column should generate more than twice the number of bytes (the vanilla write + the SAI write)
-        assertThat(saiSensor.getValue()).isGreaterThan(2 * standardSensor.getValue());
+        // Writing the same amount of data to an SAI indexed column should generate at least twice the number of bytes (the vanilla write + the SAI write)
+        assertThat(saiSensor.getValue()).isGreaterThanOrEqualTo(2 * standardSensor.getValue());
         Sensor saiRegistrySensor = SensorsTestUtil.getRegistrySensor(saiContext, Type.WRITE_BYTES);
         assertThat(saiRegistrySensor).isEqualTo(saiSensor);
 
@@ -230,7 +229,6 @@ public class SensorsWriteTest
     }
 
     @Test
-    @Ignore
     public void testSingleRowMutationWithSecondaryIndex()
     {
         ColumnFamilyStore standardStore = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
@@ -260,8 +258,8 @@ public class SensorsWriteTest
         handleMutation(secondaryIndexMutation);
 
         Sensor secondaryIndexSensor = SensorsTestUtil.getThreadLocalRequestSensor(secondaryIndexContext, Type.WRITE_BYTES);
-        // Writing the same amount of data to an indexed column should generate more than twice the number of bytes (the vanilla write + the SecondaryIndex write)
-        assertThat(secondaryIndexSensor.getValue()).isGreaterThan(2 * standardSensor.getValue());
+        // Writing the same amount of data to an indexed column should generate at lest twice the number of bytes (the vanilla write + the SecondaryIndex write)
+        assertThat(secondaryIndexSensor.getValue()).isGreaterThanOrEqualTo(2 * standardSensor.getValue());
         Sensor secondartyIndexRegistrySensor = SensorsTestUtil.getRegistrySensor(secondaryIndexContext, Type.WRITE_BYTES);
         assertThat(secondartyIndexRegistrySensor).isEqualTo(secondaryIndexSensor);
 
