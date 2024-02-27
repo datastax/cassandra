@@ -24,7 +24,6 @@ import java.nio.ByteBuffer;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.TypeSizes;
-import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -109,8 +108,7 @@ public class BtiTableScrubber extends SortedTableScrubber<BtiTableReader> implem
 
         while (!dataFile.isEOF())
         {
-            if (scrubInfo.isStopRequested())
-                throw new CompactionInterruptedException(scrubInfo.getProgress());
+            scrubInfo.throwIfStopRequested();
 
             // position in a data file where the partition starts
             long dataStart = dataFile.getFilePointer();

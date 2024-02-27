@@ -306,5 +306,5 @@ public interface CompactionRealm extends SSTableReader.Owner
     /**
      * Run an operation with concurrent compactions being stopped.
      */
-    <V> V runWithCompactionsDisabled(Callable<V> callable, OperationType operationType, boolean interruptValidation, boolean interruptViews);
+    <V> V runWithCompactionsDisabled(Callable<V> callable, OperationType operationType, boolean interruptValidation, boolean interruptViews, TableOperation.StopTrigger trigger);
 }
