@@ -27,6 +27,7 @@ import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.bind.annotation.SuperCall;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.assertj.core.api.Assertions;
 import org.junit.Test;
 
@@ -262,7 +263,7 @@ public class RepairErrorsTest extends TestBaseImpl
                                                                   Collection<SSTableReader> sstables,
                                                                   RangesAtEndpoint ranges)
         {
-            throw new CompactionInterruptedException(String.valueOf(sessionID));
+            throw new CompactionInterruptedException(String.valueOf(sessionID), TableOperation.StopTrigger.UNIT_TESTS);
         }
 
         @SuppressWarnings("unused")
