@@ -250,7 +250,7 @@ public class NativeIndexDDLTest extends SAITester
 
         TableMetadata metadata = currentTableMetadata();
         AbstractType<?> tuple = metadata.getColumn(ColumnIdentifier.getInterned("val", false)).type;
-        assertFalse(tuple.isMultiCell());
+        assertFalse(tuple.isMultiCell);
         assertFalse(tuple.isCollection());
         assertTrue(tuple.isTuple());
     }

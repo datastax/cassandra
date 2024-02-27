@@ -600,7 +600,7 @@ public abstract class Constants
 
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
-            if (column.type.isMultiCell())
+            if (column.type.isMultiCell)
                 params.setComplexDeletionTime(column);
             else
                 params.addTombstone(column);

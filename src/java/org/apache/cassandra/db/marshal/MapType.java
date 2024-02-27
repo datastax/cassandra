@@ -241,7 +241,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
 
     public String toString(boolean ignoreFreezing)
     {
-        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell;
 
         StringBuilder sb = new StringBuilder();
         if (includeFrozenType)

@@ -236,11 +236,11 @@ public final class CreateTableStatement extends AlterSchemaStatement
         columns.forEach((column, properties) ->
         {
             AbstractType<?> type = properties.type;
-            if (type.isUDT() && type.isMultiCell())
+            if (type.isUDT() && type.isMultiCell)
             {
                 ((UserType) type).fieldTypes().forEach(field ->
                 {
-                    if (field.isMultiCell())
+                    if (field.isMultiCell)
                         throw ire("Non-frozen UDTs with nested non-frozen collections are not supported");
                 });
             }
@@ -261,7 +261,7 @@ public final class CreateTableStatement extends AlterSchemaStatement
                 throw ire("Duplicate column '%s' in PRIMARY KEY clause for table '%s'", column, tableName);
 
             AbstractType<?> type = properties.type;
-            if (type.isMultiCell())
+            if (type.isMultiCell)
             {
                 CQL3Type cqlType = properties.cqlType;
                 if (type.isCollection())
@@ -393,7 +393,7 @@ public final class CreateTableStatement extends AlterSchemaStatement
     {
         boolean isDense = !clusteringColumnProperties.isEmpty();
 
-        if (columns.values().stream().anyMatch(c -> c.type.isMultiCell()))
+        if (columns.values().stream().anyMatch(c -> c.type.isMultiCell))
             throw ire("Non-frozen collections and UDTs are not supported with COMPACT STORAGE");
         if (!staticColumns.isEmpty())
             throw ire("Static columns are not supported in COMPACT STORAGE tables");

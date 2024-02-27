@@ -187,12 +187,12 @@ public class ViewPKTest extends ViewAbstractTest
                                + def.name + ", k" + (def.name.toString().equals("asciival") ? "" : ", asciival") + ")";
                 createView("mv1_" + def.name, query);
 
-                if (def.type.isMultiCell())
+                if (def.type.isMultiCell)
                     Assert.fail("MV on a multicell should fail " + def);
             }
             catch (Exception e)
             {
-                if (!def.type.isMultiCell() && !def.isPartitionKey())
+                if (!def.type.isMultiCell && !def.isPartitionKey())
                     Assert.fail("MV creation failed on " + def);
             }
 
@@ -203,12 +203,12 @@ public class ViewPKTest extends ViewAbstractTest
                                + def.name + ", asciival" + (def.name.toString().equals("k") ? "" : ", k") + ")";
                 createView("mv2_" + def.name, query);
 
-                if (def.type.isMultiCell())
+                if (def.type.isMultiCell)
                     Assert.fail("MV on a multicell should fail " + def);
             }
             catch (Exception e)
             {
-                if (!def.type.isMultiCell() && !def.isPartitionKey())
+                if (!def.type.isMultiCell && !def.isPartitionKey())
                     Assert.fail("MV creation failed on " + def);
             }
 
@@ -218,12 +218,12 @@ public class ViewPKTest extends ViewAbstractTest
                                + asciival + "PRIMARY KEY ((" + def.name + ", k), asciival)";
                 createView("mv3_" + def.name, query);
 
-                if (def.type.isMultiCell())
+                if (def.type.isMultiCell)
                     Assert.fail("MV on a multicell should fail " + def);
             }
             catch (Exception e)
             {
-                if (!def.type.isMultiCell() && !def.isPartitionKey())
+                if (!def.type.isMultiCell && !def.isPartitionKey())
                     Assert.fail("MV creation failed on " + def);
             }
 

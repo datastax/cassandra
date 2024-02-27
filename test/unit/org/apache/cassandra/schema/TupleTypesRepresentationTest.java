@@ -384,7 +384,7 @@ public class TupleTypesRepresentationTest
                 // implementation.
                 assertEquals(typeDef.toString() + "\n droppedCqlType\n", typeDef.droppedCqlType, expandedCQL);
                 assertEquals(typeDef.toString() + "\n droppedCqlTypeString\n", typeDef.droppedCqlTypeString, expandedCQL.toString());
-                assertEquals(typeDef.toString() + "\n multiCell\n", typeDef.type.isMultiCell(), typeDef.droppedType.isMultiCell());
+                assertEquals(typeDef.toString() + "\n multiCell\n", typeDef.type.isMultiCell, typeDef.droppedType.isMultiCell);
 
                 AbstractType<?> parsedType = TypeParser.parse(typeDef.typeString);
                 assertEquals(typeDef.toString(), typeDef.typeString, parsedType.toString());

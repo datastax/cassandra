@@ -87,7 +87,7 @@ public class TupleType extends MultiCellCapableType<ByteBuffer>
     @Override
     public TupleType overrideKeyspace(Function<String, String> overrideKeyspace)
     {
-        return new TupleType(subTypes.stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(Collectors.toList()), isMultiCell());
+        return new TupleType(subTypes.stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(Collectors.toList()), isMultiCell);
     }
 
     private static List<TypeSerializer<?>> fieldSerializers(List<AbstractType<?>> types)

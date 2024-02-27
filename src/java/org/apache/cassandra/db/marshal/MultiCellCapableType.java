@@ -54,7 +54,7 @@ public abstract class MultiCellCapableType<T> extends AbstractType<T>
      * The subtype/comparator to use for the {@link CellPath} part of cells forming values for this type when used in
      * its multi-cell variant.
      *
-     * <p>Note: in theory, we shouldn't have to access this on frozen instances (where {@code isMultiCell() == false}),
+     * <p>Note: in theory, we shouldn't have to access this on frozen instances (where {@code isMultiCell == false}),
      * but for convenience, it is expected that this method always returns a proper value "as if" the type was a
      * multi-cell variant, even if it is not.
      *

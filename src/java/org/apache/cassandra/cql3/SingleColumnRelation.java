@@ -325,12 +325,12 @@ public final class SingleColumnRelation extends Relation
         {
             checkFalse(receiver.type instanceof ListType, "Indexes on list entries (%s[index] = value) are not currently supported.", receiver.name);
             checkTrue(receiver.type instanceof MapType, "Column %s cannot be used as a map", receiver.name);
-            checkTrue(receiver.type.isMultiCell(), "Map-entry equality predicates on frozen map column %s are not supported", receiver.name);
+            checkTrue(receiver.type.isMultiCell, "Map-entry equality predicates on frozen map column %s are not supported", receiver.name);
             checkTrue(isEQ() || isNEQ(), "Only EQ and NEQ relations are supported on map entries");
         }
 
         // Non-frozen UDTs don't support any operator
-        checkFalse(receiver.type.isUDT() && receiver.type.isMultiCell(),
+        checkFalse(receiver.type.isUDT() && receiver.type.isMultiCell,
                    "Non-frozen UDT column '%s' (%s) cannot be restricted by any relation",
                    receiver.name,
                    receiver.type.asCQL3Type());
@@ -338,7 +338,7 @@ public final class SingleColumnRelation extends Relation
         if (receiver.type.isCollection())
         {
             // We don't support relations against entire collections (unless they're frozen), like "numbers = {1, 2, 3}"
-            checkFalse(receiver.type.isMultiCell() && !isLegalRelationForNonFrozenCollection(),
+            checkFalse(receiver.type.isMultiCell && !isLegalRelationForNonFrozenCollection(),
                        "Collection column '%s' (%s) cannot be restricted by a '%s' relation",
                        receiver.name,
                        receiver.type.asCQL3Type(),
@@ -348,7 +348,7 @@ public final class SingleColumnRelation extends Relation
             {
                 receiver = makeCollectionReceiver(receiver, isContainsKey() || isNotContainsKey());
             }
-            else if (receiver.type.isMultiCell() && mapKey != null && (isEQ() || isNEQ()))
+            else if (receiver.type.isMultiCell && mapKey != null && (isEQ() || isNEQ()))
             {
                 List<ColumnSpecification> receivers = new ArrayList<>(2);
                 receivers.add(makeCollectionReceiver(receiver, true));

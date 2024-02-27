@@ -189,7 +189,7 @@ public class KeyspaceMetadataTest extends CQLTester
 
             // Checks that the updated type is present in the updated Types
             UserType tmp = newTypes.getNullable(updatedUserType.name);
-            tmp = updatedType.isMultiCell() ? tmp : tmp.freeze();
+            tmp = updatedType.isMultiCell ? tmp : tmp.freeze();
             assertEquals(updatedType, tmp);
 
             assertEquals(keyspace, updatedUserType.keyspace);

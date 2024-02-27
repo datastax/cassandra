@@ -341,7 +341,7 @@ public interface Selectable extends AssignmentTestable
                                       column.name));
 
             Selector.Factory factory = selectable.newSelectorFactory(table, expectedType, defs, boundNames);
-            boolean isMultiCell = factory.getColumnSpecification(table).type.isMultiCell();
+            boolean isMultiCell = factory.getColumnSpecification(table).type.isMultiCell;
 
             return WritetimeOrTTLSelector.newFactory(factory, addAndGetIndex(column, defs), kind, isMultiCell);
         }
@@ -350,7 +350,7 @@ public interface Selectable extends AssignmentTestable
         public AbstractType<?> getExactTypeIfKnown(String keyspace)
         {
             AbstractType<?> type = kind.returnType;
-            return column.type.isMultiCell() && !kind.aggregatesMultiCell() ? ListType.getInstance(type, false) : type;
+            return column.type.isMultiCell && !kind.aggregatesMultiCell() ? ListType.getInstance(type, false) : type;
         }
 
         @Override

@@ -122,7 +122,7 @@ public class UserType extends TupleType implements SchemaElement
         if (newKeyspace.equals(keyspace))
             return this;
 
-        return new UserType(newKeyspace, name, fieldNames, subTypes.stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(Collectors.toList()), isMultiCell());
+        return new UserType(newKeyspace, name, fieldNames, subTypes.stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(Collectors.toList()), isMultiCell);
     }
 
     @Override
@@ -327,7 +327,7 @@ public class UserType extends TupleType implements SchemaElement
             return false;
 
         UserType other = (UserType) previous;
-        if (isMultiCell != other.isMultiCell())
+        if (isMultiCell != other.isMultiCell)
             return false;
 
         if (!keyspace.equals(other.keyspace))
@@ -408,10 +408,10 @@ public class UserType extends TupleType implements SchemaElement
             return (UserType) super.withUpdatedUserType(udt);
 
         // TODO reinvestiate this method
-        assert udt.isMultiCell();
+        assert udt.isMultiCell;
         // The type we're updating may be frozen, while the updated user type will never be (a UDT is never frozen in
         // its definition, only in its use). So if we are frozen, we should freeze the UDT we switch to.
-        return isMultiCell() ? udt : udt.freeze();
+        return isMultiCell ? udt : udt.freeze();
     }
 
     @Override
@@ -423,7 +423,7 @@ public class UserType extends TupleType implements SchemaElement
     @Override
     public String toString(boolean ignoreFreezing)
     {
-        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell;
 
         StringBuilder sb = new StringBuilder();
         if (includeFrozenType)

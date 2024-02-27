@@ -96,7 +96,7 @@ public class SetType<T> extends CollectionType<Set<T>>
     @Override
     public boolean isCompatibleWithFrozen(CollectionType<?> previous)
     {
-        assert !isMultiCell();
+        assert !isMultiCell;
         return this.getElementsType().isCompatibleWith(((SetType<?>) previous).getElementsType());
     }
 
@@ -132,13 +132,13 @@ public class SetType<T> extends CollectionType<Set<T>>
     @Override
     public String toString(boolean ignoreFreezing)
     {
-        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell;
 
         StringBuilder sb = new StringBuilder();
         if (includeFrozenType)
             sb.append(FrozenType.class.getName()).append("(");
         sb.append(getClass().getName());
-        sb.append(TypeParser.stringifyTypeParameters(Collections.<AbstractType<?>>singletonList(getElementsType()), ignoreFreezing || !isMultiCell()));
+        sb.append(TypeParser.stringifyTypeParameters(Collections.<AbstractType<?>>singletonList(getElementsType()), ignoreFreezing || !isMultiCell));
         if (includeFrozenType)
             sb.append(")");
         return sb.toString();

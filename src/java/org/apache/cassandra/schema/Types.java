@@ -337,7 +337,7 @@ public final class Types implements Iterable<UserType>
 
         public Builder add(UserType type)
         {
-            assert type.isMultiCell();
+            assert type.isMultiCell;
             types.put(type.name, type);
             return this;
         }

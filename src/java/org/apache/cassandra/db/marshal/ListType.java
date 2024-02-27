@@ -134,7 +134,7 @@ public class ListType<T> extends CollectionType<List<T>>
     @Override
     public String toString(boolean ignoreFreezing)
     {
-        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell;
 
         StringBuilder sb = new StringBuilder();
         if (includeFrozenType)

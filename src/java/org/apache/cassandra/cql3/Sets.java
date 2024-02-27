@@ -353,7 +353,7 @@ public abstract class Sets
                 return;
 
             // delete + add
-            if (column.type.isMultiCell())
+            if (column.type.isMultiCell)
                 params.setComplexDeletionTimeForOverwrite(column);
             Adder.doAdd(value, column, params);
         }
@@ -369,7 +369,7 @@ public abstract class Sets
         @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
-            assert column.type.isMultiCell() : "Attempted to add items to a frozen set";
+            assert column.type.isMultiCell : "Attempted to add items to a frozen set";
             Term.Terminal value = t.bind(params.options);
             if (value != UNSET_VALUE)
                 doAdd(value, column, params);
@@ -380,7 +380,7 @@ public abstract class Sets
             if (value == null)
             {
                 // for frozen sets, we're overwriting the whole cell
-                if (!column.type.isMultiCell())
+                if (!column.type.isMultiCell)
                     params.addTombstone(column);
 
                 return;
@@ -388,7 +388,7 @@ public abstract class Sets
 
             SortedSet<ByteBuffer> elements = ((Value) value).elements;
 
-            if (column.type.isMultiCell())
+            if (column.type.isMultiCell)
             {
                 if (elements.size() == 0)
                     return;
@@ -429,7 +429,7 @@ public abstract class Sets
         @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
-            assert column.type.isMultiCell() : "Attempted to remove items from a frozen set";
+            assert column.type.isMultiCell : "Attempted to remove items from a frozen set";
 
             Term.Terminal value = t.bind(params.options);
             if (value == null || value == UNSET_VALUE)
@@ -455,7 +455,7 @@ public abstract class Sets
         @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
-            assert column.type.isMultiCell() : "Attempted to delete a single element in a frozen set";
+            assert column.type.isMultiCell : "Attempted to delete a single element in a frozen set";
             Term.Terminal elt = t.bind(params.options);
             if (elt == null)
                 throw new InvalidRequestException("Invalid null set element");

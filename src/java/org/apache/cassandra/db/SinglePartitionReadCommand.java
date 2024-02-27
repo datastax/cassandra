@@ -916,7 +916,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     {
         for (ColumnMetadata column : columnFilter().queriedColumns())
         {
-            if (column.type.isMultiCell())
+            if (column.type.isMultiCell)
                 return true;
         }
         return false;

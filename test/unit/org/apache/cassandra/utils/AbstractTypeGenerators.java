@@ -1099,7 +1099,7 @@ public final class AbstractTypeGenerators
                 newline(sb, indent);
             }
             UserType ut = (UserType) type;
-            if (!type.isMultiCell()) sb.append("frozen ");
+            if (!type.isMultiCell) sb.append("frozen ");
             sb.append("udt[").append(ColumnIdentifier.maybeQuote(ut.elementName())).append("]:");
             int elementIndent = indent + 2;
             for (int i = 0; i < ut.size(); i++)
@@ -1150,7 +1150,7 @@ public final class AbstractTypeGenerators
                 indent += 2;
                 newline(sb, indent);
             }
-            if (!type.isMultiCell()) sb.append("frozen ");
+            if (!type.isMultiCell) sb.append("frozen ");
             switch (ct.kind)
             {
                 case MAP:

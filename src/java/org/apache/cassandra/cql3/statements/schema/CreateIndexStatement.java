@@ -321,10 +321,10 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if (!column.type.isCollection() && target.type != Type.SIMPLE)
             throw ire(NON_COLLECTION_SIMPLE_INDEX, target.type, column);
 
-        if (!(column.type instanceof MapType && column.type.isMultiCell()) && (target.type == Type.KEYS || target.type == Type.KEYS_AND_VALUES))
+        if (!(column.type instanceof MapType && column.type.isMultiCell) && (target.type == Type.KEYS || target.type == Type.KEYS_AND_VALUES))
             throw ire(CREATE_WITH_NON_MAP_TYPE, target.type, column);
 
-        if (column.type.isUDT() && column.type.isMultiCell())
+        if (column.type.isUDT() && column.type.isMultiCell)
             throw ire(CREATE_ON_NON_FROZEN_UDT, column);
     }
 

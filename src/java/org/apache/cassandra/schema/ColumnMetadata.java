@@ -251,7 +251,7 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
 
     private static Comparator<CellPath> makeCellPathComparator(Kind kind, AbstractType<?> type)
     {
-        if (kind.isPrimaryKeyKind() || !type.isMultiCell())
+        if (kind.isPrimaryKeyKind() || !type.isMultiCell)
             return null;
 
         AbstractType<?> nameComparator = type.isCollection()
@@ -546,7 +546,7 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         if (!isComplex())
             throw new MarshalException("Only complex cells should have a cell path");
 
-        assert type.isMultiCell();
+        assert type.isMultiCell;
         if (type.isCollection())
             ((CollectionType)type).nameComparator().validate(path.get(0));
         else
@@ -601,8 +601,8 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
      */
     public AbstractType<?> cellValueType()
     {
-        assert !(type instanceof UserType && type.isMultiCell());
-        return type instanceof CollectionType && type.isMultiCell()
+        assert !(type instanceof UserType && type.isMultiCell);
+        return type instanceof CollectionType && type.isMultiCell
                 ? ((CollectionType)type).valueComparator()
                 : type;
     }

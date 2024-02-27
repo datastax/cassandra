@@ -676,9 +676,9 @@ public abstract class SSTableHeaderFix
             // different UDT - bummer...
             return null;
 
-        if (cHeader.isMultiCell() != cSchema.isMultiCell())
+        if (cHeader.isMultiCell != cSchema.isMultiCell)
         {
-            if (cHeader.isMultiCell() && !cSchema.isMultiCell())
+            if (cHeader.isMultiCell && !cSchema.isMultiCell)
             {
                 // C* 3.0 writes broken SerializationHeader.Component instances - i.e. broken UDT type
                 // definitions into the sstable -Stats.db file, because 3.0 does not enclose frozen UDTs
@@ -707,9 +707,9 @@ public abstract class SSTableHeaderFix
         // Do not mess around with the UserType in the serialization header, if the column has been dropped.
         // Only fix the multi-cell status when the header contains it as a multicell (non-frozen) UserType,
         // but the schema says "frozen".
-        if (cHeader.isMultiCell() && !cSchema.isMultiCell())
+        if (cHeader.isMultiCell && !cSchema.isMultiCell)
         {
-            return new UserType(cHeader.keyspace, cHeader.name, cHeader.fieldNames(), cHeader.fieldTypes(), cSchema.isMultiCell());
+            return new UserType(cHeader.keyspace, cHeader.name, cHeader.fieldNames(), cHeader.fieldTypes(), cSchema.isMultiCell);
         }
 
         return cHeader;
@@ -732,7 +732,7 @@ public abstract class SSTableHeaderFix
             cHeaderFixed.add(cHeaderCompFixed);
             anyChanged |= cHeaderComp != cHeaderCompFixed;
         }
-        if (anyChanged || cSchema.isMultiCell() != cHeader.isMultiCell())
+        if (anyChanged || cSchema.isMultiCell != cHeader.isMultiCell)
             // TODO this should create a non-frozen tuple type for the sake of handling a dropped, non-frozen UDT
             return new TupleType(cHeaderFixed);
         return cHeader;
@@ -769,7 +769,7 @@ public abstract class SSTableHeaderFix
             return null;
         if (cHeaderElem != cHeaderElemFixed)
             // element type changed
-            return ListType.getInstance(cHeaderElemFixed, cHeader.isMultiCell());
+            return ListType.getInstance(cHeaderElemFixed, cHeader.isMultiCell);
         return cHeader;
     }
 
@@ -782,7 +782,7 @@ public abstract class SSTableHeaderFix
             return null;
         if (cHeaderElem != cHeaderElemFixed)
             // element type changed
-            return SetType.getInstance(cHeaderElemFixed, cHeader.isMultiCell());
+            return SetType.getInstance(cHeaderElemFixed, cHeader.isMultiCell);
         return cHeader;
     }
 
@@ -797,7 +797,7 @@ public abstract class SSTableHeaderFix
             return null;
         if (cHeaderKey != cHeaderKeyFixed || cHeaderVal != cHeaderValFixed)
             // element type changed
-            return MapType.getInstance(cHeaderKeyFixed, cHeaderValFixed, cHeader.isMultiCell());
+            return MapType.getInstance(cHeaderKeyFixed, cHeaderValFixed, cHeader.isMultiCell);
         return cHeader;
     }
 

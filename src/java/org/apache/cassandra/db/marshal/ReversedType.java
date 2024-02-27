@@ -95,7 +95,7 @@ public class ReversedType<T> extends AbstractType<T>
 
     private ReversedType(AbstractType<T> baseType)
     {
-        super(ComparisonType.CUSTOM, baseType.isMultiCell(), List.of(baseType)); // TODO is it correct? that is - does it make sense to take isMultiCell from baseType and not the subTypes list?
+        super(ComparisonType.CUSTOM, baseType.isMultiCell, List.of(baseType)); // TODO is it correct? that is - does it make sense to take isMultiCell from baseType and not the subTypes list?
         this.baseType = baseType;
     }
 

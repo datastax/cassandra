@@ -219,7 +219,7 @@ public abstract class Operation
         {
             if (!(receiver.type instanceof CollectionType))
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for non collection column %s", toString(receiver), receiver.name));
-            else if (!(receiver.type.isMultiCell()))
+            else if (!(receiver.type.isMultiCell))
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for frozen collection column %s", toString(receiver), receiver.name));
 
             switch (((CollectionType)receiver.type).kind)
@@ -266,7 +266,7 @@ public abstract class Operation
         {
             if (!receiver.type.isUDT())
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for non-UDT column %s", toString(receiver), receiver.name));
-            else if (!receiver.type.isMultiCell())
+            else if (!receiver.type.isMultiCell)
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for frozen UDT column %s", toString(receiver), receiver.name));
 
             int fieldPosition = ((UserType) receiver.type).fieldPosition(field);
@@ -319,7 +319,7 @@ public abstract class Operation
                 }
                 return new Constants.Adder(receiver, value.prepare(metadata.keyspace, receiver));
             }
-            else if (!(receiver.type.isMultiCell()))
+            else if (!(receiver.type.isMultiCell))
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for frozen collection column %s", toString(receiver), receiver.name));
 
             switch (((CollectionType)receiver.type).kind)
@@ -372,7 +372,7 @@ public abstract class Operation
                     throw new InvalidRequestException(String.format("Invalid operation (%s) for non counter column %s", toString(receiver), receiver.name));
                 return new Constants.Substracter(receiver, value.prepare(metadata.keyspace, receiver));
             }
-            else if (!(receiver.type.isMultiCell()))
+            else if (!(receiver.type.isMultiCell))
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for frozen collection column %s", toString(receiver), receiver.name));
 
             switch (((CollectionType)receiver.type).kind)
@@ -427,7 +427,7 @@ public abstract class Operation
 
             if (!(receiver.type instanceof ListType))
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for non list column %s", toString(receiver), receiver.name));
-            else if (!(receiver.type.isMultiCell()))
+            else if (!(receiver.type.isMultiCell))
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for frozen list column %s", toString(receiver), receiver.name));
 
             return new Lists.Prepender(receiver, v);
@@ -485,7 +485,7 @@ public abstract class Operation
         {
             if (!(receiver.type.isCollection()))
                 throw new InvalidRequestException(String.format("Invalid deletion operation for non collection column %s", receiver.name));
-            else if (!(receiver.type.isMultiCell()))
+            else if (!(receiver.type.isMultiCell))
                 throw new InvalidRequestException(String.format("Invalid deletion operation for frozen collection column %s", receiver.name));
 
             switch (((CollectionType)receiver.type).kind)
@@ -524,7 +524,7 @@ public abstract class Operation
         {
             if (!receiver.type.isUDT())
                 throw new InvalidRequestException(String.format("Invalid field deletion operation for non-UDT column %s", receiver.name));
-            else if (!receiver.type.isMultiCell())
+            else if (!receiver.type.isMultiCell)
                 throw new InvalidRequestException(String.format("Frozen UDT column %s does not support field deletions", receiver.name));
 
             if (((UserType) receiver.type).fieldPosition(field) == -1)

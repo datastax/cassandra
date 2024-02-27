@@ -125,7 +125,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
 
         // A frozen type can only have frozen subtypes, basically by definition. So make sure we don't mess it up
         // when constructing types by forgetting to set some multi-cell flag.
-        assert isMultiCell || subTypes.stream().noneMatch(AbstractType::isMultiCell) : String.format("Detected corrupted type: creating a frozen %s but with some non-frozen subtypes", getClass());
+        assert isMultiCell || subTypes.stream().noneMatch(t -> t.isMultiCell) : String.format("Detected corrupted type: creating a frozen %s but with some non-frozen subtypes", getClass());
         this.subTypes = List.copyOf(subTypes);
 
         reverseComparator = (o1, o2) -> AbstractType.this.compare(o2, o1);
@@ -334,7 +334,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
 
     public boolean isFrozenCollection()
     {
-        return isCollection() && !isMultiCell();
+        return isCollection() && !isMultiCell;
     }
 
     public boolean isReversed()
@@ -412,7 +412,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     {
         return isValueCompatibleWith(previous)
                && valueLengthIfFixed() == previous.valueLengthIfFixed()
-               && isMultiCell() == previous.isMultiCell();
+               && isMultiCell == previous.isMultiCell;
     }
 
     /**
@@ -453,22 +453,16 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return false;
     }
 
-    // TODO inline this method in a separate commit
-    public final boolean isMultiCell()
-    {
-        return isMultiCell;
-    }
-
     public boolean isFreezable()
     {
         return false;
     }
 
     /**
-     * If the type is a multi-cell one ({@link #isMultiCell()} is true), returns a frozen copy of this type (one
-     * for which {@link #isMultiCell()} returns false).
+     * If the type is a multi-cell one ({@link #isMultiCell} is true), returns a frozen copy of this type (one
+     * for which {@link #isMultiCell} returns false).
      * <p>
-     * Note that as mentioned on {@link #isMultiCell()}, a frozen type necessarily has all its subtypes frozen, so
+     * Note that as mentioned on {@link #isMultiCell}, a frozen type necessarily has all its subtypes frozen, so
      * this method also ensures that no subtypes (recursively) are marked as multi-cell.
      *
      * @return a frozen version of this type. If this type is not multi-cell (whether because it is not a "complex"
@@ -476,7 +470,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
      */
     public AbstractType<?> freeze()
     {
-        if (!isMultiCell())
+        if (!isMultiCell)
             return this;
 
         return with(freeze(subTypes), false);
@@ -516,9 +510,9 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         String.format("Invalid call to copyWith on %s with subTypes %s (provided subTypes: %s)",
                       this, this.subTypes, subTypes);
 
-        assert !this.isMultiCell() && !isMultiCell:
+        assert !this.isMultiCell && !isMultiCell:
         String.format("Invalid call to copyWith on %s with isMultiCell %b (provided isMultiCell: %b)",
-                      this, this.isMultiCell(), isMultiCell);
+                      this, this.isMultiCell, isMultiCell);
 
         return this;
     }
@@ -732,7 +726,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         if (!referencesUserType(udt.name))
             return this;
 
-        return with(subTypes.stream().map(t -> t.withUpdatedUserType(udt)).collect(Collectors.toUnmodifiableList()), isMultiCell());
+        return with(subTypes.stream().map(t -> t.withUpdatedUserType(udt)).collect(Collectors.toUnmodifiableList()), isMultiCell);
     }
 
     /**
@@ -779,7 +773,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         // testAssignement is for CQL literals and native protocol values, none of which make a meaningful
         // difference between frozen or not and reversed or not.
 
-        if (isFreezable() && !isMultiCell())
+        if (isFreezable() && !isMultiCell)
             receiverType = receiverType.freeze();
 
         if (isReversed() && !receiverType.isReversed())

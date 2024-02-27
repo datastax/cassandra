@@ -441,7 +441,7 @@ public final class JsonTransformer
             AbstractType<?> cellType = null;
             json.writeString(cell.column().name.toCQLString());
 
-            if (type.isCollection() && type.isMultiCell()) // non-frozen collection
+            if (type.isCollection() && type.isMultiCell) // non-frozen collection
             {
                 CollectionType ct = (CollectionType) type;
                 json.writeFieldName("path");
@@ -456,7 +456,7 @@ public final class JsonTransformer
 
                 cellType = cell.column().cellValueType();
             }
-            else if (type.isUDT() && type.isMultiCell()) // non-frozen udt
+            else if (type.isUDT() && type.isMultiCell) // non-frozen udt
             {
                 UserType ut = (UserType) type;
                 json.writeFieldName("path");

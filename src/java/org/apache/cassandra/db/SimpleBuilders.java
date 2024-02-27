@@ -364,12 +364,12 @@ public abstract class SimpleBuilders
             maybeInit();
             ColumnMetadata column = getColumn(columnName);
 
-            if (!overwriteForCollection && !(column.type.isMultiCell() && column.type.isCollection()))
+            if (!overwriteForCollection && !(column.type.isMultiCell && column.type.isCollection()))
                 throw new IllegalArgumentException("appendAll() can only be called on non-frozen collections");
 
             columns.add(column);
 
-            if (!column.type.isMultiCell())
+            if (!column.type.isMultiCell)
             {
                 builder.addCell(cell(column, toByteBuffer(value, column.type), null));
                 return this;
