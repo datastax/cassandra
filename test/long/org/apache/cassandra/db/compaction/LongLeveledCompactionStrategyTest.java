@@ -210,7 +210,7 @@ public class LongLeveledCompactionStrategyTest
                 }
                 return null;
             }
-        }, OperationType.COMPACTION, true, true);
+        }, OperationType.COMPACTION, true, true, TableOperation.StopTrigger.UNIT_TESTS);
     }
 
     @Test

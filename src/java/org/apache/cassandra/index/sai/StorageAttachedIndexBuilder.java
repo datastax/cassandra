@@ -162,7 +162,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                     if (isStopRequested())
                     {
                         logger.debug(indexDescriptor.logMessage("Index build has been stopped"));
-                        throw new CompactionInterruptedException(getProgress());
+                        throw new CompactionInterruptedException(getProgress(), trigger());
                     }
 
                     DecoratedKey key = keys.next();

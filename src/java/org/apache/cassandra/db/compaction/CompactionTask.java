@@ -344,7 +344,7 @@ public class CompactionTask extends AbstractCompactionTask
                 }
 
                 if (!controller.realm.isCompactionActive())
-                    throw new CompactionInterruptedException(op.getProgress());
+                    throw new CompactionInterruptedException(op.getProgress(), op.trigger());
 
                 estimatedKeys = writer.estimatedKeys();
 
@@ -383,8 +383,7 @@ public class CompactionTask extends AbstractCompactionTask
 
         void maybeStopOrUpdateState()
         {
-            if (op.isStopRequested())
-                throw new CompactionInterruptedException(op.getProgress());
+            op.throwIfStopRequested();
 
             long now = Clock.Global.nanoTime();
             if (now - lastCheckObsoletion > TimeUnit.MINUTES.toNanos(1L))
@@ -721,8 +720,8 @@ public class CompactionTask extends AbstractCompactionTask
                 writeLoop:
                 while (true)
                 {
-                    if (op.isStopRequested())
-                        throw new CompactionInterruptedException(op.getProgress());
+                    op.throwIfStopRequested();
+
                     switch (compactionCursor.copyOne(writer))
                     {
                         case EXHAUSTED:

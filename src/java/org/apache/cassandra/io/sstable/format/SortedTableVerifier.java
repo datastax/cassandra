@@ -40,7 +40,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionController;
-import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -285,8 +284,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
             while (!dataFile.isEOF())
             {
 
-                if (verifyInfo.isStopRequested())
-                    throw new CompactionInterruptedException(verifyInfo.getProgress());
+                verifyInfo.throwIfStopRequested();
 
                 long rowStart = dataFile.getFilePointer();
                 outputHandler.debug("Reading row at %d", rowStart);
