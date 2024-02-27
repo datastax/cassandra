@@ -94,18 +94,20 @@ public class CassandraOnHeapGraph<T>
     private final NonBlockingHashMapLong<VectorPostings<T>> postingsByOrdinal;
     private final NonBlockingHashMap<T, float[]> vectorsByKey;
     private final AtomicInteger nextOrdinal = new AtomicInteger();
+    private final VectorSourceModel vectorSourceModel;
     private volatile boolean hasDeletions;
 
     /**
      * @param termComparator the vector type -- passed as AbstractType for caller's convenience
-     * @param indexWriterConfig
+     * @param indexConfig
      * @param forSearching if true, vectorsByKey will be initialized and populated with vectors as they are added
      */
-    public CassandraOnHeapGraph(AbstractType<?> termComparator, IndexWriterConfig indexWriterConfig, boolean forSearching)
+    public CassandraOnHeapGraph(AbstractType<?> termComparator, IndexWriterConfig indexConfig, boolean forSearching)
     {
         serializer = (VectorType.VectorSerializer)termComparator.getSerializer();
         vectorValues = new ConcurrentVectorValues(((VectorType<?>) termComparator).dimension);
-        similarityFunction = indexWriterConfig.getSimilarityFunction();
+        similarityFunction = indexConfig.getSimilarityFunction();
+        vectorSourceModel = indexConfig.getSourceModel();
         // We need to be able to inexpensively distinguish different vectors, with a slower path
         // that identifies vectors that are equal but not the same reference.  A comparison-
         // based Map (which only needs to look at vector elements until a difference is found)
@@ -117,8 +119,8 @@ public class CassandraOnHeapGraph<T>
         builder = new GraphIndexBuilder<>(vectorValues,
                                           VectorEncoding.FLOAT32,
                                           similarityFunction,
-                                          indexWriterConfig.getMaximumNodeConnections(),
-                                          indexWriterConfig.getConstructionBeamWidth(),
+                                          indexConfig.getMaximumNodeConnections(),
+                                          indexConfig.getConstructionBeamWidth(),
                                           1.2f,
                                           1.2f);
     }
@@ -362,12 +364,9 @@ public class CassandraOnHeapGraph<T>
                                                         ? x -> ordinalMap.inverse().getOrDefault(x, x)
                                                         : x -> x;
 
-            // Get a previous segment's compressed vectors if present to speed up the PQ computation
-            CompressedVectors maybeCV = getCompressedVectorsIfPresent(indexContext);
-
             // compute and write PQ
             long pqOffset = pqOutput.getFilePointer();
-            long pqPosition = writePQ(pqOutput.asSequentialWriter(), reverseOrdinalMapper, maybeCV);
+            long pqPosition = writePQ(pqOutput.asSequentialWriter(), reverseOrdinalMapper, indexContext);
             long pqLength = pqPosition - pqOffset;
 
             // write postings
@@ -401,7 +400,7 @@ public class CassandraOnHeapGraph<T>
         }
     }
 
-    private static CompressedVectors getCompressedVectorsIfPresent(IndexContext indexContext)
+    private static CompressedVectors getCompressedVectorsIfPresent(IndexContext indexContext, VectorCompression preferredCompression)
     {
         // Retrieve the first compressed vectors for a segment with more than MAX_PQ_TRAINING_SET_SIZE rows
         // or the one with the most rows if none are larger than MAX_PQ_TRAINING_SET_SIZE
@@ -420,7 +419,7 @@ public class CassandraOnHeapGraph<T>
                 var searcher = segment.getIndexSearcher();
                 assert searcher instanceof V2VectorIndexSearcher;
                 var cv = ((V2VectorIndexSearcher) searcher).getCompressedVectors();
-                if (cv != null)
+                if (preferredCompression.matches(cv))
                 {
                     // We can exit now because we won't find a better candidate
                     if (segment.metadata.numRows > ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
@@ -464,42 +463,39 @@ public class CassandraOnHeapGraph<T>
         return ordinalMap;
     }
 
-    private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper, CompressedVectors previousCV) throws IOException
+    private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper, IndexContext indexContext) throws IOException
     {
-        VectorCompression compressionType;
-        if (vectorValues.dimension() >= 1536 && CassandraRelevantProperties.VSEARCH_11_9_UPGRADES.getBoolean())
-            compressionType = VectorCompression.BINARY_QUANTIZATION;
-        else if (vectorValues.size() < 1024)
-            compressionType = VectorCompression.NONE;
-        else
-            compressionType = VectorCompression.PRODUCT_QUANTIZATION;
-        writer.writeByte(compressionType.ordinal());
-        if (compressionType == VectorCompression.NONE)
-        {
-            if (logger.isDebugEnabled()) logger.debug("Skipping compression for only {} vectors", vectorValues.size());
-            return writer.position();
-        }
+        var preferredCompression = vectorSourceModel.preferredCompression(vectorValues.dimension());
 
-        int bytesPerVector = getBytesPerVector(vectorValues.dimension());
-        logger.debug("Computing PQ for {} vectors at {} bytes per vector (originally {}-D)",
-                     vectorValues.size(), bytesPerVector, vectorValues.dimension());
-
-        // train PQ and encode
-        VectorCompressor<?> compressor;
-        Object encoded; // byte[][], or long[][]
+        // Build encoder and compress vectors
+        VectorCompressor<?> compressor; // will be null if we can't compress
+        Object encoded = null; // byte[][], or long[][]
         // limit the PQ computation and encoding to one index at a time -- goal during flush is to
         // evict from memory ASAP so better to do the PQ build (in parallel) one at a time
         synchronized (CassandraOnHeapGraph.class)
         {
-            if (previousCV instanceof PQVectors)
-                compressor = ((ProductQuantization) previousCV.getCompressor()).refine(vectorValues);
-            else if (vectorValues.dimension() >= 1536)
-                compressor = BinaryQuantization.compute(vectorValues);
+            // build encoder (expensive for PQ, cheaper for BQ)
+            if (preferredCompression.type == VectorCompression.CompressionType.PRODUCT_QUANTIZATION)
+            {
+                var previousCV = getCompressedVectorsIfPresent(indexContext, preferredCompression);
+                compressor = computeOrRefineFrom(previousCV, preferredCompression);
+            }
             else
-                compressor = ProductQuantization.compute(vectorValues, bytesPerVector, false);
+            {
+                assert preferredCompression.type == VectorCompression.CompressionType.BINARY_QUANTIZATION : preferredCompression.type;
+                compressor = BinaryQuantization.compute(vectorValues);
+            }
             assert !vectorValues.isValueShared();
-            encoded = compressVectors(reverseOrdinalMapper, compressor);
+            // encode (compress) the vectors to save
+            if (compressor != null)
+                encoded = compressVectors(reverseOrdinalMapper, compressor);
         }
+
+        // write the compression type
+        var actualType = compressor == null ? VectorCompression.CompressionType.NONE : preferredCompression.type;
+        writer.writeByte(actualType.ordinal());
+        if (actualType == VectorCompression.CompressionType.NONE)
+            return writer.position();
 
         // save (outside the synchronized block, this is io-bound not CPU)
         CompressedVectors cv;
@@ -509,6 +505,27 @@ public class CassandraOnHeapGraph<T>
             cv = new PQVectors((ProductQuantization) compressor, (byte[][]) encoded);
         cv.write(writer);
         return writer.position();
+    }
+
+    private VectorCompressor<?> computeOrRefineFrom(CompressedVectors previousCV, VectorCompression preferredCompression)
+    {
+        // refining an existing codebook is much faster than starting from scratch
+        VectorCompressor<?> compressor;
+        if (previousCV == null)
+        {
+            if (vectorValues.size() < 1024)
+                compressor = null;
+            else
+                compressor = ProductQuantization.compute(vectorValues, preferredCompression.compressToBytes, false);
+        }
+        else
+        {
+            if (vectorValues.size() < 1024)
+                compressor = previousCV.getCompressor();
+            else
+                compressor = ((ProductQuantization) previousCV.getCompressor()).refine(vectorValues);
+        }
+        return compressor;
     }
 
     private Object compressVectors(IntUnaryOperator reverseOrdinalMapper, VectorCompressor<?> compressor)
@@ -522,47 +539,6 @@ public class CassandraOnHeapGraph<T>
                             .mapToObj(i -> ((BinaryQuantization) compressor).encode(vectorValues.vectorValue(reverseOrdinalMapper.applyAsInt(i))))
                             .toArray(long[][]::new);
         throw new UnsupportedOperationException("Unrecognized compressor " + compressor.getClass());
-    }
-
-    /**
-     * Compute bytes per vector for PQ using piecewise linear interpolation.
-     *
-     * @param dimension Dimension of the original vector
-     * @return Approximate number of bytes after compression
-     */
-    private int getBytesPerVector(int dimension) {
-        // the idea here is that higher dimensions compress well, but not so well that we should use fewer bits
-        // than a lower-dimension vector, which is what you could get with cutoff points to switch between (e.g.)
-        // D*0.5 and D*0.25.  Thus, the following ensures that bytes per vector is strictly increasing with D.
-        if (dimension <= 32) {
-            // We are compressing from 4-byte floats to single-byte codebook indexes,
-            // so this represents compression of 4x
-            // * GloVe-25 needs 25 BPV to achieve good recall
-            return dimension;
-        }
-        if (dimension <= 64) {
-            // * GloVe-50 performs fine at 25
-            return 32;
-        }
-        if (dimension <= 200) {
-            // * GloVe-100 and -200 perform well at 50 and 100 BPV, respectively
-            return (int) (dimension * 0.5);
-        }
-        if (dimension <= 400) {
-            // * NYTimes-256 actually performs fine at 64 BPV but we'll be conservative
-            //   since we don't want BPV to decrease
-            return 100;
-        }
-        if (dimension <= 768) {
-            // allow BPV to increase linearly up to 192
-            return (int) (dimension * 0.25);
-        }
-        if (dimension <= 1536) {
-            // * ada002 vectors have good recall even at 192 BPV = compression of 32x
-            return 192;
-        }
-        // We have not tested recall with larger vectors than this, let's let it increase linearly
-        return (int) (dimension * 0.125);
     }
 
     public long ramBytesUsed()
