@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -56,7 +55,6 @@ import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 @RunWith(BMUnitRunner.class)
 public class PendingAntiCompactionBytemanTest extends AbstractPendingAntiCompactionTest
@@ -64,9 +62,10 @@ public class PendingAntiCompactionBytemanTest extends AbstractPendingAntiCompact
     @BMRules(rules = { @BMRule(name = "Throw exception anticompaction",
                                targetClass = "Range$OrderedRangeContainmentChecker",
                                targetMethod = "test",
-                               action = "throw new org.apache.cassandra.db.compaction.CompactionInterruptedException(\"antiCompactionExceptionTest\");")} )
+                               action = "throw new org.apache.cassandra.db.compaction.CompactionInterruptedException" +
+                                        "(\"antiCompactionExceptionTest\", org.apache.cassandra.db.compaction.TableOperation$StopTrigger.UNIT_TESTS);")} )
     @Test
-    public void testExceptionAnticompaction() throws InterruptedException
+    public void testExceptionAnticompaction()
     {
         cfs.disableAutoCompaction();
         cfs2.disableAutoCompaction();
@@ -80,16 +79,11 @@ public class PendingAntiCompactionBytemanTest extends AbstractPendingAntiCompact
             ranges.add(new Range<>(sstable.getFirst().getToken(), sstable.getLast().getToken()));
         }
         TimeUUID prsid = prepareSession();
-        try
-        {
-            PendingAntiCompaction pac = new PendingAntiCompaction(prsid, Lists.newArrayList(cfs, cfs2), atEndpoint(ranges, NO_RANGES), es, () -> false);
-            pac.run().get();
-            fail("PAC should throw exception when anticompaction throws exception!");
-        }
-        catch (ExecutionException e)
-        {
-            assertTrue(e.getCause() instanceof CompactionInterruptedException);
-        }
+        PendingAntiCompaction pac = new PendingAntiCompaction(prsid, Lists.newArrayList(cfs, cfs2), atEndpoint(ranges, NO_RANGES), es, () -> false);
+        Assertions.assertThatThrownBy(() -> pac.run().get())
+                  .hasCauseInstanceOf(CompactionInterruptedException.class)
+                  .hasMessageContaining("Compaction interrupted due to unit tests");
+
         // Note that since we fail the PAC immediately when any of the anticompactions fail we need to wait for the other
         // AC to finish as well before asserting that we have nothing compacting.
         CompactionManager.instance.waitForCessation(Lists.newArrayList(cfs, cfs2), (sstable) -> true);
@@ -155,7 +149,7 @@ public class PendingAntiCompactionBytemanTest extends AbstractPendingAntiCompact
             Future<?> future = pac.run();
             Assertions.assertThatThrownBy(future::get)
                       .hasCauseInstanceOf(CompactionInterruptedException.class)
-                      .hasMessageContaining("Compaction interrupted");
+                      .hasMessageContaining("Compaction interrupted due to user request");
         }
         finally
         {
