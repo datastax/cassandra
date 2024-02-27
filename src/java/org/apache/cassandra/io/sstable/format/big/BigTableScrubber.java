@@ -23,7 +23,6 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
@@ -108,8 +107,7 @@ public class BigTableScrubber extends SortedTableScrubber<BigTableReader> implem
 
         while (!dataFile.isEOF())
         {
-            if (scrubInfo.isStopRequested())
-                throw new CompactionInterruptedException(scrubInfo.getProgress());
+            scrubInfo.throwIfStopRequested();
 
             long partitionStart = dataFile.getFilePointer();
             outputHandler.debug("Reading row at %d", partitionStart);

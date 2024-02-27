@@ -395,7 +395,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         // interrupt compactions and validations
         for (TableOperation operationSource : active.getTableOperations())
         {
-            operationSource.stop();
+            operationSource.stop(TableOperation.StopTrigger.SHUTDOWN);
         }
 
         // wait for tasks to terminate
@@ -434,12 +434,13 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     private AllSSTableOpStatus parallelAllSSTableOperation(final ColumnFamilyStore cfs,
                                                            final OneSSTableOperation operation,
                                                            int jobs,
-                                                           OperationType operationType)
+                                                           OperationType operationType,
+                                                           TableOperation.StopTrigger trigger)
     {
         String operationName = operationType.name();
         String keyspace = cfs.getKeyspaceName();
         String table = cfs.getTableName();
-        return cfs.withAllSSTables(operationType, (compacting) -> {
+        return cfs.withAllSSTables(operationType, trigger, (compacting) -> {
             logger.info("Starting {} for {}.{}", operationType, cfs.getKeyspaceName(), cfs.getTableName());
             List<LifecycleTransaction> transactions = new ArrayList<>();
             List<Future<?>> futures = new ArrayList<>();
@@ -538,7 +539,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
             {
                 scrubOne(cfs, input, options, active);
             }
-        }, jobs, OperationType.SCRUB);
+        }, jobs, OperationType.SCRUB, TableOperation.StopTrigger.SCRUB);
     }
 
     public AllSSTableOpStatus performVerify(ColumnFamilyStore cfs, IVerifier.Options options) throws InterruptedException, ExecutionException
@@ -557,7 +558,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
             {
                 verifyOne(cfs, input.onlyOne(), options, active);
             }
-        }, 0, OperationType.VERIFY);
+        }, 0, OperationType.VERIFY, TableOperation.StopTrigger.VERIFY);
     }
 
     public AllSSTableOpStatus performSSTableRewrite(final ColumnFamilyStore cfs,
@@ -621,7 +622,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
                 task.setCompactionType(OperationType.UPGRADE_SSTABLES);
                 task.execute(active);
             }
-        }, jobs, OperationType.UPGRADE_SSTABLES);
+        }, jobs, OperationType.UPGRADE_SSTABLES, TableOperation.StopTrigger.UPGRADE_SSTABLES);
     }
 
     public AllSSTableOpStatus performCleanup(final ColumnFamilyStore cfStore, int jobs) throws InterruptedException, ExecutionException
@@ -683,7 +684,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
                 CleanupStrategy cleanupStrategy = CleanupStrategy.get(cfStore, allRanges, transientRanges, txn.onlyOne().isRepaired(), FBUtilities.nowInSeconds());
                 doCleanupOne(cfStore, txn, cleanupStrategy, replicas.ranges(), hasIndexes);
             }
-        }, jobs, OperationType.CLEANUP);
+        }, jobs, OperationType.CLEANUP, TableOperation.StopTrigger.CLEANUP);
     }
 
     public AllSSTableOpStatus performGarbageCollection(final ColumnFamilyStore cfStore, TombstoneOption tombstoneOption, int jobs) throws InterruptedException, ExecutionException
@@ -713,7 +714,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
                                                                                   tombstoneOption);
                 task.execute(active);
             }
-        }, jobs, OperationType.GARBAGE_COLLECT);
+        }, jobs, OperationType.GARBAGE_COLLECT, TableOperation.StopTrigger.GARBAGE_COLLECT);
     }
 
     public AllSSTableOpStatus relocateSSTables(final ColumnFamilyStore cfs, int jobs) throws ExecutionException, InterruptedException
@@ -781,7 +782,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
                 task.setCompactionType(OperationType.RELOCATE);
                 task.execute(active);
             }
-        }, jobs, OperationType.RELOCATE);
+        }, jobs, OperationType.RELOCATE, TableOperation.StopTrigger.RELOCATE);
     }
 
     /**
@@ -877,7 +878,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
             }
             catch (NoSuchRepairSessionException e)
             {
-                throw new CompactionInterruptedException(e.getMessage());
+                throw new CompactionInterruptedException(e.getMessage(), TableOperation.StopTrigger.ANTICOMPACTION);
             }
             Preconditions.checkArgument(!prs.isPreview(), "Cannot anticompact for previews");
             Preconditions.checkArgument(!replicas.isEmpty(), "No ranges to anti-compact");
@@ -1026,7 +1027,8 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
                                                                         OperationType.MAJOR_COMPACTION,
                                                                         false,
                                                                         false,
-                                                                        false))
+                                                                        false,
+                                                                        TableOperation.StopTrigger.COMPACTION))
         {
             if (tasks.isEmpty())
                 return;
@@ -1889,15 +1891,21 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
             }
 
             @Override
-            public void stop()
+            public void stop(StopTrigger trigger)
             {
-                compaction.stop();
+                compaction.stop(trigger);
             }
 
             @Override
             public boolean isStopRequested()
             {
                 return compaction.isStopRequested() || isCancelled.getAsBoolean();
+            }
+
+            @Override
+            public StopTrigger trigger()
+            {
+                return compaction.trigger();
             }
         };
     }
@@ -2229,7 +2237,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         for (TableOperation operationSource : active.getTableOperations())
         {
             if (operationSource.getProgress().operationType() == operation)
-                operationSource.stop();
+                operationSource.stop(TableOperation.StopTrigger.USER_STOP);
         }
     }
 
@@ -2240,7 +2248,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         {
             TimeUUID holderId = operationSource.getProgress().operationId();
             if (holderId != null && holderId.equals(TimeUUID.fromString(compactionId)))
-                operationSource.stop();
+                operationSource.stop(TableOperation.StopTrigger.USER_STOP);
         }
     }
 
@@ -2453,7 +2461,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
      * @return True if any compaction has been interrupted false otherwise.
      */
     public boolean interruptCompactionFor(Iterable<TableMetadata> tables, Predicate<OperationType> opPredicate, Predicate<SSTableReader> readerPredicate,
-                                          boolean waitForInterruption)
+                                          boolean waitForInterruption, TableOperation.StopTrigger trigger)
     {
         assert tables != null;
 
@@ -2465,7 +2473,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
 
             if (Iterables.contains(tables, info.metadata()) && opPredicate.test(info.operationType()))
             {
-                operationSource.stop();
+                operationSource.stop(trigger);
                 interrupted.add(operationSource);
             }
         }
@@ -2489,10 +2497,6 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         return !interrupted.isEmpty();
     }
 
-    public boolean interruptCompactionFor(Iterable<TableMetadata> columnFamilies, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation)
-    {
-        return interruptCompactionFor(columnFamilies, sstablePredicate, interruptValidation, AbstractTableOperation.StopTrigger.NONE);
-    }
     /**
      * Try to stop all of the compactions for given ColumnFamilies.
      *
@@ -2504,7 +2508,10 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
      * @param interruptValidation true if validation operations for repair should also be interrupted
      * @return True if any compaction has been interrupted false otherwise.
      */
-    public boolean interruptCompactionFor(Iterable<TableMetadata> columnFamilies, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation, AbstractTableOperation.StopTrigger trigger)
+    public boolean interruptCompactionFor(Iterable<TableMetadata> columnFamilies,
+                                          Predicate<SSTableReader> sstablePredicate,
+                                          boolean interruptValidation,
+                                          TableOperation.StopTrigger trigger)
     {
         assert columnFamilies != null;
 
@@ -2528,17 +2535,15 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         return interrupted;
     }
 
-    public boolean interruptCompactionFor(Iterable<TableMetadata> tables)
+    public boolean interruptCompactionFor(Iterable<TableMetadata> tables, TableOperation.StopTrigger trigger)
     {
-        return interruptCompactionFor(tables, Predicates.alwaysTrue(), true);
+        return interruptCompactionFor(tables, Predicates.alwaysTrue(), true, trigger);
     }
 
-    public void interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation)
-    {
-        interruptCompactionForCFs(cfss, sstablePredicate, interruptValidation, AbstractTableOperation.StopTrigger.NONE);
-    }
-
-    public void interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> sstablePredicate, boolean interruptValidation, AbstractTableOperation.StopTrigger trigger)
+    public void interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss,
+                                          Predicate<SSTableReader> sstablePredicate,
+                                          boolean interruptValidation,
+                                          TableOperation.StopTrigger trigger)
     {
         List<TableMetadata> metadata = new ArrayList<>();
         for (ColumnFamilyStore cfs : cfss)
