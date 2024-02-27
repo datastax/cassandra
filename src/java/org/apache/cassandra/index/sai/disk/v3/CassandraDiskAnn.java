@@ -82,10 +82,10 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
              var reader = pqFile.createReader())
         {
             reader.seek(pqSegmentOffset);
-            VectorCompression compressionType = VectorCompression.values()[reader.readByte()];
-            if (compressionType == VectorCompression.PRODUCT_QUANTIZATION)
+            VectorCompression.CompressionType compressionType = VectorCompression.CompressionType.values()[reader.readByte()];
+            if (compressionType == VectorCompression.CompressionType.PRODUCT_QUANTIZATION)
                 compressedVectors = PQVectors.load(reader, reader.getFilePointer());
-            else if (compressionType == VectorCompression.BINARY_QUANTIZATION)
+            else if (compressionType == VectorCompression.CompressionType.BINARY_QUANTIZATION)
                 compressedVectors = BQVectors.load(reader, reader.getFilePointer());
             else
                 compressedVectors = null;
