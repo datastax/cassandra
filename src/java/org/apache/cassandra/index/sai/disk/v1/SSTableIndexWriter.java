@@ -22,14 +22,11 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Stopwatch;
@@ -48,6 +45,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -66,6 +64,7 @@ public class SSTableIndexWriter implements PerIndexWriter
     private final BooleanSupplier isIndexValid;
 
     private final AtomicInteger updatesInFlight = new AtomicInteger(0);
+    private final QuickSlidingWindowReservoir termSizeReservoir = new QuickSlidingWindowReservoir(100);
 
     private boolean aborted = false;
 
@@ -234,38 +233,39 @@ public class SSTableIndexWriter implements PerIndexWriter
                 updatesInFlight.decrementAndGet();
             }
         });
+        busyWait(() -> termSizeReservoir.size() == 0);
+        limiter.increment((long) termSizeReservoir.getMean());
     }
 
-    private void addTermInternal(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type)
+    private void busyWait(Supplier<Boolean> condition)
     {
-        // VSTODO limiter increases asynchronously, so we may exceed the limit.  how big a problem is this?
-        if (TypeUtil.isLiteral(type))
-        {
-            List<ByteBuffer> tokens = ByteLimitedMaterializer.materializeTokens(analyzer, term, indexContext, key);
-            for (ByteBuffer tokenTerm : tokens)
-                limiter.increment(currentBuilder.add(tokenTerm, key, sstableRowId));
-        }
-        else
-        {
-            limiter.increment(currentBuilder.add(term, key, sstableRowId));
-        }
-    }
-
-    private void waitForUpdatesInFlight()
-    {
-        // addTerm is only called by the compaction thread, serially, so we don't need to worry about new
-        // terms being added while we're waiting -- updatesInFlight can only decrease
-        while (updatesInFlight.get() > 0)
+        while (condition.get())
         {
             try
             {
                 Thread.sleep(1);
             }
-            catch (InterruptedException e)
+            catch (Exception e)
             {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    private void addTermInternal(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type)
+    {
+        long termSize = 0;
+        if (TypeUtil.isLiteral(type))
+        {
+            List<ByteBuffer> tokens = ByteLimitedMaterializer.materializeTokens(analyzer, term, indexContext, key);
+            for (ByteBuffer tokenTerm : tokens)
+                termSize += currentBuilder.add(tokenTerm, key, sstableRowId);
+        }
+        else
+        {
+            termSize += currentBuilder.add(term, key, sstableRowId);
+        }
+        termSizeReservoir.update(termSize);
     }
 
     private boolean shouldFlush(long sstableRowId)
@@ -289,7 +289,9 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private void flushSegment() throws IOException
     {
-        waitForUpdatesInFlight();
+        // addTerm is only called by the compaction thread, serially, so we don't need to worry about new
+        // terms being added while we're waiting -- updatesInFlight can only decrease
+        busyWait(() -> updatesInFlight.get() > 0);
 
         long start = System.nanoTime();
         try
