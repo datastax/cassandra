@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.BINARY_QUANTIZATION;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
 
@@ -34,6 +36,13 @@ public enum VectorSourceModel
     public static VectorSourceModel fromString(String value)
     {
         return valueOf(value.toUpperCase());
+    }
+
+    public VectorSimilarityFunction defaultSimilarityFunction()
+    {
+        if (this == OTHER)
+            return VectorSimilarityFunction.COSINE;
+        return VectorSimilarityFunction.DOT_PRODUCT;
     }
 
     public VectorCompression preferredCompression(int originalDimension)
