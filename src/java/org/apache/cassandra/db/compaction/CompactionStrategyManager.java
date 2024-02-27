@@ -1030,7 +1030,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
                 readLock.unlock();
             }
             return CompactionTasks.create(tasks);
-        }, operationType, false, false);
+        }, operationType, false, false, TableOperation.StopTrigger.COMPACTION);
     }
 
     /**
