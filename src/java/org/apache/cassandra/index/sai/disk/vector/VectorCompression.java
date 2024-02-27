@@ -18,9 +18,48 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-public enum VectorCompression
+import io.github.jbellis.jvector.pq.BQVectors;
+import io.github.jbellis.jvector.pq.CompressedVectors;
+import io.github.jbellis.jvector.pq.PQVectors;
+
+public class VectorCompression
 {
-    NONE,
-    PRODUCT_QUANTIZATION,
-    BINARY_QUANTIZATION
+    public final CompressionType type;
+    public final int compressToBytes;
+
+    public VectorCompression(CompressionType type, int compressToBytes)
+    {
+        this.type = type;
+        this.compressToBytes = compressToBytes;
+    }
+
+    /**
+     * @return true if the given CompressedVectors implements a matching compression type and size
+     */
+    public boolean matches(CompressedVectors cv)
+    {
+        if (type == CompressionType.NONE)
+            return cv == null;
+        if (cv == null)
+            return false;
+
+        if (type == CompressionType.PRODUCT_QUANTIZATION)
+            return cv instanceof PQVectors && cv.getCompressedSize() == compressToBytes;
+
+        assert type == CompressionType.BINARY_QUANTIZATION;
+        // BQ algorithm is the same no matter what the size is
+        return cv instanceof BQVectors;
+    }
+
+    public String toString()
+    {
+        return String.format("VectorCompression(%s, %d)", type, compressToBytes);
+    }
+
+    public enum CompressionType
+    {
+        NONE,
+        PRODUCT_QUANTIZATION,
+        BINARY_QUANTIZATION
+    }
 }
