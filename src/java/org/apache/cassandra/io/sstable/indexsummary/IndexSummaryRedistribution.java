@@ -34,7 +34,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.AbstractTableOperation;
-import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.Downsampling;
@@ -118,8 +117,7 @@ public class IndexSummaryRedistribution extends AbstractTableOperation
         double totalReadsPerSec = 0.0;
         for (T sstable : redistribute)
         {
-            if (isStopRequested())
-                throw new CompactionInterruptedException(getProgress());
+            throwIfStopRequested();
 
             if (sstable.getReadMeter() != null)
             {
@@ -172,8 +170,7 @@ public class IndexSummaryRedistribution extends AbstractTableOperation
         remainingSpace = memoryPoolCapacity;
         for (T sstable : sstables)
         {
-            if (isStopRequested())
-                throw new CompactionInterruptedException(getProgress());
+            throwIfStopRequested();
 
             int minIndexInterval = sstable.metadata().params.minIndexInterval;
             int maxIndexInterval = sstable.metadata().params.maxIndexInterval;
@@ -270,8 +267,7 @@ public class IndexSummaryRedistribution extends AbstractTableOperation
         toDownsample.addAll(forceUpsample);
         for (ResampleEntry<T> entry : toDownsample)
         {
-            if (isStopRequested())
-                throw new CompactionInterruptedException(getProgress());
+            throwIfStopRequested();
 
             T sstable = entry.sstable;
             logger.trace("Re-sampling index summary for {} from {}/{} to {}/{} of the original number of entries",
