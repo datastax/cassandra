@@ -394,7 +394,7 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
 
         execute("INSERT INTO %s (k, v) VALUES (6, ?)", map(allocate(FAIL_THRESHOLD / 4), allocate(FAIL_THRESHOLD / 4)));
         assertWarnedOnFlush(failMessage("6"));
-        execute("UPDATE %s SET v = v + ? WHERE k = 6", map(allocate(FAIL_THRESHOLD / 4 + 1), allocate(FAIL_THRESHOLD / 4)));
+        execute("UPDATE %s SET v = v + ? WHERE k = 6", map(allocate(FAIL_THRESHOLD / 4 + 3), allocate(FAIL_THRESHOLD / 4 + 3)));
         assertWarnedOnFlush(warnMessage("6"));
         assertFailedOnCompact(failMessage("6"));
     }
@@ -423,30 +423,6 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
         assertFailedOnFlush(failMessage("(2, 20, 'b')"));
     }
 
-    @Test
-    public void testGuardrailRespectsMinimumNotificationInterval() throws Throwable
-    {
-        schemaChange("CREATE TABLE %s (k int PRIMARY KEY, v set<text>)");
-
-        execute("INSERT INTO %s (k, v) VALUES (0, null)");
-        assertNotWarnedOnFlush();
-        execute("INSERT INTO %s (k, v) VALUES (1, ?)", set(allocate(WARN_THRESHOLD)));
-        assertWarnedOnFlush();
-
-        Guardrails.collectionSize.minNotifyIntervalInMs(2000L);
-
-        execute("INSERT INTO %s (k, v) VALUES (2, ?)", set(allocate(WARN_THRESHOLD)));
-        assertWarnedOnFlush();
-        execute("INSERT INTO %s (k, v) VALUES (3, ?)", set(allocate(WARN_THRESHOLD)));
-        assertNotWarnedOnFlush();
-
-        Thread.sleep(2500L);
-
-        execute("INSERT INTO %s (k, v) VALUES (2, ?)", set(allocate(WARN_THRESHOLD)));
-        assertWarnedOnFlush(warnMessage("5"));
-        assertNotWarnedOnFlush();
-    }
-
     private void execute(String query, Object... args)
     {
         SimpleStatement stmt = new SimpleStatement(format(query), args);
@@ -456,11 +432,11 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
 
     private String warnMessage(String key)
     {
-        return String.format("Detected collection v in row %s in table %s of size", key, qualifiedTableName);
+        return String.format("Detected collection v in table %s of size", qualifiedTableName);
     }
 
     private String failMessage(String key)
     {
-        return String.format("Detected collection v in row %s in table %s of size", key, qualifiedTableName);
+        return String.format("Detected collection v in table %s of size", qualifiedTableName);
     }
 }

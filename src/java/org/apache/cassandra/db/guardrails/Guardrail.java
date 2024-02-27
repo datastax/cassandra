@@ -179,7 +179,7 @@ public abstract class Guardrail
      * or {@link this#fail(String, ClientState)} is called next time.
      */
     @VisibleForTesting
-    void resetLastNotifyTime()
+    public void resetLastNotifyTime()
     {
         lastFailInMs = 0;
         lastWarnInMs = 0;

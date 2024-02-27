@@ -235,6 +235,33 @@ public class GuardrailCollectionSizeTest extends ThresholdTester
         assertWarns("UPDATE %s SET v = v + ? WHERE k = 6", map(allocate(FAIL_THRESHOLD / 4 + 1), allocate(FAIL_THRESHOLD / 4)));
     }
 
+    @Test
+    public void testGuardrailRespectsMinimumNotificationInterval() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v set<text>)");
+
+        assertValid("INSERT INTO %s (k, v) VALUES (0, null)");
+        assertWarns("INSERT INTO %s (k, v) VALUES (1, ?)", set(allocate(WARN_THRESHOLD)));
+
+        long previousNotifyInterval = Guardrails.collectionSize.minNotifyIntervalInMs();
+        Guardrails.collectionSize.minNotifyIntervalInMs(2000L);
+        Guardrails.collectionSize.resetLastNotifyTime();
+
+        try
+        {
+            assertWarns("INSERT INTO %s (k, v) VALUES (2, ?)", set(allocate(WARN_THRESHOLD)));
+            assertValid("INSERT INTO %s (k, v) VALUES (3, ?)", set(allocate(WARN_THRESHOLD)));
+
+            Thread.sleep(2500L);
+
+            assertWarns("INSERT INTO %s (k, v) VALUES (2, ?)", set(allocate(WARN_THRESHOLD)));
+        }
+        finally
+        {
+            Guardrails.collectionSize.minNotifyIntervalInMs(previousNotifyInterval);
+        }
+    }
+
     @Override
     public String createTable(String query)
     {
