@@ -22,7 +22,13 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -58,6 +64,8 @@ public class SSTableIndexWriter implements PerIndexWriter
     private final AbstractAnalyzer analyzer;
     private final NamedMemoryLimiter limiter;
     private final BooleanSupplier isIndexValid;
+
+    private final AtomicInteger updatesInFlight = new AtomicInteger(0);
 
     private boolean aborted = false;
 
@@ -213,17 +221,51 @@ public class SSTableIndexWriter implements PerIndexWriter
             currentBuilder = newSegmentBuilder();
         }
 
-        if (term.remaining() == 0) return;
+        if (term.remaining() == 0)
+            return;
 
-        if (!TypeUtil.isLiteral(type))
-        {
-            limiter.increment(currentBuilder.add(term, key, sstableRowId));
-        }
-        else
+        updatesInFlight.incrementAndGet();
+        ForkJoinPool.commonPool().submit(() -> {
+            try
+            {
+                addTermInternal(term, key, sstableRowId, type);
+            }
+            finally
+            {
+                updatesInFlight.decrementAndGet();
+            }
+        });
+    }
+
+    private void addTermInternal(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type)
+    {
+        // VSTODO limiter increases asynchronously, so we may exceed the limit.  how big a problem is this?
+        if (TypeUtil.isLiteral(type))
         {
             List<ByteBuffer> tokens = ByteLimitedMaterializer.materializeTokens(analyzer, term, indexContext, key);
             for (ByteBuffer tokenTerm : tokens)
                 limiter.increment(currentBuilder.add(tokenTerm, key, sstableRowId));
+        }
+        else
+        {
+            limiter.increment(currentBuilder.add(term, key, sstableRowId));
+        }
+    }
+
+    private void waitForUpdatesInFlight()
+    {
+        // addTerm is only called by the compaction thread, serially, so we don't need to worry about new
+        // terms being added while we're waiting -- updatesInFlight can only decrease
+        while (updatesInFlight.get() > 0)
+        {
+            try
+            {
+                Thread.sleep(1);
+            }
+            catch (InterruptedException e)
+            {
+                throw new RuntimeException(e);
+            }
         }
     }
 
@@ -248,8 +290,9 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private void flushSegment() throws IOException
     {
-        long start = System.nanoTime();
+        waitForUpdatesInFlight();
 
+        long start = System.nanoTime();
         try
         {
             long bytesAllocated = currentBuilder.totalBytesAllocated();
