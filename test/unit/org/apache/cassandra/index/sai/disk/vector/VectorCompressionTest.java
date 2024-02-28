@@ -32,6 +32,7 @@ import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.BINARY_QUANTIZATION;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.NONE;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class VectorCompressionTest extends VectorTester
@@ -78,7 +79,7 @@ public class VectorCompressionTest extends VectorTester
         // BERT is more of a family than a specific model
         for (int i : List.of(128, 256, 512, 1024))
         {
-            testOne(VectorSourceModel.BERT, i, new VectorCompression(PRODUCT_QUANTIZATION, i / 4));
+            testOne(VectorSourceModel.BERT, i, new VectorCompression(PRODUCT_QUANTIZATION, (i * 11 / 64)));
         }
     }
 
@@ -142,6 +143,8 @@ public class VectorCompressionTest extends VectorTester
             var msg = String.format("Expected %s but got %s", expectedCompression,
                                     cv == null ? "NONE" : cv.getClass().getSimpleName() + '@' + cv.getCompressedSize());
             assertTrue(msg, expectedCompression.matches(cv));
+            assertEquals((int) (100 * VectorSourceModel.tapered2x(100) * model.overqueryProvider.apply(cv)),
+                         model.topKFor(100, cv));
         }
     }
 }

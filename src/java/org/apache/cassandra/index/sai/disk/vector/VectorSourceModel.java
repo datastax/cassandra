@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.util.function.Function;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import io.github.jbellis.jvector.pq.BinaryQuantization;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
@@ -154,10 +156,10 @@ public enum VectorSourceModel
         // Most compressed vectors should be queried at ~2x as much as uncompressed vectors.  (Our compression
         // is tuned so that this should give us approximately the same recall as using uncompressed.)
         // Again, we do want this to decay as we go to very large limits.
-        var n = max(1.0, 0.509 + 9.491 * pow(limit, -0.402)); // f(1) = 10.0, f(100) = 2.0, f(1000) = 1.1
+        var n = tapered2x(limit);
 
         // per-model adjustment on top of the ~2x factor
-        int originalDimension = cv.getOriginalSize() / 8;
+        int originalDimension = cv.getOriginalSize() / 4;
         if (compressionProvider.apply(originalDimension).matches(cv))
         {
             n *= overqueryProvider.apply(cv);
@@ -170,5 +172,11 @@ public enum VectorSourceModel
         }
 
         return (int) (n * limit);
+    }
+
+    @VisibleForTesting
+    static double tapered2x(int limit)
+    {
+        return max(1.0, 0.509 + 9.491 * pow(limit, -0.402)); // f(1) = 10.0, f(100) = 2.0, f(1000) = 1.1
     }
 }
