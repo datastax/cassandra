@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.util.function.Function;
 
+import io.github.jbellis.jvector.pq.BinaryQuantization;
+import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
 import static io.github.jbellis.jvector.vector.VectorSimilarityFunction.COSINE;
@@ -35,7 +37,7 @@ public enum VectorSourceModel
     BERT((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, (dimension * 11) / 64), 2.0),
     GECKO((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 8), 1.5),
 
-    OTHER(COSINE, VectorSourceModel::genericCompression, 1.0);
+    OTHER(COSINE, VectorSourceModel::genericCompression, VectorSourceModel::genericOverquery);
 
     /**
      * Default similarity function for this model.
@@ -49,20 +51,20 @@ public enum VectorSourceModel
      * Factor by which to multiply the top K requested by to search deeper in the graph.
      * This is IN ADDITION to the tapered 2x applied by OverqueryUtils.
      */
-    public final double overqueryFactor;
+    public final Function<CompressedVectors, Double> overqueryProvider;
 
     VectorSourceModel(Function<Integer, VectorCompression> compressionProvider, double overqueryFactor)
     {
-        this(DOT_PRODUCT, compressionProvider, overqueryFactor);
+        this(DOT_PRODUCT, compressionProvider, __ -> overqueryFactor);
     }
 
     VectorSourceModel(VectorSimilarityFunction defaultSimilarityFunction,
                       Function<Integer, VectorCompression> compressionProvider,
-                      double overqueryFactor)
+                      Function<CompressedVectors, Double> overqueryProvider)
     {
         this.defaultSimilarityFunction = defaultSimilarityFunction;
         this.compressionProvider = compressionProvider;
-        this.overqueryFactor = overqueryFactor;
+        this.overqueryProvider = overqueryProvider;
     }
 
     public static VectorSourceModel fromString(String value)
@@ -117,5 +119,16 @@ public enum VectorSourceModel
             compressedBytes = (int) (originalDimension * 0.125);
         }
         return compressedBytes;
+    }
+
+    private static double genericOverquery(CompressedVectors cv)
+    {
+        // we compress extra-large vectors more aggressively, so we need to bump up the limit for those.
+        if (cv instanceof BinaryQuantization)
+            return 2.0;
+        else if ((double) cv.getOriginalSize() / cv.getCompressedSize() > 16.0)
+            return 1.5;
+        else
+            return 1.0;
     }
 }

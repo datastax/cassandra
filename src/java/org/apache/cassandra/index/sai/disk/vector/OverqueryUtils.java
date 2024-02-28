@@ -53,18 +53,17 @@ public class OverqueryUtils
         // Again, we do want this to decay as we go to very large limits.
         var n = max(1.0, 0.509 + 9.491 * pow(limit, -0.402)); // f(1) = 10.0, f(100) = 2.0, f(1000) = 1.1
 
-        if (model.compressionProvider.apply(cv.getOriginalSize() / 8).matches(cv))
+        // per-model adjustment on top of the ~2x factor
+        int originalDimension = cv.getOriginalSize() / 8;
+        if (model.compressionProvider.apply(originalDimension).matches(cv))
         {
-            n *= model.overqueryFactor;
+            n *= model.overqueryProvider.apply(cv);
         }
         else
         {
-            // we compress extra-large vectors more aggressively, so we need to bump up the limit
-            // for those.  3x if using PQ and 4x for BQ.
-            if (cv instanceof BinaryQuantization)
-                n *= 2; // total of ~4x compared to uncompressed
-            else if ((double) cv.getOriginalSize() / cv.getCompressedSize() > 16.0)
-                n *= 1.5; // total of ~3x compared to uncompressed
+            // we're using an older CV that wasn't created with the currently preferred parameters,
+            // so use the generic defaults instead
+            n *= VectorSourceModel.OTHER.overqueryProvider.apply(cv);
         }
 
         return (int) (n * limit);
