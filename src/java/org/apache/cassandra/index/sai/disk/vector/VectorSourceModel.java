@@ -57,8 +57,8 @@ public enum VectorSourceModel
             case OPENAI_V3_LARGE:
                 return new VectorCompression(PRODUCT_QUANTIZATION, originalDimension / 16);
             case BERT:
-                // VSTODO test if we can be more aggressive here
-                return new VectorCompression(PRODUCT_QUANTIZATION, originalDimension / 4);
+                // 128 -> 22
+                return new VectorCompression(PRODUCT_QUANTIZATION, (originalDimension * 11) / 64);
             case GECKO:
                 return new VectorCompression(PRODUCT_QUANTIZATION, originalDimension / 4);
         }
