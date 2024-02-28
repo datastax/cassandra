@@ -18,54 +18,44 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
+import java.util.function.Function;
+
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
+import static io.github.jbellis.jvector.vector.VectorSimilarityFunction.COSINE;
+import static io.github.jbellis.jvector.vector.VectorSimilarityFunction.DOT_PRODUCT;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.BINARY_QUANTIZATION;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
 
 public enum VectorSourceModel
 {
-    ADA002,
-    OPENAI_V3_SMALL,
-    OPENAI_V3_LARGE,
-    BERT,
-    GECKO,
+    ADA002(DOT_PRODUCT, (dimension) -> new VectorCompression(BINARY_QUANTIZATION, dimension / 8)),
+    OPENAI_V3_SMALL(DOT_PRODUCT, (dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16)),
+    OPENAI_V3_LARGE(DOT_PRODUCT, (dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16)),
+    BERT(DOT_PRODUCT, (dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, (dimension * 11) / 64)),
+    GECKO(DOT_PRODUCT, (dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 4)),
 
-    OTHER;
+    OTHER(COSINE, VectorSourceModel::genericCompression);
+
+    public final VectorSimilarityFunction defaultSimilarityFunction;
+    public final Function<Integer, VectorCompression> compressionProvider;
+
+    VectorSourceModel(VectorSimilarityFunction defaultSimilarityFunction,
+                      Function<Integer, VectorCompression> compressionProvider)
+    {
+        this.defaultSimilarityFunction = defaultSimilarityFunction;
+        this.compressionProvider = compressionProvider;
+    }
 
     public static VectorSourceModel fromString(String value)
     {
         return valueOf(value.toUpperCase());
     }
 
-    public VectorSimilarityFunction defaultSimilarityFunction()
+    private static VectorCompression genericCompression(int originalDimension)
     {
-        if (this == OTHER)
-            return VectorSimilarityFunction.COSINE;
-        return VectorSimilarityFunction.DOT_PRODUCT;
-    }
-
-    public VectorCompression preferredCompression(int originalDimension)
-    {
-        // if model is specified, use specifically tuned compression parameters
-        switch (this)
-        {
-            case ADA002:
-                return new VectorCompression(BINARY_QUANTIZATION, originalDimension / 8);
-            case OPENAI_V3_SMALL:
-                return new VectorCompression(PRODUCT_QUANTIZATION, originalDimension / 16);
-            case OPENAI_V3_LARGE:
-                return new VectorCompression(PRODUCT_QUANTIZATION, originalDimension / 16);
-            case BERT:
-                // 128 -> 22
-                return new VectorCompression(PRODUCT_QUANTIZATION, (originalDimension * 11) / 64);
-            case GECKO:
-                return new VectorCompression(PRODUCT_QUANTIZATION, originalDimension / 4);
-        }
-
         // Model is unspecified / unknown, so we guess.
         // Guessing heuristic is simple: 1536 dimensions is probably ada002, so use BQ.  Otherwise, use PQ.
-        assert this == OTHER : this;
         if (originalDimension == 1536)
             return new VectorCompression(BINARY_QUANTIZATION, originalDimension / 8);
         return new VectorCompression(PRODUCT_QUANTIZATION, defaultPQBytesFor(originalDimension));

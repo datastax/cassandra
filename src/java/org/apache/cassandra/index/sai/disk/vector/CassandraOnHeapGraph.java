@@ -465,7 +465,7 @@ public class CassandraOnHeapGraph<T>
 
     private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper, IndexContext indexContext) throws IOException
     {
-        var preferredCompression = vectorSourceModel.preferredCompression(vectorValues.dimension());
+        var preferredCompression = vectorSourceModel.compressionProvider.apply(vectorValues.dimension());
 
         // Build encoder and compress vectors
         VectorCompressor<?> compressor; // will be null if we can't compress
