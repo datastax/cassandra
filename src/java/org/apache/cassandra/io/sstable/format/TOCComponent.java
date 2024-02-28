@@ -135,7 +135,7 @@ public class TOCComponent
 
     public static void maybeAdd(Descriptor descriptor, Component component) throws IOException
     {
-        Set<Component> toc = TOCComponent.loadTOC(descriptor, false);
+        Set<Component> toc = TOCComponent.loadOrCreate(descriptor);
         if (!toc.isEmpty() && toc.add(component))
             TOCComponent.rewriteTOC(descriptor, toc);
     }
