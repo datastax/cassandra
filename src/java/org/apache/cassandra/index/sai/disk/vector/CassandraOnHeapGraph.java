@@ -94,7 +94,7 @@ public class CassandraOnHeapGraph<T>
     private final NonBlockingHashMapLong<VectorPostings<T>> postingsByOrdinal;
     private final NonBlockingHashMap<T, float[]> vectorsByKey;
     private final AtomicInteger nextOrdinal = new AtomicInteger();
-    private final VectorSourceModel vectorSourceModel;
+    private final VectorSourceModel sourceModel;
     private volatile boolean hasDeletions;
 
     /**
@@ -107,7 +107,7 @@ public class CassandraOnHeapGraph<T>
         serializer = (VectorType.VectorSerializer)termComparator.getSerializer();
         vectorValues = new ConcurrentVectorValues(((VectorType<?>) termComparator).dimension);
         similarityFunction = indexConfig.getSimilarityFunction();
-        vectorSourceModel = indexConfig.getSourceModel();
+        sourceModel = indexConfig.getSourceModel();
         // We need to be able to inexpensively distinguish different vectors, with a slower path
         // that identifies vectors that are equal but not the same reference.  A comparison-
         // based Map (which only needs to look at vector elements until a difference is found)
@@ -313,7 +313,7 @@ public class CassandraOnHeapGraph<T>
         NodeSimilarity.ExactScoreFunction scoreFunction = node2 -> {
             return similarityFunction.compare(queryVector, ((RandomAccessVectorValues<float[]>) vectorValues).vectorValue(node2));
         };
-        var topK = OverqueryUtils.topKFor(limit, null);
+        var topK = sourceModel.topKFor(limit, null);
         var result = searcher.search(scoreFunction, null, topK, threshold, bits);
         Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         context.addAnnNodesVisited(result.getVisitedCount());
@@ -465,7 +465,7 @@ public class CassandraOnHeapGraph<T>
 
     private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper, IndexContext indexContext) throws IOException
     {
-        var preferredCompression = vectorSourceModel.preferredCompression(vectorValues.dimension());
+        var preferredCompression = sourceModel.compressionProvider.apply(vectorValues.dimension());
 
         // Build encoder and compress vectors
         VectorCompressor<?> compressor; // will be null if we can't compress

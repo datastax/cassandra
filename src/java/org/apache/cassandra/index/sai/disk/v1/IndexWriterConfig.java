@@ -95,7 +95,7 @@ public class IndexWriterConfig
              bkdPostingsMinLeaves,
              DEFAULT_MAXIMUM_NODE_CONNECTIONS,
              DEFAULT_CONSTRUCTION_BEAM_WIDTH,
-             DEFAULT_SOURCE_MODEL.defaultSimilarityFunction(),
+             DEFAULT_SOURCE_MODEL.defaultSimilarityFunction,
              DEFAULT_SOURCE_MODEL
         );
     }
@@ -159,7 +159,7 @@ public class IndexWriterConfig
         int maximumNodeConnections = DEFAULT_MAXIMUM_NODE_CONNECTIONS;
         int queueSize = DEFAULT_CONSTRUCTION_BEAM_WIDTH;
         VectorSourceModel sourceModel = DEFAULT_SOURCE_MODEL;
-        VectorSimilarityFunction similarityFunction = sourceModel.defaultSimilarityFunction(); // don't leave null in case no options at all are given
+        VectorSimilarityFunction similarityFunction = sourceModel.defaultSimilarityFunction; // don't leave null in case no options at all are given
 
         if (options.get(POSTING_LIST_LVL_MIN_LEAVES) != null || options.get(POSTING_LIST_LVL_SKIP_OPTION) != null)
         {
@@ -269,7 +269,7 @@ public class IndexWriterConfig
             }
             else
             {
-                similarityFunction = sourceModel.defaultSimilarityFunction();
+                similarityFunction = sourceModel.defaultSimilarityFunction;
             }
         }
 
@@ -283,7 +283,7 @@ public class IndexWriterConfig
                                      DEFAULT_POSTING_LIST_MIN_LEAVES,
                                      DEFAULT_MAXIMUM_NODE_CONNECTIONS,
                                      DEFAULT_CONSTRUCTION_BEAM_WIDTH,
-                                     DEFAULT_SOURCE_MODEL.defaultSimilarityFunction(),
+                                     DEFAULT_SOURCE_MODEL.defaultSimilarityFunction,
                                      DEFAULT_SOURCE_MODEL
         );
     }
