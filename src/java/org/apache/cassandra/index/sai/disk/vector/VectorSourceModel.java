@@ -33,7 +33,7 @@ public enum VectorSourceModel
     OPENAI_V3_SMALL((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16), 1.5),
     OPENAI_V3_LARGE((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16), 1.5),
     BERT((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, (dimension * 11) / 64), 2.0),
-    GECKO((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 4), 1.5),
+    GECKO((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 8), 1.5),
 
     OTHER(COSINE, VectorSourceModel::genericCompression, 1.0);
 
