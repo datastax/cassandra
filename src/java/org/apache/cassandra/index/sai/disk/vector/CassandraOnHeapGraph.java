@@ -313,7 +313,7 @@ public class CassandraOnHeapGraph<T>
         NodeSimilarity.ExactScoreFunction scoreFunction = node2 -> {
             return similarityFunction.compare(queryVector, ((RandomAccessVectorValues<float[]>) vectorValues).vectorValue(node2));
         };
-        var topK = OverqueryUtils.topKFor(limit, null);
+        var topK = OverqueryUtils.topKFor(limit);
         var result = searcher.search(scoreFunction, null, topK, threshold, bits);
         Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         context.addAnnNodesVisited(result.getVisitedCount());

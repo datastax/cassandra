@@ -29,22 +29,40 @@ import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.Compr
 
 public enum VectorSourceModel
 {
-    ADA002(DOT_PRODUCT, (dimension) -> new VectorCompression(BINARY_QUANTIZATION, dimension / 8)),
-    OPENAI_V3_SMALL(DOT_PRODUCT, (dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16)),
-    OPENAI_V3_LARGE(DOT_PRODUCT, (dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16)),
-    BERT(DOT_PRODUCT, (dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, (dimension * 11) / 64)),
-    GECKO(DOT_PRODUCT, (dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 4)),
+    ADA002((dimension) -> new VectorCompression(BINARY_QUANTIZATION, dimension / 8), 2.0),
+    OPENAI_V3_SMALL((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16), 1.5),
+    OPENAI_V3_LARGE((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16), 1.5),
+    BERT((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, (dimension * 11) / 64), 2.0),
+    GECKO((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 4), 1.5),
 
-    OTHER(COSINE, VectorSourceModel::genericCompression);
+    OTHER(COSINE, VectorSourceModel::genericCompression, 1.0);
 
+    /**
+     * Default similarity function for this model.
+     */
     public final VectorSimilarityFunction defaultSimilarityFunction;
+    /**
+     * Compression provider optimized for this model.
+     */
     public final Function<Integer, VectorCompression> compressionProvider;
+    /**
+     * Factor by which to multiply the top K requested by to search deeper in the graph.
+     * This is IN ADDITION to the tapered 2x applied by OverqueryUtils.
+     */
+    public final double overqueryFactor;
+
+    VectorSourceModel(Function<Integer, VectorCompression> compressionProvider, double overqueryFactor)
+    {
+        this(DOT_PRODUCT, compressionProvider, overqueryFactor);
+    }
 
     VectorSourceModel(VectorSimilarityFunction defaultSimilarityFunction,
-                      Function<Integer, VectorCompression> compressionProvider)
+                      Function<Integer, VectorCompression> compressionProvider,
+                      double overqueryFactor)
     {
         this.defaultSimilarityFunction = defaultSimilarityFunction;
         this.compressionProvider = compressionProvider;
+        this.overqueryFactor = overqueryFactor;
     }
 
     public static VectorSourceModel fromString(String value)

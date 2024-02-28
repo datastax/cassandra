@@ -30,12 +30,16 @@ import static java.lang.Math.pow;
 public class OverqueryUtils
 {
     /**
+     * @param limit the number of results the user asked for
+     * @param cv the compressed vectors being queried.  Null if uncompressed.
+     * @param model the model that is the source of the vector distribution.  Ignored if `cv` is null.
+     *
      * @return the topK >= `limit` results to ask the index to search for, forcing
      * the greedy search deeper into the graph.  This serves two purposes:
      * 1. Smoothes out the relevance difference between small LIMIT and large
      * 2. Compensates for using lossily-compressed vectors during the search
      */
-    public static int topKFor(int limit, CompressedVectors cv)
+    public static int topKFor(int limit, CompressedVectors cv, VectorSourceModel model)
     {
         // if the vectors are uncompressed, bump up the limit a bit to start with but decay it rapidly
         if (cv == null)
@@ -49,13 +53,25 @@ public class OverqueryUtils
         // Again, we do want this to decay as we go to very large limits.
         var n = max(1.0, 0.509 + 9.491 * pow(limit, -0.402)); // f(1) = 10.0, f(100) = 2.0, f(1000) = 1.1
 
-        // we compress extra-large vectors more aggressively, so we need to bump up the limit
-        // for those.  3x if using PQ and 4x for BQ.
-        if (cv instanceof BinaryQuantization)
-            n *= 2; // total of ~4x compared to uncompressed
-        else if ((double) cv.getOriginalSize() / cv.getCompressedSize() > 16.0)
-            n *= 1.5; // total of ~3x compared to uncompressed
+        if (model.compressionProvider.apply(cv.getOriginalSize() / 8).matches(cv))
+        {
+            n *= model.overqueryFactor;
+        }
+        else
+        {
+            // we compress extra-large vectors more aggressively, so we need to bump up the limit
+            // for those.  3x if using PQ and 4x for BQ.
+            if (cv instanceof BinaryQuantization)
+                n *= 2; // total of ~4x compared to uncompressed
+            else if ((double) cv.getOriginalSize() / cv.getCompressedSize() > 16.0)
+                n *= 1.5; // total of ~3x compared to uncompressed
+        }
 
         return (int) (n * limit);
+    }
+
+    public static int topKFor(int limit)
+    {
+        return topKFor(limit, null, null);
     }
 }
