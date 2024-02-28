@@ -127,6 +127,7 @@ public enum VectorSourceModel
 
     private static double genericOverquery(CompressedVectors cv)
     {
+        assert cv != null;
         // we compress extra-large vectors more aggressively, so we need to bump up the limit for those.
         if (cv instanceof BinaryQuantization)
             return 2.0;

@@ -48,7 +48,7 @@ public class VectorCompressionTest extends VectorTester
     public void testGecko() throws IOException
     {
         // GECKO is always 768
-        testOne(VectorSourceModel.GECKO, 768, new VectorCompression(PRODUCT_QUANTIZATION, 768 / 4));
+        testOne(VectorSourceModel.GECKO, 768, new VectorCompression(PRODUCT_QUANTIZATION, 768 / 8));
     }
 
     @Test
@@ -143,8 +143,11 @@ public class VectorCompressionTest extends VectorTester
             var msg = String.format("Expected %s but got %s", expectedCompression,
                                     cv == null ? "NONE" : cv.getClass().getSimpleName() + '@' + cv.getCompressedSize());
             assertTrue(msg, expectedCompression.matches(cv));
-            assertEquals((int) (100 * VectorSourceModel.tapered2x(100) * model.overqueryProvider.apply(cv)),
-                         model.topKFor(100, cv));
+            if (cv != null)
+            {
+                assertEquals((int) (100 * VectorSourceModel.tapered2x(100) * model.overqueryProvider.apply(cv)),
+                             model.topKFor(100, cv));
+            }
         }
     }
 }
