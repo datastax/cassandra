@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.cql;
+package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.util.List;
@@ -24,6 +24,7 @@ import java.util.List;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.cql.VectorTester;
 import org.apache.cassandra.index.sai.disk.v3.V3VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
@@ -31,6 +32,7 @@ import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.BINARY_QUANTIZATION;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.NONE;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class VectorCompressionTest extends VectorTester
@@ -46,7 +48,7 @@ public class VectorCompressionTest extends VectorTester
     public void testGecko() throws IOException
     {
         // GECKO is always 768
-        testOne(VectorSourceModel.GECKO, 768, new VectorCompression(PRODUCT_QUANTIZATION, 768 / 4));
+        testOne(VectorSourceModel.GECKO, 768, new VectorCompression(PRODUCT_QUANTIZATION, 768 / 8));
     }
 
     @Test
@@ -77,7 +79,7 @@ public class VectorCompressionTest extends VectorTester
         // BERT is more of a family than a specific model
         for (int i : List.of(128, 256, 512, 1024))
         {
-            testOne(VectorSourceModel.BERT, i, new VectorCompression(PRODUCT_QUANTIZATION, i / 4));
+            testOne(VectorSourceModel.BERT, i, new VectorCompression(PRODUCT_QUANTIZATION, (i * 11 / 64)));
         }
     }
 
@@ -141,6 +143,11 @@ public class VectorCompressionTest extends VectorTester
             var msg = String.format("Expected %s but got %s", expectedCompression,
                                     cv == null ? "NONE" : cv.getClass().getSimpleName() + '@' + cv.getCompressedSize());
             assertTrue(msg, expectedCompression.matches(cv));
+            if (cv != null)
+            {
+                assertEquals((int) (100 * VectorSourceModel.tapered2x(100) * model.overqueryProvider.apply(cv)),
+                             model.topKFor(100, cv));
+            }
         }
     }
 }

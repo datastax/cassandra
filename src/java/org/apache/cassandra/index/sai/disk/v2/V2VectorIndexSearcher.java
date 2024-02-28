@@ -51,7 +51,6 @@ import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CloseableReranker;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
-import org.apache.cassandra.index.sai.disk.vector.OverqueryUtils;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -91,7 +90,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                  IndexDescriptor indexDescriptor,
                                  IndexContext indexContext) throws IOException
     {
-        this(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext, new CassandraOnDiskHnsw(segmentMetadata.componentMetadatas, perIndexFiles, indexContext));
+        this(primaryKeyMapFactory,
+             perIndexFiles,
+             segmentMetadata,
+             indexDescriptor,
+             indexContext,
+             new CassandraOnDiskHnsw(segmentMetadata.componentMetadatas, perIndexFiles, indexContext));
     }
 
     protected V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
@@ -150,7 +154,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (exp.getOp() != Expression.Op.ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + exp));
 
-        int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
+        int topK = indexContext.getIndexWriterConfig().getSourceModel().topKFor(limit, graph.getCompressedVectors());
         float[] queryVector = exp.lower.value.vector;
 
         var result = searchInternal(keyRange, context, queryVector, limit, topK, 0);
@@ -475,7 +479,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (keysInRange.isEmpty())
             return CloseableIterator.emptyIterator();
 
-        int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
+        int topK = indexContext.getIndexWriterConfig().getSourceModel().topKFor(limit, graph.getCompressedVectors());
         // Convert PKs to segment row ids and then to ordinals, skipping any that don't exist in this segment
         var bitsAndRows = flatmapPrimaryKeysToBitsAndRows(keysInRange);
         var bits = bitsAndRows.left;
