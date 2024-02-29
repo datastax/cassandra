@@ -2120,7 +2120,7 @@
              file="${build.dir}/${final.name}-parent.pom"
              packaging="pom"/>
 
-    <!-- the cassandra-all jar -->
+    <!-- the dse-db-all jar -->
     <install pomFile="${build.dir}/${final.name}.pom"
              file="${build.dir}/${final.name}.jar"/>
     <install pomFile="${build.dir}/${final.name}.pom"
@@ -2141,7 +2141,7 @@
             file="${build.dir}/${final.name}-parent.pom"
             packaging="pom"/>
 
-    <!-- the cassandra-all jar -->
+    <!-- the dse-db-all jar -->
     <deploy pomFile="${build.dir}/${final.name}.pom"
             file="${build.dir}/${final.name}.jar"/>
     <deploy pomFile="${build.dir}/${final.name}.pom"

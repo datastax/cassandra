@@ -21,13 +21,13 @@
     <groupId>org.apache</groupId>
     <version>22</version>
   </parent>
-  <groupId>org.apache.cassandra</groupId>
-  <artifactId>cassandra-parent</artifactId>
+  <groupId>com.datastax.dse</groupId>
+  <artifactId>dse-db-parent</artifactId>
   <version>@version@</version>
   <packaging>pom</packaging>
-  <name>Apache Cassandra</name>
-  <description>The Apache Cassandra Project develops a highly scalable second-generation distributed database, bringing together Dynamo's fully distributed design and Bigtable's ColumnFamily-based data model.</description>
-  <url>https://cassandra.apache.org</url>
+  <name>Datastax DB</name>
+  <description>The Apache Cassandra Project develops a highly scalable second-generation distributed database. DataStax, Inc. provides additional improvements on top of Apache Cassandra</description>
+  <url>https://datastax.com</url>
   <inceptionYear>2009</inceptionYear>
   <licenses>
     <license>
