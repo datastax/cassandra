@@ -52,17 +52,17 @@ public interface Rebufferer extends ReaderFileProxy
 
         default FloatBuffer floatBuffer()
         {
-            throw new UnsupportedOperationException();
+            throw new UnsupportedOperationException("not implemented in " + this.getClass());
         }
 
         default IntBuffer intBuffer()
         {
-            throw new UnsupportedOperationException();
+            throw new UnsupportedOperationException("not implemented in " + this.getClass());
         }
 
         default LongBuffer longBuffer()
         {
-            throw new UnsupportedOperationException();
+            throw new UnsupportedOperationException("not implemented in " + this.getClass());
         }
 
         /**
@@ -85,6 +85,24 @@ public interface Rebufferer extends ReaderFileProxy
         public ByteBuffer buffer()
         {
             return EMPTY_BUFFER;
+        }
+
+        @Override
+        public FloatBuffer floatBuffer()
+        {
+            return EMPTY_BUFFER.asFloatBuffer();
+        }
+
+        @Override
+        public IntBuffer intBuffer()
+        {
+            return EMPTY_BUFFER.asIntBuffer();
+        }
+
+        @Override
+        public LongBuffer longBuffer()
+        {
+            return EMPTY_BUFFER.asLongBuffer();
         }
 
         @Override
