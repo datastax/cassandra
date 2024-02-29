@@ -89,6 +89,10 @@ public class Segment implements Closeable, SegmentOrdering
                 // we're only trying to recover from BA/CA confusion, this is something else
                 throw e;
             }
+            
+            logger.debug("Failed to open searcher for segment {}:{} for index [{}] on column [{}] at version {}",
+                         sstableContext.descriptor(), metadata.segmentRowIdOffset, indexContext.getIndexName(), indexContext.getColumnName(), version, e);
+            
             // opening with the global format didn't work.  that means that (unless it's actually corrupt)
             // the correct version is whichever one the global format is not set to
             version = version == Version.CA ? Version.BA : Version.CA;
