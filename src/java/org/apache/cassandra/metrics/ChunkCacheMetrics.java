@@ -40,7 +40,9 @@ public interface ChunkCacheMetrics extends StatsCounter, CacheMetrics
 
     static ChunkCacheMetrics create(ChunkCache cache, String prefix)
     {
-        return USE_MICROMETER.getBoolean() ? new MicrometerChunkCacheMetrics(cache, prefix) : new CodahaleChunkCacheMetrics(cache);
+        return USE_MICROMETER.getBoolean()
+               ? new MicrometerChunkCacheMetrics(cache, prefix)
+               : new CodahaleChunkCacheMetrics(cache);
     }
 
     @Override
