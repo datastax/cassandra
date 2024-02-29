@@ -84,6 +84,8 @@ public class Segment implements Closeable, SegmentOrdering
         }
         catch (Throwable e) // there's multiple things that can go wrong w/ version mismatch, so catch all of them
         {
+            logger.error("Failed to open searcher for segment {}:{} for index [{}] on column [{}] at version {}",
+                         sstableContext.descriptor(), metadata.segmentRowIdOffset, indexContext.getIndexName(), indexContext.getColumnName(), version, e);
             if (!List.of(Version.BA, Version.CA).contains(version))
             {
                 // we're only trying to recover from BA/CA confusion, this is something else
