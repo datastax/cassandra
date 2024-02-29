@@ -117,7 +117,7 @@ public class SortedStringTableCursor implements SSTableCursor
 
         currentType = Type.PARTITION;
         partitionKey = sstable.decorateKey(ByteBufferUtil.readWithShortLength(dataFile));
-        partitionLevelDeletion = DeletionTime.serializer.deserialize(dataFile);
+        partitionLevelDeletion = DeletionTime.getSerializer(sstable.descriptor.version).deserialize(dataFile);
         if (!partitionLevelDeletion.validate())
             UnfilteredValidation.handleInvalid(sstable.metadata(), partitionKey, sstable, "partitionLevelDeletion="+partitionLevelDeletion.toString());
         if (!activeRangeDeletion.isLive())
