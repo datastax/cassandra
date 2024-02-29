@@ -43,11 +43,6 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     private volatile Timer missLatency;
     private volatile Counter evictions;
 
-    public MicrometerChunkCacheMetrics(CacheSize cache)
-    {
-        this(cache, "chunk_cache");
-    }
-
     public MicrometerChunkCacheMetrics(CacheSize cache, String metricsPrefix)
     {
         this.cache = cache;
