@@ -238,6 +238,8 @@ public class MessagingService extends MessagingServiceMBeanImpl
     }
 
     public final static boolean NON_GRACEFUL_SHUTDOWN = Boolean.getBoolean("cassandra.test.messagingService.nonGracefulShutdown");
+    public final static boolean GRACEFUL_CLOSE = !Boolean.getBoolean("cassandra.messagingService.nonGracefulClose");
+    public final static boolean UNUSED_CONNECTION_MONITORING = !Boolean.getBoolean("cassandra.messagingService.disableUnusedConnectionMonitoring");
 
     public enum Version
     {
@@ -303,7 +305,8 @@ public class MessagingService extends MessagingServiceMBeanImpl
     MessagingService(boolean testOnly, EndpointMessagingVersions versions, MessagingMetrics metrics)
     {
         super(testOnly, versions, metrics);
-        OutboundConnections.scheduleUnusedConnectionMonitoring(this, ScheduledExecutors.scheduledTasks, 1L, TimeUnit.HOURS);
+        if (UNUSED_CONNECTION_MONITORING)
+            OutboundConnections.scheduleUnusedConnectionMonitoring(this, ScheduledExecutors.scheduledTasks, 1L, TimeUnit.HOURS);
     }
 
     /**
@@ -418,7 +421,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
      */
     void closeOutboundNow(OutboundConnections connections)
     {
-        connections.close(true).addListener(
+        connections.close(GRACEFUL_CLOSE).addListener(
             future -> channelManagers.remove(connections.template().to, connections)
         );
     }
@@ -503,7 +506,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
             callbacks.shutdownGracefully();
             List<Future<Void>> closing = new ArrayList<>();
             for (OutboundConnections pool : channelManagers.values())
-                closing.add(pool.close(true));
+                closing.add(pool.close(GRACEFUL_CLOSE));
 
             long deadline = System.nanoTime() + units.toNanos(timeout);
             maybeFail(() -> new FutureCombiner(closing).get(timeout, units),
