@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.io;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.ICompressor;
@@ -96,7 +97,8 @@ public class CryptoUtils
         }
         compressor.uncompress(compBytes.bytes, 0, compBytesLength, uncompBytes.bytes, 0);
 
-        return new ByteArrayIndexInput("", uncompBytes.bytes, 0, uncompBytesLen);
+        // TODO is it true that the byte array is little-endian?
+        return new ByteArrayIndexInput("", uncompBytes.bytes, 0, uncompBytesLen, ByteOrder.LITTLE_ENDIAN);
     }
 
     public static void compress(BytesRef uncompBytes,

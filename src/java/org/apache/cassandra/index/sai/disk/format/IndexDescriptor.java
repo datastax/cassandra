@@ -38,7 +38,6 @@ import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
-import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.EmptyIndex;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
@@ -46,6 +45,7 @@ import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
+import org.apache.cassandra.index.sai.disk.oldlucene.EndiannessReverserChecksumIndexInput;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -55,8 +55,9 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+import org.apache.lucene.store.BufferedChecksumIndexInput;
+import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.IOUtils;
 
@@ -313,9 +314,34 @@ public class IndexDescriptor
         return IndexFileUtils.instance.openBlockingInput(createPerSSTableFileHandle(indexComponent));
     }
 
+    public ChecksumIndexInput openCheckSummedPerSSTableInput(IndexComponent indexComponent)
+    {
+        var indexInput = openPerSSTableInput(indexComponent);
+        return checksumIndexInput(indexInput);
+    }
+
     public IndexInput openPerIndexInput(IndexComponent indexComponent, IndexContext indexContext)
     {
         return IndexFileUtils.instance.openBlockingInput(createPerIndexFileHandle(indexComponent, indexContext));
+    }
+
+    public ChecksumIndexInput openCheckSummedPerIndexInput(IndexComponent indexComponent, IndexContext indexContext)
+    {
+        var indexInput = openPerIndexInput(indexComponent, indexContext);
+        return checksumIndexInput(indexInput);
+    }
+
+    private ChecksumIndexInput checksumIndexInput(IndexInput indexInput)
+    {
+        // This logic is a bit counterintuitive. For version AA, we wrote using Lucene 7.5, which wrote in
+        // big-endian format. The BufferedChecksumIndexInput reads bytes from the indexInput and assumes they
+        // are in big-endian format. Therefore, we need to reverse the endianness of the indexInput for version AA.
+        // This is true even if indexInput reads in big-endian format, because the BufferedChecksumIndexInput
+        // reads byte by byte then builds shorts, ints, and longs from the bytes, assuming little-endian format.
+        if (version == Version.AA)
+            return new EndiannessReverserChecksumIndexInput(indexInput);
+        else
+            return new BufferedChecksumIndexInput(indexInput);
     }
 
     public IndexOutputWriter openPerSSTableOutput(IndexComponent component) throws IOException

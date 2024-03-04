@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.HashMap;
 import java.util.Map;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -27,8 +28,10 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.lucene.backward_codecs.store.EndiannessReverserUtil;
 import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.cassandra.index.sai.disk.oldlucene.ByteArrayIndexInput;
+import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BytesRef;
 
@@ -46,42 +49,45 @@ public class MetadataSource
 
     public static MetadataSource loadGroupMetadata(IndexDescriptor indexDescriptor) throws IOException
     {
-        return MetadataSource.load(indexDescriptor.openPerSSTableInput(IndexComponent.GROUP_META));
+        try (var input = indexDescriptor.openCheckSummedPerSSTableInput(IndexComponent.GROUP_META))
+        {
+            return MetadataSource.load(input);
+        }
     }
 
     public static MetadataSource loadColumnMetadata(IndexDescriptor indexDescriptor, IndexContext indexContext) throws IOException
     {
-        return MetadataSource.load(indexDescriptor.openPerIndexInput(IndexComponent.META, indexContext));
+        try (var input = indexDescriptor.openCheckSummedPerIndexInput(IndexComponent.META, indexContext))
+        {
+            return MetadataSource.load(input);
+        }
     }
 
-    private static MetadataSource load(IndexInput indexInput) throws IOException
+    private static MetadataSource load(ChecksumIndexInput input) throws IOException
     {
         Map<String, BytesRef> components = new HashMap<>();
         Version version;
 
-        try (BufferedChecksumIndexInput input = new BufferedChecksumIndexInput(indexInput))
+        version = SAICodecUtils.checkHeader(input);
+        final int num = input.readInt();
+
+        for (int x = 0; x < num; x++)
         {
-            version = SAICodecUtils.checkHeader(input);
-            final int num = input.readInt();
-
-            for (int x = 0; x < num; x++)
+            if (input.length() == input.getFilePointer())
             {
-                if (input.length() == input.getFilePointer())
-                {
-                    // we should never get here, because we always add footer to the file
-                    throw new IllegalStateException("Unexpected EOF in " + input);
-                }
-
-                final String name = input.readString();
-                final int length = input.readInt();
-                final byte[] bytes = new byte[length];
-                input.readBytes(bytes, 0, length);
-
-                components.put(name, new BytesRef(bytes));
+                // we should never get here, because we always add footer to the file
+                throw new IllegalStateException("Unexpected EOF in " + input);
             }
 
-            SAICodecUtils.checkFooter(input);
+            final String name = input.readString();
+            final int length = input.readInt();
+            final byte[] bytes = new byte[length];
+            input.readBytes(bytes, 0, length);
+
+            components.put(name, new BytesRef(bytes));
         }
+
+        SAICodecUtils.checkFooter(input);
 
         return new MetadataSource(version, components);
     }
@@ -95,8 +101,8 @@ public class MetadataSource
             throw new IllegalArgumentException(String.format("Could not find component '%s'. Available properties are %s.",
                                                              name, components.keySet()));
         }
-
-        return new ByteArrayIndexInput(name, bytes.bytes);
+        var order = version == Version.AA ? ByteOrder.BIG_ENDIAN : ByteOrder.LITTLE_ENDIAN;
+        return new ByteArrayIndexInput(name, bytes.bytes, order);
     }
 
     public Version getVersion()
