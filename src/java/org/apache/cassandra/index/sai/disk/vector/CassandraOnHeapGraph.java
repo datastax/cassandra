@@ -548,7 +548,9 @@ public class CassandraOnHeapGraph<T>
 
     private long postingsBytesUsed()
     {
-        return postingsMap.values().stream().mapToLong(VectorPostings::ramBytesUsed).sum();
+        return RamEstimation.concurrentHashMapRamUsed(postingsByOrdinal.size()) // NBHM is close to CHM
+               + 3 * RamEstimation.concurrentHashMapRamUsed(postingsMap.size()) // CSLM is much less efficient than CHM
+               + postingsMap.values().stream().mapToLong(VectorPostings::ramBytesUsed).sum();
     }
 
     private long exactRamBytesUsed()
