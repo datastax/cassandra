@@ -33,7 +33,7 @@ public class VectorPostings<T>
     private final CopyOnWriteArrayList<T> postings;
     private volatile int ordinal = -1;
 
-    private volatile IntArrayList rowIds;
+    private volatile IntArrayList rowIds; // initially null; gets filled in on flush by computeRowIds
 
     public VectorPostings(T firstKey)
     {
@@ -114,7 +114,7 @@ public class VectorPostings<T>
         return Integer.BYTES + REF_BYTES + AH_BYTES;
     }
 
-    // we can't do this exactly without reflection, because keys could be Long or PrimaryKey.
+    // we can't do this exactly without reflection, because keys could be Integer or PrimaryKey.
     // PK is larger, so we'll take that and return an upper bound.
     // we already count the float[] vector in vectorValues, so leave it out here
     public static long bytesPerPosting()
