@@ -52,8 +52,7 @@ import org.apache.cassandra.utils.concurrent.FutureCombiner;
 import static java.util.Collections.synchronizedList;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static org.apache.cassandra.concurrent.Stage.MUTATION;
-import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_MESSAGING_METRICS_PROVIDER_PROPERTY;
-import static org.apache.cassandra.config.CassandraRelevantProperties.NON_GRACEFUL_SHUTDOWN;
+import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 
@@ -305,6 +304,9 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
         return ordinal;
     }
 
+    public final static boolean GRACEFUL_CLOSE = !NON_GRACEFUL_CLOSE.getBoolean();
+    public final static boolean UNUSED_CONNECTION_MONITORING = !DISABLE_UNUSED_CONNECTION_MONITORING.getBoolean();
+
     private static class MSHandle
     {
         public static final MessagingService instance = new MessagingService(false);
@@ -352,7 +354,8 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     MessagingService(boolean testOnly, EndpointMessagingVersions versions, MessagingMetrics metrics)
     {
         super(testOnly, versions, metrics);
-        OutboundConnections.scheduleUnusedConnectionMonitoring(this, ScheduledExecutors.scheduledTasks, 1L, TimeUnit.HOURS);
+        if (UNUSED_CONNECTION_MONITORING)
+            OutboundConnections.scheduleUnusedConnectionMonitoring(this, ScheduledExecutors.scheduledTasks, 1L, TimeUnit.HOURS);
     }
 
     @Override
@@ -529,7 +532,7 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
      */
     void closeOutboundNow(OutboundConnections connections)
     {
-        connections.close(true).addListener(
+        connections.close(GRACEFUL_CLOSE).addListener(
             future -> channelManagers.remove(connections.template().to, connections)
         );
     }
@@ -618,7 +621,7 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
             callbacks.shutdownGracefully();
             List<Future<Void>> closing = new ArrayList<>();
             for (OutboundConnections pool : channelManagers.values())
-                closing.add(pool.close(true));
+                closing.add(pool.close(GRACEFUL_CLOSE));
 
             long deadline = nanoTime() + units.toNanos(timeout);
             maybeFail(() -> FutureCombiner.nettySuccessListener(closing).get(timeout, units),
