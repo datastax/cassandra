@@ -18,7 +18,6 @@ package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import java.io.IOException;
 
-import org.apache.lucene.backward_codecs.store.EndiannessReverserIndexInput;
 import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.IndexInput;
@@ -82,6 +81,6 @@ public final class EndiannessReverserChecksumIndexInput extends ChecksumIndexInp
 
     @Override
     public IndexInput slice(String sliceDescription, long offset, long length) throws IOException {
-        return new EndiannessReverserIndexInput(in.slice(sliceDescription, offset, length));
+        throw new UnsupportedOperationException("This operation is not yet supported");
     }
 }
