@@ -65,7 +65,6 @@ import static org.junit.Assert.assertTrue;
  * Note: The sstables and SAI indexes used in this test were written with DSE 6.8
  * in order to guarantee the correctness of the V1 on-disk format code.
  */
-@Ignore // FIXME broken due to little-endian upgrade to Lucene 9.5
 public class LegacyOnDiskFormatTest
 {
     private TemporaryFolder temporaryFolder = new TemporaryFolder();
