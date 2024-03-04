@@ -263,6 +263,7 @@ public enum CassandraRelevantProperties
     DISABLE_SSTABLE_ACTIVITY_TRACKING("cassandra.sstable_activity_tracking", "true"),
     DISABLE_STCS_IN_L0("cassandra.disable_stcs_in_l0"),
     DISABLE_TCACTIVE_OPENSSL("cassandra.disable_tcactive_openssl"),
+    DISABLE_UNUSED_CONNECTION_MONITORING("cassandra.messagingService.disableUnusedConnectionMonitoring"),
     /** property for the rate of the scheduled task that monitors disk usage */
     DISK_USAGE_MONITOR_INTERVAL_MS("cassandra.disk_usage.monitor_interval_ms", convertToString(TimeUnit.SECONDS.toMillis(30))),
     /** property for the interval on which the repeated client warnings and diagnostic events about disk usage are ignored */
@@ -452,6 +453,7 @@ public enum CassandraRelevantProperties
     /** If set, {@link org.apache.cassandra.net.MessagingService} is shutdown abrtuptly without waiting for anything.
      * This is an optimization used in unit tests becuase we never restart a node there. The only node is stopoped
      * when the JVM terminates. Therefore, we can use such optimization and not wait unnecessarily. */
+    NON_GRACEFUL_CLOSE("cassandra.messagingService.nonGracefulClose"),
     NON_GRACEFUL_SHUTDOWN("cassandra.test.messagingService.nonGracefulShutdown"),
     /** for specific tests */
     /** This property indicates whether disable_mbean_registration is true */
