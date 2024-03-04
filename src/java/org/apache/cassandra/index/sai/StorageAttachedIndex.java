@@ -49,6 +49,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
@@ -67,9 +68,11 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
@@ -80,6 +83,7 @@ import org.apache.cassandra.dht.OrderPreservingPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -102,8 +106,8 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
-import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VALIDATE_TERMS_AT_COORDINATOR;
 import static org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig.MAX_TOP_K;
@@ -199,6 +203,7 @@ public class StorageAttachedIndex implements Index
                                                                      IndexWriterConfig.MAXIMUM_NODE_CONNECTIONS,
                                                                      IndexWriterConfig.CONSTRUCTION_BEAM_WIDTH,
                                                                      IndexWriterConfig.SIMILARITY_FUNCTION,
+                                                                     IndexWriterConfig.SOURCE_MODEL,
                                                                      IndexWriterConfig.OPTIMIZE_FOR,
                                                                      LuceneAnalyzer.INDEX_ANALYZER,
                                                                      LuceneAnalyzer.QUERY_ANALYZER);
@@ -219,7 +224,7 @@ public class StorageAttachedIndex implements Index
     private final IndexContext indexContext;
 
     // Tracks whether or not we've started the index build on initialization.
-    private volatile boolean initBuildStarted = false;
+    private volatile boolean canFlushFromMemtableIndex = false;
 
     // Tracks whether the index has been invalidated due to removal, a table drop, etc.
     private volatile boolean valid = true;
@@ -327,6 +332,24 @@ public class StorageAttachedIndex implements Index
         {
             if (type.valueLengthIfFixed() == 4 && config.getSimilarityFunction() == VectorSimilarityFunction.COSINE)
                 throw new InvalidRequestException("Cosine similarity is not supported for single-dimension vectors");
+
+            // vectors of fixed length types are fixed length too, so we can reject the index creation
+            // if that fixed length is over the max term size for vectors
+            if (type.isValueLengthFixed() && IndexContext.MAX_VECTOR_TERM_SIZE < type.valueLengthIfFixed())
+            {
+                AbstractType<?> elementType = ((VectorType<?>) type).elementType;
+                var error = String.format("Vector index created with %s will produce terms of %s, " +
+                                          "exceeding the max vector term size of %s. " +
+                                          "That sets an implicit limit of %d dimensions for %s vectors.",
+                                          type.asCQL3Type(),
+                                          FBUtilities.prettyPrintMemory(type.valueLengthIfFixed()),
+                                          FBUtilities.prettyPrintMemory(IndexContext.MAX_VECTOR_TERM_SIZE),
+                                          IndexContext.MAX_VECTOR_TERM_SIZE / elementType.valueLengthIfFixed(),
+                                          elementType.asCQL3Type());
+                // VSTODO until we can safely differentiate client and system requests, we can only log here
+                // Ticket for this: https://github.com/riptano/VECTOR-SEARCH/issues/85
+                logger.warn(error);
+            }
         }
         else if (!SUPPORTED_TYPES.contains(type.asCQL3Type()) && !TypeUtil.isFrozen(type))
         {
@@ -356,20 +379,42 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
+    public boolean shouldSkipInitialization()
+    {
+        // SAI performs partial initialization so it must always execute it; the actual index build is then still skipped
+        // if IndexBuildDecider.instance.onInitialBuild().skipped() is true.
+        return false;
+    }
+
+    @Override
     public Callable<?> getInitializationTask()
     {
+        IndexBuildDecider.Decision decision = IndexBuildDecider.instance.onInitialBuild();
         // New storage-attached indexes will be available for queries after on disk index data are built.
         // Memtable data will be indexed via flushing triggered by schema change
         // We only want to validate the index files if we are starting up
-        return () -> startInitialBuild(baseCfs, StorageService.instance.isStarting()).get();
+        return () -> startInitialBuild(baseCfs, StorageService.instance.isStarting(), decision.skipped()).get();
     }
 
-    private Future<?> startInitialBuild(ColumnFamilyStore baseCfs, boolean validate)
+    private Future<?> startInitialBuild(ColumnFamilyStore baseCfs, boolean validate, boolean skipIndexBuild)
     {
+        if (skipIndexBuild)
+        {
+            logger.info("Skipping initialization task for {}.{} after flushing memtable", baseCfs.metadata(), indexContext.getIndexName());
+            // Force another flush to make sure on disk index is generated for memtable data before marking it queryable.
+            // In case of offline scrub, there is no live memtables.
+            if (!baseCfs.getTracker().getView().liveMemtables.isEmpty())
+                baseCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.INDEX_BUILD_STARTED);
+
+            // From now on, all memtable will have attached memtable index. It is now safe to flush indexes directly from flushing Memtables.
+            canFlushFromMemtableIndex = true;
+            return CompletableFuture.completedFuture(null);
+        }
+
         if (baseCfs.indexManager.isIndexQueryable(this))
         {
             logger.debug(indexContext.logMessage("Skipping validation and building in initialization task, as pre-join has already made the storage attached index queryable..."));
-            initBuildStarted = true;
+            canFlushFromMemtableIndex = true;
             return CompletableFuture.completedFuture(null);
         }
 
@@ -378,7 +423,8 @@ public class StorageAttachedIndex implements Index
         CompactionManager.instance.interruptCompactionFor(Collections.singleton(baseCfs.metadata()),
                                                           OperationType.REWRITES_SSTABLES,
                                                           Predicates.alwaysTrue(),
-                                                          true);
+                                                          true,
+                                                          TableOperation.StopTrigger.INDEX_BUILD);
 
         // Force another flush to make sure on disk index is generated for memtable data before marking it queryable.
         // In case of offline scrub, there is no live memtables.
@@ -387,8 +433,8 @@ public class StorageAttachedIndex implements Index
             baseCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.INDEX_BUILD_STARTED);
         }
 
-        // It is now safe to flush indexes directly from flushing Memtables.
-        initBuildStarted = true;
+        // From now on, all memtable will have attached memtable index. It is now safe to flush indexes directly from flushing Memtables.
+        canFlushFromMemtableIndex = true;
 
         StorageAttachedIndexGroup indexGroup = StorageAttachedIndexGroup.getIndexGroup(baseCfs);
         List<SSTableReader> nonIndexed = findNonIndexedSSTables(baseCfs, indexGroup, validate);
@@ -506,9 +552,10 @@ public class StorageAttachedIndex implements Index
         return this::startPreJoinTask;
     }
 
-    public boolean isInitBuildStarted()
+    @VisibleForTesting
+    public boolean canFlushFromMemtableIndex()
     {
-        return initBuildStarted;
+        return canFlushFromMemtableIndex;
     }
 
     public BooleanSupplier isIndexValid()
@@ -548,10 +595,15 @@ public class StorageAttachedIndex implements Index
     public Callable<?> getTruncateTask(long truncatedAt)
     {
         /*
-         * index files will be removed as part of base sstable lifecycle in
-         * {@link LogTransaction#delete(java.io.File)} asynchronously.
+         * index files will be removed as part of base sstable lifecycle in {@link LogTransaction#delete(java.io.File)}
+         * asynchronously, but we need to mark the index queryable because if the truncation is during the initial
+         * build of the index it won't get marked queryable by the build.
          */
-        return null;
+        return () -> {
+            logger.info(indexContext.logMessage("Making index queryable during table truncation"));
+            baseCfs.indexManager.makeIndexQueryable(this, Status.BUILD_SUCCEEDED);
+            return null;
+        };
     }
 
     @Override
@@ -659,6 +711,7 @@ public class StorageAttachedIndex implements Index
         for (Row row : update)
             indexContext.validate(key, row);
     }
+
     /**
      * This method is called by the startup tasks to find SSTables that don't have indexes. The method is
      * synchronized so that the view is unchanged between validation and the selection of non-indexed SSTables.

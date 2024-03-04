@@ -21,13 +21,17 @@
 package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
+import java.nio.LongBuffer;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
-import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.MoreExecutors;
+import org.cliffc.high_scale_lib.NonBlockingHashSet;
+import org.cliffc.high_scale_lib.NonBlockingIdentityHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,17 +56,23 @@ public class ChunkCache
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
-    public static final long cacheSize = 1024L * 1024L * Math.max(0, DatabaseDescriptor.getFileCacheSizeInMB() - RESERVED_POOL_SPACE_IN_MB);
     public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
 
-    private static boolean enabled = DatabaseDescriptor.getFileCacheEnabled() && cacheSize > 0;
-    public static final ChunkCache instance = enabled ? new ChunkCache(BufferPools.forChunkCache()) : null;
+    public static final ChunkCache instance = DatabaseDescriptor.getFileCacheEnabled()
+                                              ? new ChunkCache(BufferPools.forChunkCache(), DatabaseDescriptor.getFileCacheSizeInMB(), ChunkCacheMetrics::create)
+                                              : null;
 
     private final BufferPool bufferPool;
 
+    // Relies on the implementation detail that keys are interned strings and can be compared by reference.
+    // Because compute optimistically updates the set without acquiring a lock, we must use a set that is
+    // safe for concurrent access.
+    private final NonBlockingIdentityHashMap<String, NonBlockingHashSet<Key>> keysByFile;
     private final LoadingCache<Key, Buffer> cache;
+    private final long cacheSize;
     public final ChunkCacheMetrics metrics;
 
+    private boolean enabled;
     private Function<ChunkReader, RebuffererFactory> wrapper = this::wrap;
 
     static class Key
@@ -150,6 +160,31 @@ public class ChunkCache
         }
 
         @Override
+        public FloatBuffer floatBuffer()
+        {
+            assert references.get() > 0;
+            // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
+            return buffer.asFloatBuffer();
+        }
+
+        @Override
+        public IntBuffer intBuffer()
+        {
+            assert references.get() > 0;
+            // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
+            return buffer.asIntBuffer();
+        }
+
+        @Override
+        public LongBuffer longBuffer()
+        {
+            assert references.get() > 0;
+            // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
+            return buffer.asLongBuffer();
+        }
+
+
+        @Override
         public long offset()
         {
             return offset;
@@ -163,10 +198,13 @@ public class ChunkCache
         }
     }
 
-    private ChunkCache(BufferPool pool)
+    public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
     {
+        cacheSize = 1024L * 1024L * Math.max(0, cacheSizeInMB - RESERVED_POOL_SPACE_IN_MB);
+        enabled = cacheSize > 0;
         bufferPool = pool;
-        metrics = ChunkCacheMetrics.create(this);
+        metrics = createMetrics.apply(this);
+        keysByFile = new NonBlockingIdentityHashMap<>();
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
                         .executor(MoreExecutors.directExecutor())
@@ -182,6 +220,13 @@ public class ChunkCache
         ByteBuffer buffer = bufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
         assert buffer != null;
         key.file.readChunk(key.position, buffer);
+        // Complete addition within compute remapping function to ensure there is no race condition with removal.
+        keysByFile.compute(key.internedPath, (k, v) -> {
+            if (v == null)
+                v = new NonBlockingHashSet<>();
+            v.add(key);
+            return v;
+        });
         return new Buffer(buffer, key.position);
     }
 
@@ -189,10 +234,19 @@ public class ChunkCache
     public void onRemoval(Key key, Buffer buffer, RemovalCause cause)
     {
         buffer.release();
+        // Complete addition within compute remapping function to ensure there is no race condition with load.
+        keysByFile.compute(key.internedPath, (k, v) -> {
+            if (v == null)
+                return null;
+            v.remove(key);
+            return v.isEmpty() ? null : v;
+        });
     }
 
     public void close()
     {
+        // Clear keysByFile first to prevent unnecessary computation in onRemoval method.
+        keysByFile.clear();
         cache.invalidateAll();
     }
 
@@ -201,24 +255,27 @@ public class ChunkCache
         return new CachingRebufferer(file);
     }
 
-    public static RebuffererFactory maybeWrap(ChunkReader file)
+    public RebuffererFactory maybeWrap(ChunkReader file)
     {
         if (!enabled)
             return file;
 
-        return instance.wrapper.apply(file);
+        return wrapper.apply(file);
     }
 
     public void invalidateFile(String filePath)
     {
         var internedPath = filePath.intern();
-        cache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> x.internedPath == internedPath));
+        var keys = keysByFile.remove(internedPath);
+        if (keys == null)
+            return;
+        keys.forEach(cache::invalidate);
     }
 
     @VisibleForTesting
     public void enable(boolean enabled)
     {
-        ChunkCache.enabled = enabled;
+        this.enabled = enabled;
         wrapper = this::wrap;
         cache.invalidateAll();
         metrics.reset();

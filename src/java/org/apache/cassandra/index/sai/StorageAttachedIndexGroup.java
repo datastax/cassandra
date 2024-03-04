@@ -36,6 +36,7 @@ import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.RegularAndStaticColumns;
@@ -347,9 +348,13 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
                 // Column indexes are invalid if their SSTable-level components are corrupted so delete
                 // their associated index files and mark them non-queryable.
                 indices.forEach(index -> {
-                    indexDescriptor.deleteColumnIndex(index.getIndexContext());
+                    if (CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
+                        indexDescriptor.deleteColumnIndex(index.getIndexContext());
                     index.makeIndexNonQueryable();
                 });
+
+                if (!CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
+                    logger.debug("Leaving believed-corrupt files for SSTable {} in place after failure loading per-sstable components", sstable);
             });
             return indices;
         }
@@ -364,7 +369,11 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             {
                 // Delete the index files and mark the index non-queryable, as its view may be compromised,
                 // and incomplete, for our callers:
-                invalid.forEach(context -> context.indexDescriptor.deleteColumnIndex(index.getIndexContext()));
+                if (CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
+                    invalid.forEach(context -> context.indexDescriptor.deleteColumnIndex(index.getIndexContext()));
+                else
+                    logger.debug("Leaving believed-corrupt files for {} in place after failure loading per-column components",
+                                 invalid.stream().map(SSTableContext::toString).collect(Collectors.joining(", ")));
                 index.makeIndexNonQueryable();
                 incomplete.add(index);
             }

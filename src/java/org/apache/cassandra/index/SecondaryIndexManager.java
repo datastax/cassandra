@@ -192,8 +192,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     // store per-endpoint index status: the key of inner map is identifier "keyspace.index"
     public static final Map<InetAddressAndPort, Map<String, Index.Status>> peerIndexStatus = new ConcurrentHashMap<>();
-    // executes index status propagation task asynchronously to avoid potential deadlock on SIM
-    private static final ExecutorService statusPropagationExecutor = Executors.newSingleThreadExecutor();
+    // executes index status propagation task asynchronously to avoid potential deadlock on SIM. Used NamedThreadFactory to create daemon thread
+    private static final ExecutorService statusPropagationExecutor = Executors.newSingleThreadExecutor(new NamedThreadFactory("IndexStatusPropagationExecutor"));
 
     /**
      * All registered indexes.
@@ -299,7 +299,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             try
             {
-                initialBuildTask = IndexBuildDecider.instance.onInitialBuild().skipped() ? null : index.getInitializationTask();
+                initialBuildTask = index.shouldSkipInitialization() ? null : index.getInitializationTask();
             }
             catch (Throwable t)
             {
@@ -311,8 +311,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         // if there's no initialization, just mark as built (if it should be queryable) and return:
         if (initialBuildTask == null)
         {
-            if (!IndexBuildDecider.instance.onInitialBuild().skipped() || IndexBuildDecider.instance.isIndexQueryableWithoutInitialBuild(baseCfs))
+            if (IndexBuildDecider.instance.isIndexQueryableAfterInitialBuild(baseCfs))
                 markIndexBuilt(index, true);
+
             return Futures.immediateFuture(null);
         }
 
@@ -330,7 +331,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             @Override
             public void onSuccess(Object o)
             {
-                markIndexBuilt(index, true);
+                if (IndexBuildDecider.instance.isIndexQueryableAfterInitialBuild(baseCfs))
+                    markIndexBuilt(index, true);
+
                 initialization.set(o);
             }
         }, MoreExecutors.directExecutor());
@@ -1941,8 +1944,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return delta;
     }
 
-    @VisibleForTesting
-    public synchronized static void propagateLocalIndexStatus(String keyspace, String index, Index.Status status)
+    private synchronized static void propagateLocalIndexStatus(String keyspace, String index, Index.Status status)
     {
         try
         {

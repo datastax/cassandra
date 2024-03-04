@@ -405,9 +405,21 @@ public enum CassandraRelevantProperties
     // if true, allow BQ and writing optimized ordinal maps
     VSEARCH_11_9_UPGRADES("cassandra.vsearch_11_9_upgrades", "true"),
 
+    // Allow disabling deletions of corrupt index components for troubleshooting
+    DELETE_CORRUPT_SAI_COMPONENTS("cassandra.sai.delete_corrupt_components", "true"),
+
     // Enables parallel index read.
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
-    PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num");
+    PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num"),
+
+    // Allows skipping advising the OS to free cached pages associated commitlog flushing
+    COMMITLOG_SKIP_FILE_ADVICE("cassandra.commitlog.skip_file_advice"),
+
+    // Changes the semantic of the "THREE" consistency level to mean "all but one"
+    // i.e. that all replicas except for at most one in the cluster (across all DCs) must accept the write for it to be successful.
+    THREE_MEANS_ALL_BUT_ONE("dse.consistency_level.three_means_all_but_one", "false"),
+    CUSTOM_KEYSPACES_FILTER_PROVIDER("cassandra.custom_keyspaces_filter_provider_class"),
+    CUSTOM_READ_OBSERVER_FACTORY("cassandra.custom_read_observer_factory_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

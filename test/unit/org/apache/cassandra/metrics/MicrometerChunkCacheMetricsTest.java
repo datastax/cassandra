@@ -93,7 +93,7 @@ public class MicrometerChunkCacheMetricsTest
     {
 
         // No-op
-        chunkCacheMetrics.recordEviction();
+        chunkCacheMetrics.recordEviction(1, null);
 
         // No-op
         chunkCacheMetrics.recordLoadFailure(25);
@@ -126,10 +126,10 @@ public class MicrometerChunkCacheMetricsTest
     public void testEvictionRecording()
     {
         long initialEvictionCount = chunkCacheMetrics.snapshot().evictionCount();
-        chunkCacheMetrics.recordEviction(4);
+        chunkCacheMetrics.recordEviction(4, null);
         assertEquals(initialEvictionCount + 4, chunkCacheMetrics.snapshot().evictionCount());
 
-        chunkCacheMetrics.recordEviction();
+        chunkCacheMetrics.recordEviction(1, null);
         assertEquals(initialEvictionCount + 4 + 1, chunkCacheMetrics.snapshot().evictionCount());
     }
 

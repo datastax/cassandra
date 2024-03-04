@@ -40,8 +40,10 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.CloseableIterator;
 
 /**
  * Each segment represents an on-disk index structure (kdtree/terms/postings) flushed by memory limit or token boundaries,
@@ -75,8 +77,13 @@ public class Segment implements Closeable, SegmentOrdering
 
         var version = sstableContext.indexDescriptor.getIndexVersion(indexContext);
         IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
-        logger.info("Opened searcher {} for segment {} at version {}",
-                    searcher.getClass().getName(), sstableContext.descriptor(), version);
+        logger.info("Opened searcher {} for segment {}:{} for index [{}] on column [{}] at version {}",
+                    searcher.getClass().getSimpleName(),
+                    sstableContext.descriptor(),
+                    metadata.segmentRowIdOffset,
+                    indexContext.getIndexName(),
+                    indexContext.getColumnName(),
+                    version);
         this.index = searcher;
     }
 
@@ -144,6 +151,25 @@ public class Segment implements Closeable, SegmentOrdering
         return index.search(expression, keyRange, context, defer, limit);
     }
 
+    /**
+     * Order the on-disk index synchronously and produce an iterator in score order
+     *
+     * @param expression to filter on disk index
+     * @param keyRange   key range specific in read command, used by ANN index
+     * @param context    to track per sstable cache and per query metrics
+     * @param limit      the num of rows to returned, used by ANN index
+     * @return an iterator of {@link ScoredPrimaryKey} in score order
+     */
+    public CloseableIterator<ScoredPrimaryKey> orderBy(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, int limit) throws IOException
+    {
+        return index.orderBy(expression, keyRange, context, limit);
+    }
+
+    public IndexSearcher getIndexSearcher()
+    {
+        return index;
+    }
+
     @Override
     public boolean equals(Object o)
     {
@@ -160,9 +186,9 @@ public class Segment implements Closeable, SegmentOrdering
     }
 
     @Override
-    public RangeIterator limitToTopResults(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
+    public CloseableIterator<ScoredPrimaryKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Expression exp, int limit) throws IOException
     {
-        return index.limitToTopResults(context, keys, exp, limit);
+        return index.orderResultsBy(context, keys, exp, limit);
     }
 
     @Override

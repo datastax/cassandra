@@ -183,7 +183,7 @@ public class PostingListRangeIterator extends RangeIterator
                 }
             }
 
-            segmentRowId = postingList.advance(targetRowID - searcherContext.segmentRowIdOffset);
+            segmentRowId = postingList.advance(targetRowID - searcherContext.getSegmentRowIdOffset());
             needsSkipping = false;
         }
         else
@@ -196,7 +196,7 @@ public class PostingListRangeIterator extends RangeIterator
         }
         lastSegmentRowId = segmentRowId;
         return segmentRowId != PostingList.END_OF_STREAM
-               ? segmentRowId + searcherContext.segmentRowIdOffset
+               ? segmentRowId + searcherContext.getSegmentRowIdOffset()
                : PostingList.END_OF_STREAM;
     }
 }

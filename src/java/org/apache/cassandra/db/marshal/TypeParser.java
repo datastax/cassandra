@@ -47,7 +47,7 @@ public class TypeParser
     // A cache of parsed string, specially useful for DynamicCompositeType
     private static volatile ImmutableMap<String, AbstractType<?>> cache = ImmutableMap.of();
 
-    public static final TypeParser EMPTY_PARSER = new TypeParser("", 0);
+    private static final TypeParser EMPTY_PARSER = new TypeParser("", 0);
 
     private TypeParser(String str, int idx)
     {
@@ -61,7 +61,9 @@ public class TypeParser
     }
 
     /**
-     * Parse a string containing an type definition.
+     * Creates a new TypeParser and uses it to parse the given type definition string.
+     *
+     * @param str the string to parse.
      */
     public static AbstractType<?> parse(String str) throws SyntaxException, ConfigurationException
     {
@@ -115,15 +117,10 @@ public class TypeParser
         }
     }
 
-    public static AbstractType<?> parse(CharSequence compareWith) throws SyntaxException, ConfigurationException
-    {
-        return parse(compareWith == null ? null : compareWith.toString());
-    }
-
     /**
      * Parse an AbstractType from current position of this parser.
      */
-    public AbstractType<?> parse() throws SyntaxException, ConfigurationException
+    private AbstractType<?> parse() throws SyntaxException, ConfigurationException
     {
         skipBlank();
         String name = readNextIdentifier();
@@ -165,7 +162,7 @@ public class TypeParser
             }
             else if (str.charAt(idx) != ',' && str.charAt(idx) != ')')
             {
-                throwSyntaxError("unexpected character '" + str.charAt(idx) + "'");
+                throwSyntaxError("unexpected character '" + str.charAt(idx) + '\'');
             }
             map.put(k, v);
         }
@@ -279,51 +276,6 @@ public class TypeParser
         throw new SyntaxException(String.format("Syntax error parsing '%s' at char %d: unexpected end of string", str, idx));
     }
 
-    public Map<ByteBuffer, CollectionType> getCollectionsParameters() throws SyntaxException, ConfigurationException
-    {
-        Map<ByteBuffer, CollectionType> map = new HashMap<>();
-
-        if (isEOS())
-            return map;
-
-        if (str.charAt(idx) != '(')
-            throw new IllegalStateException();
-
-        ++idx; // skipping '('
-
-        while (skipBlankAndComma())
-        {
-            if (str.charAt(idx) == ')')
-            {
-                ++idx;
-                return map;
-            }
-
-            ByteBuffer bb = fromHex(readNextIdentifier());
-
-            skipBlank();
-            if (str.charAt(idx) != ':')
-                throwSyntaxError("expecting ':' token");
-
-            ++idx;
-            skipBlank();
-            try
-            {
-                AbstractType<?> type = parse();
-                if (!(type instanceof CollectionType))
-                    throw new SyntaxException(type + " is not a collection type");
-                map.put(bb, (CollectionType)type);
-            }
-            catch (SyntaxException e)
-            {
-                SyntaxException ex = new SyntaxException(String.format("Exception while parsing '%s' around char %d", str, idx));
-                ex.initCause(e);
-                throw ex;
-            }
-        }
-        throw new SyntaxException(String.format("Syntax error parsing '%s' at char %d: unexpected end of string", str, idx));
-    }
-
     public Pair<AbstractType<?>, Integer> getVectorParameters() throws SyntaxException, ConfigurationException
     {
         if (isEOS())
@@ -364,7 +316,7 @@ public class TypeParser
         }
     }
 
-    public Pair<Pair<String, ByteBuffer>, List<Pair<ByteBuffer, AbstractType>>> getUserTypeParameters() throws SyntaxException, ConfigurationException
+    public Pair<Pair<String, ByteBuffer>, List<Pair<ByteBuffer, AbstractType<?>>>> getUserTypeParameters() throws SyntaxException, ConfigurationException
     {
 
         if (isEOS() || str.charAt(idx) != '(')
@@ -376,7 +328,7 @@ public class TypeParser
         String keyspace = readNextIdentifier();
         skipBlankAndComma();
         ByteBuffer typeName = fromHex(readNextIdentifier());
-        List<Pair<ByteBuffer, AbstractType>> defs = new ArrayList<>();
+        List<Pair<ByteBuffer, AbstractType<?>>> defs = new ArrayList<>();
 
         while (skipBlankAndComma())
         {
@@ -394,7 +346,7 @@ public class TypeParser
             skipBlank();
             try
             {
-                AbstractType type = parse();
+                AbstractType<?> type = parse();
                 defs.add(Pair.create(name, type));
             }
             catch (SyntaxException e)
@@ -407,10 +359,14 @@ public class TypeParser
         throw new SyntaxException(String.format("Syntax error parsing '%s' at char %d: unexpected end of string", str, idx));
     }
 
-    private static AbstractType<?> getAbstractType(String compareWith) throws ConfigurationException
+    /**
+     * Parse a type string and return the corresponding {@link AbstractType}. It is used for the type definition which
+     * is not followed by an opening parenthesis, e.g. "org.apache.cassandra.db.marshal.UTF8Type".
+     */
+    private static AbstractType<?> getAbstractType(String typeName) throws ConfigurationException
     {
-        String className = compareWith.contains(".") ? compareWith : "org.apache.cassandra.db.marshal." + compareWith;
-        Class<? extends AbstractType<?>> typeClass = FBUtilities.<AbstractType<?>>classForName(className, "abstract-type");
+        String className = typeName.contains(".") ? typeName : "org.apache.cassandra.db.marshal." + typeName;
+        Class<? extends AbstractType<?>> typeClass = FBUtilities.classForName(className, "abstract-type");
         try
         {
             Field field = typeClass.getDeclaredField("instance");
@@ -423,10 +379,16 @@ public class TypeParser
         }
     }
 
+    /**
+     * Parse a type string and return the corresponding {@link AbstractType}. It is used for the type definition
+     * which is followed by an opening parenthesis, e.g.
+     * "org.apache.cassandra.db.marshal.ListType(org.apache.cassandra.db.marshal.UTF8Type)".
+     */
     private static AbstractType<?> getAbstractType(String compareWith, TypeParser parser) throws SyntaxException, ConfigurationException
     {
         String className = compareWith.contains(".") ? compareWith : "org.apache.cassandra.db.marshal." + compareWith;
-        Class<? extends AbstractType<?>> typeClass = FBUtilities.<AbstractType<?>>classForName(className, "abstract-type");
+        Class<? extends AbstractType<?>> typeClass = FBUtilities.classForName(className, "abstract-type");
+
         try
         {
             Method method = typeClass.getDeclaredMethod("getInstance", TypeParser.class);
@@ -440,12 +402,16 @@ public class TypeParser
         }
         catch (InvocationTargetException e)
         {
-            ConfigurationException ex = new ConfigurationException("Invalid definition for comparator " + typeClass.getName() + ".");
-            ex.initCause(e.getTargetException());
-            throw ex;
+            throw new ConfigurationException("Invalid definition for comparator " + typeClass.getName() + '.',
+                                             e.getTargetException());
         }
     }
 
+    /**
+     * Parse a type string and return the corresponding AbstractType. It is used for the type definition which is not
+     * followed by an opening parenthesis, e.g. "org.apache.cassandra.db.marshal.UTF8Type", but does not have static
+     * {@code instance} field.
+     */
     private static AbstractType<?> getRawAbstractType(Class<? extends AbstractType<?>> typeClass) throws ConfigurationException
     {
         try
@@ -472,9 +438,8 @@ public class TypeParser
         }
         catch (InvocationTargetException e)
         {
-            ConfigurationException ex = new ConfigurationException("Invalid definition for comparator " + typeClass.getName() + ".");
-            ex.initCause(e.getTargetException());
-            throw ex;
+            throw new ConfigurationException("Invalid definition for comparator " + typeClass.getName() + '.',
+                                             e.getTargetException());
         }
     }
 
@@ -565,23 +530,17 @@ public class TypeParser
         if (iter.hasNext())
         {
             Map.Entry<Byte, AbstractType<?>> entry = iter.next();
-            sb.append((char)(byte)entry.getKey()).append("=>").append(entry.getValue());
+            // Aliases are only used by DynamicCompositeType that is always frozen but without requiring a 'Frozen()'
+            // in its subtypes' representation.
+            sb.append((char)(byte)entry.getKey()).append("=>").append(entry.getValue().toString(true));
         }
         while (iter.hasNext())
         {
             Map.Entry<Byte, AbstractType<?>> entry = iter.next();
-            sb.append(',').append((char)(byte)entry.getKey()).append("=>").append(entry.getValue());
+            sb.append(',').append((char)(byte)entry.getKey()).append("=>").append(entry.getValue().toString(true));
         }
         sb.append(')');
         return sb.toString();
-    }
-
-    /**
-     * Helper function to ease the writing of AbstractType.toString() methods.
-     */
-    public static String stringifyTypeParameters(List<AbstractType<?>> types)
-    {
-        return stringifyTypeParameters(types, false);
     }
 
     /**
@@ -593,40 +552,22 @@ public class TypeParser
         for (int i = 0; i < types.size(); i++)
         {
             if (i > 0)
-                sb.append(",");
+                sb.append(',');
             sb.append(types.get(i).toString(ignoreFreezing));
         }
         return sb.append(')').toString();
-    }
-
-    public static String stringifyCollectionsParameters(Map<ByteBuffer, ? extends CollectionType> collections)
-    {
-        StringBuilder sb = new StringBuilder();
-        sb.append('(');
-        boolean first = true;
-        for (Map.Entry<ByteBuffer, ? extends CollectionType> entry : collections.entrySet())
-        {
-            if (!first)
-                sb.append(',');
-
-            first = false;
-            sb.append(ByteBufferUtil.bytesToHex(entry.getKey())).append(":");
-            sb.append(entry.getValue());
-        }
-        sb.append(')');
-        return sb.toString();
     }
 
     public static String stringifyUserTypeParameters(String keysace, ByteBuffer typeName, List<FieldIdentifier> fields,
                                                      List<AbstractType<?>> columnTypes, boolean ignoreFreezing)
     {
         StringBuilder sb = new StringBuilder();
-        sb.append('(').append(keysace).append(",").append(ByteBufferUtil.bytesToHex(typeName));
+        sb.append('(').append(keysace).append(',').append(ByteBufferUtil.bytesToHex(typeName));
 
         for (int i = 0; i < fields.size(); i++)
         {
             sb.append(',');
-            sb.append(ByteBufferUtil.bytesToHex(fields.get(i).bytes)).append(":");
+            sb.append(ByteBufferUtil.bytesToHex(fields.get(i).bytes)).append(':');
             sb.append(columnTypes.get(i).toString(ignoreFreezing));
         }
         sb.append(')');

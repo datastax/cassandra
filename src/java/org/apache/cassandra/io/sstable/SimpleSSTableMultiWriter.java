@@ -64,10 +64,9 @@ public class SimpleSSTableMultiWriter implements SSTableMultiWriter
         return Collections.singleton(writer.finished());
     }
 
-    public SSTableMultiWriter setOpenResult(boolean openResult)
+    public void openResult()
     {
-        writer.setOpenResult(openResult);
-        return this;
+        writer.openResult();
     }
 
     public String getFilename()

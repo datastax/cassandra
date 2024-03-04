@@ -22,6 +22,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.exceptions.InvalidColumnTypeException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 
@@ -491,7 +492,7 @@ public class MapEntriesIndexTest extends SAITester
     {
         // If we ever support using non-frozen collections as clustering columns, we need to determine
         // if range queries should work when the column is a clustering column.
-        assertInvalidThrow(InvalidRequestException.class,
+        assertInvalidThrow(InvalidColumnTypeException.class,
                            String.format(
                            "CREATE TABLE %s.%s (partition int, item_cost map<text, int>, PRIMARY KEY (partition, item_cost))",
                            KEYSPACE,

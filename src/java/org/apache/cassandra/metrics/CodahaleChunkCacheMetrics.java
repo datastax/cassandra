@@ -20,6 +20,7 @@ package org.apache.cassandra.metrics;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 
+import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.google.common.annotations.VisibleForTesting;
 
 import com.codahale.metrics.Timer;
@@ -75,8 +76,7 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     }
 
     @Override
-    public void recordEviction()
-    {
+    public void recordEviction(int weight, RemovalCause removalCause) {
     }
 
     @Override
@@ -155,7 +155,7 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     @Override
     public CacheStats snapshot()
     {
-        return new CacheStats(metrics.hits.getCount(), metrics.misses.getCount(), missLatency.getCount(), 0L, missLatency.getCount(), 0L, 0L);
+        return CacheStats.of(metrics.hits.getCount(), metrics.misses.getCount(), missLatency.getCount(), 0L, missLatency.getCount(), 0L, 0L);
     }
 
     @Override

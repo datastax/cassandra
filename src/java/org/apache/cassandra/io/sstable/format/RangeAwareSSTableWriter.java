@@ -150,11 +150,10 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     }
 
     @Override
-    public SSTableMultiWriter setOpenResult(boolean openResult)
+    public void openResult()
     {
-        finishedWriters.forEach((w) -> w.setOpenResult(openResult));
-        currentWriter.setOpenResult(openResult);
-        return this;
+        finishedWriters.forEach(SSTableMultiWriter::openResult);
+        currentWriter.openResult();
     }
 
     public String getFilename()

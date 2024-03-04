@@ -241,7 +241,7 @@ public class AuthCache<K, V> implements AuthCacheMBean
 
         // Always set as mandatory
         cache.policy().refreshAfterWrite().ifPresent(policy ->
-            policy.setExpiresAfter(getUpdateInterval(), TimeUnit.MILLISECONDS));
+            policy.setRefreshesAfter(getUpdateInterval(), TimeUnit.MILLISECONDS));
         cache.policy().expireAfterWrite().ifPresent(policy ->
             policy.setExpiresAfter(getValidity(), TimeUnit.MILLISECONDS));
         cache.policy().eviction().ifPresent(policy ->

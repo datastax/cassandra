@@ -19,16 +19,14 @@
 package org.apache.cassandra.index.sai.disk.v2.hnsw;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.NoSuchElementException;
-import java.util.PrimitiveIterator;
-import java.util.function.Function;
-import java.util.stream.IntStream;
+import java.util.function.IntConsumer;
+import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
@@ -39,14 +37,18 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
+import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
-import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
+import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
+import org.apache.cassandra.index.sai.disk.vector.VectorSupplier;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.util.hnsw.HnswGraphSearcher;
 import org.apache.lucene.util.hnsw.NeighborQueue;
@@ -56,7 +58,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraOnDiskHnsw.class);
 
-    private final Function<QueryContext, VectorsWithCache> vectorsSupplier;
+    private final Supplier<VectorsWithCache> vectorsSupplier;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final OnDiskHnswGraph hnsw;
     private final VectorSimilarityFunction similarityFunction;
@@ -73,7 +75,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
 
         vectorsFile = indexFiles.vectors();
         long vectorsSegmentOffset = getComponentMetadata(IndexComponent.VECTOR).offset;
-        vectorsSupplier = (qc) -> new VectorsWithCache(new OnDiskVectors(vectorsFile, vectorsSegmentOffset), qc);
+        vectorsSupplier = () -> new VectorsWithCache(new OnDiskVectors(vectorsFile, vectorsSegmentOffset));
 
         SegmentMetadata.ComponentMetadata postingListsMetadata = getComponentMetadata(IndexComponent.POSTING_LISTS);
         ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
@@ -103,12 +105,15 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
      * @return Row IDs associated with the topK vectors near the query
      */
     @Override
-    public VectorPostingList search(float[] queryVector, int topK, int limit, Bits acceptBits, QueryContext context)
+    public CloseableIterator<ScoredRowId> search(float[] queryVector, int topK, float threshold, Bits acceptBits, QueryContext context, IntConsumer nodesVisited)
     {
+        if (threshold > 0)
+            throw new InvalidRequestException("Geo queries are not supported for legacy SAI indexes -- drop the index and recreate it to enable these");
+
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
         NeighborQueue queue;
-        try (var vectors = vectorsSupplier.apply(context); var view = hnsw.getView(context))
+        try (var vectors = vectorsSupplier.get(); var view = hnsw.getView(context))
         {
             queue = HnswGraphSearcher.search(queryVector,
                                              topK,
@@ -118,8 +123,11 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
                                              view,
                                              LuceneCompat.bits(ordinalsMap.ignoringDeleted(acceptBits)),
                                              Integer.MAX_VALUE);
+            // Since we do not resume search for HNSW, we call this eagerly.
+            nodesVisited.accept(queue.visitedCount());
             Tracing.trace("HNSW search visited {} nodes to return {} results", queue.visitedCount(), queue.size());
-            return annRowIdsToPostings(queue);
+            var scores = new ReorderingNodeScoresIterator(queue);
+            return new NodeScoreToScoredRowIdIterator(scores, ordinalsMap.getRowIdsView());
         }
         catch (IOException e)
         {
@@ -127,65 +135,37 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         }
     }
 
-    @Override
-    public VectorPostingList search(float[] queryVector, int topK, float threshold, int limit, Bits bits, QueryContext context)
+    /**
+     * An iterator that reorders the results from HNSW to descending score order.
+     */
+    static class ReorderingNodeScoresIterator extends AbstractIterator<SearchResult.NodeScore>
     {
-        if (threshold > 0)
-            throw new InvalidRequestException("Geo queries are not supported for legacy SAI indexes -- drop the index and recreate it to enable these");
+        private final SearchResult.NodeScore[] scores;
+        private int index;
 
-        return search(queryVector, topK, limit, bits, context);
-    }
-
-    private class RowIdIterator implements PrimitiveIterator.OfInt, AutoCloseable
-    {
-        private final NeighborQueue queue;
-        private final RowIdsView rowIdsView = ordinalsMap.getRowIdsView();
-
-        private PrimitiveIterator.OfInt segmentRowIdIterator = IntStream.empty().iterator();
-
-        public RowIdIterator(NeighborQueue queue)
+        public ReorderingNodeScoresIterator(NeighborQueue queue)
         {
-            this.queue = queue;
-        }
-
-        @Override
-        public boolean hasNext() {
-            while (!segmentRowIdIterator.hasNext() && queue.size() > 0) {
-                try
-                {
-                    var ordinal = queue.pop();
-                    segmentRowIdIterator = Arrays.stream(rowIdsView.getSegmentRowIdsMatching(ordinal)).iterator();
-                }
-                catch (IOException e)
-                {
-                    throw new RuntimeException(e);
-                }
+            scores = new SearchResult.NodeScore[queue.size()];
+            // We start at the last element since the queue is sorted in ascending order
+            index = queue.size() - 1;
+            // Because the queue is sorted in ascending order, we need to eagerly consume it
+            for (int i = 0; i <= index; i++)
+            {
+                // Get the score first since pop removes the top element
+                float score = queue.topScore();
+                scores[i] = new SearchResult.NodeScore(queue.pop(), score);
             }
-            return segmentRowIdIterator.hasNext();
         }
 
         @Override
-        public int nextInt() {
-            if (!hasNext())
-                throw new NoSuchElementException();
-            return segmentRowIdIterator.nextInt();
-        }
-
-        @Override
-        public void close()
+        protected SearchResult.NodeScore computeNext()
         {
-            rowIdsView.close();
-        }
-    }
-
-    private VectorPostingList annRowIdsToPostings(NeighborQueue queue) throws IOException
-    {
-        try (var iterator = new RowIdIterator(queue))
-        {
-            // JVector returns results ordered most- to least-similar, which is why VPL has a `limit` paramter
-            // to avoid sorting results we don't care about.  But Lucene returns them with the least-similar
-            // results at the front of the queue, so we ensure we exhaust the whole queue here.
-            return new VectorPostingList(iterator, queue.size(), queue.visitedCount());
+            if (index < 0)
+            {
+                logger.warn("HNSW queue is empty, returning false, but the search might not have been exhaustive");
+                return endOfData();
+            }
+            return scores[index--];
         }
     }
 
@@ -204,6 +184,12 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     }
 
     @Override
+    public VectorSupplier getVectorSupplier()
+    {
+        return new HNSWVectorSupplier(vectorsSupplier.get());
+    }
+
+    @Override
     public CompressedVectors getCompressedVectors()
     {
         return null;
@@ -213,12 +199,10 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     class VectorsWithCache implements RandomAccessVectorValues<float[]>, AutoCloseable
     {
         private final OnDiskVectors vectors;
-        private final QueryContext queryContext;
 
-        public VectorsWithCache(OnDiskVectors vectors, QueryContext queryContext)
+        public VectorsWithCache(OnDiskVectors vectors)
         {
             this.vectors = vectors;
-            this.queryContext = queryContext;
         }
 
         @Override
@@ -236,13 +220,9 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         @Override
         public float[] vectorValue(int i) throws IOException
         {
-            queryContext.addHnswVectorsAccessed(1);
             var cached = vectorCache.get(i);
             if (cached != null)
-            {
-                queryContext.addHnswVectorCacheHits(1);
                 return cached;
-            }
 
             return vectors.vectorValue(i);
         }
@@ -256,6 +236,35 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         public void close()
         {
             vectors.close();
+        }
+    }
+
+    private static class HNSWVectorSupplier implements VectorSupplier
+    {
+        private final VectorsWithCache view;
+
+        private HNSWVectorSupplier(VectorsWithCache view)
+        {
+            this.view = view;
+        }
+
+        @Override
+        public float[] getVectorForOrdinal(int ordinal)
+        {
+            try
+            {
+                return view.vectorValue(ordinal);
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(view);
         }
     }
 }

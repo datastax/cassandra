@@ -47,6 +47,7 @@ public class Version
     public static final List<Version> ALL = Lists.newArrayList(CA, BA, AA);
 
     public static final Version EARLIEST = AA;
+    public static final Version VECTOR_EARLIEST = BA;
     // The latest version can be configured to be an earlier version to support partial upgrades that don't
     // write newer versions of the on-disk formats.
     public static final Version LATEST = parse(System.getProperty("cassandra.sai.latest.version", "ca"));
