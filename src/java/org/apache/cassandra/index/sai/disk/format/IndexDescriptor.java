@@ -180,9 +180,11 @@ public class IndexDescriptor
         return getVersion(context).fileNameFormatter().format(component, context);
     }
 
-    /**
-     * Returns the version of the files available for the given context.  Null context = shared components.
-     */
+    public Version getVersion()
+    {
+        return getVersion(null);
+    }
+
     public Version getVersion(IndexContext context)
     {
         return versions.computeIfAbsent(context, __ ->
@@ -284,7 +286,7 @@ public class IndexDescriptor
 
     public boolean isSSTableEmpty()
     {
-        return isPerSSTableBuildComplete() && numberOfComponents() == 1;
+        return isPerSSTableBuildComplete() && numberOfComponents(null) == 1;
     }
 
     public boolean isIndexEmpty(IndexContext context)
@@ -533,11 +535,6 @@ public class IndexDescriptor
     private int numberOfComponents(IndexContext context)
     {
         return components.containsKey(context) ? components.get(context).size() : 0;
-    }
-
-    private int numberOfComponents()
-    {
-        return components.get(null).size();
     }
 
     private File createFile(IndexComponent component, IndexContext context)
