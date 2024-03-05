@@ -86,11 +86,9 @@ public class IndexDescriptor
     public final ClusteringComparator clusteringComparator;
     public final PrimaryKey.Factory primaryKeyFactory;
 
-    // group -> version
+    // versions and components.  null context = per-sstable entry
     private final Map<IndexContext, Version> versions = Maps.newHashMap();
-    // group -> components
     private final Map<IndexContext, Set<IndexComponent>> components = Maps.newHashMap();
-    // component -> file
     private final Map<AttachedIndexComponent, File> fileMap = Maps.newHashMap();
 
     /**
