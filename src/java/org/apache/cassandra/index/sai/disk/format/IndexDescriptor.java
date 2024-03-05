@@ -384,6 +384,7 @@ public class IndexDescriptor
                   .map(fileMap::remove)
                   .filter(java.util.Objects::nonNull)
                   .forEach(this::deleteComponent);
+        components.clear();
     }
 
     public void createComponentOnDisk(IndexComponent component) throws IOException
