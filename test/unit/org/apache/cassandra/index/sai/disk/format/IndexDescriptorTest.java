@@ -77,7 +77,7 @@ public class IndexDescriptorTest
 
         IndexDescriptor indexDescriptor = IndexDescriptor.createNew(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
 
-        assertEquals(Version.AA, indexDescriptor.getIndexVersion(IndexDescriptor.ComponentGroupId.SSTABLE));
+        assertEquals(Version.AA, indexDescriptor.getVersion(null));
         assertTrue(indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER));
     }
 
@@ -92,7 +92,7 @@ public class IndexDescriptorTest
         IndexDescriptor indexDescriptor = IndexDescriptor.createNew(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
 
-        assertEquals(Version.AA, indexDescriptor.getIndexVersion(IndexDescriptor.ComponentGroupId.SSTABLE));
+        assertEquals(Version.AA, indexDescriptor.getVersion(null));
         assertTrue(indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext));
     }
 
@@ -105,7 +105,7 @@ public class IndexDescriptorTest
 
         IndexDescriptor indexDescriptor = IndexDescriptor.createNew(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
 
-        assertEquals(Version.BA, indexDescriptor.getIndexVersion(IndexDescriptor.ComponentGroupId.SSTABLE));
+        assertEquals(Version.BA, indexDescriptor.getVersion(null));
         assertTrue(indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER));
     }
 
@@ -119,7 +119,7 @@ public class IndexDescriptorTest
         IndexDescriptor indexDescriptor = IndexDescriptor.createNew(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
 
-        assertEquals(Version.BA, indexDescriptor.getIndexVersion(IndexDescriptor.ComponentGroupId.SSTABLE));
+        assertEquals(Version.BA, indexDescriptor.getVersion(null));
         assertTrue(indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext));
     }
 

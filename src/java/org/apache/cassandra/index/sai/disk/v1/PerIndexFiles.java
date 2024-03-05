@@ -45,7 +45,7 @@ public class PerIndexFiles implements Closeable
         this.indexDescriptor = indexDescriptor;
         this.indexContext = indexContext;
 
-        var toOpen = new HashSet<>(indexDescriptor.getIndexVersion(indexContext).onDiskFormat().perIndexComponents(indexContext));
+        var toOpen = new HashSet<>(indexDescriptor.getVersion(indexContext).onDiskFormat().perIndexComponents(indexContext));
         toOpen.remove(IndexComponent.META);
         toOpen.remove(IndexComponent.COLUMN_COMPLETION_MARKER);
 
