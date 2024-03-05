@@ -271,7 +271,7 @@ public class CommitLog implements CommitLogMBean
         segmentsWithInvalidMutations = new ArrayList<>();
         replayer.commitLogReader.segmentsWithInvalidMutations.forEach((file) ->
         {
-            logger.warn("Skipped invalid mutations from file {}", file);
+            logger.warn("Skipped invalid mutations from file {}.", file);
             segmentsWithInvalidMutations.add(file);
         });
         return replayer.blockForWrites(flushReason);
