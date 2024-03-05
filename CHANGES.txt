@@ -1,4 +1,5 @@
 Future version (tbd)
+ * Avoid over-skipping of key iterators from static column indexes during mixed intersections (CASSANDRA-19278)
  * Require only MODIFY permission on base when updating table with MV (STAR-564)
 Merged from 5.0:
  * Add guardrail for vector dimensions (CASSANDRA-18730)

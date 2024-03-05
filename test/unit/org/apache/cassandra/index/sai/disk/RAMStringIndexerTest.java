@@ -26,14 +26,15 @@ import java.util.List;
 import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.BytesRef;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.string;
+import static org.junit.Assert.assertEquals;
 
-public class RAMStringIndexerTest extends SaiRandomizedTest
+public class RAMStringIndexerTest extends SAIRandomizedTester
 {
     @Test
     public void test() throws Exception
@@ -74,8 +75,8 @@ public class RAMStringIndexerTest extends SaiRandomizedTest
     public void testLargeSegment() throws IOException
     {
         final RAMStringIndexer indexer = new RAMStringIndexer(UTF8Type.instance);
-        final int numTerms = between(1 << 10, 1 << 13);
-        final int numPostings = between(1 << 5, 1 << 10);
+        final int numTerms = (int) between(1 << 10, 1 << 13);
+        final int numPostings = (int) between(1 << 5, 1 << 10);
 
         for (int id = 0; id < numTerms; ++id)
         {

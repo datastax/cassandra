@@ -20,13 +20,15 @@ package org.apache.cassandra.index.sai.disk.v1.kdtree;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.cassandra.index.sai.utils.SeekingRandomAccessInput;
 import org.apache.lucene.util.LongValues;
 import org.apache.lucene.util.packed.DirectReader;
 import org.apache.lucene.util.packed.DirectWriter;
 
-public class LeafOrderMapTest extends SaiRandomizedTest
+import static org.junit.Assert.assertEquals;
+
+public class LeafOrderMapTest extends SAIRandomizedTester
 {
     @Test
     public void test() throws Exception

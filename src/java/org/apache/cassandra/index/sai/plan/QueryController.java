@@ -63,11 +63,11 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.OrderingFilterRangeIterator;
+import org.apache.cassandra.index.sai.iterators.OrderingFilterRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.MergeScoredPrimaryKeyIterator;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
@@ -173,7 +173,7 @@ public class QueryController
         DataRange last = ranges.get(ranges.size() - 1);
         this.mergeRange = ranges.size() == 1 ? first.keyRange() : first.keyRange().withNewRight(last.keyRange().right);
 
-        this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
+        this.keyFactory = PrimaryKey.factory(cfs.metadata(), indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
         this.lastPrimaryKey = keyFactory.createTokenOnly(mergeRange.right.getToken());
     }
@@ -232,10 +232,7 @@ public class QueryController
         if (index != null)
             return index.getIndexContext();
 
-        return new IndexContext(cfs.metadata().keyspace,
-                                cfs.metadata().name,
-                                cfs.metadata().partitionKeyType,
-                                cfs.metadata().comparator,
+        return new IndexContext(cfs.metadata(),
                                 expression.column(),
                                 IndexTarget.Type.VALUES,
                                 null,
@@ -270,14 +267,14 @@ public class QueryController
         return command.queryMemtableAndDisk(cfs, executionController);
     }
 
-    public RangeIterator buildIterator()
+    public KeyRangeIterator buildIterator()
     {
         // VSTODO we can clean this up when we break ordering out
         var nonOrderingExpressions = filterOperation.expressions().stream()
                                                     .filter(e -> e.operator() != Operator.ANN)
                                                     .collect(Collectors.toList());
         if (nonOrderingExpressions.isEmpty() && filterOperation.children().isEmpty())
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         return Operation.Node.buildTree(nonOrderingExpressions, filterOperation.children(), filterOperation.isDisjunction())
                              .analyzeTree(this)
                              .rangeIterator(this);
@@ -311,7 +308,7 @@ public class QueryController
         return getTopKRows(whereClauseIter, orderings.get(0));
     }
 
-    private QueryContext.FilterSortOrder decideFilterSortOrder(RowFilter.FilterElement filter, RangeIterator iter)
+    private QueryContext.FilterSortOrder decideFilterSortOrder(RowFilter.FilterElement filter, KeyRangeIterator iter)
     {
         double sortThenFilterCost = estimateSortThenFilterCost(iter);
         double filterThenSortCost = estimateFilterThenSortCost(filter, iter);
@@ -323,7 +320,7 @@ public class QueryController
         return order;
     }
 
-    private float estimateFilterThenSortCost(RowFilter.FilterElement filter, RangeIterator iter)
+    private float estimateFilterThenSortCost(RowFilter.FilterElement filter, KeyRangeIterator iter)
     {
         // Unions are cheap but intersections have higher costs because of skipping on the iterators,
         // so we add a penalty for each intersection used in the filter.
@@ -335,7 +332,7 @@ public class QueryController
                + estimateRowMaterializationCost(materializedRows);
     }
 
-    private float estimateSortThenFilterCost(RangeIterator iter)
+    private float estimateSortThenFilterCost(KeyRangeIterator iter)
     {
         float selectivity = estimateSelectivity(iter);
         int materializedRows = SoftLimitUtil.softLimit(getExactLimit(), SOFT_LIMIT_CONFIDENCE, selectivity);
@@ -420,7 +417,7 @@ public class QueryController
     }
 
     /**
-     * Build a {@link RangeIterator.Builder} from the given list of expressions by applying given operation (OR/AND).
+     * Build a {@link KeyRangeIterator.Builder} from the given list of expressions by applying given operation (OR/AND).
      * Building of such builder involves index search, results of which are persisted in the internal resources list
      *
      * @param op The operation type to coalesce expressions with.
@@ -428,16 +425,16 @@ public class QueryController
      *
      * @return range iterator builder based on given expressions and operation type.
      */
-    public RangeIterator buildRangeIteratorForExpressions(Operation.OperationType op, Collection<Expression> expressions)
+    public KeyRangeIterator buildRangeIteratorForExpressions(Operation.OperationType op, Collection<Expression> expressions)
     {
         assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + filterOperation;
 
         // VSTODO move ANN out of expressions and into its own abstraction? That will help get generic ORDER BY support
         Collection<Expression> exp = expressions.stream().filter(e -> e.operation != Expression.Op.ANN).collect(Collectors.toList());
-        boolean defer = op == Operation.OperationType.OR || RangeIntersectionIterator.shouldDefer(exp.size());
-        RangeIterator.Builder builder = op == Operation.OperationType.OR
-                                        ? RangeUnionIterator.builder()
-                                        : RangeIntersectionIterator.builder(RangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT);
+        boolean defer = op == Operation.OperationType.OR || KeyRangeIntersectionIterator.shouldDefer(exp.size());
+        KeyRangeIterator.Builder builder = op == Operation.OperationType.OR
+                                        ? KeyRangeUnionIterator.builder()
+                                        : KeyRangeIntersectionIterator.builder(KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT);
 
         Set<Map.Entry<Expression, NavigableSet<SSTableIndex>>> view = referenceAndGetView(op, exp).entrySet();
 
@@ -446,7 +443,7 @@ public class QueryController
             for (Map.Entry<Expression, NavigableSet<SSTableIndex>> e : view)
             {
                 @SuppressWarnings("resource") // RangeIterators are closed by releaseIndexes
-                RangeIterator index = TermIterator.build(e.getKey(), e.getValue(), mergeRange, queryContext, defer, Integer.MAX_VALUE);
+                KeyRangeIterator index = TermIterator.build(e.getKey(), e.getValue(), mergeRange, queryContext, defer, Integer.MAX_VALUE);
 
                 builder.add(index);
             }
@@ -489,7 +486,7 @@ public class QueryController
     }
 
     // This is a hybrid query. We apply all other predicates before ordering and limiting.
-    public CloseableIterator<ScoredPrimaryKey> getTopKRows(RangeIterator source, RowFilter.Expression expression)
+    public CloseableIterator<ScoredPrimaryKey> getTopKRows(KeyRangeIterator source, RowFilter.Expression expression)
     {
         List<CloseableIterator<ScoredPrimaryKey>> scoredPrimaryKeyIterators = new ArrayList<>();
         List<SSTableIndex> indexesToRelease = new ArrayList<>();
@@ -814,13 +811,13 @@ public class QueryController
      *
      * @param iterator iterator over the keys from the index(es)
      */
-    private float estimateSelectivity(RangeIterator iterator)
+    private float estimateSelectivity(KeyRangeIterator iterator)
     {
         long totalRowCount = estimateTotalAvailableRows();
         return estimateSelectivity(iterator, totalRowCount);
     }
 
-    private float estimateSelectivity(RangeIterator iterator, long totalRowCount)
+    private float estimateSelectivity(KeyRangeIterator iterator, long totalRowCount)
     {
         float selectivity;
 
@@ -830,18 +827,18 @@ public class QueryController
         // For intersection and union we assume predicates are independent
         // (column values are not correlated with each other).
         // This assumption is not neccesarily true, but we have no statistical information to do any better.
-        if (iterator instanceof RangeIntersectionIterator)
+        if (iterator instanceof KeyRangeIntersectionIterator)
         {
-            RangeIntersectionIterator intersectionIterator = (RangeIntersectionIterator) iterator;
+            KeyRangeIntersectionIterator intersectionIterator = (KeyRangeIntersectionIterator) iterator;
             selectivity = 1.0f;
-            for (RangeIterator range : intersectionIterator.ranges)
+            for (KeyRangeIterator range : intersectionIterator.ranges)
                 selectivity *= estimateSelectivity(range, totalRowCount);
         }
-        else if (iterator instanceof RangeUnionIterator)
+        else if (iterator instanceof KeyRangeUnionIterator)
         {
             selectivity = 0.0f;
-            RangeUnionIterator unionIterator = (RangeUnionIterator) iterator;
-            for (RangeIterator range : unionIterator.ranges)
+            KeyRangeUnionIterator unionIterator = (KeyRangeUnionIterator) iterator;
+            for (KeyRangeIterator range : unionIterator.ranges)
                 selectivity = 1.0f - (1.0f - selectivity) * (1.0f - estimateSelectivity(range, totalRowCount));
         }
         else

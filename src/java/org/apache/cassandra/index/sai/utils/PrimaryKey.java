@@ -26,6 +26,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 import org.apache.cassandra.index.sai.disk.v2.RowAwarePrimaryKeyFactory;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -40,6 +41,21 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  */
 public interface PrimaryKey extends Comparable<PrimaryKey>
 {
+    enum Kind
+    {
+        TOKEN(false),
+        SKINNY(false),
+        WIDE(true),
+        STATIC(true);
+
+        public final boolean hasClustering;
+
+        Kind(boolean hasClustering)
+        {
+            this.hasClustering = hasClustering;
+        }
+    }
+
     /**
      * A factory for creating {@link PrimaryKey} instances
      */
@@ -104,11 +120,20 @@ public interface PrimaryKey extends Comparable<PrimaryKey>
      *                        factory to use
      * @return a {@link Factory} for {@link PrimaryKey} creation
      */
-    static Factory factory(ClusteringComparator clusteringComparator, IndexFeatureSet indexFeatureSet)
+    static Factory factory(TableMetadata tableMetadata, IndexFeatureSet indexFeatureSet)
     {
-        return indexFeatureSet.isRowAware() ? new RowAwarePrimaryKeyFactory(clusteringComparator)
+        return indexFeatureSet.isRowAware() ? new RowAwarePrimaryKeyFactory(tableMetadata)
                                             : new PartitionAwarePrimaryKeyFactory();
     }
+
+    /**
+     * Returns the {@link Kind} of the {@link PrimaryKey}. The {@link Kind} is used locally in the {@link #compareTo(Object)}
+     * methods to determine how far the comparision needs to go between keys.
+     * <p>
+     * The {@link Kind} values have a categorization of {@code isClustering}. This indicates whether the key belongs to
+     * a table with clustering tables or not.
+     */
+    Kind kind();
 
     /**
      * Returns the {@link Token} associated with this primary key.
@@ -178,4 +203,19 @@ public interface PrimaryKey extends Comparable<PrimaryKey>
      * @return the {@code ByteSource} max prefix byte comparable.
      */
     ByteSource asComparableBytesMaxPrefix(ByteComparable.Version version);
+
+    default PrimaryKey toStatic()
+    {
+        throw new UnsupportedOperationException("Only STATIC and WIDE keys can be converted to STATIC");
+    }
+
+    /**
+     * Assumes static keys are before wide keys for the same partition.
+     * A static key is not equal to a wide key.
+     */
+    default int compareToStrict(PrimaryKey o)
+    {
+        return compareTo(o);
+    }
+
 }

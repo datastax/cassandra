@@ -42,6 +42,7 @@ import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.lucene.store.IndexInput;
 
 public class V2OnDiskFormat extends V1OnDiskFormat
@@ -88,9 +89,9 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator)
+    public PrimaryKey.Factory primaryKeyFactory(TableMetadata tableMetadata)
     {
-        return new RowAwarePrimaryKeyFactory(comparator);
+        return new RowAwarePrimaryKeyFactory(tableMetadata);
     }
 
     @Override

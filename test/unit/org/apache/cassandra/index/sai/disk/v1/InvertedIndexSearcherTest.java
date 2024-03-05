@@ -39,8 +39,8 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -48,10 +48,15 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class InvertedIndexSearcherTest extends SaiRandomizedTest
+public class InvertedIndexSearcherTest extends SAIRandomizedTester
 {
     public static final int LIMIT = Integer.MAX_VALUE;
 
@@ -77,7 +82,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         {
             for (int t = 0; t < numTerms; ++t)
             {
-                try (RangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
+                try (KeyRangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
                         .add(Operator.EQ, wrap(termsEnum.get(t).left)), null, new QueryContext(), false, LIMIT))
                 {
                     assertTrue(results.hasNext());
@@ -92,7 +97,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                     assertFalse(results.hasNext());
                 }
 
-                try (RangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
+                try (KeyRangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
                         .add(Operator.EQ, wrap(termsEnum.get(t).left)), null, new QueryContext(), false, LIMIT))
                 {
                     assertTrue(results.hasNext());
@@ -114,7 +119,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 
             // try searching for terms that weren't indexed
             final String tooLongTerm = randomSimpleString(10, 12);
-            RangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
+            KeyRangeIterator results = searcher.search(new Expression(SAITester.createIndexContext("meh", UTF8Type.instance))
                                                                 .add(Operator.EQ, UTF8Type.instance.decompose(tooLongTerm)), null, new QueryContext(), false, LIMIT);
             assertFalse(results.hasNext());
 

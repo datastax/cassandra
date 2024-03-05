@@ -76,7 +76,7 @@ public class IndexDescriptorTest
 
         createFileOnDisk("-SAI_GroupComplete.db");
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, SAITester.EMPTY_TABLE);
 
         assertEquals(Version.AA, indexDescriptor.version);
         assertTrue(indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER));
@@ -90,7 +90,7 @@ public class IndexDescriptorTest
         createFileOnDisk("-SAI_GroupComplete.db");
         createFileOnDisk("-SAI_test_index_ColumnComplete.db");
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, SAITester.EMPTY_TABLE);
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
 
         assertEquals(Version.AA, indexDescriptor.version);
@@ -104,7 +104,7 @@ public class IndexDescriptorTest
 
         createFileOnDisk("-SAI+ba+GroupComplete.db");
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, SAITester.EMPTY_TABLE);
 
         assertEquals(Version.BA, indexDescriptor.version);
         assertTrue(indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER));
@@ -117,7 +117,7 @@ public class IndexDescriptorTest
 
         createFileOnDisk("-SAI+ba+test_index+ColumnComplete.db");
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, SAITester.EMPTY_TABLE);
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
 
         assertEquals(Version.BA, indexDescriptor.version);
@@ -134,7 +134,7 @@ public class IndexDescriptorTest
         createFileOnDisk("-SAI_TokenValues.db");
         createFileOnDisk("-SAI_OffsetsValues.db");
 
-        IndexDescriptor result = IndexDescriptor.create(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor result = IndexDescriptor.create(descriptor, SAITester.EMPTY_TABLE);
 
         assertTrue(result.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER));
         assertTrue(result.hasComponent(IndexComponent.GROUP_META));
@@ -154,7 +154,7 @@ public class IndexDescriptorTest
         createFileOnDisk("-SAI_test_index_PostingLists.db");
 
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, SAITester.EMPTY_TABLE);
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
 
         assertTrue(indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext));
@@ -174,7 +174,7 @@ public class IndexDescriptorTest
         createFileOnDisk("-SAI_test_index_KDTree.db");
         createFileOnDisk("-SAI_test_index_KDTreePostingLists.db");
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, Murmur3Partitioner.instance, SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, SAITester.EMPTY_TABLE);
         IndexContext indexContext = SAITester.createIndexContext("test_index", Int32Type.instance);
 
         assertTrue(indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext));

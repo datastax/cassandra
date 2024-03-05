@@ -59,7 +59,7 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
@@ -132,7 +132,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
      *
      * @return operation
      */
-    private RangeIterator analyze()
+    private KeyRangeIterator analyze()
     {
         return controller.buildIterator();
     }
@@ -168,7 +168,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final Iterator<DataRange> keyRanges;
         private AbstractBounds<PartitionPosition> currentKeyRange;
 
-        private final RangeIterator operation;
+        private final KeyRangeIterator operation;
         private final FilterTree filterTree;
         private final QueryController controller;
         private final ReadExecutionController executionController;
@@ -177,7 +177,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
         private PrimaryKey lastKey;
 
-        private ResultRetriever(RangeIterator operation,
+        private ResultRetriever(KeyRangeIterator operation,
                                 FilterTree filterTree,
                                 QueryController controller,
                                 ReadExecutionController executionController,

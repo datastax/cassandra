@@ -51,6 +51,12 @@ public class PrimaryKeyWithSource implements PrimaryKey
     }
 
     @Override
+    public Kind kind()
+    {
+        return primaryKey.kind();
+    }
+
+    @Override
     public Token token()
     {
         return primaryKey.token();
@@ -93,9 +99,15 @@ public class PrimaryKeyWithSource implements PrimaryKey
     }
 
     @Override
+    public PrimaryKey toStatic()
+    {
+        return primaryKey.toStatic();
+    }
+
+    @Override
     public int compareTo(PrimaryKey o)
     {
-        if (o instanceof PrimaryKeyWithSource)
+        if (o instanceof PrimaryKeyWithSource && kind() == o.kind())
         {
             var other = (PrimaryKeyWithSource) o;
             if (sourceSstableId.equals(other.sourceSstableId))
@@ -105,9 +117,21 @@ public class PrimaryKeyWithSource implements PrimaryKey
     }
 
     @Override
-    public boolean equals(Object o)
+    public int compareToStrict(PrimaryKey o)
     {
         if (o instanceof PrimaryKeyWithSource)
+        {
+            var other = (PrimaryKeyWithSource) o;
+            if (sourceSstableId.equals(other.sourceSstableId))
+                return Long.compare(sourceRowId, other.sourceRowId);
+        }
+        return primaryKey.compareToStrict(o);
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (o instanceof PrimaryKeyWithSource && kind() == ((PrimaryKeyWithSource) o).kind())
         {
             var other = (PrimaryKeyWithSource) o;
             if (sourceSstableId.equals(other.sourceSstableId))

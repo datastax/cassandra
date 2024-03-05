@@ -182,10 +182,7 @@ public class TrieMemoryIndexTest
 
         IndexMetadata indexMetadata = IndexMetadata.fromSchemaMetadata("col_index", IndexMetadata.Kind.CUSTOM, options);
         Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(table, indexMetadata);
-        IndexContext indexContext = new IndexContext(table.keyspace,
-                                                     table.name,
-                                                     table.partitionKeyType,
-                                                     table.comparator,
+        IndexContext indexContext = new IndexContext(table,
                                                      target.left,
                                                      target.right,
                                                      indexMetadata,

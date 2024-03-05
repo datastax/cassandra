@@ -22,17 +22,17 @@ import java.util.SortedSet;
 import java.util.TreeSet;
 
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 
 public class KeyRangeIteratorTest extends AbstractKeyRangeIteratorTest
 {
     @Override
-    protected RangeIterator makeIterator(long minimumTokenValue, long maximumTokenValue, long... tokens)
+    protected KeyRangeIterator makeIterator(long minimumTokenValue, long maximumTokenValue, long... tokens)
     {
         SortedSet<PrimaryKey> set = new TreeSet<>();
 
         Arrays.stream(tokens).forEach(t -> set.add(keyForToken(t)));
 
-        return new KeyRangeIterator(set);
+        return new org.apache.cassandra.index.sai.memory.KeyRangeIterator(set);
     }
 }

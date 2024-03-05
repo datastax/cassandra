@@ -45,6 +45,12 @@ public class ScoredPrimaryKey implements PrimaryKey
     }
 
     @Override
+    public Kind kind()
+    {
+        return primaryKey.kind();
+    }
+
+    @Override
     public Token token()
     {
         return primaryKey.token();
@@ -87,9 +93,21 @@ public class ScoredPrimaryKey implements PrimaryKey
     }
 
     @Override
+    public PrimaryKey toStatic()
+    {
+        return new ScoredPrimaryKey(primaryKey.toStatic(), score);
+    }
+
+    @Override
     public int compareTo(PrimaryKey o)
     {
         return primaryKey.compareTo(o);
+    }
+
+    @Override
+    public int compareToStrict(PrimaryKey o)
+    {
+        return primaryKey.compareToStrict(o);
     }
 
     @Override
@@ -106,4 +124,6 @@ public class ScoredPrimaryKey implements PrimaryKey
     {
         return primaryKey.equals(obj);
     }
+
+
 }

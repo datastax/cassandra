@@ -28,11 +28,11 @@ import org.junit.rules.RuleChain;
 import org.junit.rules.TemporaryFolder;
 import org.junit.rules.TestRule;
 
-import com.carrotsearch.randomizedtesting.RandomizedTest;
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
@@ -42,14 +42,16 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.TableMetadata;
 
+import static org.junit.Assert.assertEquals;
+
 @ThreadLeakScope(ThreadLeakScope.Scope.NONE)
-public class SaiRandomizedTest extends RandomizedTest
+public class SAIRandomizedTester extends SAITester
 {
     private static Thread.UncaughtExceptionHandler handler;
 
     @SuppressWarnings("unused")
     @BeforeClass
-    private static void saveUncaughtExceptionHandler()
+    public static void saveUncaughtExceptionHandler()
     {
         handler = Thread.getDefaultUncaughtExceptionHandler();
         DatabaseDescriptor.daemonInitialization();
@@ -57,7 +59,7 @@ public class SaiRandomizedTest extends RandomizedTest
 
     @SuppressWarnings("unused")
     @AfterClass
-    private static void restoreUncaughtExceptionHandler()
+    public static void restoreUncaughtExceptionHandler()
     {
         Thread.setDefaultUncaughtExceptionHandler(handler);
     }
@@ -125,7 +127,7 @@ public class SaiRandomizedTest extends RandomizedTest
 
     public static int nextInt(int min, int max)
     {
-        return between(min, max - 1);
+        return (int) between(min, max - 1);
     }
 
     public static long nextLong(long min, long max)
@@ -133,7 +135,7 @@ public class SaiRandomizedTest extends RandomizedTest
         return between(min, max - 1);
     }
 
-    public static double nextDouble()
+    public static double randomDouble()
     {
         return randomDoubleBetween(0, 1);
     }
@@ -143,37 +145,28 @@ public class SaiRandomizedTest extends RandomizedTest
         return randomLongBetween(min, max);
     }
 
+    public static boolean randomBoolean()
+    {
+        return getRandom().nextBoolean();
+    }
+
     public static int randomIntBetween(int min, int max)
     {
-        if (min < 0) throw new IllegalArgumentException("min must be >= 0: " + min);
         if (min > max) throw new IllegalArgumentException("max must be >= min: " + min + ", " + max);
         return min == max ? min : (int) randomDoubleBetween((double) min, (double) max);
     }
 
     public static long randomLongBetween(long min, long max)
     {
-        if (min < 0) throw new IllegalArgumentException("min must be >= 0: " + min);
         if (min > max) throw new IllegalArgumentException("max must be >= min: " + min + ", " + max);
         return min == max ? min : (long) randomDoubleBetween((double) min, (double) max);
     }
 
     public static double randomDoubleBetween(double min, double max)
     {
-        if (min < 0) throw new IllegalArgumentException("min must be >= 0: " + min);
         if (min > max) throw new IllegalArgumentException("max must be >= min: " + min + ", " + max);
 
-        return min == max ? min : min + (max - min) * randomDouble();
-    }
-
-    public static long scaledRandomLongBetween(long min, long max)
-    {
-        if (min < 0) throw new IllegalArgumentException("min must be >= 0: " + min);
-        if (min > max) throw new IllegalArgumentException("max must be >= min: " + min + ", " + max);
-
-        double point = Math.min(1, Math.abs(randomGaussian()) * 0.3) * multiplier();
-        double range = max - min;
-        long scaled = Math.round(Math.min(point * range, range));
-        return isNightly() ? max - scaled : min + scaled;
+        return min == max ? min : min + (max - min) * getRandom().nextDouble();
     }
 
     public static String randomSimpleString(int minLength, int maxLength)

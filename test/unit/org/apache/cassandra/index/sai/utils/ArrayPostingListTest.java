@@ -21,7 +21,9 @@ import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
 
-public class ArrayPostingListTest extends SaiRandomizedTest
+import static org.junit.Assert.assertEquals;
+
+public class ArrayPostingListTest extends SAIRandomizedTester
 {
     @Test
     public void testArrayPostingList() throws Exception

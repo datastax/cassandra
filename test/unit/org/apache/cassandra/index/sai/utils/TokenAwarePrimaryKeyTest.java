@@ -22,7 +22,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.v1.PartitionAwarePrimaryKeyFactory;
 
-public class TokenAwarePrimaryKeyTest extends AbstractPrimaryKeyTest
+public class TokenAwarePrimaryKeyTest extends AbstractPrimaryKeyTester
 {
     @Test
     public void simplePartitionTokenAwareTest() throws Throwable

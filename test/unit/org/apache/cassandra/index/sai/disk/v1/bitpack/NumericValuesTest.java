@@ -27,10 +27,12 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
-import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.SAIRandomizedTester;
 import org.apache.cassandra.io.util.FileHandle;
 
-public class NumericValuesTest extends SaiRandomizedTest
+import static org.junit.Assert.assertEquals;
+
+public class NumericValuesTest extends SAIRandomizedTester
 {
     @Test
     public void testMonotonic() throws Exception

@@ -238,10 +238,7 @@ public class StorageAttachedIndex implements Index
         this.config = config;
         TableMetadata tableMetadata = baseCfs.metadata();
         Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, config);
-        this.indexContext = new IndexContext(tableMetadata.keyspace,
-                                             tableMetadata.name,
-                                             tableMetadata.partitionKeyType,
-                                             tableMetadata.comparator,
+        this.indexContext = new IndexContext(tableMetadata,
                                              target.left,
                                              target.right,
                                              config,

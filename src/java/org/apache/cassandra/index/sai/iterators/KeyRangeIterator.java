@@ -15,40 +15,43 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.utils;
+package org.apache.cassandra.index.sai.iterators;
 
 import java.io.Closeable;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
+import java.util.Properties;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.index.sai.utils.AbstractIterator;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
  * Range iterators contain primary keys, in sorted order, with no duplicates.  They also
  * know their minimum and maximum keys, and an upper bound on the number of keys they contain.
  */
-public abstract class RangeIterator extends AbstractIterator<PrimaryKey> implements Closeable
+public abstract class KeyRangeIterator extends AbstractIterator<PrimaryKey> implements Closeable
 {
     private static final Builder.EmptyRangeIterator EMPTY = new Builder.EmptyRangeIterator();
 
     private final PrimaryKey min, max;
     private final long count;
 
-    protected RangeIterator(Builder.Statistics statistics)
+    protected KeyRangeIterator(Builder.Statistics statistics)
     {
         this(statistics.min, statistics.max, statistics.tokenCount);
     }
 
-    public RangeIterator(RangeIterator range)
+    public KeyRangeIterator(KeyRangeIterator range)
     {
         this(range == null ? null : range.min, range == null ? null : range.max, range == null ? -1 : range.count);
     }
 
-    public RangeIterator(PrimaryKey min, PrimaryKey max, long count)
+    public KeyRangeIterator(PrimaryKey min, PrimaryKey max, long count)
     {
         if (min == null || max == null || count == 0)
         {
@@ -110,7 +113,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
      */
     protected abstract void performSkipTo(PrimaryKey nextKey);
 
-    public static RangeIterator empty()
+    public static KeyRangeIterator empty()
     {
         return EMPTY;
     }
@@ -128,7 +131,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         protected final Statistics statistics;
 
         @VisibleForTesting
-        protected final PriorityQueue<RangeIterator> ranges;
+        protected final PriorityQueue<KeyRangeIterator> ranges;
 
         public Builder(IteratorType type)
         {
@@ -156,12 +159,12 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             return ranges.size();
         }
 
-        public Collection<RangeIterator> ranges()
+        public Collection<KeyRangeIterator> ranges()
         {
             return ranges;
         }
 
-        public Builder add(RangeIterator range)
+        public Builder add(KeyRangeIterator range)
         {
             if (range == null)
                 return this;
@@ -175,7 +178,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             return this;
         }
 
-        public Builder add(List<RangeIterator> ranges)
+        public Builder add(List<KeyRangeIterator> ranges)
         {
             if (ranges == null || ranges.isEmpty())
                 return this;
@@ -184,7 +187,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             return this;
         }
 
-        public final RangeIterator build()
+        public final KeyRangeIterator build()
         {
             if (rangeCount() == 0)
                 return new Builder.EmptyRangeIterator();
@@ -192,7 +195,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
                 return buildIterator();
         }
 
-        public static class EmptyRangeIterator extends RangeIterator
+        public static class EmptyRangeIterator extends KeyRangeIterator
         {
             EmptyRangeIterator() { super(null, null, 0); }
             public org.apache.cassandra.index.sai.utils.PrimaryKey computeNext() { return endOfData(); }
@@ -200,7 +203,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             public void close() { }
         }
 
-        protected abstract RangeIterator buildIterator();
+        protected abstract KeyRangeIterator buildIterator();
 
         public static class Statistics
         {
@@ -210,9 +213,9 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             protected long tokenCount;
 
             // iterator with the least number of items
-            protected RangeIterator minRange;
+            protected KeyRangeIterator minRange;
             // iterator with the most number of items
-            protected RangeIterator maxRange;
+            protected KeyRangeIterator maxRange;
 
             // tracks if all of the added ranges overlap, which is useful in case of intersection,
             // as it gives direct answer as to such iterator is going to produce any results.
@@ -233,7 +236,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
              *
              * @param range The range to update statistics with.
              */
-            public void update(RangeIterator range)
+            public void update(KeyRangeIterator range)
             {
                 switch (iteratorType)
                 {
@@ -286,12 +289,12 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
                 hasRange = true;
             }
 
-            private RangeIterator min(RangeIterator a, RangeIterator b)
+            private KeyRangeIterator min(KeyRangeIterator a, KeyRangeIterator b)
             {
                 return a.getMaxKeys() > b.getMaxKeys() ? b : a;
             }
 
-            private RangeIterator max(RangeIterator a, RangeIterator b)
+            private KeyRangeIterator max(KeyRangeIterator a, KeyRangeIterator b)
             {
                 return a.getMaxKeys() > b.getMaxKeys() ? a : b;
             }
@@ -309,7 +312,7 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
     }
 
     @VisibleForTesting
-    protected static <U extends Comparable<U>> boolean isOverlapping(RangeIterator a, RangeIterator b)
+    protected static <U extends Comparable<U>> boolean isOverlapping(KeyRangeIterator a, KeyRangeIterator b)
     {
         return isOverlapping(a.peek(), a.getMaximum(), b);
     }
@@ -332,27 +335,27 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
      *  If either range is empty, they're disjoint.
      */
     @VisibleForTesting
-    protected static boolean isOverlapping(PrimaryKey min, PrimaryKey max, RangeIterator b)
+    protected static boolean isOverlapping(PrimaryKey min, PrimaryKey max, KeyRangeIterator b)
     {
         return (min != null && max != null) &&
                b.hasNext() && min.compareTo(b.getMaximum()) <= 0 && b.peek().compareTo(max) <= 0;
     }
 
     @SuppressWarnings("unchecked")
-    private static <T extends Comparable> T nullSafeMin(T a, T b)
+    private static PrimaryKey nullSafeMin(PrimaryKey a, PrimaryKey b)
     {
         if (a == null) return b;
         if (b == null) return a;
 
-        return a.compareTo(b) > 0 ? b : a;
+        return a.compareToStrict(b) > 0 ? b : a;
     }
 
     @SuppressWarnings("unchecked")
-    private static <T extends Comparable> T nullSafeMax(T a, T b)
+    private static PrimaryKey nullSafeMax(PrimaryKey a, PrimaryKey b)
     {
         if (a == null) return b;
         if (b == null) return a;
 
-        return a.compareTo(b) > 0 ? a : b;
+        return a.compareToStrict(b) > 0 ? a : b;
     }
 }

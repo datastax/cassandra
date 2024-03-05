@@ -36,8 +36,8 @@ import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -162,13 +162,13 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public RangeIterator search(Expression expression,
-                                AbstractBounds<PartitionPosition> keyRange,
-                                QueryContext context,
-                                boolean defer,
-                                int limit) throws IOException
+    public KeyRangeIterator search(Expression expression,
+                                   AbstractBounds<PartitionPosition> keyRange,
+                                   QueryContext context,
+                                   boolean defer,
+                                   int limit) throws IOException
     {
-        RangeConcatIterator.Builder rangeConcatIteratorBuilder = RangeConcatIterator.builder(segments.size());
+        KeyRangeConcatIterator.Builder rangeConcatIteratorBuilder = KeyRangeConcatIterator.builder(segments.size());
 
         for (Segment segment : segments)
         {

@@ -71,9 +71,9 @@ import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
@@ -81,6 +81,7 @@ import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -114,11 +115,7 @@ public class IndexContext
 
     public static final String ENABLE_SEGMENT_COMPACTION_OPTION_NAME = "enable_segment_compaction";
 
-    private final AbstractType<?> partitionKeyType;
-    private final ClusteringComparator clusteringComparator;
-
-    private final String keyspace;
-    private final String table;
+    private final TableMetadata table;
     private final ColumnMetadata column;
     private final IndexTarget.Type indexType;
     private final AbstractType<?> validator;
@@ -142,19 +139,13 @@ public class IndexContext
 
     private final int maxTermSize;
 
-    public IndexContext(@Nonnull String keyspace,
-                        @Nonnull String table,
-                        @Nonnull AbstractType<?> partitionKeyType,
-                        @Nonnull ClusteringComparator clusteringComparator,
+    public IndexContext(@Nonnull TableMetadata table,
                         @Nonnull ColumnMetadata column,
                         @Nonnull IndexTarget.Type indexType,
                         IndexMetadata config,
                         @Nonnull Memtable.Owner owner)
     {
-        this.keyspace = keyspace;
         this.table = table;
-        this.partitionKeyType = partitionKeyType;
-        this.clusteringComparator = clusteringComparator;
         this.column = column;
         this.indexType = indexType;
         this.config = config;
@@ -163,14 +154,14 @@ public class IndexContext
         this.validator = TypeUtil.cellValueType(column, indexType);
         this.owner = owner;
 
-        this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
-                                              : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
+        this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(table.keyspace, table.name, getIndexName())
+                                              : new ColumnQueryMetrics.BKDIndexMetrics(table.keyspace, table.name, getIndexName());
 
-        this.primaryKeyFactory = Version.LATEST.onDiskFormat().primaryKeyFactory(clusteringComparator);
+        this.primaryKeyFactory = Version.LATEST.onDiskFormat().primaryKeyFactory(table);
 
         if (config != null)
         {
-            String fullIndexName = String.format("%s.%s.%s", this.keyspace, this.table, this.config.name);
+            String fullIndexName = String.format("%s.%s.%s", table.keyspace, table.name, this.config.name);
             this.indexWriterConfig = IndexWriterConfig.fromOptions(fullIndexName, validator, config.options);
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(config.options);
             this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), config.options);
@@ -200,7 +191,7 @@ public class IndexContext
 
     public AbstractType<?> keyValidator()
     {
-        return partitionKeyType;
+        return table.partitionKeyType;
     }
 
     public PrimaryKey.Factory keyFactory()
@@ -210,7 +201,7 @@ public class IndexContext
 
     public ClusteringComparator comparator()
     {
-        return clusteringComparator;
+        return table.comparator;
     }
 
     public IndexMetrics getIndexMetrics()
@@ -225,10 +216,15 @@ public class IndexContext
 
     public String getKeyspace()
     {
-        return keyspace;
+        return table.keyspace;
     }
 
     public String getTable()
+    {
+        return table.name;
+    }
+
+    public TableMetadata getTableMetadata()
     {
         return table;
     }
@@ -411,24 +407,24 @@ public class IndexContext
                             .orElse(null);
     }
 
-    public RangeIterator searchMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public KeyRangeIterator searchMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         if (e.getOp().isNonEquality())
         {
             Expression negExpression = e.negated();
-            RangeIterator allKeys = scanMemtable(keyRange);
-            RangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
-            return RangeAntiJoinIterator.create(allKeys, matchedKeys);
+            KeyRangeIterator allKeys = scanMemtable(keyRange);
+            KeyRangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
+            return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
         }
 
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
         if (memtables.isEmpty())
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
 
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         for (MemtableIndex index : memtables)
         {
@@ -453,19 +449,19 @@ public class IndexContext
         return result;
     }
 
-    private RangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
+    private KeyRangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
     {
         Collection<Memtable> memtables = liveMemtables.keySet();
         if (memtables.isEmpty())
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
 
-        RangeIterator.Builder builder = RangeUnionIterator.builder(memtables.size());
+        KeyRangeIterator.Builder builder = KeyRangeUnionIterator.builder(memtables.size());
 
         for (Memtable memtable : memtables)
         {
-            RangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
+            KeyRangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
             builder.add(memtableIterator);
         }
         return builder.build();
@@ -661,7 +657,7 @@ public class IndexContext
             case PARTITION_KEY:
                 if (key == null)
                     return null;
-                return partitionKeyType instanceof CompositeType
+                return table.partitionKeyType instanceof CompositeType
                        ? CompositeType.extractComponent(key.getKey(), column.position())
                        : key.getKey();
             case CLUSTERING:
@@ -766,13 +762,12 @@ public class IndexContext
         return Objects.equals(column, other.column) &&
                Objects.equals(indexType, other.indexType) &&
                Objects.equals(config, other.config) &&
-               Objects.equals(partitionKeyType, other.partitionKeyType) &&
-               Objects.equals(clusteringComparator, other.clusteringComparator);
+               Objects.equals(table, other.table);
     }
 
     public int hashCode()
     {
-        return Objects.hash(column, indexType, config, partitionKeyType, clusteringComparator);
+        return Objects.hash(column, indexType, config, table);
     }
 
     /**
@@ -790,7 +785,7 @@ public class IndexContext
     public String logMessage(String message)
     {
         // Index names are unique only within a keyspace.
-        return String.format("[%s.%s.%s] %s", keyspace, table, config == null ? "?" : config.name, message);
+        return String.format("[%s.%s.%s] %s", table.keyspace, table.name, config == null ? "?" : config.name, message);
     }
 
     /**

@@ -62,7 +62,9 @@ import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
@@ -78,10 +80,12 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
@@ -125,7 +129,10 @@ public class SAITester extends CQLTester
 
     public static final ClusteringComparator EMPTY_COMPARATOR = new ClusteringComparator();
 
-    public static final PrimaryKey.Factory TEST_FACTORY = Version.LATEST.onDiskFormat().primaryKeyFactory(EMPTY_COMPARATOR);
+    public static final TableMetadata EMPTY_TABLE = TableMetadata.builder("test_ks", "test_cf")
+                                                                 .addPartitionKeyColumn("pk", Int32Type.instance)
+                                                                 .build();
+    public static final PrimaryKey.Factory TEST_FACTORY = Version.LATEST.onDiskFormat().primaryKeyFactory(EMPTY_TABLE);
 
 
     static
@@ -207,10 +214,7 @@ public class SAITester extends CQLTester
 
     public static IndexContext createIndexContext(String name, AbstractType<?> validator, ColumnFamilyStore cfs)
     {
-        return new IndexContext(cfs.getKeyspaceName(),
-                                cfs.getTableName(),
-                                UTF8Type.instance,
-                                new ClusteringComparator(),
+        return new IndexContext(cfs.metadata(),
                                 ColumnMetadata.regularColumn("sai", "internal", name, validator),
                                 IndexTarget.Type.SIMPLE,
                                 IndexMetadata.fromSchemaMetadata(name, IndexMetadata.Kind.CUSTOM, null),
@@ -219,11 +223,15 @@ public class SAITester extends CQLTester
 
     public static IndexContext createIndexContext(String name, AbstractType<?> validator)
     {
-        return new IndexContext("test_ks",
-                                "test_cf",
-                                UTF8Type.instance,
-                                new ClusteringComparator(),
-                                ColumnMetadata.regularColumn("sai", "internal", name, validator),
+        ColumnMetadata column = ColumnMetadata.regularColumn("sai", "internal", name, validator);
+        TableMetadata table = TableMetadata.builder("test_ks", "test_cf")
+                                           .addPartitionKeyColumn("pk", Int32Type.instance)
+                                           .addColumn(column)
+                                           .partitioner(Murmur3Partitioner.instance)
+                                           .caching(CachingParams.CACHE_NOTHING)
+                                           .build();
+        return new IndexContext(table,
+                                column,
                                 IndexTarget.Type.SIMPLE,
                                 IndexMetadata.fromSchemaMetadata(name, IndexMetadata.Kind.CUSTOM, null),
                                 MockSchema.newCFS("test_ks"));
@@ -231,11 +239,15 @@ public class SAITester extends CQLTester
 
     public static IndexContext createIndexContext(String columnName, String indexName, AbstractType<?> validator)
     {
-        return new IndexContext("test_ks",
-                                "test_cf",
-                                UTF8Type.instance,
-                                new ClusteringComparator(),
-                                ColumnMetadata.regularColumn("sai", "internal", columnName, validator),
+        ColumnMetadata column = ColumnMetadata.regularColumn("sai", "internal", columnName, validator);
+        TableMetadata table = TableMetadata.builder("test_ks", "test_cf")
+                                           .addPartitionKeyColumn("pk", Int32Type.instance)
+                                           .addColumn(column)
+                                           .partitioner(Murmur3Partitioner.instance)
+                                           .caching(CachingParams.CACHE_NOTHING)
+                                           .build();
+        return new IndexContext(table,
+                                column,
                                 IndexTarget.Type.SIMPLE,
                                 IndexMetadata.fromSchemaMetadata(indexName, IndexMetadata.Kind.CUSTOM, null),
                                 MockSchema.newCFS("test_ks"));
