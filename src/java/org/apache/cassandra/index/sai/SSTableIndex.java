@@ -36,7 +36,7 @@ import org.apache.cassandra.index.sai.disk.EmptyIndex;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
-import org.apache.cassandra.index.sai.disk.format.IndexIdentifier;
+import org.apache.cassandra.index.sai.disk.format.ComponentGroupId;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -198,7 +198,7 @@ public class SSTableIndex
 
     public Version getVersion()
     {
-        return sstableContext.indexDescriptor.getIndexVersion(IndexIdentifier.SSTABLE);
+        return sstableContext.indexDescriptor.getIndexVersion(ComponentGroupId.SSTABLE);
     }
 
     public IndexFeatureSet indexFeatureSet()

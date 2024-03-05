@@ -21,7 +21,7 @@ import com.google.common.base.Objects;
 
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.format.IndexIdentifier;
+import org.apache.cassandra.index.sai.disk.format.ComponentGroupId;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Throwables;
@@ -127,7 +127,7 @@ public class SSTableContext extends SharedCloseableImpl
      */
     public int openFilesPerSSTable()
     {
-        return indexDescriptor.getIndexVersion(IndexIdentifier.SSTABLE).onDiskFormat().openFilesPerSSTable();
+        return indexDescriptor.getIndexVersion(ComponentGroupId.SSTABLE).onDiskFormat().openFilesPerSSTable();
     }
 
     @Override
