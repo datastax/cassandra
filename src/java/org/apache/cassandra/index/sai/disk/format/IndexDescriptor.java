@@ -53,21 +53,23 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.IOUtils;
 
 /**
- * The {@link IndexDescriptor} is an analog of the SSTable {@link Descriptor} and provides version
+ * The `IndexDescriptor` is an analog of the SSTable {@link Descriptor} and provides version
  * specific information about the on-disk state of {@link StorageAttachedIndex}es.
- *
- * The {@IndexDescriptor} is primarily responsible for maintaining a view of the on-disk state
+ * <p>
+ * The `IndexDescriptor` is primarily responsible for maintaining a view of the on-disk state
  * of the SAI indexes for a specific {@link org.apache.cassandra.io.sstable.SSTable}. It maintains mappings
  * of the current on-disk components and files. It is responsible for opening files for use by
  * writers and readers.
- *
- * It's remaining responsibility is to act as a proxy to the {@link OnDiskFormat} associated with the
- * index {@link Version}.
+ * <p>
+ * Each sstable has per-index components associated with it, and also components that are shared
+ * by all indexes (especially the PrimaryKeyMap).
+ * <p>
+ * IndexDescriptor's remaining responsibility is to act as a proxy to the {@link OnDiskFormat}
+ * associated with the index {@link Version}.
  */
 public class IndexDescriptor
 {
@@ -87,9 +89,9 @@ public class IndexDescriptor
     // turns an index context or name into a unique identifier that can be identity-compared
     private final IndexIdentifier.Provider indexIdentifierProvider = new IndexIdentifier.Provider();
     // index -> version
-    private final Map<IndexIdentifier, Version> perIndexVersions = Maps.newHashMap();
+    private final Map<IndexIdentifier, Version> perIndexVersions = Maps.newIdentityHashMap();
     // index -> components
-    private final Map<IndexIdentifier, Set<IndexComponent>> perIndexComponents = Maps.newHashMap();
+    private final Map<IndexIdentifier, Set<IndexComponent>> perIndexComponents = Maps.newIdentityHashMap();
     // component -> file
     private final Map<AttachedIndexComponent, File> onDiskPerIndexFileMap = Maps.newHashMap();
 

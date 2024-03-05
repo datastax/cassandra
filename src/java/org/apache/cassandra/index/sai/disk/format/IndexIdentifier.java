@@ -21,28 +21,43 @@ package org.apache.cassandra.index.sai.disk.format;
 import java.util.HashMap;
 import java.util.Map;
 
+import javax.annotation.Nonnull;
+
 import org.apache.cassandra.index.sai.IndexContext;
 
 /**
  * A unique (within this sstable) identifier for a column OR sstable index.  The instances
  * may be compared using object identity.
- *
- * Usage: create a Provider() and then call get() to get an identifier for a column or sstable.
+ * <p>
+ * Usage: create a Provider() (per sstable) and then call get() to get an identifier for a column or sstable.
  * The Provider takes care of ensuring instance uniqueness.
  */
+@SuppressWarnings("InstantiationOfUtilityClass")
 public class IndexIdentifier
 {
     public static final IndexIdentifier SSTABLE = new IndexIdentifier();
+
+    private IndexIdentifier() {}
 
     public static class Provider
     {
         private final Map<String, IndexIdentifier> identifiers = new HashMap<>();
 
+        /**
+         * @return a unique identifier for the given index name (non-null)
+         */
         public IndexIdentifier get(String indexName)
         {
+            if (indexName == null)
+                throw new UnsupportedOperationException("indexName cannot be null");
             return identifiers.computeIfAbsent(indexName, __ -> new IndexIdentifier());
         }
 
+        /**
+         *
+         * @param indexContext the index whose identifier we want.  If null, returns the SSTABLE identifier.
+         * @return a unique identifier for the given index
+         */
         public IndexIdentifier get(IndexContext indexContext)
         {
             if (indexContext == null)
