@@ -344,7 +344,7 @@ public class FileHandle extends SharedCloseableImpl
          * @param order
          * @return
          */
-        public Builder byteOrder(ByteOrder order)
+        public Builder order(ByteOrder order)
         {
             this.order = order;
             return this;

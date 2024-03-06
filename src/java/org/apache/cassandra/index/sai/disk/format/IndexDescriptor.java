@@ -504,7 +504,7 @@ public class IndexDescriptor
     private FileHandle addByteOrderAndComplete(FileHandle.Builder builder, IndexComponent component, IndexContext context)
     {
         var order = getVersion(context).onDiskFormat().byteOrderFor(component, context);
-        return builder.byteOrder(order).complete();
+        return builder.order(order).complete();
     }
 
     /**
