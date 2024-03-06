@@ -25,6 +25,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.ArrayListMultimap;
 import org.apache.cassandra.io.util.File;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -57,7 +59,7 @@ public class CommitLogReader
     public static final int ALL_MUTATIONS = -1;
     private final CRC32 checksum;
     private final Map<TableId, AtomicInteger> invalidMutations;
-    public final List<String> segmentsWithInvalidMutations;
+    public final Multimap<String, TableId> segmentsWithInvalidMutations;
 
     private byte[] buffer;
 
@@ -65,7 +67,7 @@ public class CommitLogReader
     {
         checksum = new CRC32();
         invalidMutations = new HashMap<>();
-        segmentsWithInvalidMutations = new ArrayList<String>();
+        segmentsWithInvalidMutations = ArrayListMultimap.create();
         buffer = new byte[4096];
     }
 
@@ -446,7 +448,7 @@ public class CommitLogReader
             {
                 i = new AtomicInteger(1);
                 invalidMutations.put(ex.id, i);
-                segmentsWithInvalidMutations.add(desc.fileName());
+                segmentsWithInvalidMutations.put(desc.fileName(), ex.id);
             }
             else
                 i.incrementAndGet();
@@ -482,8 +484,8 @@ public class CommitLogReader
         if (shouldReplay)
             handler.handleMutation(mutation, size, entryLocation, desc);
 
-        // if the commit log segment was previously added to this list due to invalid mutations, it will be removed after successful replay
-        segmentsWithInvalidMutations.remove(desc.fileName());
+        // if the commit log segment was previously added to this list due to invalid mutations, it will be removed for those table ids that were successful replayed
+        mutation.getTableIds().forEach(tableid -> segmentsWithInvalidMutations.remove(desc.fileName(), tableid));
     }
 
     /**

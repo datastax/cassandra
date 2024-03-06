@@ -36,6 +36,8 @@ import java.util.function.Function;
 import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.ArrayListMultimap;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,7 +94,7 @@ public class CommitLog implements CommitLogMBean
     public final CommitLogArchiver archiver;
     public final CommitLogMetrics metrics;
     final AbstractCommitLogService executor;
-    public List<String> segmentsWithInvalidMutations = new ArrayList<>();
+    public Multimap<String, TableId> segmentsWithInvalidMutations;
 
     volatile Configuration configuration;
     private boolean started = false;
@@ -236,7 +238,7 @@ public class CommitLog implements CommitLogMBean
 
             for (File f : files)
             {
-                if(segmentsWithInvalidMutations.contains(f.name()))
+                if(!segmentsWithInvalidMutations.get(f.name()).isEmpty())
                 {
                     logger.debug("File {} should not be deleted as it contains invalid mutations", f.name());
                 }
@@ -268,12 +270,7 @@ public class CommitLog implements CommitLogMBean
           Now, we can do delete removed segments and add new ones or just reload afresh
           I decided to simply reload as this list is likely to be small, if it exists at all
          */
-        segmentsWithInvalidMutations = new ArrayList<>();
-        replayer.commitLogReader.segmentsWithInvalidMutations.forEach((file) ->
-        {
-            logger.warn("Skipped invalid mutations from file {}.", file);
-            segmentsWithInvalidMutations.add(file);
-        });
+        segmentsWithInvalidMutations = replayer.commitLogReader.segmentsWithInvalidMutations;
         return replayer.blockForWrites(flushReason);
     }
 
