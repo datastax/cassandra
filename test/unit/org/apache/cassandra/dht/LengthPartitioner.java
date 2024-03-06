@@ -250,6 +250,14 @@ public class LengthPartitioner implements IPartitioner
         }
 
         @Override
+        public Token nextValidToken()
+        {
+            Long next = token.equals(Long.MAX_VALUE) ? ZERO
+                    : token + 1;
+            return new BigIntegerToken(next);
+        }
+
+        @Override
         public long getLongValue()
         {
             return token;
