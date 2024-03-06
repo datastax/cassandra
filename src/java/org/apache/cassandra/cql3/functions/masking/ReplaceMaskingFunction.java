@@ -21,6 +21,7 @@ package org.apache.cassandra.cql3.functions.masking;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.functions.Arguments;
 import org.apache.cassandra.cql3.functions.FunctionArguments;
 import org.apache.cassandra.cql3.functions.FunctionFactory;
@@ -67,7 +68,7 @@ public class ReplaceMaskingFunction extends MaskingFunction
                                            FunctionParameter.sameAs(0, true, FunctionParameter.anyType(true)))
         {
             @Override
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args, List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
             {
                 AbstractType<?> replacedType = argTypes.get(0);
                 AbstractType<?> replacementType = argTypes.get(1);

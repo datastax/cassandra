@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.cql3.functions.Arguments;
@@ -136,7 +137,7 @@ public class HashMaskingFunction extends MaskingFunction
                                            FunctionParameter.optional(FunctionParameter.fixed(CQL3Type.Native.TEXT)))
         {
             @Override
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args, List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
             {
                 switch (argTypes.size())
                 {
@@ -145,7 +146,8 @@ public class HashMaskingFunction extends MaskingFunction
                     case 2:
                         return new HashMaskingFunction(name, argTypes.get(0), true);
                     default:
-                        throw invalidNumberOfArgumentsException();
+                        throw new InvalidRequestException("Invalid number of arguments for function " + this);
+//                        throw invalidNumberOfArgumentsException();
                 }
             }
         };
