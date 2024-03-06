@@ -192,7 +192,8 @@ public class IndexDescriptor
         {
             for (Version version : Version.ALL)
             {
-                if (componentExistsOnDisk(version, descriptor, IndexComponent.GROUP_COMPLETION_MARKER, context))
+                var marker = context == null ? IndexComponent.GROUP_COMPLETION_MARKER : IndexComponent.COLUMN_COMPLETION_MARKER;
+                if (componentExistsOnDisk(version, descriptor, marker, context))
                     return version;
             }
             // this is called by flush while creating new index files, as well as loading files that already exist
