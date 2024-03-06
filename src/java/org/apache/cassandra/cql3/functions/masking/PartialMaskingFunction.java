@@ -27,6 +27,7 @@ import java.util.stream.Stream;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.lang3.StringUtils;
 
+import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
 import org.apache.cassandra.cql3.functions.Arguments;
@@ -189,7 +190,7 @@ public class PartialMaskingFunction extends MaskingFunction
         {
             @Override
             @SuppressWarnings("unchecked")
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args, List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
             {
                 AbstractType<String> inputType = (AbstractType<String>) argTypes.get(0);
                 return new PartialMaskingFunction(name, kind, inputType, argTypes.size() == 4);
