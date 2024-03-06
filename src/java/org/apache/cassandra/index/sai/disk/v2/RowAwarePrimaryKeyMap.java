@@ -87,9 +87,9 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             try
             {
                 MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexDescriptor);
-                NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES)));
-                SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCKS)));
-                NumericValuesMeta blockOffsetsMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)));
+                NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES)));
+                SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS)));
+                NumericValuesMeta blockOffsetsMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)));
 
                 token = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
                 this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);

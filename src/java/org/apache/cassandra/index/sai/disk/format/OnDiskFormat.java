@@ -80,23 +80,6 @@ public interface OnDiskFormat
     public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator);
 
     /**
-     * Returns true if the per-sstable index components have been built and are valid.
-     *
-     * @param indexDescriptor The {@link IndexDescriptor} for the SSTable SAI index
-     * @return true if the per-sstable index components have been built and are complete
-     */
-    public boolean isPerSSTableBuildComplete(IndexDescriptor indexDescriptor);
-
-    /**
-     * Returns true if the per-index index components have been built and are valid.
-     *
-     * @param indexDescriptor The {@link IndexDescriptor} for the SSTable SAI Index
-     * @param indexContext The {@link IndexContext} for the index
-     * @return true if the per-index index components have been built and are complete
-     */
-    public boolean isPerIndexBuildComplete(IndexDescriptor indexDescriptor, IndexContext indexContext);
-
-    /**
      * Returns a {@link PrimaryKeyMap.Factory} for the SSTable
      *
      * @param indexDescriptor The {@link IndexDescriptor} for the SSTable
