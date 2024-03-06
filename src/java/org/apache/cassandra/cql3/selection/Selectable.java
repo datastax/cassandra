@@ -155,7 +155,7 @@ public interface Selectable extends AssignmentTestable
          */
         private static final ColumnIdentifier bindMarkerNameInSelection = new ColumnIdentifier("[selection]", true);
 
-        private final Term.Raw rawTerm;
+        public final Term.Raw rawTerm;
 
         public WithTerm(Term.Raw rawTerm)
         {
