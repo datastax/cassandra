@@ -36,9 +36,11 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.UUIDGen;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.LWT_LOCKS_PER_THREAD;
+
 public class PaxosState
 {
-    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentWriters() * 1024);
+    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentWriters() * LWT_LOCKS_PER_THREAD.getInt());
 
     private final Commit promised;
     private final Commit accepted;
