@@ -221,6 +221,20 @@ public class OnDiskOrdinalsMap
         }
 
         @Override
+        public boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
+        {
+            boolean called = false;
+            int start = Math.max(startRowId, 0);
+            int end = Math.min(endRowId, size);
+            for (int rowId = start; rowId < end; rowId++)
+            {
+                called = true;
+                consumer.accept(rowId, rowId);
+            }
+            return called;
+        }
+
+        @Override
         public void close()
         {
             // noop
@@ -257,6 +271,46 @@ public class OnDiskOrdinalsMap
                 return -1;
 
             return reader.readInt();
+        }
+
+        @Override
+        public boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
+        {
+            boolean called = false;
+
+            long start = DiskBinarySearch.searchFloor(0, high, startRowId, i -> {
+                try
+                {
+                    long offset = rowOrdinalOffset + i * 8;
+                    reader.seek(offset);
+                    return reader.readInt();
+                }
+                catch (IOException e)
+                {
+                    throw new RuntimeException(e);
+                }
+            });
+
+            if (start < 0 || start >= high)
+                return false;
+
+            reader.seek(rowOrdinalOffset + start * 8);
+            // sequential read without seeks should be fast, we expect OS to prefetch data from the disk
+            // binary search for starting offset of min rowid >= startRowId unlikely to be faster
+            for (long idx = start; idx < high; idx ++)
+            {
+                int rowId = reader.readInt();
+                if (rowId > endRowId)
+                    break;
+
+                int ordinal = reader.readInt();
+                if (rowId >= startRowId)
+                {
+                    called = true;
+                    consumer.accept(rowId, ordinal);
+                }
+            }
+            return called;
         }
 
         @Override
