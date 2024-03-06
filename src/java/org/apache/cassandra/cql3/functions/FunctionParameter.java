@@ -62,17 +62,6 @@ public interface FunctionParameter
     void validateType(FunctionFactory factory, AssignmentTestable arg, AbstractType<?> argType);
 
     /**
-     * @return the literal value, if any
-     */
-    default String getLiteral(AssignmentTestable arg)
-    {
-        if (arg instanceof Constants.Literal)
-            return ((Constants.Literal) arg).getRawText();
-        else
-            throw new IllegalArgumentException("Not a literal");
-    }
-
-    /**
      * @return a function parameter definition that accepts values of string-based data types (text, varchar and ascii)
      */
     static FunctionParameter string()
@@ -271,6 +260,9 @@ public interface FunctionParameter
             @Override
             public void validateType(FunctionFactory factory, AssignmentTestable arg, AbstractType<?> argType)
             {
+                if (arg instanceof Selectable.WithTerm)
+                    arg = ((Selectable.WithTerm) arg).rawTerm;
+
                 if (!(arg instanceof Constants.Literal))
                     throw invalidArgumentException(factory, arg);
 

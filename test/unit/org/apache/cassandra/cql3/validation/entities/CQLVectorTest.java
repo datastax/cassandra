@@ -26,7 +26,10 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.assertj.core.api.Assertions;
 
 public class CQLVectorTest extends CQLTester
 {
@@ -177,6 +180,10 @@ public class CQLVectorTest extends CQLTester
                                   "but found value",
                                   InvalidRequestException.class,
                                   "SELECT random_float_vector(value, -1, 1) FROM %s");
+        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
+                                  "but found 1 + 1",
+                                  InvalidRequestException.class,
+                                  "SELECT random_float_vector(1 + 1, -1, 1) FROM %s");
 
         // wrong argument values
         assertInvalidThrowMessage("Max value must be greater than min value",
@@ -188,6 +195,32 @@ public class CQLVectorTest extends CQLTester
                                   "(type vector<float, 1>) to value (type vector<float, 2>)",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(1, -1, 1))");
+
+        // test select
+        for (int dimension : new int[]{ 1, 2, 3, 10, 1000 })
+        {
+            assertSelectRandomVectorFunction(dimension, -1, 1);
+            assertSelectRandomVectorFunction(dimension, 0, 1);
+            assertSelectRandomVectorFunction(dimension, -1.5f, 1.5f);
+            assertSelectRandomVectorFunction(dimension, 0.999999f, 1);
+            assertSelectRandomVectorFunction(dimension, 0, 0.000001f);
+            assertSelectRandomVectorFunction(dimension, Float.MIN_VALUE, Float.MAX_VALUE);
+        }
+    }
+
+    private void assertSelectRandomVectorFunction(int dimension, float min, float max)
+    {
+        String functionCall = String.format("random_float_vector(%d, %f, %f)", dimension, min, max);
+        String select = "SELECT " + functionCall + " FROM %s";
+
+        for (int i = 0; i < 100; i++)
+        {
+            UntypedResultSet rs = execute(select);
+            Assertions.assertThat(rs).isNotEmpty();
+            Assertions.assertThat(rs.one().getVector("system." + functionCall, FloatType.instance, dimension))
+                      .hasSize(dimension)
+                      .allSatisfy(v -> Assertions.assertThat(v).isBetween(min, max));
+        }
     }
 
     @Test

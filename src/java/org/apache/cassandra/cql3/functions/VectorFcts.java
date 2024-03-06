@@ -102,8 +102,7 @@ public abstract class VectorFcts
         {
             // Get the vector type from the dimension argument. We need to do this here assuming that the argument is a
             // literal, so we know the dimension of the return type before actually executing the function.
-            AssignmentTestable arg = args.get(0);
-            int dimension = Integer.parseInt(parameters.get(0).getLiteral(arg));
+            int dimension = Integer.parseInt(args.get(0).toString());
             VectorType<Float> type = VectorType.getInstance(FloatType.instance, dimension);
 
             final NumberType<?> minType = (NumberType<?>) argTypes.get(1);
