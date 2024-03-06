@@ -105,11 +105,19 @@ public class SSTableIndex
     }
 
     /**
-     * @return total size of per-column index components, in bytes
+     * @return total size of per-column SAI components, in bytes
      */
     public long sizeOfPerColumnComponents()
     {
         return sstableContext.indexDescriptor.sizeOnDiskOfPerIndexComponents(indexContext);
+    }
+
+    /**
+     * @return total size of per-sstable SAI components, in bytes
+     */
+    public long sizeOfPerSSTableComponents()
+    {
+        return sstableContext.indexDescriptor.sizeOnDiskOfPerSSTableComponents();
     }
 
     /**
@@ -189,12 +197,12 @@ public class SSTableIndex
 
     public Version getVersion()
     {
-        return sstableContext.indexDescriptor.version;
+        return sstableContext.indexDescriptor.getVersion(indexContext);
     }
 
     public IndexFeatureSet indexFeatureSet()
     {
-        return sstableContext.indexDescriptor.version.onDiskFormat().indexFeatureSet();
+        return getVersion().onDiskFormat().indexFeatureSet();
     }
 
     public SSTableReader getSSTable()
@@ -283,5 +291,4 @@ public class SSTableIndex
     {
         return PrimaryKeyMapIterator.create(sstableContext, keyRange);
     }
-
 }

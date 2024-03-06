@@ -334,9 +334,9 @@ public class CassandraOnHeapGraph<T>
                                                                                   postingsMap.keySet().size(), vectorValues.size());
         logger.debug("Writing graph with {} rows and {} distinct vectors", postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), vectorValues.size());
 
-        try (var pqOutput = IndexFileUtils.instance.openOutput(indexDescriptor.fileFor(IndexComponent.PQ, indexContext), true, indexDescriptor.version);
-             var postingsOutput = IndexFileUtils.instance.openOutput(indexDescriptor.fileFor(IndexComponent.POSTING_LISTS, indexContext), true, indexDescriptor.version);
-             var indexOutput = IndexFileUtils.instance.openOutput(indexDescriptor.fileFor(IndexComponent.TERMS_DATA, indexContext), true, indexDescriptor.version))
+        try (var pqOutput = IndexFileUtils.instance().openOutput(indexDescriptor.fileFor(IndexComponent.PQ, indexContext), true, indexDescriptor.getVersion(indexContext));
+             var postingsOutput = IndexFileUtils.instance().openOutput(indexDescriptor.fileFor(IndexComponent.POSTING_LISTS, indexContext), true, indexDescriptor.getVersion(indexContext));
+             var indexOutput = IndexFileUtils.instance().openOutput(indexDescriptor.fileFor(IndexComponent.TERMS_DATA, indexContext), true, indexDescriptor.getVersion(indexContext)))
         {
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);
