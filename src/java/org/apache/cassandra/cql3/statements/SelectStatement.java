@@ -1100,29 +1100,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         ResultSet cqlRows = result.build();
         maybeWarn(result, options);
 
-        ColumnFamilyStore store = cfs();
-        if (store != null)
-            store.metric.coordinatorReadSize.update(calculateSize(cqlRows.rows));
-
         orderResults(cqlRows);
 
         cqlRows.trim(userLimit);
 
         return cqlRows;
-    }
-
-    private int calculateSize(List<List<ByteBuffer>> rows)
-    {
-        int size = 0;
-        for (List<ByteBuffer> row : rows)
-        {
-            for (int i = 0, isize = row.size(); i < isize; i++)
-            {
-                ByteBuffer value = row.get(i);
-                size += value != null ? value.remaining() : 0;
-            }
-        }
-        return size;
     }
 
     public static ByteBuffer[] getComponents(TableMetadata metadata, DecoratedKey dk)
