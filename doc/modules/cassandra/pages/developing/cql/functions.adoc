@@ -288,6 +288,13 @@ A number of functions allow to obtain the similarity score between vectors of fl
 
 include::cassandra:partial$vector-search/vector_functions.adoc[]
 
+[[vector-functions]]
+===== Vector functions
+
+A number of functions to operate with vectors of floats.
+
+include::cassandra:partial$vector-search/vector_functions.adoc[]
+
 [[user-defined-scalar-functions]]
 === User-defined functions
 

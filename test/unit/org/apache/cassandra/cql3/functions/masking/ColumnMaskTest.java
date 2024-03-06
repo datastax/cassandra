@@ -28,6 +28,7 @@ import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.Session;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.functions.Arguments;
 import org.apache.cassandra.cql3.functions.FunctionFactory;
@@ -574,7 +575,7 @@ public class ColumnMaskTest extends ColumnMaskTester
     private static final FunctionFactory NEGATIVE = new FunctionFactory("mask_negative", FunctionParameter.fixed(CQL3Type.Native.INT))
     {
         @Override
-        protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+        protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args, List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
         {
             return new MaskingFunction(name, argTypes.get(0), argTypes.get(0))
             {
