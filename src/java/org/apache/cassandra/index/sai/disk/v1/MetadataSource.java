@@ -49,7 +49,9 @@ public class MetadataSource
     {
         try (var input = indexDescriptor.openCheckSummedPerSSTableInput(IndexComponent.GROUP_META))
         {
-            return MetadataSource.load(input, indexDescriptor.getVersion());
+            var version = indexDescriptor.getVersion();
+            var order = version.onDiskFormat().byteOrderForComponent(IndexComponent.GROUP_META, null);
+            return MetadataSource.load(input, version, order);
         }
     }
 
@@ -57,11 +59,13 @@ public class MetadataSource
     {
         try (var input = indexDescriptor.openCheckSummedPerIndexInput(IndexComponent.META, indexContext))
         {
-            return MetadataSource.load(input, indexDescriptor.getVersion(indexContext));
+            var version = indexDescriptor.getVersion();
+            var order = version.onDiskFormat().byteOrderForComponent(IndexComponent.META, indexContext);
+            return MetadataSource.load(input, version, order);
         }
     }
 
-    private static MetadataSource load(ChecksumIndexInput input, Version expectedVersion) throws IOException
+    private static MetadataSource load(ChecksumIndexInput input, Version expectedVersion, ByteOrder order) throws IOException
     {
         Map<String, Supplier<ByteArrayIndexInput>> components = new HashMap<>();
         Version version;
@@ -85,8 +89,6 @@ public class MetadataSource
             final byte[] bytes = new byte[length];
             input.readBytes(bytes, 0, length);
 
-            // TODO is this always correct?
-            var order = version == Version.AA ? ByteOrder.BIG_ENDIAN : ByteOrder.LITTLE_ENDIAN;
             components.put(name, () -> new ByteArrayIndexInput(name, bytes, order));
         }
 

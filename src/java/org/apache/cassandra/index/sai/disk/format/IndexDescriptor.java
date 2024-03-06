@@ -425,14 +425,18 @@ public class IndexDescriptor
         return checksumIndexInput(context, indexInput);
     }
 
+    /**
+     * Returns a ChecksumIndexInput that reads the indexInput in the correct endianness for the context.
+     * These files were written by the Lucene {@link org.apache.lucene.store.DataOutput}. When written by
+     * Lucene 7.5, {@link org.apache.lucene.store.DataOutput} wrote the file using big endian formatting.
+     * After the upgrade to Lucene 9, the {@link org.apache.lucene.store.DataOutput} writes in little endian
+     * formatting.
+     * @param context The index context
+     * @param indexInput The index input to read
+     * @return A ChecksumIndexInput that reads the indexInput in the correct endianness for the context
+     */
     private ChecksumIndexInput checksumIndexInput(IndexContext context, IndexInput indexInput)
     {
-        // This logic is a bit counterintuitive. For version AA, we wrote using Lucene 7.5, which wrote in
-        // big-endian format. The BufferedChecksumIndexInput reads individual bytes from the indexInput and assumes they
-        // are in big-endian format. Therefore, we need to reverse the endianness of the indexInput for version AA.
-        // This is true even if indexInput reads in big-endian format, because the BufferedChecksumIndexInput
-        // reads byte by byte then builds shorts, ints, and longs from the bytes, assuming little-endian format.
-        // TODO verify this logic
         if (getVersion(context) == Version.AA)
             return new EndiannessReverserChecksumIndexInput(indexInput);
         else
