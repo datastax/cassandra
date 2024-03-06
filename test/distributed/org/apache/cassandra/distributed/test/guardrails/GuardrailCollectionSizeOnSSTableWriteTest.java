@@ -32,6 +32,7 @@ import org.apache.cassandra.distributed.api.Feature;
 
 import static java.nio.ByteBuffer.allocate;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISK_USAGE_NOTIFY_INTERVAL_MS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.ENABLE_GUARDRAILS_FOR_ANONYMOUS_USER;
 
 /**
  * Tests the guardrail for the size of collections, {@link Guardrails#collectionSize}.
@@ -54,6 +55,10 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
     @BeforeClass
     public static void setupCluster() throws IOException
     {
+        // Disable guardrails for anonymous users (no client authentication) This allows the test to check guardrails 
+        // during sstable writes without being affected by the guardrail for anonymous users.
+        ENABLE_GUARDRAILS_FOR_ANONYMOUS_USER.setBoolean(false);
+        
         // Ensure guardrail notifications are not suppressed
         DISK_USAGE_NOTIFY_INTERVAL_MS.setLong(0L);
         cluster = init(Cluster.build(NUM_NODES)
@@ -283,7 +288,7 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
         execute("INSERT INTO %s (k, v) VALUES (5, ?)", map(allocate(WARN_THRESHOLD), allocate(1)));
         assertWarnedOnFlush(warnMessage("5"));
 
-        execute("INSERT INTO %s (k, v) VALUES (6, ?)", map(allocate(1), allocate(WARN_THRESHOLD)));
+        execute("INSERT INTO %s (k, v) VALUES (6, ?)", map(allocate(1), allocate(WARN_THRESHOLD + 1)));
         assertWarnedOnFlush(warnMessage("6"));
 
         execute("INSERT INTO %s (k, v) VALUES (7, ?)", map(allocate(WARN_THRESHOLD), allocate(WARN_THRESHOLD)));
@@ -292,7 +297,7 @@ public class GuardrailCollectionSizeOnSSTableWriteTest extends GuardrailTester
         execute("INSERT INTO %s (k, v) VALUES (8, ?)", map(allocate(FAIL_THRESHOLD), allocate(1)));
         assertFailedOnFlush(failMessage("8"));
 
-        execute("INSERT INTO %s (k, v) VALUES (9, ?)", map(allocate(1), allocate(FAIL_THRESHOLD)));
+        execute("INSERT INTO %s (k, v) VALUES (9, ?)", map(allocate(1), allocate(FAIL_THRESHOLD + 1)));
         assertFailedOnFlush(failMessage("9"));
 
         execute("INSERT INTO %s (k, v) VALUES (10, ?)", map(allocate(FAIL_THRESHOLD), allocate(FAIL_THRESHOLD)));
