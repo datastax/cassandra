@@ -225,19 +225,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
             // create a bitset of ordinals corresponding to the rows in the given key range
             SparseFixedBitSet bits = bitSetForSearch();
-            boolean hasMatches = false;
+            final boolean hasMatches;
             try (var ordinalsView = graph.getOrdinalsView())
             {
-                for (long sstableRowId = minSSTableRowId; sstableRowId <= maxSSTableRowId; sstableRowId++)
-                {
-                    int segmentRowId = metadata.toSegmentRowId(sstableRowId);
-                    int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                    if (ordinal >= 0)
-                    {
-                        bits.set(ordinal);
-                        hasMatches = true;
-                    }
-                }
+                int startSegmentRowId = metadata.toSegmentRowId(minSSTableRowId);
+                int endSegmentRowId = metadata.toSegmentRowId(maxSSTableRowId);
+                hasMatches = ordinalsView.forEachOrdinalInRange(startSegmentRowId, endSegmentRowId, (segmentRowId, ordinal) -> {
+                    bits.set(ordinal);
+                });
             }
             catch (IOException e)
             {
