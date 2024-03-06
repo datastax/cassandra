@@ -385,6 +385,9 @@ public enum CassandraRelevantProperties
     SYSTEM_VIEWS_INCLUDE_INDEXES("cassandra.system_view.include_indexes"),
     VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("cassandra.sai.validate_max_term_size_at_coordinator"),
     CUSTOM_KEYSPACES_FILTER_PROVIDER("cassandra.custom_keyspaces_filter_provider_class"),
+
+    LWT_LOCKS_PER_THREAD("cassandra.lwt_locks_per_thread", "1024"),
+
     CUSTOM_READ_OBSERVER_FACTORY("cassandra.custom_read_observer_factory_class"),
 
     // Allows skipping advising the OS to free cached pages associated with commitlog flushing
@@ -402,6 +405,7 @@ public enum CassandraRelevantProperties
      * Whether to enable the use of {@link EndpointGroupingRangeCommandIterator}
      */
     RANGE_READ_ENDPOINT_GROUPING_ENABLED("cassandra.range_read_endpoint_grouping_enabled", "true");
+
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
