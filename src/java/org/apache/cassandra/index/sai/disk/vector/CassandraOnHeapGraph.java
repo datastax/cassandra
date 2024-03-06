@@ -67,7 +67,6 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -335,9 +334,9 @@ public class CassandraOnHeapGraph<T>
                                                                                   postingsMap.keySet().size(), vectorValues.size());
         logger.debug("Writing graph with {} rows and {} distinct vectors", postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), vectorValues.size());
 
-        try (IndexOutputWriter pqOutput = IndexFileUtils.instance.openOutput(indexDescriptor.fileFor(IndexComponent.PQ, indexContext), true, indexDescriptor.version);
-             IndexOutputWriter postingsOutput = IndexFileUtils.instance.openOutput(indexDescriptor.fileFor(IndexComponent.POSTING_LISTS, indexContext), true, indexDescriptor.version);
-             IndexOutputWriter indexOutput = IndexFileUtils.instance.openOutput(indexDescriptor.fileFor(IndexComponent.TERMS_DATA, indexContext), true, indexDescriptor.version))
+        try (var pqOutput = IndexFileUtils.instance().openOutput(indexDescriptor.fileFor(IndexComponent.PQ, indexContext), true, indexDescriptor.getVersion(indexContext));
+             var postingsOutput = IndexFileUtils.instance().openOutput(indexDescriptor.fileFor(IndexComponent.POSTING_LISTS, indexContext), true, indexDescriptor.getVersion(indexContext));
+             var indexOutput = IndexFileUtils.instance().openOutput(indexDescriptor.fileFor(IndexComponent.TERMS_DATA, indexContext), true, indexDescriptor.getVersion(indexContext)))
         {
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);

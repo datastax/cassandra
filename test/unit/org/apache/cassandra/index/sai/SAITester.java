@@ -274,7 +274,7 @@ public class SAITester extends CQLTester
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            File file = IndexDescriptor.create(sstable).fileFor(indexComponent);
+            File file = IndexDescriptor.createFrom(sstable).fileFor(indexComponent);
             corruptionType.corrupt(file);
         }
     }
@@ -285,7 +285,7 @@ public class SAITester extends CQLTester
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            File file = IndexDescriptor.create(sstable).fileFor(indexComponent, indexContext);
+            File file = IndexDescriptor.createFrom(sstable).fileFor(indexComponent, indexContext);
             corruptionType.corrupt(file);
         }
     }
@@ -334,7 +334,7 @@ public class SAITester extends CQLTester
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
+            IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
             if (indexDescriptor.isIndexEmpty(context))
                 continue;
             if (!indexDescriptor.validatePerSSTableComponentsChecksum() || !indexDescriptor.validatePerIndexComponentsChecksum(context))

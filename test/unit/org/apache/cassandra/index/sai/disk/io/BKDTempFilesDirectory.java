@@ -74,7 +74,7 @@ public class BKDTempFilesDirectory extends Directory
                                                                                               name +
                                                                                               ".db"));
 
-        return IndexFileUtils.instance().openOutput(file, false, delegate.version);
+        return IndexFileUtils.instance().openOutput(file, false, delegate.getVersion());
     }
 
     @Override
