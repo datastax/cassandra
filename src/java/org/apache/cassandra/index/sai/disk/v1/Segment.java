@@ -35,7 +35,6 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -74,33 +73,15 @@ public class Segment implements Closeable, SegmentOrdering
         this.indexFiles = indexFiles;
         this.metadata = metadata;
 
-        var version = sstableContext.indexDescriptor.version;
-        // FIXME we only have one IndexDescriptor + Version per sstable, so this is a hack
-        // to support indexes at different versions.  Vectors are the only types impacted by multiple versions so far.
-        IndexSearcher searcher;
-        try
-        {
-            searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
-        }
-        catch (Throwable e) // there's multiple things that can go wrong w/ version mismatch, so catch all of them
-        {
-            if (!List.of(Version.BA, Version.CA).contains(version))
-            {
-                // we're only trying to recover from BA/CA confusion, this is something else
-                throw e;
-            }
-            
-            logger.debug("Failed to open searcher for segment {}:{} for index [{}] on column [{}] at version {}",
-                         sstableContext.descriptor(), metadata.segmentRowIdOffset, indexContext.getIndexName(), indexContext.getColumnName(), version, e);
-            
-            // opening with the global format didn't work.  that means that (unless it's actually corrupt)
-            // the correct version is whichever one the global format is not set to
-            version = version == Version.CA ? Version.BA : Version.CA;
-            searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
-        }
+        var version = sstableContext.indexDescriptor.getVersion(indexContext);
+        IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
         logger.info("Opened searcher {} for segment {}:{} for index [{}] on column [{}] at version {}",
-                    searcher.getClass().getSimpleName(), sstableContext.descriptor(), metadata.segmentRowIdOffset,
-                    indexContext.getIndexName(), indexContext.getColumnName(), version);
+                    searcher.getClass().getSimpleName(),
+                    sstableContext.descriptor(),
+                    metadata.segmentRowIdOffset,
+                    indexContext.getIndexName(),
+                    indexContext.getColumnName(),
+                    version);
         this.index = searcher;
     }
 

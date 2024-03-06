@@ -44,6 +44,9 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.lucene.store.IndexInput;
 
+/**
+ * Updates SAI OnDiskFormat to include full PK -> offset mapping, and adds vector components.
+ */
 public class V2OnDiskFormat extends V1OnDiskFormat
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -128,7 +131,7 @@ public class V2OnDiskFormat extends V1OnDiskFormat
             {
                 Version earliest = getExpectedEarliestVersion(indexComponent);
                 if (checksum)
-                    SAICodecUtils.validateChecksum(input, indexDescriptor.version);
+                    SAICodecUtils.validateChecksum(input, indexDescriptor.getVersion());
                 else
                     SAICodecUtils.validate(input, earliest);
             }
