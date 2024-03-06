@@ -25,6 +25,7 @@ import java.util.Set;
 
 import com.google.common.collect.ImmutableList;
 
+import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
@@ -49,7 +50,7 @@ public class CollectionFcts
         functions.add(new FunctionFactory("map_keys", FunctionParameter.anyMap())
         {
             @Override
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args, List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
             {
                 return makeMapKeysFunction(name.name, (MapType<?, ?>) argTypes.get(0));
             }
@@ -58,7 +59,7 @@ public class CollectionFcts
         functions.add(new FunctionFactory("map_values", FunctionParameter.anyMap())
         {
             @Override
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
             {
                 return makeMapValuesFunction(name.name, (MapType<?, ?>) argTypes.get(0));
             }
@@ -67,7 +68,7 @@ public class CollectionFcts
         functions.add(new FunctionFactory("collection_count", FunctionParameter.anyCollection())
         {
             @Override
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
             {
                 return makeCollectionCountFunction(name.name, (CollectionType<?>) argTypes.get(0));
             }
@@ -76,7 +77,7 @@ public class CollectionFcts
         functions.add(new FunctionFactory("collection_min", FunctionParameter.setOrList())
         {
             @Override
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
             {
                 return makeCollectionMinFunction(name.name, (CollectionType<?>) argTypes.get(0));
             }
@@ -85,7 +86,7 @@ public class CollectionFcts
         functions.add(new FunctionFactory("collection_max", FunctionParameter.setOrList())
         {
             @Override
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
             {
                 return makeCollectionMaxFunction(name.name, (CollectionType<?>) argTypes.get(0));
             }
@@ -94,7 +95,7 @@ public class CollectionFcts
         functions.add(new FunctionFactory("collection_sum", FunctionParameter.numericSetOrList())
         {
             @Override
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
             {
                 return makeCollectionSumFunction(name.name, (CollectionType<?>) argTypes.get(0));
             }
@@ -103,7 +104,7 @@ public class CollectionFcts
         functions.add(new FunctionFactory("collection_avg", FunctionParameter.numericSetOrList())
         {
             @Override
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
             {
                 return makeCollectionAvgFunction(name.name, (CollectionType<?>) argTypes.get(0));
             }
