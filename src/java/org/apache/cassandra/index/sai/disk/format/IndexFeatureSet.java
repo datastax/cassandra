@@ -20,11 +20,11 @@ package org.apache.cassandra.index.sai.disk.format;
 
 /**
  * The {@code IndexFeatureSet} represents the set of features available that are available
- * to an {@code OnDiskFormat}. The baseline features included in the V1 on-disk format are
- * not included in the feature set.
+ * to an {@code OnDiskFormat}.
  *
- * V1 on-disk format features should only be added if support for them is dropped in future
- * version.
+ * The baseline features included in the V1 on-disk format are not included in the feature set.
+ * Thus, V1 on-disk format features should only be added here if support for them is dropped in
+ * a future version.
  */
 public interface IndexFeatureSet
 {
