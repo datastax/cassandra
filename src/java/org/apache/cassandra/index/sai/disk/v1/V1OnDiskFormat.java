@@ -56,6 +56,11 @@ import org.apache.lucene.store.IndexInput;
 
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
 
+/**
+ * The original SAI OnDiskFormat, found in DSE.  Because it has a simple token -> offsets map, queries
+ * against "wide partitions" are slow in proportion to the partition size, since we have to read
+ * the whole partition and post-filter the rows
+ */
 public class V1OnDiskFormat implements OnDiskFormat
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -137,22 +142,6 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public boolean isPerSSTableBuildComplete(IndexDescriptor indexDescriptor)
-    {
-        // TODO this is fragile, it can return true for any descriptor version as long as the
-        // completion marker is there.  Ideally we would check to see if the expected
-        // perIndexComponents are there as well.
-        return indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER);
-    }
-
-    @Override
-    public boolean isPerIndexBuildComplete(IndexDescriptor indexDescriptor, IndexContext indexContext)
-    {
-        return indexDescriptor.hasComponent(IndexComponent.GROUP_COMPLETION_MARKER) &&
-               indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext);
-    }
-
-    @Override
     public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable) throws IOException
     {
         return new PartitionAwarePrimaryKeyMap.PartitionAwarePrimaryKeyMapFactory(indexDescriptor, sstable);
@@ -215,7 +204,7 @@ public class V1OnDiskFormat implements OnDiskFormat
             {
                 Version earliest = getExpectedEarliestVersion(indexComponent);
                 if (checksum)
-                    SAICodecUtils.validateChecksum(input, indexDescriptor.version);
+                    SAICodecUtils.validateChecksum(input, indexDescriptor.getVersion());
                 else
                     SAICodecUtils.validate(input, earliest);
             }
@@ -254,7 +243,7 @@ public class V1OnDiskFormat implements OnDiskFormat
         // starting with v3, vector components include proper headers and checksum; skip for earlier versions
         if (context.isVector()
             && isVectorDataComponent(component)
-            && !descriptor.version.onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
+            && !descriptor.getVersion(context).onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
         {
             return true;
         }
@@ -262,7 +251,7 @@ public class V1OnDiskFormat implements OnDiskFormat
         try (IndexInput input = descriptor.openPerIndexInput(component, context))
         {
             if (checksum)
-                SAICodecUtils.validateChecksum(input, descriptor.version);
+                SAICodecUtils.validateChecksum(input, descriptor.getVersion(context));
             else
                 SAICodecUtils.validate(input);
         }
