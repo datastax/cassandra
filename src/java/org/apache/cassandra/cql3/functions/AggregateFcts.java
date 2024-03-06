@@ -23,6 +23,7 @@ import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -65,7 +66,9 @@ public abstract class AggregateFcts
         functions.add(new FunctionFactory("max", FunctionParameter.anyType(true))
         {
             @Override
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,
+                                                           List<AbstractType<?>> argTypes,
+                                                           AbstractType<?> receiverType)
             {
                 AbstractType<?> type = argTypes.get(0);
                 return type.isCounter() ? maxFunctionForCounter : makeMaxFunction(type);
@@ -76,7 +79,9 @@ public abstract class AggregateFcts
         functions.add(new FunctionFactory("min", FunctionParameter.anyType(true))
         {
             @Override
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,
+                                                           List<AbstractType<?>> argTypes,
+                                                           AbstractType<?> receiverType)
             {
                 AbstractType<?> type = argTypes.get(0);
                 return type.isCounter() ? minFunctionForCounter : makeMinFunction(type);
