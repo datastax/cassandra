@@ -36,20 +36,39 @@ public class DiskBinarySearch
      */
     public static long searchInt(long low, long high, int target, Function<Long, Integer> f)
     {
+        return search(low, high, target, false, f);
+    }
+
+    /**
+     * Similar to searchInt but returns index of a value greater or equal to the target, -1 if not found.
+     */
+    public static long searchFloor(long low, long high, int target, Function<Long, Integer> f)
+    {
+        return search(low, high, target, true, f);
+    }
+
+    private static long search(long low, long high, int target, boolean floorSearch, Function<Long, Integer> f)
+    {
         assert high < Long.MAX_VALUE >> 2 : "high is too large to avoid potential overflow: " + high;
         assert low < high : "low must be less than high: " + low + " >= " + high;
 
+        int value = Integer.MIN_VALUE;
+        long i = low;
+
         while (low < high)
         {
-            long i = low + (high - low) / 2;
-            int value = f.apply(i);
+            i = low + (high - low) / 2;
+            value = f.apply(i);
+
             if (target == value)
                 return i;
-            else if (target > value)
+
+            if (target > value)
                 low = i + 1;
             else
                 high = i;
         }
-        return -1;
+        return floorSearch && value >= target ? i : -1;
     }
+
 }
