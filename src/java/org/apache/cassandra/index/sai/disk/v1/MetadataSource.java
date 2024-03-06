@@ -47,12 +47,12 @@ public class MetadataSource
 
     public static MetadataSource loadGroupMetadata(IndexDescriptor indexDescriptor) throws IOException
     {
-        return MetadataSource.load(indexDescriptor.openPerSSTableInput(IndexComponent.GROUP_META), indexDescriptor.version);
+        return MetadataSource.load(indexDescriptor.openPerSSTableInput(IndexComponent.GROUP_META), indexDescriptor.getVersion());
     }
 
     public static MetadataSource loadColumnMetadata(IndexDescriptor indexDescriptor, IndexContext indexContext) throws IOException
     {
-        return MetadataSource.load(indexDescriptor.openPerIndexInput(IndexComponent.META, indexContext), indexDescriptor.version);
+        return MetadataSource.load(indexDescriptor.openPerIndexInput(IndexComponent.META, indexContext), indexDescriptor.getVersion(indexContext));
     }
 
     private static MetadataSource load(IndexInput indexInput, Version indexVersion) throws IOException
