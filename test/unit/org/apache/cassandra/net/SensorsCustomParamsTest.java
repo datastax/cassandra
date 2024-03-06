@@ -52,4 +52,22 @@ public class SensorsCustomParamsTest
         String actualParam = SensorsCustomParams.encodeTableInWriteByteTableParam(table);
         assertEquals(expectedParam, actualParam);
     }
+
+    @Test
+    public void testEncodeTableInIndexByteRequestParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("INDEX_BYTES_REQUEST.%s", "t1");
+        String actualParam = SensorsCustomParams.encodeTableInIndexByteRequestParam(table);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInIndexByteTableParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("INDEX_BYTES_TABLE.%s", "t1");
+        String actualParam = SensorsCustomParams.encodeTableInIndexByteTableParam(table);
+        assertEquals(expectedParam, actualParam);
+    }
 }

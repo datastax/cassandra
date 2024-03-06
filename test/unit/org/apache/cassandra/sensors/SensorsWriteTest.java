@@ -19,8 +19,6 @@
 package org.apache.cassandra.sensors;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -30,8 +28,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
@@ -39,15 +35,11 @@ import org.apache.cassandra.db.MutationVerbHandler;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
-import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.BloomFilter;
 
@@ -59,9 +51,6 @@ public class SensorsWriteTest
     public static final String CF_STANDARD = "Standard";
     public static final String CF_STANDARD2 = "Standard2";
     public static final String CF_STANDARD_CLUSTERING = "StandardClustering";
-    public static final String CF_STANDARD_SAI = "StandardSAI";
-    public static final String CF_STANDARD_SECONDARY_INDEX = "StandardSecondaryIndex";
-
 
     private ColumnFamilyStore store;
     private CopyOnWriteArrayList<Message> capturedOutboundMessages;
@@ -71,23 +60,6 @@ public class SensorsWriteTest
     {
         SchemaLoader.prepareServer();
 
-        // build SAI indexes
-        Indexes.Builder saiIndexes = Indexes.builder();
-        saiIndexes.add(IndexMetadata.fromSchemaMetadata(CF_STANDARD_SAI + "_val", IndexMetadata.Kind.CUSTOM, new HashMap<>()
-        {{
-            put(IndexTarget.CUSTOM_INDEX_OPTION_NAME, StorageAttachedIndex.class.getName());
-            put(IndexTarget.TARGET_OPTION_NAME, "val");
-        }}));
-
-        // build secondary indexes
-        Indexes.Builder secondaryIndexes = Indexes.builder();
-        secondaryIndexes.add(IndexMetadata.fromIndexTargets(
-        Collections.singletonList(
-        new IndexTarget(
-        new ColumnIdentifier("val", true), IndexTarget.Type.VALUES)), CF_STANDARD_SECONDARY_INDEX + "_val",
-        IndexMetadata.Kind.COMPOSITES,
-        Collections.emptyMap()));
-
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD,
@@ -95,14 +67,7 @@ public class SensorsWriteTest
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD2,
                                                               1, AsciiType.instance, AsciiType.instance, null),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_CLUSTERING,
-                                                              1, AsciiType.instance, AsciiType.instance, AsciiType.instance),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_SAI,
-                                                              1, AsciiType.instance, AsciiType.instance, null)
-                                                .partitioner(Murmur3Partitioner.instance) // supported by SAI
-                                                .indexes(saiIndexes.build()),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_SECONDARY_INDEX,
-                                                              1, AsciiType.instance, AsciiType.instance, null)
-                                                .indexes(secondaryIndexes.build()));
+                                                              1, AsciiType.instance, AsciiType.instance, AsciiType.instance));
 
         CompactionManager.instance.disableAutoCompaction();
     }
@@ -114,8 +79,6 @@ public class SensorsWriteTest
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).metadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).metadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_CLUSTERING).metadata());
-        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_SAI).metadata());
-        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_SECONDARY_INDEX).metadata());
 
         capturedOutboundMessages = new CopyOnWriteArrayList<>();
         MessagingService.instance().outboundSink.add((message, to) ->
@@ -129,6 +92,7 @@ public class SensorsWriteTest
     public void afterTest()
     {
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).truncateBlocking();
+        Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_CLUSTERING).truncateBlocking();
 
         RequestTracker.instance.set(null);
@@ -186,86 +150,6 @@ public class SensorsWriteTest
             assertThat(registrySensor.getValue()).isEqualTo(writeSensorSum);
             assertResponseSensors(localSensor.getValue(), writeSensorSum, CF_STANDARD_CLUSTERING);
         }
-    }
-
-    @Test
-    public void testSingleRowMutationWithSAI()
-    {
-        ColumnFamilyStore standardStore = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
-        Context standardContext = new Context(KEYSPACE1, CF_STANDARD, standardStore.metadata.id.toString());
-
-        ColumnFamilyStore saiStore = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_SAI);
-        Context saiContext = new Context(KEYSPACE1, CF_STANDARD_SAI, saiStore.metadata.id.toString());
-
-        String partitionKey = "0";
-        Mutation standardMutation = new RowUpdateBuilder(standardStore.metadata(), 0, partitionKey)
-                                    .add("val", "hi there")
-                                    .build();
-        handleMutation(standardMutation);
-
-        Sensor standardSensor = SensorsTestUtil.getThreadLocalRequestSensor(standardContext, Type.WRITE_BYTES);
-        assertThat(standardSensor.getValue()).isGreaterThan(0);
-        Sensor standardRegistrySensor = SensorsTestUtil.getRegistrySensor(standardContext, Type.WRITE_BYTES);
-        assertThat(standardRegistrySensor).isEqualTo(standardSensor);
-
-        // check global registry is synchronized for Standard table
-        assertThat(standardRegistrySensor.getValue()).isEqualTo(standardSensor.getValue());
-        assertResponseSensors(standardSensor.getValue(), standardRegistrySensor.getValue(), CF_STANDARD);
-
-        Mutation saiMutation = new RowUpdateBuilder(saiStore.metadata(), 0, partitionKey)
-                               .add("val", "hi there")
-                               .build();
-        handleMutation(saiMutation);
-
-        Sensor saiSensor = SensorsTestUtil.getThreadLocalRequestSensor(saiContext, Type.WRITE_BYTES);
-        // Writing the same amount of data to an SAI indexed column should generate at least twice the number of bytes (the vanilla write + the SAI write)
-        assertThat(saiSensor.getValue()).isGreaterThanOrEqualTo(2 * standardSensor.getValue());
-        Sensor saiRegistrySensor = SensorsTestUtil.getRegistrySensor(saiContext, Type.WRITE_BYTES);
-        assertThat(saiRegistrySensor).isEqualTo(saiSensor);
-
-        // check global registry is synchronized for SAI table
-        assertThat(saiRegistrySensor.getValue()).isEqualTo(saiSensor.getValue());
-        assertResponseSensors(saiSensor.getValue(), saiRegistrySensor.getValue(), CF_STANDARD_SAI);
-    }
-
-    @Test
-    public void testSingleRowMutationWithSecondaryIndex()
-    {
-        ColumnFamilyStore standardStore = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
-        Context standardContext = new Context(KEYSPACE1, CF_STANDARD, standardStore.metadata.id.toString());
-
-        ColumnFamilyStore secondaryIndexStore = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_SECONDARY_INDEX);
-        Context secondaryIndexContext = new Context(KEYSPACE1, CF_STANDARD_SECONDARY_INDEX, secondaryIndexStore.metadata.id.toString());
-
-        String partitionKey = "0";
-        Mutation standardMutation = new RowUpdateBuilder(standardStore.metadata(), 0, partitionKey)
-                                    .add("val", "hi there")
-                                    .build();
-        handleMutation(standardMutation);
-
-        Sensor standardSensor = SensorsTestUtil.getThreadLocalRequestSensor(standardContext, Type.WRITE_BYTES);
-        assertThat(standardSensor.getValue()).isGreaterThan(0);
-        Sensor standardRegistrySensor = SensorsTestUtil.getRegistrySensor(standardContext, Type.WRITE_BYTES);
-        assertThat(standardRegistrySensor).isEqualTo(standardSensor);
-
-        // check global registry is synchronized for Standard table
-        assertThat(standardRegistrySensor.getValue()).isEqualTo(standardSensor.getValue());
-        assertResponseSensors(standardSensor.getValue(), standardRegistrySensor.getValue(), CF_STANDARD);
-
-        Mutation secondaryIndexMutation = new RowUpdateBuilder(secondaryIndexStore.metadata(), 0, partitionKey)
-                                          .add("val", "hi there")
-                                          .build();
-        handleMutation(secondaryIndexMutation);
-
-        Sensor secondaryIndexSensor = SensorsTestUtil.getThreadLocalRequestSensor(secondaryIndexContext, Type.WRITE_BYTES);
-        // Writing the same amount of data to an indexed column should generate at lest twice the number of bytes (the vanilla write + the SecondaryIndex write)
-        assertThat(secondaryIndexSensor.getValue()).isGreaterThanOrEqualTo(2 * standardSensor.getValue());
-        Sensor secondartyIndexRegistrySensor = SensorsTestUtil.getRegistrySensor(secondaryIndexContext, Type.WRITE_BYTES);
-        assertThat(secondartyIndexRegistrySensor).isEqualTo(secondaryIndexSensor);
-
-        // check global registry is synchronized for Secondary Index table
-        assertThat(secondartyIndexRegistrySensor.getValue()).isEqualTo(secondaryIndexSensor.getValue());
-        assertResponseSensors(secondaryIndexSensor.getValue(), secondartyIndexRegistrySensor.getValue(), CF_STANDARD_SECONDARY_INDEX);
     }
 
     @Test

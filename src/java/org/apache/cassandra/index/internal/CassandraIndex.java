@@ -451,9 +451,9 @@ public abstract class CassandraIndex implements Index
 
                 RequestSensors sensors = requestTracker.get();
                 if (sensors != null) {
-                    sensors.registerSensor(sensorContext, Type.WRITE_BYTES);
+                    sensors.registerSensor(sensorContext, Type.INDEX_BYTES);
                     // estimate the size of the index entry as the data size of the cell before indexing
-                    sensors.incrementSensor(sensorContext, Type.WRITE_BYTES, cell.dataSize());
+                    sensors.incrementSensor(sensorContext, Type.INDEX_BYTES, cell.dataSize());
                 }
             }
 

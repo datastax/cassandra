@@ -29,5 +29,6 @@ public enum Type
     READ_BYTES,
     SEARCH_BYTES,
 
-    WRITE_BYTES;
+    WRITE_BYTES,
+    INDEX_BYTES
 }

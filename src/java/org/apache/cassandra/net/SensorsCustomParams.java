@@ -46,6 +46,16 @@ public final class SensorsCustomParams
      * To support batch writes, table name is encoded in the following format: WRITE_BYTES_TABLE.<table>
      */
     public static final String WRITE_BYTES_TABLE_TEMPLATE = "WRITE_BYTES_TABLE.%s";
+    /**
+     * The per-request index bytes value for a given keyspace and table.
+     * To support batch writes, table name is encoded in the following format: INDEX_BYTES_REQUEST.<table>
+     */
+    public static final String INDEX_BYTES_REQUEST_TEMPLATE = "INDEX_BYTES_REQUEST.%s";
+    /**
+     * The total index bytes value for a given keyspace and table, across all requests.
+     * To support batch writes, table name is encoded in the following format: INDEX_BYTES_TABLE.<table>
+     */
+    public static final String INDEX_BYTES_TABLE_TEMPLATE = "INDEX_BYTES_TABLE.%s";
 
     private SensorsCustomParams()
     {
@@ -70,5 +80,15 @@ public final class SensorsCustomParams
     public static String encodeTableInWriteByteTableParam(String tableName)
     {
         return String.format(WRITE_BYTES_TABLE_TEMPLATE, tableName);
+    }
+
+    public static String encodeTableInIndexByteRequestParam(String tableName)
+    {
+        return String.format(INDEX_BYTES_REQUEST_TEMPLATE, tableName);
+    }
+
+    public static String encodeTableInIndexByteTableParam(String tableName)
+    {
+        return String.format(INDEX_BYTES_TABLE_TEMPLATE, tableName);
     }
 }
