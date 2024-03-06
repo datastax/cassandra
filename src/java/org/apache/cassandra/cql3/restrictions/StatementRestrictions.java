@@ -302,6 +302,7 @@ public class StatementRestrictions
      */
     public static class Builder
     {
+        private final ClientState state;
         private final StatementType type;
         private final TableMetadata table;
         private final WhereClause whereClause;
@@ -321,6 +322,7 @@ public class StatementRestrictions
                        boolean allowFiltering,
                        boolean forView)
         {
+            this.state = state;
             this.type = type;
             this.table = table;
             this.whereClause = whereClause;
@@ -363,27 +365,27 @@ public class StatementRestrictions
             RestrictionSet.Builder nonPrimaryKeyRestrictionSet = RestrictionSet.builder();
             ImmutableSet.Builder<ColumnMetadata> notNullColumnsBuilder = ImmutableSet.builder();
 
-        /*
-         * WHERE clause. For a given entity, rules are:
-         *   - EQ relation conflicts with anything else (including a 2nd EQ)
-         *   - Can't have more than one LT(E) relation (resp. GT(E) relation)
-         *   - IN relation are restricted to row keys (for now) and conflicts with anything else (we could
-         *     allow two IN for the same entity but that doesn't seem very useful)
-         *   - The value_alias cannot be restricted in any way (we don't support wide rows with indexed value
-         *     in CQL so far)
-         *   - CONTAINS and CONTAINS_KEY cannot be used with UPDATE or DELETE
-         */
-        for (Relation relation : element.relations())
-        {
-            if ((relation.isContains() || relation.isContainsKey() || relation.isNotContains() || relation.isNotContainsKey()) && (type.isUpdate() || type.isDelete()))
+            /*
+             * WHERE clause. For a given entity, rules are:
+             *   - EQ relation conflicts with anything else (including a 2nd EQ)
+             *   - Can't have more than one LT(E) relation (resp. GT(E) relation)
+             *   - IN relation are restricted to row keys (for now) and conflicts with anything else (we could
+             *     allow two IN for the same entity but that doesn't seem very useful)
+             *   - The value_alias cannot be restricted in any way (we don't support wide rows with indexed value
+             *     in CQL so far)
+             *   - CONTAINS and CONTAINS_KEY cannot be used with UPDATE or DELETE
+             */
+            for (Relation relation : element.relations())
             {
-                throw invalidRequest("Cannot use %s with %s", type, relation.operator());
-            }
+                if ((relation.isContains() || relation.isContainsKey() || relation.isNotContains() || relation.isNotContainsKey()) && (type.isUpdate() || type.isDelete()))
+                {
+                    throw invalidRequest("Cannot use %s with %s", type, relation.operator());
+                }
 
-            if (relation.operator() == Operator.IS_NOT)
-            {
-                if (!forView)
-                    throw invalidRequest("Unsupported restriction: %s", relation);
+                if (relation.operator() == Operator.IS_NOT)
+                {
+                    if (!forView)
+                        throw invalidRequest("Unsupported restriction: %s", relation);
 
                     notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames).getColumnDefs());
                 }
@@ -502,7 +504,7 @@ public class StatementRestrictions
                 if (partitionKeyRestrictions.needFiltering(table) || (!partitionKeyRestrictions.isEmpty() && element.isDisjunction()))
                 {
                     if (!allowFiltering && !forView && !hasQueriableIndex)
-                        throw new InvalidRequestException(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+                        throw new InvalidRequestException(allowFilteringMessage(state));
 
                     isKeyRange = true;
                     usesSecondaryIndexing = hasQueriableIndex;
@@ -666,7 +668,7 @@ public class StatementRestrictions
                                                                                          nonPrimaryKeyRestrictions);
             if (unsupported.isEmpty())
             {
-                throw invalidRequest(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+                throw new InvalidRequestException(allowFilteringMessage(state));
             }
             else
             {
