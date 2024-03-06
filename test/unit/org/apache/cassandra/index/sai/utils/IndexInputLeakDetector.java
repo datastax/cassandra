@@ -43,7 +43,7 @@ public class IndexInputLeakDetector extends TestRuleAdapter
         TrackingIndexFileUtils trackingIndexFileUtils = new TrackingIndexFileUtils(sequentialWriterOption);
         trackedIndexFileUtils.add(trackingIndexFileUtils);
         IndexFileUtils.setOverrideInstance(trackingIndexFileUtils);
-        return IndexDescriptor.create(descriptor, tableMetadata.partitioner, tableMetadata.comparator);
+        return IndexDescriptor.createNew(descriptor, tableMetadata.partitioner, tableMetadata.comparator);
     }
 
     @Override

@@ -257,7 +257,7 @@ public class SegmentMergerTest extends SAITester
     {
         Descriptor descriptor = Iterables.getOnlyElement(getCurrentColumnFamilyStore().getLiveSSTables()).descriptor;
         TableMetadata table = currentTableMetadata();
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, table.partitioner, table.comparator);
+        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(descriptor, table.partitioner, table.comparator);
         assertTrue(indexDescriptor.isPerSSTableBuildComplete());
         IndexMetadata index = table.indexes.get(indexName).get();
         Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(table, index);
