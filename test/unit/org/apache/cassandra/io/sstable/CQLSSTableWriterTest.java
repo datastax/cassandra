@@ -1505,7 +1505,7 @@ public abstract class CQLSSTableWriterTest
         File[] dataFiles = dataDir.list(f -> f.name().endsWith('-' + BigFormat.Components.DATA.type.repr));
         assertNotNull(dataFiles);
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(Descriptor.fromFile(dataFiles[0]),
+        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(Descriptor.fromFile(dataFiles[0]),
                                                                  Murmur3Partitioner.instance,
                                                                  Schema.instance.getTableMetadata(keyspace, table).comparator);
 
@@ -1549,7 +1549,7 @@ public abstract class CQLSSTableWriterTest
         assertNotNull(dataFiles);
 
         // no indexes built due to withBuildIndexes set to false
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(Descriptor.fromFile(dataFiles[0]),
+        IndexDescriptor indexDescriptor = IndexDescriptor.createNew(Descriptor.fromFile(dataFiles[0]),
                                                                  Murmur3Partitioner.instance,
                                                                  Schema.instance.getTableMetadata(keyspace, table).comparator);
 
