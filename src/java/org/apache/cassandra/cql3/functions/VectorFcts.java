@@ -83,8 +83,8 @@ public abstract class VectorFcts
     }
 
     /**
-     * CQL native function create a random float vector of a certaing dimension.
-     * All the components of the vector will be random floats between -1 and 1.
+     * CQL native function create a random float vector of a certain dimension.
+     * All the components of the vector will be random floats between the specified min and max values.
      */
     private static class RandomFloatVectorFunctionFactory extends FunctionFactory
     {

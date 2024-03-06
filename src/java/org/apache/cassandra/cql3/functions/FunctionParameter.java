@@ -240,6 +240,7 @@ public interface FunctionParameter
     }
 
     /**
+     * @param name the name of the function parameter
      * @param type the accepted type of literal
      * @param inferredType the inferred type of the literal
      * @return a function parameter definition that accepts a specific literal type
