@@ -410,7 +410,7 @@ public class IndexDescriptor
     public ChecksumIndexInput openCheckSummedPerSSTableInput(IndexComponent component)
     {
         var indexInput = openPerSSTableInput(component);
-        return checksumIndexInput(indexInput);
+        return checksumIndexInput(null, indexInput);
     }
 
     public IndexInput openPerIndexInput(IndexComponent component, IndexContext context)
@@ -421,17 +421,17 @@ public class IndexDescriptor
     public ChecksumIndexInput openCheckSummedPerIndexInput(IndexComponent indexComponent, IndexContext indexContext)
     {
         var indexInput = openPerIndexInput(indexComponent, indexContext);
-        return checksumIndexInput(indexInput);
+        return checksumIndexInput(indexContext, indexInput);
     }
 
-    private ChecksumIndexInput checksumIndexInput(IndexInput indexInput)
+    private ChecksumIndexInput checksumIndexInput(IndexContext context, IndexInput indexInput)
     {
         // This logic is a bit counterintuitive. For version AA, we wrote using Lucene 7.5, which wrote in
-        // big-endian format. The BufferedChecksumIndexInput reads bytes from the indexInput and assumes they
+        // big-endian format. The BufferedChecksumIndexInput reads individual bytes from the indexInput and assumes they
         // are in big-endian format. Therefore, we need to reverse the endianness of the indexInput for version AA.
         // This is true even if indexInput reads in big-endian format, because the BufferedChecksumIndexInput
         // reads byte by byte then builds shorts, ints, and longs from the bytes, assuming little-endian format.
-        if (version == Version.AA)
+        if (getVersion(context) == Version.AA)
             return new EndiannessReverserChecksumIndexInput(indexInput);
         else
             return new BufferedChecksumIndexInput(indexInput);
@@ -483,7 +483,7 @@ public class IndexDescriptor
     {
         try (final FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this, component))
         {
-            return builder.complete();
+            return addByteOrderAndComplete(builder, component, null);
         }
     }
 
@@ -491,8 +491,14 @@ public class IndexDescriptor
     {
         try (final FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this, component, context))
         {
-            return builder.complete();
+            return addByteOrderAndComplete(builder, component, context);
         }
+    }
+
+    private FileHandle addByteOrderAndComplete(FileHandle.Builder builder, IndexComponent component, IndexContext context)
+    {
+        var order = getVersion(context).onDiskFormat().byteOrderForComponent(component, context);
+        return builder.byteOrder(order).complete();
     }
 
     /**
