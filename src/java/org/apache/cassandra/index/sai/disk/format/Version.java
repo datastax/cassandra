@@ -42,7 +42,7 @@ public class Version
     // Converged Cassandra with JVector
     public static final Version CA = new Version("ca", V3OnDiskFormat.instance, (c, i) -> stargazerFileNameFormat(c, i, "ca"));
 
-    // These are in reverse order so that the latest version is used first. Version matching tests
+    // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version so we want to test that one first.
     public static final List<Version> ALL = Lists.newArrayList(CA, BA, AA);
 
@@ -112,6 +112,10 @@ public class Version
 
     public static interface FileNameFormatter
     {
+        /**
+         * Format filename for given index component and index context.  Only the filename is
+         * returned, not a full path.
+         */
         public String format(IndexComponent indexComponent, IndexContext indexContext);
     }
 

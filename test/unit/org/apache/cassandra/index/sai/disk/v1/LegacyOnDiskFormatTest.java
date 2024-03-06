@@ -94,7 +94,7 @@ public class LegacyOnDiskFormatTest
                                      .addRegularColumn("text_value", UTF8Type.instance)
                                      .build();
         sstable = TrieIndexFormat.instance.getReaderFactory().openNoValidation(descriptor, TableMetadataRef.forOfflineTools(tableMetadata));
-        indexDescriptor = IndexDescriptor.create(sstable);
+        indexDescriptor = IndexDescriptor.createFrom(sstable);
     }
 
     @After
@@ -108,11 +108,11 @@ public class LegacyOnDiskFormatTest
     {
         final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
 
-        NumericValuesMeta numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.OFFSETS_VALUES, null)));
+        NumericValuesMeta numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.OFFSETS_VALUES, null)));
 
         assertEquals(100, numericValuesMeta.valueCount);
 
-        numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES, null)));
+        numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES, null)));
 
         assertEquals(100, numericValuesMeta.valueCount);
     }

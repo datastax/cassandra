@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Random;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 import com.google.common.base.Stopwatch;
 
@@ -125,7 +124,7 @@ public abstract class AbstractOnDiskBenchmark
                                     metadata.keyspace,
                                     metadata.name,
                                     Util.newUUIDGen().get());
-        indexDescriptor = IndexDescriptor.create(descriptor, metadata.partitioner, metadata.comparator);
+        indexDescriptor = IndexDescriptor.createNew(descriptor, metadata.partitioner, metadata.comparator);
         index = "test";
         indexContext = SAITester.createIndexContext(index, IntegerType.instance);
 
@@ -193,7 +192,7 @@ public abstract class AbstractOnDiskBenchmark
     protected final LongArray openRowIdToTokenReader() throws IOException
     {
         MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES)));
+        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES)));
         return new BlockPackedReader(token, tokensMeta).open();
     }
 }

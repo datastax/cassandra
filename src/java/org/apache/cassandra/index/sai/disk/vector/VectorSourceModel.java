@@ -18,54 +18,68 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
+import java.util.function.Function;
+
+import com.google.common.annotations.VisibleForTesting;
+
+import io.github.jbellis.jvector.pq.BinaryQuantization;
+import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
+import static io.github.jbellis.jvector.vector.VectorSimilarityFunction.COSINE;
+import static io.github.jbellis.jvector.vector.VectorSimilarityFunction.DOT_PRODUCT;
+import static java.lang.Math.max;
+import static java.lang.Math.pow;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.BINARY_QUANTIZATION;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
 
 public enum VectorSourceModel
 {
-    ADA002,
-    OPENAI_V3_SMALL,
-    OPENAI_V3_LARGE,
-    BERT,
-    GECKO,
+    ADA002((dimension) -> new VectorCompression(BINARY_QUANTIZATION, dimension / 8), 2.0),
+    OPENAI_V3_SMALL((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16), 1.5),
+    OPENAI_V3_LARGE((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16), 1.5),
+    BERT((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, (dimension * 11) / 64), 2.0),
+    GECKO((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 8), 1.5),
 
-    OTHER;
+    OTHER(COSINE, VectorSourceModel::genericCompression, VectorSourceModel::genericOverquery);
+
+    /**
+     * Default similarity function for this model.
+     */
+    public final VectorSimilarityFunction defaultSimilarityFunction;
+    /**
+     * Compression provider optimized for this model.
+     */
+    public final Function<Integer, VectorCompression> compressionProvider;
+    /**
+     * Factor by which to multiply the top K requested by to search deeper in the graph.
+     * This is IN ADDITION to the tapered 2x applied by OverqueryUtils.
+     */
+    public final Function<CompressedVectors, Double> overqueryProvider;
+
+    VectorSourceModel(Function<Integer, VectorCompression> compressionProvider, double overqueryFactor)
+    {
+        this(DOT_PRODUCT, compressionProvider, __ -> overqueryFactor);
+    }
+
+    VectorSourceModel(VectorSimilarityFunction defaultSimilarityFunction,
+                      Function<Integer, VectorCompression> compressionProvider,
+                      Function<CompressedVectors, Double> overqueryProvider)
+    {
+        this.defaultSimilarityFunction = defaultSimilarityFunction;
+        this.compressionProvider = compressionProvider;
+        this.overqueryProvider = overqueryProvider;
+    }
 
     public static VectorSourceModel fromString(String value)
     {
         return valueOf(value.toUpperCase());
     }
 
-    public VectorSimilarityFunction defaultSimilarityFunction()
+    private static VectorCompression genericCompression(int originalDimension)
     {
-        if (this == OTHER)
-            return VectorSimilarityFunction.COSINE;
-        return VectorSimilarityFunction.DOT_PRODUCT;
-    }
-
-    public VectorCompression preferredCompression(int originalDimension)
-    {
-        // if model is specified, use specifically tuned compression parameters
-        switch (this)
-        {
-            case ADA002:
-                return new VectorCompression(BINARY_QUANTIZATION, originalDimension / 8);
-            case OPENAI_V3_SMALL:
-                return new VectorCompression(PRODUCT_QUANTIZATION, originalDimension / 16);
-            case OPENAI_V3_LARGE:
-                return new VectorCompression(PRODUCT_QUANTIZATION, originalDimension / 16);
-            case BERT:
-                // VSTODO test if we can be more aggressive here
-                return new VectorCompression(PRODUCT_QUANTIZATION, originalDimension / 4);
-            case GECKO:
-                return new VectorCompression(PRODUCT_QUANTIZATION, originalDimension / 4);
-        }
-
         // Model is unspecified / unknown, so we guess.
         // Guessing heuristic is simple: 1536 dimensions is probably ada002, so use BQ.  Otherwise, use PQ.
-        assert this == OTHER : this;
         if (originalDimension == 1536)
             return new VectorCompression(BINARY_QUANTIZATION, originalDimension / 8);
         return new VectorCompression(PRODUCT_QUANTIZATION, defaultPQBytesFor(originalDimension));
@@ -109,5 +123,61 @@ public enum VectorSourceModel
             compressedBytes = (int) (originalDimension * 0.125);
         }
         return compressedBytes;
+    }
+
+    private static double genericOverquery(CompressedVectors cv)
+    {
+        assert cv != null;
+        // we compress extra-large vectors more aggressively, so we need to bump up the limit for those.
+        if (cv instanceof BinaryQuantization)
+            return 2.0;
+        else if ((double) cv.getOriginalSize() / cv.getCompressedSize() > 16.0)
+            return 1.5;
+        else
+            return 1.0;
+    }
+
+    /**
+     * @param limit the number of results the user asked for
+     * @param cv the compressed vectors being queried.  Null if uncompressed.
+     * @return the topK >= `limit` results to ask the index to search for, forcing
+     * the greedy search deeper into the graph.  This serves two purposes:
+     * 1. Smoothes out the relevance difference between small LIMIT and large
+     * 2. Compensates for using lossily-compressed vectors during the search
+     */
+    public int topKFor(int limit, CompressedVectors cv)
+    {
+        // if the vectors are uncompressed, bump up the limit a bit to start with but decay it rapidly
+        if (cv == null)
+        {
+            var n = max(1.0, 0.979 + 4.021 * pow(limit, -0.761)); // f(1) =  5.0, f(100) = 1.1, f(1000) = 1.0
+            return (int) (n * limit);
+        }
+
+        // Most compressed vectors should be queried at ~2x as much as uncompressed vectors.  (Our compression
+        // is tuned so that this should give us approximately the same recall as using uncompressed.)
+        // Again, we do want this to decay as we go to very large limits.
+        var n = tapered2x(limit);
+
+        // per-model adjustment on top of the ~2x factor
+        int originalDimension = cv.getOriginalSize() / 4;
+        if (compressionProvider.apply(originalDimension).matches(cv))
+        {
+            n *= overqueryProvider.apply(cv);
+        }
+        else
+        {
+            // we're using an older CV that wasn't created with the currently preferred parameters,
+            // so use the generic defaults instead
+            n *= OTHER.overqueryProvider.apply(cv);
+        }
+
+        return (int) (n * limit);
+    }
+
+    @VisibleForTesting
+    static double tapered2x(int limit)
+    {
+        return max(1.0, 0.509 + 9.491 * pow(limit, -0.402)); // f(1) = 10.0, f(100) = 2.0, f(1000) = 1.1
     }
 }

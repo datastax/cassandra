@@ -205,7 +205,7 @@ public class SegmentsSystemViewTest extends SAITester
             {
                 SSTableReader sstable = sstableIndex.getSSTable();
 
-                IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
+                IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
                 indexDescriptor.hasComponent(IndexComponent.COLUMN_COMPLETION_MARKER, index.getIndexContext());
 
                 if (TypeUtil.isLiteral(sstableIndex.getIndexContext().getValidator()))
