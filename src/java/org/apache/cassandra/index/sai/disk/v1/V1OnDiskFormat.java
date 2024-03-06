@@ -299,7 +299,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public ByteOrder byteOrderForComponent(IndexComponent indexComponent, IndexContext context)
+    public ByteOrder byteOrderFor(IndexComponent indexComponent, IndexContext context)
     {
         return ByteOrder.BIG_ENDIAN;
     }

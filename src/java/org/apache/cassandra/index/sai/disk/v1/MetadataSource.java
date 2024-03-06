@@ -50,7 +50,7 @@ public class MetadataSource
         try (var input = indexDescriptor.openCheckSummedPerSSTableInput(IndexComponent.GROUP_META))
         {
             var version = indexDescriptor.getVersion();
-            var order = version.onDiskFormat().byteOrderForComponent(IndexComponent.GROUP_META, null);
+            var order = version.onDiskFormat().byteOrderFor(IndexComponent.GROUP_META, null);
             return MetadataSource.load(input, version, order);
         }
     }
@@ -60,7 +60,7 @@ public class MetadataSource
         try (var input = indexDescriptor.openCheckSummedPerIndexInput(IndexComponent.META, indexContext))
         {
             var version = indexDescriptor.getVersion();
-            var order = version.onDiskFormat().byteOrderForComponent(IndexComponent.META, indexContext);
+            var order = version.onDiskFormat().byteOrderFor(IndexComponent.META, indexContext);
             return MetadataSource.load(input, version, order);
         }
     }

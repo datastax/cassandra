@@ -208,5 +208,5 @@ public interface OnDiskFormat
      * @param context - The {@link IndexContext} for the index
      * @return The {@link ByteOrder} for the file associated with the {@link IndexComponent}
      */
-    public ByteOrder byteOrderForComponent(IndexComponent component, IndexContext context);
+    public ByteOrder byteOrderFor(IndexComponent component, IndexContext context);
 }
