@@ -394,6 +394,7 @@ public final class VectorType<T> extends AbstractType<List<T>>
         public abstract <V> List<V> split(V buffer, ValueAccessor<V> accessor);
         public abstract <V> V serializeRaw(List<V> elements, ValueAccessor<V> accessor);
         public abstract float[] deserializeFloatArray(ByteBuffer input);
+        public abstract ByteBuffer serializeFloatArray(float[] value);
 
         @Override
         public String toString(List<T> value)
@@ -540,6 +541,21 @@ public final class VectorType<T> extends AbstractType<List<T>>
         }
 
         @Override
+        public ByteBuffer serializeFloatArray(float[] value)
+        {
+            if (elementType != FloatType.instance)
+                throw new UnsupportedOperationException();
+
+            if (value.length != dimension)
+                throw new MarshalException(String.format("Required %d elements, but saw %d", dimension, value.length));
+
+            var fb = FloatBuffer.wrap(value);
+            var bb = ByteBuffer.allocate(fb.capacity() * Float.BYTES);
+            bb.asFloatBuffer().put(fb);
+            return bb;
+        }
+
+        @Override
         public <V> void validate(V input, ValueAccessor<V> accessor) throws MarshalException
         {
             if (accessor.isEmpty(input))
@@ -681,6 +697,12 @@ public final class VectorType<T> extends AbstractType<List<T>>
         }
 
         public float[] deserializeFloatArray(ByteBuffer input)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ByteBuffer serializeFloatArray(float[] value)
         {
             throw new UnsupportedOperationException();
         }

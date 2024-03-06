@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3.functions;
 
+import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -90,7 +91,9 @@ public class ToJsonFct extends NativeScalarFunction
         }
 
         @Override
-        protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+        protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,
+                                                       List<AbstractType<?>> argTypes,
+                                                       AbstractType<?> receiverType)
         {
             return ToJsonFct.getInstance(name.name, argTypes);
         }
