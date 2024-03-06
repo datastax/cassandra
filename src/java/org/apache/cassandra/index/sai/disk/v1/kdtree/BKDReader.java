@@ -39,6 +39,8 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.disk.v1.postings.FilteringPostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
@@ -53,11 +55,9 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.PointValues.Relation;
-import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.LongValues;
-import org.apache.lucene.util.packed.DirectReader;
 import org.apache.lucene.util.packed.DirectWriter;
 
 /**
@@ -247,7 +247,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         final SeekingRandomAccessInput randoInput = new SeekingRandomAccessInput(bkdInput);
         for (int x = 0; x < count; x++)
         {
-            LongValues orderMapReader = DirectReader.getInstance(randoInput, DirectWriter.unsignedBitsRequired(maxPointsInLeafNode - 1), orderMapPointer);
+            LongValues orderMapReader = LuceneCompat.getDirectReaderInstance(randoInput, LuceneCompat.directWriterUnsignedBitsRequired(randoInput.order(), maxPointsInLeafNode - 1), orderMapPointer);
             final short idx = (short) LeafOrderMap.getValue(x, orderMapReader);
             origIndex[x] = idx;
         }
@@ -697,7 +697,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             final SeekingRandomAccessInput randoInput = new SeekingRandomAccessInput(bkdInput);
             for (int x = 0; x < count; x++)
             {
-                LongValues orderMapReader = DirectReader.getInstance(randoInput, DirectWriter.unsignedBitsRequired(maxPointsInLeafNode - 1), orderMapPointer);
+                LongValues orderMapReader = LuceneCompat.getDirectReaderInstance(randoInput, LuceneCompat.directWriterUnsignedBitsRequired(randoInput.order(), maxPointsInLeafNode - 1), orderMapPointer);
                 origIndex[x] = (short) orderMapReader.get(x);
             }
 

@@ -43,6 +43,7 @@ import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.oldlucene.EndiannessReverserChecksumIndexInput;
 import org.apache.cassandra.index.sai.memory.RowMapping;
@@ -56,7 +57,6 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.lucene.store.ChecksumIndexInput;
-import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.IOUtils;
 
 /**
@@ -419,10 +419,10 @@ public class IndexDescriptor
         return IndexFileUtils.instance.openBlockingInput(createPerIndexFileHandle(component, context));
     }
 
-    public ChecksumIndexInput openCheckSummedPerIndexInput(IndexComponent indexComponent, IndexContext indexContext)
+    public ChecksumIndexInput openCheckSummedPerIndexInput(IndexComponent component, IndexContext context)
     {
-        var indexInput = openPerIndexInput(indexComponent, indexContext);
-        return checksumIndexInput(indexContext, indexInput);
+        var indexInput = openPerIndexInput(component, context);
+        return checksumIndexInput(context, indexInput);
     }
 
     private ChecksumIndexInput checksumIndexInput(IndexContext context, IndexInput indexInput)
@@ -432,6 +432,7 @@ public class IndexDescriptor
         // are in big-endian format. Therefore, we need to reverse the endianness of the indexInput for version AA.
         // This is true even if indexInput reads in big-endian format, because the BufferedChecksumIndexInput
         // reads byte by byte then builds shorts, ints, and longs from the bytes, assuming little-endian format.
+        // TODO verify this logic
         if (getVersion(context) == Version.AA)
             return new EndiannessReverserChecksumIndexInput(indexInput);
         else

@@ -77,6 +77,11 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         buffer.order(order);
     }
 
+    public ByteOrder order()
+    {
+        return order;
+    }
+
     /**
      * Read a float[] at the current position.
      *

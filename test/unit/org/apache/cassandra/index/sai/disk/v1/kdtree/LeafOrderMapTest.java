@@ -17,9 +17,15 @@
  */
 package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
+import java.io.IOException;
+import java.nio.ByteOrder;
+
 import org.junit.Test;
 
+import net.openhft.chronicle.wire.SelfDescribingMarshallable;
 import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.SeekingRandomAccessInput;
 import org.apache.lucene.util.LongValues;
@@ -45,7 +51,7 @@ public class LeafOrderMapTest extends SaiRandomizedTest
         var input = out.toIndexInput();
 
         final byte bits = (byte) DirectWriter.unsignedBitsRequired(array.length - 1);
-        LongValues reader = DirectReader.getInstance(new SeekingRandomAccessInput(input), bits);
+        LongValues reader = LuceneCompat.getDirectReaderInstance(new SeekingRandomAccessInput(input, ByteOrder.LITTLE_ENDIAN), bits, 0);
 
         for (int x=0; x < array.length; x++)
         {

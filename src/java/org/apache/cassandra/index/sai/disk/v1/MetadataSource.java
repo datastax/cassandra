@@ -21,27 +21,25 @@ import java.io.IOException;
 import java.nio.ByteOrder;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.lucene.backward_codecs.store.EndiannessReverserUtil;
-import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.cassandra.index.sai.disk.oldlucene.ByteArrayIndexInput;
 import org.apache.lucene.store.ChecksumIndexInput;
-import org.apache.lucene.store.IndexInput;
-import org.apache.lucene.util.BytesRef;
 
 @NotThreadSafe
 public class MetadataSource
 {
     private final Version version;
-    private final Map<String, BytesRef> components;
+    private final Map<String, Supplier<ByteArrayIndexInput>> components;
 
-    private MetadataSource(Version version, Map<String, BytesRef> components)
+    private MetadataSource(Version version, Map<String, Supplier<ByteArrayIndexInput>> components)
     {
         this.version = version;
         this.components = components;
@@ -51,7 +49,7 @@ public class MetadataSource
     {
         try (var input = indexDescriptor.openCheckSummedPerSSTableInput(IndexComponent.GROUP_META))
         {
-            return MetadataSource.load(input);
+            return MetadataSource.load(input, indexDescriptor.getVersion());
         }
     }
 
@@ -59,16 +57,19 @@ public class MetadataSource
     {
         try (var input = indexDescriptor.openCheckSummedPerIndexInput(IndexComponent.META, indexContext))
         {
-            return MetadataSource.load(input);
+            return MetadataSource.load(input, indexDescriptor.getVersion(indexContext));
         }
     }
 
-    private static MetadataSource load(ChecksumIndexInput input) throws IOException
+    private static MetadataSource load(ChecksumIndexInput input, Version expectedVersion) throws IOException
     {
-        Map<String, BytesRef> components = new HashMap<>();
+        Map<String, Supplier<ByteArrayIndexInput>> components = new HashMap<>();
         Version version;
 
         version = SAICodecUtils.checkHeader(input);
+        if (version != expectedVersion)
+            throw new IllegalStateException("Unexpected version " + version + " in " + input + ", expected " + expectedVersion);
+
         final int num = input.readInt();
 
         for (int x = 0; x < num; x++)
@@ -84,7 +85,9 @@ public class MetadataSource
             final byte[] bytes = new byte[length];
             input.readBytes(bytes, 0, length);
 
-            components.put(name, new BytesRef(bytes));
+            // TODO is this always correct?
+            var order = version == Version.AA ? ByteOrder.BIG_ENDIAN : ByteOrder.LITTLE_ENDIAN;
+            components.put(name, () -> new ByteArrayIndexInput(name, bytes, order));
         }
 
         SAICodecUtils.checkFooter(input);
@@ -94,15 +97,15 @@ public class MetadataSource
 
     public IndexInput get(String name)
     {
-        BytesRef bytes = components.get(name);
+        var supplier = components.get(name);
 
-        if (bytes == null)
+        if (supplier == null)
         {
             throw new IllegalArgumentException(String.format("Could not find component '%s'. Available properties are %s.",
                                                              name, components.keySet()));
         }
-        var order = version == Version.AA ? ByteOrder.BIG_ENDIAN : ByteOrder.LITTLE_ENDIAN;
-        return new ByteArrayIndexInput(name, bytes.bytes, order);
+
+        return supplier.get();
     }
 
     public Version getVersion()

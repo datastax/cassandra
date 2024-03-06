@@ -42,6 +42,7 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.QueryEventListeners;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -101,6 +102,12 @@ public class LegacyOnDiskFormatTest
     public void teardown()
     {
         temporaryFolder.delete();
+    }
+
+    @Test
+    public void correctlyIdentifiesPerSSTableFileVersion()
+    {
+        assertEquals(Version.AA, indexDescriptor.getVersion());
     }
 
     @Test

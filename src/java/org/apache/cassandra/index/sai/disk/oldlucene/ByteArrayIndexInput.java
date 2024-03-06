@@ -23,7 +23,7 @@ import java.io.UncheckedIOException;
 import java.nio.ByteOrder;
 import java.util.Locale;
 
-import org.apache.lucene.store.IndexInput;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.lucene.store.RandomAccessInput;
 
 /**
@@ -49,12 +49,11 @@ public final class ByteArrayIndexInput extends IndexInput implements RandomAcces
     }
 
     public ByteArrayIndexInput(String description, byte[] bytes, int offs, int length, ByteOrder order) {
-        super(description);
+        super(description, order);
         this.offset = offs;
         this.bytes = bytes;
         this.length = length;
         this.pos = offs;
-        assert order == ByteOrder.BIG_ENDIAN || order == ByteOrder.LITTLE_ENDIAN;
         this.isBigEndian = order == ByteOrder.BIG_ENDIAN;
     }
 

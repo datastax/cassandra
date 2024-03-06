@@ -32,6 +32,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.ScanningPostingsReader;
@@ -47,7 +48,6 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
-import org.apache.lucene.store.IndexInput;
 
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.validate;
 
