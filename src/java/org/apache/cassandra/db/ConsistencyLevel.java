@@ -17,17 +17,14 @@
  */
 package org.apache.cassandra.db;
 
-import java.util.EnumSet;
 import java.util.Locale;
 
 import javax.annotation.Nullable;
 
 import com.carrotsearch.hppc.ObjectIntHashMap;
-import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InOurDc;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -246,9 +243,6 @@ public enum ConsistencyLevel
 
     public void validateForWrite(String keyspaceName, ClientState clientState) throws InvalidRequestException
     {
-        if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.writeConsistencyLevels.guard(EnumSet.of(this), clientState);
-
         switch (this)
         {
             case SERIAL:
@@ -260,9 +254,6 @@ public enum ConsistencyLevel
     // This is the same than validateForWrite really, but we include a slightly different error message for SERIAL/LOCAL_SERIAL
     public void validateForCasCommit(AbstractReplicationStrategy replicationStrategy, String keyspaceName, ClientState clientState) throws InvalidRequestException
     {
-        if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.writeConsistencyLevels.guard(EnumSet.of(this), clientState);
-
         switch (this)
         {
             case EACH_QUORUM:
@@ -276,9 +267,6 @@ public enum ConsistencyLevel
 
     public void validateForCas(String keyspaceName, ClientState clientState) throws InvalidRequestException
     {
-        if (SchemaConstants.isUserKeyspace(keyspaceName))
-            Guardrails.writeConsistencyLevels.guard(EnumSet.of(this), clientState);
-
         if (!isSerialConsistency())
             throw new InvalidRequestException("Invalid consistency for conditional update. Must be one of SERIAL or LOCAL_SERIAL");
     }
@@ -290,9 +278,6 @@ public enum ConsistencyLevel
 
     public void validateCounterForWrite(TableMetadata metadata, ClientState clientState) throws InvalidRequestException
     {
-        if (SchemaConstants.isUserKeyspace(metadata.keyspace))
-            Guardrails.writeConsistencyLevels.guard(EnumSet.of(this), clientState);
-
         if (this == ConsistencyLevel.ANY)
             throw new InvalidRequestException("Consistency level ANY is not yet supported for counter table " + metadata.name);
 
@@ -310,7 +295,7 @@ public enum ConsistencyLevel
     /**
      * Returns the strictest consistency level allowed by Guardrails.
      *
-     * @param clientState the client state, used to skip the guardrails check if the query is internal or is done by a superuser.
+     * @param state the query state, used to skip the guardrails check if the query is internal or is done by a superuser.
      * @return the strictest allowed serial consistency level
      * @throws InvalidRequestException if all serial consistency level are disallowed
      */
