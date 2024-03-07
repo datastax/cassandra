@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.utils;
 import java.io.IOException;
 import java.nio.ByteOrder;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.RandomAccessInput;
 
@@ -37,6 +39,7 @@ public class SeekingRandomAccessInput implements RandomAccessInput
         this.order = in.order();
     }
 
+    @VisibleForTesting
     public SeekingRandomAccessInput(IndexInput in, ByteOrder order)
     {
         this.in = in;

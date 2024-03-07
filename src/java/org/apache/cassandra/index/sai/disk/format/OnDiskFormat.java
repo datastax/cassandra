@@ -204,6 +204,7 @@ public interface OnDiskFormat
 
     /**
      * Return the {@link ByteOrder} for the given {@link IndexComponent} and {@link IndexContext}.
+     *
      * @param component - The {@link IndexComponent} for the index
      * @param context - The {@link IndexContext} for the index
      * @return The {@link ByteOrder} for the file associated with the {@link IndexComponent}

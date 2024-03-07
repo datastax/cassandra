@@ -431,6 +431,7 @@ public class IndexDescriptor
      * Lucene 7.5, {@link org.apache.lucene.store.DataOutput} wrote the file using big endian formatting.
      * After the upgrade to Lucene 9, the {@link org.apache.lucene.store.DataOutput} writes in little endian
      * formatting.
+     *
      * @param context The index context
      * @param indexInput The index input to read
      * @return A ChecksumIndexInput that reads the indexInput in the correct endianness for the context

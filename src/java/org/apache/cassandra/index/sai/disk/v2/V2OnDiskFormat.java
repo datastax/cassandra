@@ -174,7 +174,7 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     @Override
     public ByteOrder byteOrderFor(IndexComponent indexComponent, IndexContext context)
     {
-        // The little endian files are written by lucene, and the upgrade to lucene 9 switched the byte order.
+        // The little-endian files are written by Lucene, and the upgrade to Lucene 9 switched the byte order from big to little.
         switch (indexComponent)
         {
             case META:
