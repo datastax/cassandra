@@ -225,20 +225,16 @@ public class OnDiskOrdinalsMap
         @Override
         public boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
         {
-            assert endRowId > 0 : "endRowId must be greater than 0";
             // risk of overflow
             assert endRowId < Integer.MAX_VALUE : "endRowId must be less than Integer.MAX_VALUE";
             assert endRowId >= startRowId : "endRowId must be greater than or equal to startRowId";
 
-            boolean called = false;
             int start = Math.max(startRowId, 0);
             int end = Math.min(endRowId + 1, size);
             for (int rowId = start; rowId < end; rowId++)
-            {
-                called = true;
                 consumer.accept(rowId, rowId);
-            }
-            return called;
+            // Returns true if we called the consumer at least once.
+            return end > start;
         }
 
         @Override
