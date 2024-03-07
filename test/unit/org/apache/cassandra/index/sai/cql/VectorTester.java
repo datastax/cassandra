@@ -57,12 +57,12 @@ public class VectorTester extends SAITester
     static void setMaxBruteForceRows(int n) throws Throwable
     {
         var shouldUseBruteForce = InvokePointBuilder.newInvokePoint()
-                                                  .onClass("org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher")
+                                                  .onClass("org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher$CostEstimate")
                                                   .onMethod("shouldUseBruteForce")
                                                   .atEntry();
         var ab = ActionBuilder.newActionBuilder()
                               .actions()
-                              .doAction("$this.globalBruteForceRows = " + n);
+                              .doAction("$this.this$0.globalBruteForceRows = " + n);
         var changeBruteForceThreshold = Injections.newCustom("force_non_bruteforce_queries")
                                                   .add(shouldUseBruteForce)
                                                   .add(ab)
