@@ -889,13 +889,6 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     {
         UnfilteredRowIterator merged = UnfilteredRowIterators.merge(iterators);
 
-        if (!merged.isEmpty())
-        {
-            DecoratedKey key = merged.partitionKey();
-            metrics.topReadPartitionFrequency.addSample(key.getKey(), 1);
-            metrics.topReadPartitionSSTableCount.addSample(key.getKey(), metricsCollector.getMergedSSTables());
-        }
-
         return withSSTablesIterated(merged, controller, totalIntersectingSSTables, metrics, metricsCollector, startTimeNanos);
     }
 
@@ -906,8 +899,12 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                                                        SSTableReadMetricsCollector metricsCollector,
                                                        long startTimeNanos)
     {
-        DecoratedKey key = iterator.partitionKey();
-        metrics.topReadPartitionFrequency.addSample(key.getKey(), 1);
+        if (!iterator.isEmpty())
+        {
+            DecoratedKey key = iterator.partitionKey();
+            metrics.topReadPartitionFrequency.addSample(key.getKey(), 1);
+            metrics.topReadPartitionSSTableCount.addSample(key.getKey(), metricsCollector.getMergedSSTables());
+        }
 
         class UpdateSstablesIterated extends Transformation<UnfilteredRowIterator>
         {
