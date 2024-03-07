@@ -24,6 +24,8 @@ import java.util.HashSet;
 import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
@@ -223,9 +225,14 @@ public class OnDiskOrdinalsMap
         @Override
         public boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
         {
+            assert endRowId > 0 : "endRowId must be greater than 0";
+            // risk of overflow
+            assert endRowId < Integer.MAX_VALUE : "endRowId must be less than Integer.MAX_VALUE";
+            assert endRowId >= startRowId : "endRowId must be greater than or equal to startRowId";
+
             boolean called = false;
             int start = Math.max(startRowId, 0);
-            int end = Math.min(endRowId, size);
+            int end = Math.min(endRowId + 1, size);
             for (int rowId = start; rowId < end; rowId++)
             {
                 called = true;
@@ -241,21 +248,64 @@ public class OnDiskOrdinalsMap
         }
     }
 
+    /**
+     * not thread safe
+     */
     private class FileReadingOrdinalsView implements OrdinalsView
     {
         RandomAccessReader reader = fh.createReader();
         private final long high = (segmentEnd - 8 - rowOrdinalOffset) / 8;
+        private int lastFoundRowId = -1;
+        private long lastFoundRowIdIndex = -1;
+
+        private int lastRowId = -1;
 
         /**
          * @return order if given row id is found; otherwise return -1
+         * rowId must increase
          */
         @Override
         public int getOrdinalForRowId(int rowId) throws IOException
         {
+            if (rowId <= lastRowId)
+                throw new IllegalArgumentException("rowId " + rowId + " is less than or equal to lastRowId " + lastRowId);
+            lastRowId = rowId;
+
+            if (rowId < lastFoundRowId) // skipped row, no need to search
+                return -1;
+
+            long low = 0;
+            if (lastFoundRowId > -1 && lastFoundRowIdIndex < high)
+            {
+                low = lastFoundRowIdIndex;
+
+                if (lastFoundRowId == rowId) // "lastFoundRowId + 1 == rowId" case that returned -1 likely moved use here
+                {
+                    long offset = rowOrdinalOffset + lastFoundRowIdIndex * 8;
+                    reader.seek(offset);
+                    int foundRowId = reader.readInt();
+                    assert foundRowId == rowId : "expected rowId " + rowId + " but found " + foundRowId;
+                    return reader.readInt();
+                }
+                else if (lastFoundRowId + 1 == rowId) // sequential read, skip binary search
+                {
+                    long offset = rowOrdinalOffset + (lastFoundRowIdIndex + 1) * 8;
+                    reader.seek(offset);
+                    int foundRowId = reader.readInt();
+                    lastFoundRowId = foundRowId;
+                    lastFoundRowIdIndex++;
+                    if (foundRowId == rowId)
+                        return reader.readInt();
+                    else
+                        return -1;
+                }
+            }
+            final AtomicLong lastRowIdIndex = new AtomicLong(-1L);
             // Compute the offset of the start of the rowId to vectorOrdinal mapping
-            long index = DiskBinarySearch.searchInt(0, Math.toIntExact(high), rowId, i -> {
+            long index = DiskBinarySearch.searchInt(low, high, rowId, i -> {
                 try
                 {
+                    lastRowIdIndex.set(i);
                     long offset = rowOrdinalOffset + i * 8;
                     reader.seek(offset);
                     return reader.readInt();
@@ -270,6 +320,8 @@ public class OnDiskOrdinalsMap
             if (index < 0)
                 return -1;
 
+            lastFoundRowId = rowId;
+            lastFoundRowIdIndex = lastRowIdIndex.get();
             return reader.readInt();
         }
 
