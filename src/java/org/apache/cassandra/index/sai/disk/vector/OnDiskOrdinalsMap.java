@@ -226,7 +226,7 @@ public class OnDiskOrdinalsMap
             boolean called = false;
             int start = Math.max(startRowId, 0);
             int end = Math.min(endRowId, size);
-            for (int rowId = start; rowId < end; rowId++)
+            for (int rowId = start; rowId <= end; rowId++)
             {
                 called = true;
                 consumer.accept(rowId, rowId);
