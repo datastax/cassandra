@@ -26,7 +26,6 @@ import java.util.function.UnaryOperator;
 import java.util.stream.StreamSupport;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 
@@ -179,18 +178,6 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         if (keyspace.createReplicationStrategy().hasTransientReplicas())
             throw new InvalidRequestException(TRANSIENTLY_REPLICATED_KEYSPACE_NOT_SUPPORTED);
-
-        // guardrails to limit number of secondary indexes per table.
-        if (!attrs.isCustom)
-        {
-            long existingSecondaryIndexes = table.indexes.stream().filter(indexMetadata -> !indexMetadata.isCustom()).count();
-            Guardrails.secondaryIndexesPerTable.guard(existingSecondaryIndexes + 1,
-                                                      Strings.isNullOrEmpty(indexName)
-                                                      ? String.format("on table %s", table.name)
-                                                      : String.format("%s on table %s", indexName, table.name),
-                                                      false,
-                                                      state);
-        }
 
         List<IndexTarget> indexTargets = Lists.newArrayList(transform(rawIndexTargets, t -> t.prepare(table)));
 
