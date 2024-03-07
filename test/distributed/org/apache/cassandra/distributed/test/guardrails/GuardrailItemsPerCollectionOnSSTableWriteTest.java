@@ -139,6 +139,12 @@ public class GuardrailItemsPerCollectionOnSSTableWriteTest extends GuardrailTest
         execute("UPDATE %s SET v = v + {2, 3} WHERE k = 1");
         assertNotWarnedOnFlush();
         assertWarnedOnCompact(warnMessage("1", 3));
+    }
+
+    @Test
+    public void testSetSizeAfterCompaction_failOnCompact() throws Throwable
+    {
+        schemaChange("CREATE TABLE %s (k int PRIMARY KEY, v set<int>)");
 
         execute("INSERT INTO %s (k, v) VALUES (2, {1, 2})");
         assertNotWarnedOnFlush();
@@ -212,12 +218,24 @@ public class GuardrailItemsPerCollectionOnSSTableWriteTest extends GuardrailTest
         execute("UPDATE %s SET v = v + [2, 3] WHERE k = 1");
         assertNotWarnedOnFlush();
         assertWarnedOnCompact(warnMessage("1", 3));
+    }
+
+    @Test
+    public void testListSizeAfterCompaction_failOnComapact() throws Throwable
+    {
+        schemaChange("CREATE TABLE %s (k int PRIMARY KEY, v list<int>)");
 
         execute("INSERT INTO %s (k, v) VALUES (2, [1, 2])");
         assertNotWarnedOnFlush();
         execute("UPDATE %s SET v = v + [3, 4, 5] WHERE k = 2");
         assertWarnedOnFlush(warnMessage("2", 3));
         assertFailedOnCompact(failMessage("2", 5));
+    }
+
+    @Test
+    public void testListSizeAfterCompaction_nullNoWarn() throws Throwable
+    {
+        schemaChange("CREATE TABLE %s (k int PRIMARY KEY, v list<int>)");
 
         execute("INSERT INTO %s (k, v) VALUES (3, [1, 2, 3])");
         assertWarnedOnFlush(warnMessage("3", 3));
@@ -285,12 +303,24 @@ public class GuardrailItemsPerCollectionOnSSTableWriteTest extends GuardrailTest
         execute("UPDATE %s SET v = v + {2:20} WHERE k = 0");
         assertNotWarnedOnFlush();
         assertNotWarnedOnCompact();
+    }
+
+    @Test
+    public void testMapSizeAfterCompaction_warnOnCompact()
+    {
+        schemaChange("CREATE TABLE %s (k int PRIMARY KEY, v map<int, int>)");
 
         execute("INSERT INTO %s (k, v) VALUES (1, {1:10})");
         assertNotWarnedOnFlush();
         execute("UPDATE %s SET v = v + {2:20, 3:30} WHERE k = 1");
         assertNotWarnedOnFlush();
         assertWarnedOnCompact(warnMessage("1", 3));
+    }
+
+    @Test
+    public void testMapSizeAfterCompaction_failOnCompact()
+    {
+        schemaChange("CREATE TABLE %s (k int PRIMARY KEY, v map<int, int>)");
 
         execute("INSERT INTO %s (k, v) VALUES (2, {1:10, 2:20})");
         assertNotWarnedOnFlush();
@@ -330,15 +360,15 @@ public class GuardrailItemsPerCollectionOnSSTableWriteTest extends GuardrailTest
 
     private String warnMessage(String key, int numItems)
     {
-        return String.format("Detected collection v in row %s in table %s with %d items, " +
+        return String.format("Detected collection v in table %s with %d items, " +
                              "this exceeds the warning threshold of %d.",
-                             key, qualifiedTableName, numItems, WARN_THRESHOLD);
+                             qualifiedTableName, numItems, WARN_THRESHOLD);
     }
 
     private String failMessage(String key, int numItems)
     {
-        return String.format("Detected collection v in row %s in table %s with %d items, " +
+        return String.format("Detected collection v in table %s with %d items, " +
                              "this exceeds the failure threshold of %d.",
-                             key, qualifiedTableName, numItems, FAIL_THRESHOLD);
+                             qualifiedTableName, numItems, FAIL_THRESHOLD);
     }
 }
