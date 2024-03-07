@@ -96,8 +96,7 @@ public class CryptoUtils
         }
         compressor.uncompress(compBytes.bytes, 0, compBytesLength, uncompBytes.bytes, 0);
 
-        // TODO is it true that the byte array is little-endian?
-        return new ByteArrayIndexInput("", uncompBytes.bytes, 0, uncompBytesLen, ByteOrder.LITTLE_ENDIAN);
+        return new ByteArrayIndexInput("", uncompBytes.bytes, 0, uncompBytesLen, input.order());
     }
 
     public static void compress(BytesRef uncompBytes,
