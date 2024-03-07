@@ -19,10 +19,17 @@
 package org.apache.cassandra.index.sai.disk.v2.hnsw;
 
 
-import java.util.function.Function;
-
 public class DiskBinarySearch
 {
+    /**
+     * A function that takes a primitive long and returns a primitive int.
+     */
+    @FunctionalInterface
+    public interface LongIntFunction
+    {
+        int apply(long i);
+    }
+
     /**
      * Search for the target int between positions low and high, using the provided function
      * to retrieve the int value at the given ordinal.
@@ -34,7 +41,7 @@ public class DiskBinarySearch
      *
      * @return index if target is found; otherwise return -1 if targer is not found
      */
-    public static long searchInt(long low, long high, int target, Function<Long, Integer> f)
+    public static long searchInt(long low, long high, int target, LongIntFunction f)
     {
         return search(low, high, target, false, f);
     }
@@ -42,12 +49,12 @@ public class DiskBinarySearch
     /**
      * Similar to searchInt but returns index of a value greater or equal to the target, -1 if not found.
      */
-    public static long searchFloor(long low, long high, int target, Function<Long, Integer> f)
+    public static long searchFloor(long low, long high, int target, LongIntFunction f)
     {
         return search(low, high, target, true, f);
     }
 
-    private static long search(long low, long high, int target, boolean floorSearch, Function<Long, Integer> f)
+    private static long search(long low, long high, int target, boolean floorSearch, LongIntFunction f)
     {
         assert high < Long.MAX_VALUE >> 2 : "high is too large to avoid potential overflow: " + high;
         assert low < high : "low must be less than high: " + low + " >= " + high;
