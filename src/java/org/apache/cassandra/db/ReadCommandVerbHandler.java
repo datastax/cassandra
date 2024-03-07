@@ -62,7 +62,22 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         // Initialize the sensor and set ExecutorLocals
         Context context = Context.from(command);
         RequestSensors sensors = new RequestSensors();
-        sensors.registerSensor(context, Type.READ_BYTES);
+        Type type;
+        String requestBytesParam;
+        String tableBytesParam;
+        if (command.indexQueryPlan != null)
+        {
+             type = Type.SEARCH_BYTES;
+             requestBytesParam = SensorsCustomParams.SEARCH_BYTES_REQUEST;
+             tableBytesParam = SensorsCustomParams.SEARCH_BYTES_TABLE;
+        }
+        else
+        {
+             type = Type.READ_BYTES;
+             requestBytesParam = SensorsCustomParams.READ_BYTES_REQUEST;
+             tableBytesParam = SensorsCustomParams.READ_BYTES_TABLE;
+        }
+        sensors.registerSensor(context, type);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
@@ -85,12 +100,14 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         Tracing.trace("Enqueuing response to {}", message.from());
 
-        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(context, Type.READ_BYTES);
+        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(context, type);
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
-        readRequestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_REQUEST, bytes));
+        readRequestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue()))
+                         .ifPresent(bytes -> reply.withCustomParam(requestBytesParam, bytes));
 
-        Optional<Sensor> readTableSensor = SensorsRegistry.instance.getSensor(Context.from(command), Type.READ_BYTES);
-        readTableSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_TABLE, bytes));
+        Optional<Sensor> readTableSensor = SensorsRegistry.instance.getSensor(Context.from(command), type);
+        readTableSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue()))
+                       .ifPresent(bytes -> reply.withCustomParam(tableBytesParam, bytes));
 
         MessagingService.instance().send(reply.build(), message.from());
     }

@@ -78,6 +78,7 @@ import org.apache.cassandra.schema.SchemaProvider;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.sensors.read.TrackingRowIterator;
@@ -403,8 +404,8 @@ public abstract class ReadCommand extends AbstractReadQuery
         }
 
         Context context = Context.from(this);
-        UnfilteredPartitionIterator iterator = (null == searcher) ? Transformation.apply(queryStorage(cfs, executionController), new TrackingRowIterator(context))
-                                                                  : searchStorage(searcher, executionController);
+        UnfilteredPartitionIterator iterator = (null == searcher) ? Transformation.apply(queryStorage(cfs, executionController), new TrackingRowIterator(context, Type.READ_BYTES))
+                                                                  : Transformation.apply(searchStorage(searcher, executionController), new TrackingRowIterator(context, Type.SEARCH_BYTES));
 
         iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
 

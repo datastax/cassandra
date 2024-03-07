@@ -40,6 +40,18 @@ public final class SensorsCustomParams
      * The per-request write bytes value for a given keyspace and table.
      * To support batch writes, table name is encoded in the following format: WRITE_BYTES_REQUEST.<table>
      */
+    /**
+     * The per-request search bytes value for a given keyspace and table.
+     */
+    public static final String SEARCH_BYTES_REQUEST = "SEARCH_BYTES_REQUEST";
+    /**
+     * The total search bytes value for a given keyspace and table, across all requests. This is a monotonically increasing value.
+     */
+    public static final String SEARCH_BYTES_TABLE = "SEARCH_BYTES_TABLE";
+    /**
+     * The per-request write bytes value for a given keyspace and table.
+     * To support batch writes, table name is encoded in the following format: WRITE_BYTES_REQUEST.<table>
+     */
     public static final String WRITE_BYTES_REQUEST_TEMPLATE = "WRITE_BYTES_REQUEST.%s";
     /**
      * The total write bytes value for a given keyspace and table, across all requests.

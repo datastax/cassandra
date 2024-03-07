@@ -53,7 +53,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 public class SensorsIndexTest
 {
-    public static final String KEYSPACE1 = "SensorsWriteTest";
+    public static final String KEYSPACE1 = "SensorsIndexTest";
     public static final String CF_STANDARD = "Standard";
     public static final String CF_STANDARD_SAI = "StandardSAI";
     public static final String CF_STANDARD_SECONDARY_INDEX = "StandardSecondaryIndex";
