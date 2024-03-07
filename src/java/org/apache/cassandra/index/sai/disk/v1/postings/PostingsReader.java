@@ -154,7 +154,7 @@ public class PostingsReader implements OrdinalPostingList
                 String message = String.format("Postings list header is corrupted: Bits per value for block offsets must be no more than 64 and is %d.", offsetBitsPerValue);
                 throw new CorruptIndexException(message, input);
             }
-            this.offsets = new LongArrayReader(randomAccessInput, offsetBitsPerValue == 0 ? LongValues.ZEROES : LuceneCompat.getDirectReaderInstance(randomAccessInput, offsetBitsPerValue, input.getFilePointer()), numBlocks);
+            this.offsets = new LongArrayReader(randomAccessInput, offsetBitsPerValue == 0 ? LongValues.ZEROES : LuceneCompat.directReaderGetInstance(randomAccessInput, offsetBitsPerValue, input.getFilePointer()), numBlocks);
 
             input.seek(maxBlockValuesOffset);
             final byte valuesBitsPerValue = input.readByte();
@@ -163,7 +163,7 @@ public class PostingsReader implements OrdinalPostingList
                 String message = String.format("Postings list header is corrupted: Bits per value for values samples must be no more than 64 and is %d.", valuesBitsPerValue);
                 throw new CorruptIndexException(message, input);
             }
-            this.maxValues = new LongArrayReader(randomAccessInput, valuesBitsPerValue == 0 ? LongValues.ZEROES : LuceneCompat.getDirectReaderInstance(randomAccessInput, valuesBitsPerValue, input.getFilePointer()), numBlocks);
+            this.maxValues = new LongArrayReader(randomAccessInput, valuesBitsPerValue == 0 ? LongValues.ZEROES : LuceneCompat.directReaderGetInstance(randomAccessInput, valuesBitsPerValue, input.getFilePointer()), numBlocks);
         }
 
         void close() throws IOException
@@ -417,6 +417,6 @@ public class PostingsReader implements OrdinalPostingList
             throw new CorruptIndexException(
                     String.format("Postings list #%s block is corrupted. Bits per value should be no more than 64 and is %d.", postingsBlockIdx, bitsPerValue), input);
         }
-        currentFORValues = LuceneCompat.getDirectReaderInstance(seekingInput, bitsPerValue, currentPosition);
+        currentFORValues = LuceneCompat.directReaderGetInstance(seekingInput, bitsPerValue, currentPosition);
     }
 }

@@ -32,7 +32,7 @@ import org.apache.lucene.util.packed.DirectWriter;
  */
 public class LuceneCompat
 {
-    public static LongValues getDirectReaderInstance(SeekingRandomAccessInput slice, int bitsPerValue, long offset)
+    public static LongValues directReaderGetInstance(SeekingRandomAccessInput slice, int bitsPerValue, long offset)
     {
         if (slice.order() == ByteOrder.LITTLE_ENDIAN)
             return DirectReader.getInstance(slice, bitsPerValue, offset);

@@ -60,7 +60,7 @@ public abstract class AbstractBlockPackedReader implements LongArray
         final int block = (int) (index >>> blockShift);
         final int idx = (int) (index & blockMask);
         final LongValues subReader = blockBitsPerValue[block] == 0 ? LongValues.ZEROES
-                                                                   : LuceneCompat.getDirectReaderInstance(input, blockBitsPerValue[block], blockOffsetAt(block));
+                                                                   : LuceneCompat.directReaderGetInstance(input, blockBitsPerValue[block], blockOffsetAt(block));
         return delta(block, idx) + subReader.get(idx);
     }
 

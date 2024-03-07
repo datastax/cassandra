@@ -47,7 +47,7 @@ public class LeafOrderMapTest extends SaiRandomizedTest
         var input = out.toIndexInput();
 
         final byte bits = (byte) DirectWriter.unsignedBitsRequired(array.length - 1);
-        LongValues reader = LuceneCompat.getDirectReaderInstance(new SeekingRandomAccessInput(input, ByteOrder.LITTLE_ENDIAN), bits, 0);
+        LongValues reader = LuceneCompat.directReaderGetInstance(new SeekingRandomAccessInput(input, ByteOrder.LITTLE_ENDIAN), bits, 0);
 
         for (int x=0; x < array.length; x++)
         {

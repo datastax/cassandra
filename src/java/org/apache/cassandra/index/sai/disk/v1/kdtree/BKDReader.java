@@ -246,7 +246,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         final SeekingRandomAccessInput randoInput = new SeekingRandomAccessInput(bkdInput);
         for (int x = 0; x < count; x++)
         {
-            LongValues orderMapReader = LuceneCompat.getDirectReaderInstance(randoInput, LuceneCompat.directWriterUnsignedBitsRequired(randoInput.order(), maxPointsInLeafNode - 1), orderMapPointer);
+            LongValues orderMapReader = LuceneCompat.directReaderGetInstance(randoInput, LuceneCompat.directWriterUnsignedBitsRequired(randoInput.order(), maxPointsInLeafNode - 1), orderMapPointer);
             final short idx = (short) LeafOrderMap.getValue(x, orderMapReader);
             origIndex[x] = idx;
         }
@@ -696,7 +696,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             final SeekingRandomAccessInput randoInput = new SeekingRandomAccessInput(bkdInput);
             for (int x = 0; x < count; x++)
             {
-                LongValues orderMapReader = LuceneCompat.getDirectReaderInstance(randoInput, LuceneCompat.directWriterUnsignedBitsRequired(randoInput.order(), maxPointsInLeafNode - 1), orderMapPointer);
+                LongValues orderMapReader = LuceneCompat.directReaderGetInstance(randoInput, LuceneCompat.directWriterUnsignedBitsRequired(randoInput.order(), maxPointsInLeafNode - 1), orderMapPointer);
                 origIndex[x] = (short) orderMapReader.get(x);
             }
 
