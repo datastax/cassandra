@@ -381,6 +381,10 @@
       <artifactId>lucene-analysis-common</artifactId>
     </dependency>
     <dependency>
+      <groupId>org.apache.lucene</groupId>
+      <artifactId>lucene-backward-codecs</artifactId>
+    </dependency>
+    <dependency>
       <groupId>io.github.jbellis</groupId>
       <artifactId>jvector</artifactId>
     </dependency>
