@@ -19,15 +19,13 @@ package org.apache.cassandra.index.sai.disk.io;
 
 import java.io.IOException;
 
-import org.apache.lucene.store.IndexInput;
-
 public abstract class FilterIndexInput extends IndexInput
 {
     private final IndexInput delegate;
 
     protected FilterIndexInput(IndexInput delegate)
     {
-        super(delegate.toString());
+        super(delegate.toString(), delegate.order());
         this.delegate = delegate;
     }
 

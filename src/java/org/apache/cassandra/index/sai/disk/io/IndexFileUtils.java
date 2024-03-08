@@ -42,7 +42,6 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.lucene.store.ChecksumIndexInput;
-import org.apache.lucene.store.IndexInput;
 
 public class IndexFileUtils
 {
@@ -110,7 +109,7 @@ public class IndexFileUtils
         return IndexInputReader.create(randomReader, fileHandle::close);
     }
 
-    public static ChecksumIndexInput getBufferedChecksumIndexInput(IndexInput indexInput, Version version)
+    public static ChecksumIndexInput getBufferedChecksumIndexInput(org.apache.lucene.store.IndexInput indexInput, Version version)
     {
         return new BufferedChecksumIndexInput(indexInput, getChecksumFactory(version).get());
     }
