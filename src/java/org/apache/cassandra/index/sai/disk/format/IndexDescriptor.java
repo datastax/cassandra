@@ -44,7 +44,9 @@ import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
+import org.apache.cassandra.index.sai.disk.oldlucene.EndiannessReverserChecksumIndexInput;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Component;
@@ -54,7 +56,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.util.IOUtils;
 
 /**
@@ -190,7 +192,8 @@ public class IndexDescriptor
         {
             for (Version version : Version.ALL)
             {
-                if (componentExistsOnDisk(version, descriptor, IndexComponent.GROUP_COMPLETION_MARKER, context))
+                var marker = context == null ? IndexComponent.GROUP_COMPLETION_MARKER : IndexComponent.COLUMN_COMPLETION_MARKER;
+                if (componentExistsOnDisk(version, descriptor, marker, context))
                     return version;
             }
             // this is called by flush while creating new index files, as well as loading files that already exist
@@ -405,9 +408,40 @@ public class IndexDescriptor
         return IndexFileUtils.instance().openBlockingInput(createPerSSTableFileHandle(component));
     }
 
+    public ChecksumIndexInput openCheckSummedPerSSTableInput(IndexComponent component)
+    {
+        var indexInput = openPerSSTableInput(component);
+        return checksumIndexInput(null, indexInput);
+    }
+
     public IndexInput openPerIndexInput(IndexComponent component, IndexContext context)
     {
         return IndexFileUtils.instance().openBlockingInput(createPerIndexFileHandle(component, context));
+    }
+
+    public ChecksumIndexInput openCheckSummedPerIndexInput(IndexComponent component, IndexContext context)
+    {
+        var indexInput = openPerIndexInput(component, context);
+        return checksumIndexInput(context, indexInput);
+    }
+
+    /**
+     * Returns a ChecksumIndexInput that reads the indexInput in the correct endianness for the context.
+     * These files were written by the Lucene {@link org.apache.lucene.store.DataOutput}. When written by
+     * Lucene 7.5, {@link org.apache.lucene.store.DataOutput} wrote the file using big endian formatting.
+     * After the upgrade to Lucene 9, the {@link org.apache.lucene.store.DataOutput} writes in little endian
+     * formatting.
+     *
+     * @param context The index context
+     * @param indexInput The index input to read
+     * @return A ChecksumIndexInput that reads the indexInput in the correct endianness for the context
+     */
+    private ChecksumIndexInput checksumIndexInput(IndexContext context, IndexInput indexInput)
+    {
+        if (getVersion(context) == Version.AA)
+            return new EndiannessReverserChecksumIndexInput(indexInput, getVersion(context));
+        else
+            return IndexFileUtils.getBufferedChecksumIndexInput(indexInput, getVersion(context));
     }
 
     public IndexOutputWriter openPerSSTableOutput(IndexComponent component) throws IOException
@@ -455,13 +489,19 @@ public class IndexDescriptor
     public FileHandle createPerSSTableFileHandle(IndexComponent component)
     {
         FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this, component);
-        return builder.complete();
+        return addByteOrderAndComplete(builder, component, null);
     }
 
     public FileHandle createPerIndexFileHandle(IndexComponent component, IndexContext context)
     {
         FileHandle.Builder builder = StorageProvider.instance.fileHandleBuilderFor(this, component, context);
-        return builder.complete();
+        return addByteOrderAndComplete(builder, component, context);
+    }
+
+    private FileHandle addByteOrderAndComplete(FileHandle.Builder builder, IndexComponent component, IndexContext context)
+    {
+        var order = getVersion(context).onDiskFormat().byteOrderFor(component, context);
+        return builder.order(order).complete();
     }
 
     /**
