@@ -25,7 +25,6 @@ import javax.annotation.concurrent.NotThreadSafe;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.lucene.store.DataInput;
-import org.apache.lucene.store.IndexInput;
 
 /**
  * This is a wrapper over a Cassandra {@link RandomAccessReader} that provides an {@link IndexInput}
@@ -54,7 +53,7 @@ public class IndexInputReader extends IndexInput
 
     private IndexInputReader(RandomAccessReader input, Runnable doOnClose, long offset, long length)
     {
-        super(input.getFile().toString());
+        super(input.getFile().toString(), input.order());
         this.input = input;
         this.doOnClose = doOnClose;
         this.offset = offset;
@@ -118,7 +117,7 @@ public class IndexInputReader extends IndexInput
     {
         try
         {
-            return Short.reverseBytes(input.readShort());
+            return input.readShort();
         }
         catch (CorruptBlockException ex)
         {
@@ -135,7 +134,7 @@ public class IndexInputReader extends IndexInput
     {
         try
         {
-            return Integer.reverseBytes(input.readInt());
+            return input.readInt();
         }
         catch (CorruptBlockException ex)
         {
@@ -152,7 +151,7 @@ public class IndexInputReader extends IndexInput
     {
         try
         {
-            return Long.reverseBytes(input.readLong());
+            return input.readLong();
         }
         catch (CorruptBlockException ex)
         {

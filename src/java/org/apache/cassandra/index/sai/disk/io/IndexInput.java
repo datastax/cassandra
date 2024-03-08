@@ -16,29 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v1.postings;
+package org.apache.cassandra.index.sai.disk.io;
 
 import java.io.IOException;
-
-import org.apache.cassandra.index.sai.disk.io.IndexInput;
-import org.apache.cassandra.index.sai.metrics.QueryEventListener;
+import java.nio.ByteOrder;
 
 /**
- * An sub-class of the {@code PostingsReader} that does not allow the {@code PostingList} to be
- * advanced and does not support mapping row ids to primary keys.
- *
- * It is used during index mergers to sequentially scan the postings in order using {@code nextPosting}.
+ * A subclass of {@link org.apache.lucene.store.IndexInput} that provides access to the byte order of the underlying data.
  */
-public class ScanningPostingsReader extends PostingsReader
+public abstract class IndexInput extends org.apache.lucene.store.IndexInput
 {
-    public ScanningPostingsReader(IndexInput input, BlocksSummary summary) throws IOException
+    protected final ByteOrder order;
+
+    protected IndexInput(String resourceDescription, ByteOrder order)
     {
-        super(input, summary, QueryEventListener.PostingListEventListener.NO_OP);
+        super(resourceDescription);
+        this.order = order;
+    }
+
+    public ByteOrder order()
+    {
+        return order;
     }
 
     @Override
-    public long advance(long targetRowId)
-    {
-        throw new UnsupportedOperationException("Cannot advance a scanning postings reader");
-    }
+    public abstract IndexInput slice(String sliceDescription, long offset, long length) throws IOException;
 }
