@@ -25,7 +25,6 @@ import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.index.sai.disk.oldlucene.ByteArrayIndexInput;
-import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.BytesRef;
@@ -96,7 +95,7 @@ public class CryptoUtils
         }
         compressor.uncompress(compBytes.bytes, 0, compBytesLength, uncompBytes.bytes, 0);
 
-        return new ByteArrayIndexInput("", uncompBytes.bytes, 0, uncompBytesLen);
+        return new ByteArrayIndexInput("", uncompBytes.bytes, 0, uncompBytesLen, input.order());
     }
 
     public static void compress(BytesRef uncompBytes,
