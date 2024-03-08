@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.nio.ByteOrder;
 import java.util.EnumSet;
 import java.util.Set;
 
@@ -295,6 +296,12 @@ public class V1OnDiskFormat implements OnDiskFormat
     {
         // For the V1 format there are always 2 open files per index - index (kdtree or terms) + postings
         return 2;
+    }
+
+    @Override
+    public ByteOrder byteOrderFor(IndexComponent indexComponent, IndexContext context)
+    {
+        return ByteOrder.BIG_ENDIAN;
     }
 
     protected boolean isBuildCompletionMarker(IndexComponent indexComponent)

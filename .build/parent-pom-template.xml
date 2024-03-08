@@ -1216,6 +1216,11 @@
         <version>9.8.0-5ea8bb4f21</version>
       </dependency>
       <dependency>
+        <groupId>org.apache.lucene</groupId>
+        <artifactId>lucene-backward-codecs</artifactId>
+        <version>9.8.0-5ea8bb4f21</version>
+      </dependency>
+      <dependency>
         <groupId>io.github.jbellis</groupId>
         <artifactId>jvector</artifactId>
         <version>3.0.0-alpha.6</version>
