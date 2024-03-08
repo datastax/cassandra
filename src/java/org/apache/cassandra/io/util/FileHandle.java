@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.io.util;
 
+import java.nio.ByteOrder;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -50,6 +51,7 @@ public class FileHandle extends SharedCloseableImpl
     public final ChannelProxy channel;
 
     public final long onDiskLength;
+    private final ByteOrder order;
 
     public final SliceDescriptor sliceDescriptor;
 
@@ -67,6 +69,7 @@ public class FileHandle extends SharedCloseableImpl
                        ChannelProxy channel,
                        RebuffererFactory rebuffererFactory,
                        CompressionMetadata compressionMetadata,
+                       ByteOrder order,
                        long onDiskLength,
                        SliceDescriptor sliceDescriptor)
     {
@@ -74,6 +77,7 @@ public class FileHandle extends SharedCloseableImpl
         this.rebuffererFactory = rebuffererFactory;
         this.channel = channel;
         this.compressionMetadata = Optional.ofNullable(compressionMetadata);
+        this.order = order;
         this.onDiskLength = onDiskLength;
         this.sliceDescriptor = sliceDescriptor;
     }
@@ -84,6 +88,7 @@ public class FileHandle extends SharedCloseableImpl
         channel = copy.channel;
         rebuffererFactory = copy.rebuffererFactory;
         compressionMetadata = copy.compressionMetadata;
+        order = copy.order;
         onDiskLength = copy.onDiskLength;
         sliceDescriptor = copy.sliceDescriptor;
     }
@@ -163,7 +168,7 @@ public class FileHandle extends SharedCloseableImpl
         Rebufferer.BufferHolder bufferHolder = position > 0
                                                ? Rebufferer.emptyBufferHolderAt(position)
                                                : Rebufferer.EMPTY;
-        return new RandomAccessReader(instantiateRebufferer(limiter), bufferHolder);
+        return new RandomAccessReader(instantiateRebufferer(limiter), bufferHolder, order);
     }
 
     /**
@@ -259,6 +264,8 @@ public class FileHandle extends SharedCloseableImpl
         private ChunkCache chunkCache;
         private int bufferSize = RandomAccessReader.DEFAULT_BUFFER_SIZE;
         private BufferType bufferType = BufferType.OFF_HEAP;
+        private ByteOrder order = ByteOrder.BIG_ENDIAN;
+
         private boolean mmapped = false;
         private long lengthOverride = -1;
         private MmappedRegionsCache mmappedRegionsCache;
@@ -351,6 +358,17 @@ public class FileHandle extends SharedCloseableImpl
         }
 
         /**
+         * Set the byte order to apply to each buffer.
+         * @param order
+         * @return
+         */
+        public Builder order(ByteOrder order)
+        {
+            this.order = order;
+            return this;
+        }
+
+        /**
          * Override the file length.
          *
          * @param lengthOverride Override file length (in bytes) so that read cannot go further than this value.
@@ -429,7 +447,7 @@ public class FileHandle extends SharedCloseableImpl
                 }
                 Cleanup cleanup = new Cleanup(channel, rebuffererFactory, compressionMetadata, chunkCache);
 
-                FileHandle fileHandle = new FileHandle(cleanup, channel, rebuffererFactory, compressionMetadata, length, sliceDescriptor);
+                FileHandle fileHandle = new FileHandle(cleanup, channel, rebuffererFactory, compressionMetadata, order, length, sliceDescriptor);
                 return fileHandle;
             }
             catch (Throwable t)
