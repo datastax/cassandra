@@ -28,7 +28,6 @@ import org.junit.Assert;
 
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriterOption;
-import org.apache.lucene.store.IndexInput;
 
 public class TrackingIndexFileUtils extends IndexFileUtils
 {

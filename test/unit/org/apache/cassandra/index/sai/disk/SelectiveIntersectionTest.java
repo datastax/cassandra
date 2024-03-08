@@ -27,11 +27,11 @@ import org.junit.Test;
 
 import com.datastax.driver.core.Session;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.inject.Injections;
-import org.apache.lucene.store.IndexInput;
 
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 import static org.junit.Assert.assertEquals;
