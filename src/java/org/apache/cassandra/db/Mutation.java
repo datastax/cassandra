@@ -50,6 +50,8 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.Future;
@@ -79,6 +81,7 @@ public class Mutation implements IMutation, Supplier<Mutation>
     final AtomicLong viewLockAcquireStart = new AtomicLong(0);
 
     private final boolean cdcEnabled;
+    private final RequestTracker requestTracker;
 
     private static final int SERIALIZATION_VERSION_COUNT = MessagingService.Version.values().length;
     // Contains serialized representations of this mutation.
@@ -106,6 +109,7 @@ public class Mutation implements IMutation, Supplier<Mutation>
         this.modifications = modifications;
         this.cdcEnabled = cdcEnabled;
         this.approxCreatedAtNanos = approxCreatedAtNanos;
+        this.requestTracker = RequestTracker.instance;
     }
 
     private static boolean cdcEnabled(Iterable<PartitionUpdate> modifications)
@@ -250,12 +254,20 @@ public class Mutation implements IMutation, Supplier<Mutation>
     public Future<?> applyFuture(WriteOptions writeOptions)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
-        return ks.applyFuture(this, writeOptions, true);
+        return ks.applyFuture(this, writeOptions, true).addListener(f -> {
+            RequestSensors sensors = requestTracker.get();
+            if (sensors != null)
+                sensors.syncAllSensors();
+        });
     }
 
     public void apply(WriteOptions writeOptions)
     {
         Keyspace.open(keyspaceName).apply(this, writeOptions);
+
+        RequestSensors sensors = requestTracker.get();
+        if (sensors != null)
+            sensors.syncAllSensors();
     }
 
     /*
