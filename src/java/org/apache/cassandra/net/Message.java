@@ -279,6 +279,12 @@ public class Message<T>
         return responseWith(NoPayload.noPayload);
     }
 
+    /** Builds a response Builder with no payload, to allow for adding custom params if needed */
+    public Builder<NoPayload> emptyResponseBuilder()
+    {
+        return responseWithBuilder(NoPayload.noPayload);
+    }
+
     /** Builds a failure response Message with an explicit reason, and fields inferred from request Message */
     public Message<RequestFailureReason> failureResponse(RequestFailureReason reason)
     {
