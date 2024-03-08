@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
@@ -31,7 +30,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.ReadCommandVerbHandler;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -262,6 +260,30 @@ public class MessageTest
                         .build();
 
         Message reply = msg.responseWithBuilder(msg)
+                           .withCustomParam("custom1", "custom1value".getBytes(StandardCharsets.UTF_8))
+                           .withCustomParam("custom2", "custom2value".getBytes(StandardCharsets.UTF_8))
+                           .build();
+
+        assertEquals(id, reply.id());
+        assertEquals(from, reply.from());
+        assertEquals(2, reply.header.customParams().size());
+        assertEquals("custom1value", new String(reply.header.customParams().get("custom1"), StandardCharsets.UTF_8));
+        assertEquals("custom2value", new String(reply.header.customParams().get("custom2"), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    public void testEmptyResponseBuilderWithCustomParams()
+    {
+        long id = 1;
+        InetAddressAndPort from = FBUtilities.getLocalAddressAndPort();
+
+        Message<NoPayload> msg =
+        Message.builder(Verb.READ_REQ, noPayload)
+               .withId(1)
+               .from(from)
+               .build();
+
+        Message reply = msg.emptyResponseBuilder()
                            .withCustomParam("custom1", "custom1value".getBytes(StandardCharsets.UTF_8))
                            .withCustomParam("custom2", "custom2value".getBytes(StandardCharsets.UTF_8))
                            .build();
