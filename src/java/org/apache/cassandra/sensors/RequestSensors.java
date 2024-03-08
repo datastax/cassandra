@@ -20,16 +20,20 @@ package org.apache.cassandra.sensors;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
+import org.apache.cassandra.utils.Pair;
 
 /**
  * Groups {@link Sensor}s associated to a given request/response and related {@link Context}: this is the main entry
  * point to create and modify sensors. More specifically:
  * <ul>
- *     <li>Create a new sensor associated to the request/response via {@link #registerSensor(Type)}.</li>
- *     <li>Increment the sensor value for the request/response via {@link #incrementSensor(Type, double)}.</li>
+ *     <li>Create a new sensor associated to the request/response via {@link #registerSensor(Context, Type)}.</li>
+ *     <li>Increment the sensor value for the request/response via {@link #incrementSensor(Context, Type, double)}.</li>
  *     <li>Sync this request/response sensor value to the {@link SensorsRegistry} via {@link #syncAllSensors()}.</li>
  * </ul>
  * Sensor values related to a given request/response are isolated from other sensors, and the "same" sensor
@@ -41,33 +45,36 @@ import java.util.function.Supplier;
 public class RequestSensors
 {
     private final Supplier<SensorsRegistry> sensorsRegistry;
-    private final Context context;
-    private final ConcurrentMap<Type, Sensor> sensors = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Pair<Context, Type>, Sensor> sensors = new ConcurrentHashMap<>();
 
-    public RequestSensors(Context context)
+    public RequestSensors()
     {
-        this(() -> SensorsRegistry.instance, context);
+        this(() -> SensorsRegistry.instance);
     }
 
-    public RequestSensors(Supplier<SensorsRegistry> sensorsRegistry, Context context)
+    public RequestSensors(Supplier<SensorsRegistry> sensorsRegistry)
     {
         this.sensorsRegistry = sensorsRegistry;
-        this.context = context;
     }
 
-    public void registerSensor(Type type)
+    public void registerSensor(Context context, Type type)
     {
-        sensors.putIfAbsent(type, new Sensor(context, type));
+        sensors.putIfAbsent(Pair.create(context, type), new Sensor(context, type));
     }
 
-    public Optional<Sensor> getSensor(Type type)
+    public Optional<Sensor> getSensor(Context context, Type type)
     {
-        return Optional.ofNullable(sensors.get(type));
+        return Optional.ofNullable(sensors.get(Pair.create(context, type)));
     }
 
-    public void incrementSensor(Type type, double value)
+    public Set<Sensor> getSensors(Type type)
     {
-        Optional.ofNullable(sensors.get(type)).ifPresent(s -> s.increment(value));
+        return sensors.values().stream().filter(s -> s.getType() == type).collect(Collectors.toSet());
+    }
+
+    public void incrementSensor(Context context, Type type, double value)
+    {
+        Optional.ofNullable(sensors.get(Pair.create(context, type))).ifPresent(s -> s.increment(value));
     }
 
     public void syncAllSensors()
@@ -81,21 +88,20 @@ public class RequestSensors
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         RequestSensors sensors1 = (RequestSensors) o;
-        return Objects.equals(context, sensors1.context) && Objects.equals(sensors, sensors1.sensors);
+        return Objects.equals(sensors, sensors1.sensors);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(context, sensors);
+        return Objects.hash(sensors);
     }
 
     @Override
     public String toString()
     {
         return "RequestSensors{" +
-               "context=" + context +
-               ", sensors=" + sensors +
+               "sensors=" + sensors +
                '}';
     }
 }
