@@ -31,6 +31,7 @@ import org.apache.commons.lang3.reflect.FieldUtils;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.github.jbellis.jvector.util.BitSet;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
@@ -59,6 +60,31 @@ public class OnDiskOrdinalsMapTest
     {
         // otherwise "FileHandle fileHandle = builder.complete()" throws
         DatabaseDescriptor.clientInitialization();
+    }
+
+    @Test
+    public void testMatchRangeBits() {
+        BitSet bits = new OnDiskOrdinalsMap.MatchRangeBits(1, 3);
+        assertFalse(bits.get(0));
+        assertTrue(bits.get(1));
+        assertTrue(bits.get(2));
+        assertTrue(bits.get(3));
+        assertFalse(bits.get(4));
+        assertEquals(3, bits.cardinality());
+
+        bits = new OnDiskOrdinalsMap.MatchRangeBits(1, 1);
+        assertFalse(bits.get(0));
+        assertTrue(bits.get(1));
+        assertFalse(bits.get(2));
+        assertEquals(1, bits.cardinality());
+
+        bits = new OnDiskOrdinalsMap.MatchRangeBits(3, 1);
+        assertFalse(bits.get(0));
+        assertFalse(bits.get(1));
+        assertFalse(bits.get(2));
+        assertFalse(bits.get(3));
+        assertFalse(bits.get(4));
+        assertEquals(0, bits.cardinality());
     }
 
     @Test
