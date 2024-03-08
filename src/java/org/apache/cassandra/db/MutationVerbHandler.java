@@ -17,12 +17,22 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Optional;
+import java.util.Set;
+
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.ForwardingInfo;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.ParamType;
+import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.SensorsRegistry;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -36,7 +46,25 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
     private void respond(Message<?> respondTo, InetAddressAndPort respondToAddress)
     {
         Tracing.trace("Enqueuing response to {}", respondToAddress);
-        MessagingService.instance().send(respondTo.emptyResponse(), respondToAddress);
+
+        Set<Sensor> writeRequestSensors = RequestTracker.instance.get().getSensors(Type.WRITE_BYTES);
+        Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
+        for (Sensor requestSensor : writeRequestSensors)
+        {
+            String requestBytesParam = SensorsCustomParams.encodeTableInWriteByteRequestParam(requestSensor.getContext().getTable());
+            byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(requestSensor.getValue());
+            response.withCustomParam(requestBytesParam, requestBytes);
+
+            // for each table in the mutation, send the global per table write bytes as observed by the registry
+            Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(requestSensor.getContext(), Type.WRITE_BYTES);
+            registrySensor.ifPresent(sensor -> {
+                String tableBytesParam = SensorsCustomParams.encodeTableInWriteByteTableParam(sensor.getContext().getTable());
+                byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
+                response.withCustomParam(tableBytesParam, tableBytes);
+            });
+        }
+
+        MessagingService.instance().send(response.build(), respondToAddress);
     }
 
     private void failed()
@@ -64,6 +92,10 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
         InetAddressAndPort respondToAddress = message.respondTo();
         try
         {
+            // Initialize the sensor and set ExecutorLocals
+            RequestSensors sensors = new RequestSensors();
+            RequestTracker.instance.set(sensors);
+
             message.payload.applyFuture(WriteOptions.DEFAULT).addCallback(o -> respond(message, respondToAddress), wto -> failed());
         }
         catch (WriteTimeoutException wto)

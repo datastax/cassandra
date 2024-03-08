@@ -36,13 +36,23 @@ public final class SensorsCustomParams
      * The total read bytes value for a given keyspace and table, across all requests. This is a monotonically increasing value.
      */
     public static final String READ_BYTES_TABLE = "READ_BYTES_TABLE";
+    /**
+     * The per-request write bytes value for a given keyspace and table.
+     * To support batch writes, table name is encoded in the following format: WRITE_BYTES_REQUEST."table"
+     */
+    public static final String WRITE_BYTES_REQUEST_TEMPLATE = "WRITE_BYTES_REQUEST.%s";
+    /**
+     * The total write bytes value for a given keyspace and table, across all requests.
+     * To support batch writes, table name is encoded in the following format: WRITE_BYTES_TABLE."table"
+     */
+    public static final String WRITE_BYTES_TABLE_TEMPLATE = "WRITE_BYTES_TABLE.%s";
 
     private SensorsCustomParams()
     {
     }
 
     /**
-     * Utility method to encode senors value as byte buffer in the big endian order.
+     * Utility method to encode sensor value as byte buffer in the big endian order.
      */
     public static byte[] sensorValueAsBytes(double value)
     {
@@ -50,5 +60,15 @@ public final class SensorsCustomParams
         buffer.putDouble(value);
 
         return buffer.array();
+    }
+
+    public static String encodeTableInWriteByteRequestParam(String tableName)
+    {
+        return String.format(WRITE_BYTES_REQUEST_TEMPLATE, tableName);
+    }
+
+    public static String encodeTableInWriteByteTableParam(String tableName)
+    {
+        return String.format(WRITE_BYTES_TABLE_TEMPLATE, tableName);
     }
 }
