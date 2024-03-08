@@ -24,6 +24,7 @@ import org.junit.Test;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 
@@ -54,6 +55,7 @@ public class ChunkCacheInterceptingTest
 
             ChunkReader chunkReader = mock(ChunkReader.class);
             when(chunkReader.chunkSize()).thenReturn(1024);
+            when(chunkReader.channel()).thenReturn(new ChannelProxy(new File("")));
 
             RebuffererFactory rebuferrerFactory = ChunkCache.maybeWrap(chunkReader);
             assertTrue("chunk cache didn't create our interceptor?", interceptor != null);

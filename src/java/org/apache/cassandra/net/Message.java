@@ -342,7 +342,7 @@ public class Message<T>
 
     private static final AtomicInteger nextId = new AtomicInteger(0);
 
-    private static long nextId()
+    public static long nextId()
     {
         long id;
         do
@@ -460,6 +460,17 @@ public class Message<T>
         public Map<String,byte[]> customParams()
         {
             return (Map<String, byte[]>) params.get(ParamType.CUSTOM_MAP);
+        }
+
+        public int flags()
+        {
+            return flags;
+        }
+
+        @Nullable
+        public Map<ParamType, Object> params()
+        {
+            return params;
         }
 
         /**
