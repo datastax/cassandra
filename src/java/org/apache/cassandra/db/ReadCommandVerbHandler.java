@@ -102,8 +102,9 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         MessageParams.reset();
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = new RequestSensors(Context.from(command));
-        sensors.registerSensor(Type.READ_BYTES);
+        Context context = Context.from(command);
+        RequestSensors sensors = new RequestSensors();
+        sensors.registerSensor(context, Type.READ_BYTES);
         RequestTracker.instance.set(sensors);
 
         long timeout = message.expiresAtNanos() - message.createdAtNanos();
@@ -148,7 +149,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         {
             Tracing.trace("Enqueuing response to {}", message.from());
 
-            Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(Type.READ_BYTES);
+            Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(context, Type.READ_BYTES);
             Message.Builder<ReadResponse> replyBuilder = message.responseWithBuilder(response);
             readRequestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> replyBuilder.withCustomParam(SensorsCustomParams.READ_BYTES_REQUEST, bytes));
 
