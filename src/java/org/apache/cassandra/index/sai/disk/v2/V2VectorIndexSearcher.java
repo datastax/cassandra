@@ -30,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.pq.CompressedVectors;
+import io.github.jbellis.jvector.util.BitSet;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseFixedBitSet;
 import org.agrona.collections.IntArrayList;
@@ -224,24 +225,24 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             }
 
             // create a bitset of ordinals corresponding to the rows in the given key range
-            SparseFixedBitSet bits = bitSetForSearch();
-            final boolean hasMatches;
+            final BitSet bits;
             try (var ordinalsView = graph.getOrdinalsView())
             {
                 int startSegmentRowId = metadata.toSegmentRowId(minSSTableRowId);
                 int endSegmentRowId = metadata.toSegmentRowId(maxSSTableRowId);
-                hasMatches = ordinalsView.forEachOrdinalInRange(startSegmentRowId, endSegmentRowId, (segmentRowId, ordinal) -> {
-                    bits.set(ordinal);
-                });
+
+                bits = ordinalsView.buildOrdinalBitSet(startSegmentRowId, endSegmentRowId, this::bitSetForSearch);
             }
             catch (IOException e)
             {
                 throw new RuntimeException(e);
             }
-            // We can make a more accurate cost estimate now
-            var betterCostEstimate = estimateCost(topK, bits.cardinality());
 
-            if (!hasMatches)
+            int cardinality = bits.cardinality();
+            // We can make a more accurate cost estimate now
+            var betterCostEstimate = estimateCost(topK, cardinality);
+
+            if (cardinality == 0)
                 return CloseableIterator.emptyIterator();
 
             return graph.search(queryVector, topK, threshold, bits, context, visited -> {
