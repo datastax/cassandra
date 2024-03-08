@@ -60,8 +60,9 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         validateTransientStatus(message);
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = new RequestSensors(Context.from(command));
-        sensors.registerSensor(Type.READ_BYTES);
+        Context context = Context.from(command);
+        RequestSensors sensors = new RequestSensors();
+        sensors.registerSensor(context, Type.READ_BYTES);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
@@ -84,7 +85,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         Tracing.trace("Enqueuing response to {}", message.from());
 
-        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(Type.READ_BYTES);
+        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(context, Type.READ_BYTES);
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
         readRequestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_REQUEST, bytes));
 
