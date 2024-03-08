@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.sensors;
 
-import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.junit.After;
@@ -38,9 +36,7 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
@@ -107,7 +103,7 @@ public class SensorsReadTest
     @Test
     public void testMemtableRead()
     {
-        store = discardSSTables(KEYSPACE1, CF_STANDARD);
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
 
         for (int j = 0; j < 10; j++)
@@ -123,14 +119,14 @@ public class SensorsReadTest
         handleReadCommand(command);
 
         assertRequestAndRegistrySensorsEquality(context);
-        Sensor requestSensor = getThreadLocalRequestSensor();
+        Sensor requestSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
     }
 
     @Test
     public void testSinglePartitionReadCommand_ByPartitionKey()
     {
-        store = discardSSTables(KEYSPACE1, CF_STANDARD);
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
 
         for (int j = 0; j < 10; j++)
@@ -150,14 +146,14 @@ public class SensorsReadTest
         handleReadCommand(command);
 
         assertRequestAndRegistrySensorsEquality(context);
-        Sensor requestSensor = getThreadLocalRequestSensor();
+        Sensor requestSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
     }
 
     @Test
     public void testSinglePartitionReadCommand_ByClustering()
     {
-        store = discardSSTables(KEYSPACE1, CF_STANDARD_CLUSTERING);
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_CLUSTERING);
         Context context = new Context(KEYSPACE1, CF_STANDARD_CLUSTERING, store.metadata.id.toString());
 
         for (int j = 0; j < 10; j++)
@@ -179,14 +175,14 @@ public class SensorsReadTest
 
         assertRequestAndRegistrySensorsEquality(context);
 
-        Sensor requestSensor = getThreadLocalRequestSensor();
+        Sensor requestSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
     }
 
     @Test
     public void testSinglePartitionReadCommand_AllowFiltering()
     {
-        store = discardSSTables(KEYSPACE1, CF_STANDARD_CLUSTERING);
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_CLUSTERING);
         Context context = new Context(KEYSPACE1, CF_STANDARD_CLUSTERING, store.metadata.id.toString());
 
         for (int j = 0; j < 10; j++)
@@ -206,30 +202,30 @@ public class SensorsReadTest
         ReadCommand command1 = Util.cmd(store, key).includeRow("0").build();
         handleReadCommand(command1);
 
-        Sensor request1Sensor = getThreadLocalRequestSensor();
+        Sensor request1Sensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         // Extract the value as later we will reset the thread local and the sensor value will be lost
         long request1Bytes = (long) request1Sensor.getValue();
 
         assertThat(request1Sensor.getValue()).isGreaterThan(0);
-        assertThat(request1Sensor).isEqualTo(getRegistrySensor(context));
+        assertThat(request1Sensor).isEqualTo(SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES));
         assertResponseSensors(request1Sensor.getValue(), request1Sensor.getValue());
 
-        getThreadLocalRequestSensor().reset();
+        SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES).reset();
         capturedOutboundMessages.clear();
 
         ReadCommand command2 = Util.cmd(store, key).filterOn("val", Operator.EQ, "9").build();
         handleReadCommand(command2);
 
-        Sensor request2Sensor = getThreadLocalRequestSensor();
+        Sensor request2Sensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(request2Sensor.getValue()).isEqualTo(request1Bytes * 10);
-        assertThat(getRegistrySensor(context).getValue()).isEqualTo(request1Bytes + request2Sensor.getValue());
+        assertThat(SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES).getValue()).isEqualTo(request1Bytes + request2Sensor.getValue());
         assertResponseSensors(request2Sensor.getValue(), request1Bytes + request2Sensor.getValue());
     }
 
     @Test
     public void testPartitionRangeReadCommand_ByPartitionKey()
     {
-        store = discardSSTables(KEYSPACE1, CF_STANDARD);
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD);
         Context context = new Context(KEYSPACE1, CF_STANDARD, store.metadata.id.toString());
 
         for (int j = 0; j < 10; j++)
@@ -248,32 +244,24 @@ public class SensorsReadTest
         ReadCommand command1 = Util.cmd(store, key).build();
         handleReadCommand(command1);
 
-        Sensor request1Sensor = getThreadLocalRequestSensor();
+        Sensor request1Sensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         // Extract the value as later we will reset the thread local and the sensor value will be lost
         long request1Bytes = (long) request1Sensor.getValue();
 
         assertThat(request1Sensor.getValue()).isGreaterThan(0);
-        assertThat(request1Sensor).isEqualTo(getRegistrySensor(context));
+        assertThat(request1Sensor).isEqualTo(SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES));
         assertResponseSensors(request1Bytes, request1Bytes);
 
-        getThreadLocalRequestSensor().reset();
+        SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES).reset();
         capturedOutboundMessages.clear();
 
         ReadCommand command2 = Util.cmd(store).fromKeyIncl("0").toKeyIncl("9").build();
         handleReadCommand(command2);
 
-        Sensor request2Sensor = getThreadLocalRequestSensor();
+        Sensor request2Sensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(request2Sensor.getValue()).isEqualTo(request1Bytes * 10);
-        assertThat(getRegistrySensor(context).getValue()).isEqualTo(request1Bytes + request2Sensor.getValue());
+        assertThat(SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES).getValue()).isEqualTo(request1Bytes + request2Sensor.getValue());
         assertResponseSensors(request2Sensor.getValue(), request1Bytes + request2Sensor.getValue());
-    }
-
-    private ColumnFamilyStore discardSSTables(String ks, String cf)
-    {
-        Keyspace keyspace = Keyspace.open(ks);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cf);
-        cfs.discardSSTables(System.currentTimeMillis());
-        return cfs;
     }
 
     private static void handleReadCommand(ReadCommand command)
@@ -283,10 +271,10 @@ public class SensorsReadTest
 
     private void assertRequestAndRegistrySensorsEquality(Context context)
     {
-        Sensor localSensor = getThreadLocalRequestSensor();
+        Sensor localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(localSensor.getValue()).isGreaterThan(0);
 
-        Sensor registrySensor = getRegistrySensor(context);
+        Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
         assertThat(registrySensor).isEqualTo(localSensor);
     }
 
@@ -297,8 +285,8 @@ public class SensorsReadTest
         assertResponseSensors(message, requestValue, registryValue);
 
         // make sure messages with sensor values can be deserialized on the receiving node
-        DataOutputBuffer out = serialize(message);
-        Message deserializedMessage = deserialize(out, message.from());
+        DataOutputBuffer out = SensorsTestUtil.serialize(message);
+        Message deserializedMessage = SensorsTestUtil.deserialize(out, message.from());
         assertResponseSensors(deserializedMessage, requestValue, registryValue);
     }
 
@@ -308,63 +296,9 @@ public class SensorsReadTest
         assertThat(message.header.customParams()).containsKey(READ_BYTES_REQUEST);
         assertThat(message.header.customParams()).containsKey(READ_BYTES_TABLE);
 
-        double requestReadBytes = bytesToDouble(message.header.customParams().get(READ_BYTES_REQUEST));
-        double tableReadBytes = bytesToDouble(message.header.customParams().get(READ_BYTES_TABLE));
+        double requestReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(READ_BYTES_REQUEST));
+        double tableReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(READ_BYTES_TABLE));
         assertThat(requestReadBytes).isEqualTo(requestValue);
         assertThat(tableReadBytes).isEqualTo(registryValue);
-    }
-
-    private static double bytesToDouble(byte[] bytes)
-    {
-        ByteBuffer readBytesBuffer = ByteBuffer.allocate(Double.BYTES);
-        readBytesBuffer.put(bytes);
-        readBytesBuffer.flip();
-        return readBytesBuffer.getDouble();
-    }
-
-    private static DataOutputBuffer serialize(Message message)
-    {
-        try (DataOutputBuffer out = new DataOutputBuffer())
-        {
-            int messagingVersion = MessagingService.current_version;
-            Message.serializer.serialize(message, out, messagingVersion);
-            return out;
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException("Cannot serialize message " + message, e);
-        }
-    }
-
-    private static Message deserialize(DataOutputBuffer out, InetAddressAndPort peer)
-    {
-        try (DataInputBuffer in = new DataInputBuffer(out.buffer(), false))
-        {
-            int messagingVersion = MessagingService.current_version;
-            return Message.serializer.deserialize(in, peer, messagingVersion);
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException("Cannot deserialize message from " + peer, e);
-        }
-    }
-
-    /**
-     * Returns the read sensor with the given context from the global registry
-     * @param context the sensor context
-     * @return the requested read sensor from the global registry
-     */
-    private static Sensor getRegistrySensor(Context context)
-    {
-        return SensorsRegistry.instance.getOrCreateSensor(context, Type.READ_BYTES).get();
-    }
-
-    /**
-     * Returns the read sensor registered in the thread local {@link RequestSensors}
-     * @return the thread local read sensor
-     */
-    private static Sensor getThreadLocalRequestSensor()
-    {
-        return RequestTracker.instance.get().getSensor(Type.READ_BYTES).get();
     }
 }
