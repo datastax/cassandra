@@ -20,9 +20,10 @@ package org.apache.cassandra.index.sai.disk.oldlucene;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.ByteOrder;
 import java.util.Locale;
 
-import org.apache.lucene.store.IndexInput;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.lucene.store.RandomAccessInput;
 
 /**
@@ -39,19 +40,21 @@ public final class ByteArrayIndexInput extends IndexInput implements RandomAcces
 
     private final int offset;
     private final int length;
+    private final boolean isBigEndian;
 
     private int pos;
 
-    public ByteArrayIndexInput(String description, byte[] bytes) {
-        this(description, bytes, 0, bytes.length);
+    public ByteArrayIndexInput(String description, byte[] bytes, ByteOrder order) {
+        this(description, bytes, 0, bytes.length, order);
     }
 
-    public ByteArrayIndexInput(String description, byte[] bytes, int offs, int length) {
-        super(description);
+    public ByteArrayIndexInput(String description, byte[] bytes, int offs, int length, ByteOrder order) {
+        super(description, order);
         this.offset = offs;
         this.bytes = bytes;
         this.length = length;
         this.pos = offs;
+        this.isBigEndian = order == ByteOrder.BIG_ENDIAN;
     }
 
     public long getFilePointer() {
@@ -76,23 +79,33 @@ public final class ByteArrayIndexInput extends IndexInput implements RandomAcces
 
     @Override
     public short readShort() {
-        return (short) ((bytes[pos++] & 0xFF) | ((bytes[pos++] & 0xFF) << 8));
+        var b1 = bytes[pos++] & 0xFF;
+        var b2 = bytes[pos++] & 0xFF;
+        return isBigEndian
+               ? (short) (b1 << 8 | b2)
+               : (short) (b2 << 8 | b1);
     }
 
     @Override
     public int readInt() {
-        return (bytes[pos++] & 0xFF) | ((bytes[pos++] & 0xFF) << 8)
-               | ((bytes[pos++] & 0xFF) << 16) | ((bytes[pos++] & 0xFF) << 24);
+        var b1 = bytes[pos++] & 0xFF;
+        var b2 = bytes[pos++] & 0xFF;
+        var b3 = bytes[pos++] & 0xFF;
+        var b4 = bytes[pos++] & 0xFF;
+        
+        return isBigEndian
+               ? b1 << 24 | b2 << 16 | b3 << 8 | b4
+               : b4 << 24 | b3 << 16 | b2 << 8 | b1;
     }
 
     @Override
     public long readLong()
     {
-        int i1 = (bytes[pos++] & 0xFF) | ((bytes[pos++] & 0xFF) << 8)
-                 | ((bytes[pos++] & 0xFF) << 16) | ((bytes[pos++] & 0xFF) << 24);
-        int i2 = (bytes[pos++] & 0xFF) | ((bytes[pos++] & 0xFF) << 8)
-                 | ((bytes[pos++] & 0xFF) << 16) | ((bytes[pos++] & 0xFF) << 24);
-        return (long) i1 & 4294967295L | (long) i2 << 32;
+        int i1 = readInt();
+        int i2 = readInt();
+        return isBigEndian
+                ? (long) i1 << 32 | i2 & 0xFFFFFFFFL
+                : (long) i2 << 32 | i1 & 0xFFFFFFFFL;
     }
 
     // NOTE: AIOOBE not EOF if you read too much
@@ -131,8 +144,11 @@ public final class ByteArrayIndexInput extends IndexInput implements RandomAcces
                                                              offset, length, this));
         }
 
-        return new ByteArrayIndexInput(sliceDescription, this.bytes, Math.toIntExact(this.offset + offset),
-                                       Math.toIntExact(length));
+        return new ByteArrayIndexInput(sliceDescription,
+                                       this.bytes,
+                                       Math.toIntExact(this.offset + offset),
+                                       Math.toIntExact(length),
+                                       isBigEndian ? ByteOrder.BIG_ENDIAN : ByteOrder.LITTLE_ENDIAN);
     }
 
     @Override
@@ -143,22 +159,32 @@ public final class ByteArrayIndexInput extends IndexInput implements RandomAcces
     @Override
     public short readShort(long pos) throws IOException {
         int i = Math.toIntExact(offset + pos);
-        return (short) ((bytes[i] & 0xFF) | ((bytes[i + 1] & 0xFF) << 8));
+        var b1 = bytes[i] & 0xFF;
+        var b2 = bytes[i + 1] & 0xFF;
+        return isBigEndian
+                ? (short) (b1 << 8 | b2)
+                : (short) (b2 << 8 | b1);
     }
 
     @Override
     public int readInt(long pos) throws IOException {
         int i = Math.toIntExact(offset + pos);
-        return (bytes[i] & 0xFF) | ((bytes[i + 1] & 0xFF) << 8)
-               | ((bytes[i + 2] & 0xFF) << 16) | ((bytes[i + 3] & 0xFF) << 24);
-
+        var b1 = bytes[i] & 0xFF;
+        var b2 = bytes[i + 1] & 0xFF;
+        var b3 = bytes[i + 2] & 0xFF;
+        var b4 = bytes[i + 3] & 0xFF;
+        return isBigEndian
+                ? b1 << 24 | b2 << 16 | b3 << 8 | b4
+                : b4 << 24 | b3 << 16 | b2 << 8 | b1;
     }
 
     @Override
     public long readLong(long pos) throws IOException {
         int i = Math.toIntExact(offset + pos);
-        int i1 = readInt(i);
-        int i2 = readInt(i + 4);
-        return (long) i1 & 4294967295L | (long) i2 << 32;
+        int b1 = readInt(i);
+        int b2 = readInt(i + 4);
+        return isBigEndian
+                ? (long) b1 << 32 | b2 & 0xFFFFFFFFL
+                : (long) b2 << 32 | b1 & 0xFFFFFFFFL;
     }
 }

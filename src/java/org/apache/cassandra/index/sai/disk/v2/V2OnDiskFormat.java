@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v2;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.nio.ByteOrder;
 import java.util.EnumSet;
 import java.util.Set;
 
@@ -168,5 +169,25 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     public int openFilesPerSSTable()
     {
         return 4;
+    }
+
+    @Override
+    public ByteOrder byteOrderFor(IndexComponent indexComponent, IndexContext context)
+    {
+        // The little-endian files are written by Lucene, and the upgrade to Lucene 9 switched the byte order from big to little.
+        switch (indexComponent)
+        {
+            case META:
+            case GROUP_META:
+            case TOKEN_VALUES:
+            case PRIMARY_KEY_BLOCK_OFFSETS:
+            case KD_TREE:
+            case KD_TREE_POSTING_LISTS:
+                return ByteOrder.LITTLE_ENDIAN;
+            case POSTING_LISTS:
+                return (context != null && context.isVector()) ? ByteOrder.BIG_ENDIAN : ByteOrder.LITTLE_ENDIAN;
+            default:
+                return ByteOrder.BIG_ENDIAN;
+        }
     }
 }

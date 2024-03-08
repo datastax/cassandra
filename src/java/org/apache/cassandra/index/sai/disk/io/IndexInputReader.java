@@ -25,7 +25,6 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.store.DataInput;
-import org.apache.lucene.store.IndexInput;
 
 public class IndexInputReader extends IndexInput
 {
@@ -34,7 +33,7 @@ public class IndexInputReader extends IndexInput
 
     private IndexInputReader(RandomAccessReader input, Runnable doOnClose)
     {
-        super(input.getFile().toString());
+        super(input.getFile().toString(), input.order());
         this.input = input;
         this.doOnClose = doOnClose;
     }
@@ -89,7 +88,7 @@ public class IndexInputReader extends IndexInput
     {
         try
         {
-            return Short.reverseBytes(input.readShort());
+            return input.readShort();
         }
         catch (CorruptBlockException ex)
         {
@@ -106,7 +105,7 @@ public class IndexInputReader extends IndexInput
     {
         try
         {
-            return Integer.reverseBytes(input.readInt());
+            return input.readInt();
         }
         catch (CorruptBlockException ex)
         {
@@ -123,7 +122,7 @@ public class IndexInputReader extends IndexInput
     {
         try
         {
-            return Long.reverseBytes(input.readLong());
+            return input.readLong();
         }
         catch (CorruptBlockException ex)
         {
