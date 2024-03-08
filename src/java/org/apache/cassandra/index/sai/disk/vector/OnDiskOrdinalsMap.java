@@ -24,13 +24,14 @@ import java.util.HashSet;
 import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.util.BitSet;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.DiskBinarySearch;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -203,6 +204,85 @@ public class OnDiskOrdinalsMap
         return new FileReadingOrdinalsView();
     }
 
+    /** Bits matching the given range, inclusively. */
+    public static class MatchRangeBits extends BitSet
+    {
+        final int lowerBound;
+        final int upperBound;
+
+        public MatchRangeBits(int lowerBound, int upperBound) {
+            // bitset is empty if lowerBound > upperBound
+            this.lowerBound = lowerBound;
+            this.upperBound = upperBound;
+        }
+
+        @Override
+        public boolean get(int index) {
+            return lowerBound <= index && index <= upperBound;
+        }
+
+        @Override
+        public int length() {
+            if (lowerBound > upperBound)
+                return 0;
+            return upperBound - lowerBound + 1;
+        }
+
+        @Override
+        public void set(int i)
+        {
+            throw new UnsupportedOperationException("not supported");
+        }
+
+        @Override
+        public boolean getAndSet(int i)
+        {
+            throw new UnsupportedOperationException("not supported");
+        }
+
+        @Override
+        public void clear(int i)
+        {
+            throw new UnsupportedOperationException("not supported");
+        }
+
+        @Override
+        public void clear(int i, int i1)
+        {
+            throw new UnsupportedOperationException("not supported");
+        }
+
+        @Override
+        public int cardinality()
+        {
+            return length();
+        }
+
+        @Override
+        public int approximateCardinality()
+        {
+            return length();
+        }
+
+        @Override
+        public int prevSetBit(int i)
+        {
+            throw new UnsupportedOperationException("not supported");
+        }
+
+        @Override
+        public int nextSetBit(int i)
+        {
+            throw new UnsupportedOperationException("not supported");
+        }
+
+        @Override
+        public long ramBytesUsed()
+        {
+            return 2 * Integer.BYTES;
+        }
+    }
+
     private static class RowIdMatchingOrdinalsView implements OrdinalsView
     {
         // The number of ordinals in the segment. If we see a rowId greater than or equal to this, we know it's not in
@@ -235,6 +315,15 @@ public class OnDiskOrdinalsMap
                 consumer.accept(rowId, rowId);
             // Returns true if we called the consumer at least once.
             return end > start;
+        }
+
+        @Override
+        public BitSet buildOrdinalBitSet(int startRowId, int endRowId, Supplier<BitSet> unused) throws IOException
+        {
+            int start = Math.max(startRowId, 0);
+            int end = Math.min(endRowId + 1, size);
+
+            return new MatchRangeBits(start, end);
         }
 
         @Override
@@ -359,6 +448,16 @@ public class OnDiskOrdinalsMap
                 }
             }
             return called;
+        }
+
+        @Override
+        public BitSet buildOrdinalBitSet(int startRowId, int endRowId, Supplier<BitSet> bitsetSupplier) throws IOException
+        {
+            BitSet bits = bitsetSupplier.get();
+            this.forEachOrdinalInRange(startRowId, endRowId, (segmentRowId, ordinal) -> {
+                bits.set(ordinal);
+            });
+            return bits;
         }
 
         @Override
