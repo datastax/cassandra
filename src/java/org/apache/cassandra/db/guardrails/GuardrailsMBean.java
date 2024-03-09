@@ -379,22 +379,29 @@ public interface GuardrailsMBean
     void setPageSizeThreshold(int warn, int fail);
 
     /**
-     * @return The threshold to warn when requested page weight (bytes) greater than threshold.
-     * {@code null} means disabled.
+     * @return The threshold to warn when requesting page with more data (bytes) than threshold, as a string formatted as in,
+     * for example, {@code 10GiB}, {@code 20MiB}, {@code 30KiB} or {@code 40B}. A {@code null} value means disabled.
      */
-    int getPageWeightWarnThreshold();
+    @Nullable
+    String getPageWeightWarnThreshold();
 
     /**
-     * @return The threshold to prevent requesting page with more data (bytes) than threshold.
-     * {@code null} means disabled.
+     * @return The threshold to fail when requesting page with more data (bytes) than threshold, as a string formatted as in,
+     * for example, {@code 10GiB}, {@code 20MiB}, {@code 30KiB} or {@code 40B}. A {@code null} value means disabled.
      */
-    int getPageWeightFailThreshold();
+    @Nullable
+    String getPageWeightFailThreshold();
 
     /**
-     * @param warn The threshold to warn when the requested page weight (bytes) is greater than threshold. -1 means disabled.
-     * @param fail The threshold to prevent requesting pages with more data (bytes) than threshold. -1 means disabled.
+     * @param warnSize The threshold to warn when encountering page weights larger than threshold, as a string formatted
+     *                 as in, for example, {@code 10GiB}, {@code 20MiB}, {@code 30KiB} or {@code 40B}.
+     *                 A {@code null} value means disabled.
+     * @param failSize The threshold to fail when encountering page weights larger than threshold, as a string formatted
+     *                 as in, for example, {@code 10GiB}, {@code 20MiB}, {@code 30KiB} or {@code 40B}.
+     *                 A {@code null} value means disabled. Triggering a failure emits a log message and a diagnostic
+     *                 event, but it desn't throw an exception interrupting the offending sstable write.
      */
-    void setPageWeightThreshold(int warn, int fail);
+    void setPageWeightThreshold(@Nullable String warnSize, @Nullable String failSize);
 
     /**
      * Returns whether list operations that require read before write are allowed.

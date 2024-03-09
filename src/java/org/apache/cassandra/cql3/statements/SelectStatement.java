@@ -157,6 +157,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 {
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(SelectStatement.logger, 1, TimeUnit.MINUTES);
+    public static final String USAGE_WARNING_PAGE_WEIGHT = "Applied page weight limit of ";
 
     private final String rawCQLStatement;
     public final VariableSpecifications bindVariables;
@@ -372,10 +373,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             Guardrails.readConsistencyLevels.guard(EnumSet.of(options.getConsistency()), queryState.getClientState());
 
         PageSize pageSize = options.getPageSize();
-        if (pageSize != null && options.getPageSize().isDefined() && pageSize.getUnit() == PageSize.PageUnit.BYTES)
-        {
-            Guardrails.pageSize.guard(pageSize.bytes(), "in bytes", false, queryState.getClientState());
-        }
+        pageSize.guard(table(), queryState.getClientState());
     }
 
     /**
@@ -993,7 +991,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             {
                 DataStorageSpec.IntBytesBound pageWeightFailThreshold = DatabaseDescriptor.getGuardrailsConfig().getPageWeightFailThreshold();
                 int bytesLimit = pageWeightFailThreshold == null ? NO_LIMIT : pageWeightFailThreshold.toBytes();
-                String limitStr = "Applied page weight limit of " + FBUtilities.prettyPrintMemory(bytesLimit);
+                String limitStr = USAGE_WARNING_PAGE_WEIGHT + FBUtilities.prettyPrintMemory(bytesLimit);
                 ClientWarn.instance.warn(limitStr);
                 logger.trace(limitStr);
                 limits = limits.forPaging(PageSize.inBytes(bytesLimit));

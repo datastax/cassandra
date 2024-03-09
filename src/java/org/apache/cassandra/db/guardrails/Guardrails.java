@@ -19,7 +19,6 @@
 package org.apache.cassandra.db.guardrails;
 
 import java.util.Collections;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -940,24 +939,23 @@ public final class Guardrails implements GuardrailsMBean
     }
 
     @Override
-    public int getPageWeightWarnThreshold()
+    @Nullable
+    public String getPageWeightWarnThreshold()
     {
-        return Math.toIntExact(Optional.ofNullable(DEFAULT_CONFIG.getPageWeightWarnThreshold())
-                                       .map(DataStorageSpec::quantity).orElse(-1L));
+        return sizeToString(DEFAULT_CONFIG.getPageWeightWarnThreshold());
     }
 
     @Override
-    public int getPageWeightFailThreshold()
+    @Nullable
+    public String getPageWeightFailThreshold()
     {
-        return Math.toIntExact(Optional.ofNullable(DEFAULT_CONFIG.getPageWeightFailThreshold())
-                                       .map(DataStorageSpec::quantity).orElse(-1L));
+        return sizeToString(DEFAULT_CONFIG.getPageWeightFailThreshold());
     }
 
     @Override
-    public void setPageWeightThreshold(int warn, int fail)
+    public void setPageWeightThreshold(@Nullable String warnSize, @Nullable String failSize)
     {
-        DEFAULT_CONFIG.setPageWeightThreshold(warn > 0 ? new DataStorageSpec.IntBytesBound(warn) : null,
-                                              fail > 0 ? new DataStorageSpec.IntBytesBound(fail) : null);
+        DEFAULT_CONFIG.setPageWeightThreshold(intSizeFromString(warnSize), intSizeFromString(failSize));
     }
 
     @Override
@@ -1415,6 +1413,11 @@ public final class Guardrails implements GuardrailsMBean
     private static DataStorageSpec.LongBytesBound sizeFromString(@Nullable String size)
     {
         return StringUtils.isEmpty(size) ? null : new DataStorageSpec.LongBytesBound(size);
+    }
+
+    private static DataStorageSpec.IntBytesBound intSizeFromString(@Nullable String size)
+    {
+        return StringUtils.isEmpty(size) ? null : new DataStorageSpec.IntBytesBound(size);
     }
 
     private static String durationToString(@Nullable DurationSpec duration)
