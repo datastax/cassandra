@@ -51,12 +51,18 @@ import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
 
 public class ChunkCache
-        implements CacheLoader<ChunkCache.Key, ChunkCache.Buffer>, RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
+        implements CacheLoader<ChunkCache.Key, ChunkCache.BufferFuture>, RemovalListener<ChunkCache.Key, ChunkCache.BufferFuture>, CacheSize
 {
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
     public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
+
+    private static final boolean SYNC_LOAD = Boolean.getBoolean("cassandra.chunk_cache.sync_load");
+
+    static {
+        logger.info("cassandra.chunk_cache.sync_load={}", SYNC_LOAD);
+    }
 
     public static final ChunkCache instance = DatabaseDescriptor.getFileCacheEnabled()
                                               ? new ChunkCache(BufferPools.forChunkCache(), DatabaseDescriptor.getFileCacheSizeInMB(), ChunkCacheMetrics::create)
@@ -68,7 +74,7 @@ public class ChunkCache
     // Because compute optimistically updates the set without acquiring a lock, we must use a set that is
     // safe for concurrent access.
     private final NonBlockingIdentityHashMap<String, NonBlockingHashSet<Key>> keysByFile;
-    private final LoadingCache<Key, Buffer> cache;
+    private final LoadingCache<Key, BufferFuture> cache;
     private final long cacheSize;
     public final ChunkCacheMetrics metrics;
 
@@ -122,6 +128,36 @@ public class ChunkCache
             return (position == other.position)
                    && internedPath == other.internedPath // == is okay b/c we explicitly intern
                    && file.chunkSize() == other.file.chunkSize(); // TODO we should not allow different chunk sizes
+        }
+    }
+
+    static class BufferFuture {
+        private final Key key;
+        private final Buffer buffer;
+        private boolean loaded;
+
+        public BufferFuture(Key key, Buffer buffer) {
+            this.key = key;
+            this.buffer = buffer;
+        }
+
+        int size() {
+            return key.file.chunkSize();
+        }
+
+        synchronized void release()
+        {
+            buffer.release();
+        }
+
+        public synchronized Buffer loadBuffer()
+        {
+            if (!loaded && buffer.references.get() > 0)
+            {
+                key.file.readChunk(key.position, buffer.buffer);
+                loaded = true;
+            }
+            return buffer;
         }
     }
 
@@ -208,18 +244,25 @@ public class ChunkCache
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
                         .executor(MoreExecutors.directExecutor())
-                        .weigher((key, buffer) -> ((Buffer) buffer).buffer.capacity())
+                        .weigher((key, buffer) -> ((BufferFuture) buffer).size())
                         .removalListener(this)
                         .recordStats(() -> metrics)
                         .build(this);
     }
 
     @Override
-    public Buffer load(Key key)
+    public BufferFuture load(Key key)
     {
         ByteBuffer buffer = bufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
         assert buffer != null;
-        key.file.readChunk(key.position, buffer);
+        BufferFuture bufferFuture =  new BufferFuture(key, new Buffer(buffer, key.position));
+
+        // reading from the disk is a blocking operation, so it is better to not do it
+        // inside the lock of the cache, to avoid blocking other threads that are trying to access
+        // the same portion of the cache.
+        if (SYNC_LOAD)
+            bufferFuture.loadBuffer();
+
         // Complete addition within compute remapping function to ensure there is no race condition with removal.
         keysByFile.compute(key.internedPath, (k, v) -> {
             if (v == null)
@@ -227,11 +270,11 @@ public class ChunkCache
             v.add(key);
             return v;
         });
-        return new Buffer(buffer, key.position);
+        return bufferFuture;
     }
 
     @Override
-    public void onRemoval(Key key, Buffer buffer, RemovalCause cause)
+    public void onRemoval(Key key, BufferFuture buffer, RemovalCause cause)
     {
         buffer.release();
         // Complete addition within compute remapping function to ensure there is no race condition with load.
@@ -320,7 +363,7 @@ public class ChunkCache
                 Key key = new Key(source, internedPath, pageAlignedPos);
                 while (true)
                 {
-                    buf = cache.get(key).reference();
+                    buf = cache.get(key).loadBuffer().reference();
                     if (buf != null)
                         return buf;
 
