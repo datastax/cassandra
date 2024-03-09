@@ -996,15 +996,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 logger.trace(limitStr);
                 limits = limits.forPaging(PageSize.inBytes(bytesLimit));
             }
-            else if (Guardrails.pageSize.enabled(clientState))
-            {   // TODO should we do that?
-                int pageSizeFailThreshold = DatabaseDescriptor.getGuardrailsConfig().getPageSizeFailThreshold();
-                int rowsLimit = pageSizeFailThreshold < 0 ? NO_LIMIT : pageSizeFailThreshold;
-                String limitStr = "Applied page size limit of " + rowsLimit + " rows";
-                ClientWarn.instance.warn(limitStr);
-                logger.trace(limitStr);
-                limits = limits.forPaging(PageSize.inRows(rowsLimit));
-            }
         }
 
         return limits;
