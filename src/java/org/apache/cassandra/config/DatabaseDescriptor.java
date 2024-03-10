@@ -1913,9 +1913,10 @@ public class DatabaseDescriptor
             if (conf.data_file_directories.length == 0)
                 throw new ConfigurationException("At least one DataFileDirectory must be specified", false);
 
-            dataDirectories = new File[conf.data_file_directories.length];
-            for (int i = 0; i < conf.data_file_directories.length; i++)
-                dataDirectories[i] = StorageProvider.instance.createDirectory(conf.data_file_directories[i], StorageProvider.DirectoryType.DATA);
+            File[] dataDirs = new File[conf.data_file_directories.length];
+            for (int i = 0; i < conf.data_file_directories.length; i++) 
+                dataDirs[i] = StorageProvider.instance.createDirectory(conf.data_file_directories[i], StorageProvider.DirectoryType.DATA);
+            setDataDirectories(dataDirs);
 
             if (conf.local_system_data_file_directory != null)
                 localSystemDataFileDirectory = StorageProvider.instance.createDirectory(conf.local_system_data_file_directory, StorageProvider.DirectoryType.LOCAL_SYSTEM_DATA);
