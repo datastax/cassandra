@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.PriorityQueue;
 import java.util.SortedSet;
 
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 
@@ -78,17 +79,41 @@ public class KeyRangeIterator extends RangeIterator
         return next;
     }
 
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(Token nextToken)
     {
         while (!keys.isEmpty())
         {
             PrimaryKey key = keys.peek();
-            if (key.compareTo(nextKey) >= 0)
+            if (key.token().compareTo(nextToken) >= 0)
                 break;
 
             // consume smaller key
             keys.poll();
         }
+    }
+
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
+    {
+        while (!keys.isEmpty())
+        {
+            PrimaryKey key = keys.poll();
+            var cmp = key.compareTo(otherKey);
+            if (cmp < 0)
+                continue;
+            if (cmp == 0)
+            {
+                // Because intersection is guaranteed to be strictly ascending, we must keep
+                // track of lastKey, but do not need to actively dedupe.
+                if (!uniqueKeys)
+                    lastKey = key;
+                return IntersectionResult.MATCH;
+            }
+
+            // Store the primary key as the next value for the iterator
+            setNext(key);
+            return IntersectionResult.MISS;
+        }
+        return IntersectionResult.EXHAUSTED;
     }
 
     public void close() throws IOException

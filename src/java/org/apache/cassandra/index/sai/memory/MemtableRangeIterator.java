@@ -20,12 +20,9 @@ package org.apache.cassandra.index.sai.memory;
 
 import java.io.IOException;
 
-import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -35,6 +32,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.io.util.FileUtils;
@@ -88,33 +86,17 @@ public class MemtableRangeIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(Token nextToken)
     {
-        PartitionPosition start = nextKey.partitionKey() != null
-                                  ? nextKey.partitionKey()
-                                  : nextKey.token().minKeyBound();
-        if (!keyRange.right.isMinimum() && start.compareTo(keyRange.right) > 0)
+        do
         {
-            partitionIterator = EmptyIterators.unfilteredPartition(memtable.metadata());
-            rowIterator = null;
-            return;
-        }
-
-        AbstractBounds<PartitionPosition> partitionBounds = AbstractBounds.bounds(start, true, keyRange.right, true);
-        DataRange dataRange = new DataRange(partitionBounds, new ClusteringIndexSliceFilter(Slices.ALL, false));
-        FileUtils.closeQuietly(partitionIterator);
-        partitionIterator = memtable.makePartitionIterator(columns, dataRange);
-        if (partitionIterator.hasNext())
-        {
-            this.rowIterator = partitionIterator.next();
-            if (!nextKey.hasEmptyClustering() && rowIterator.partitionKey().equals(nextKey.partitionKey()))
-            {
-                Slice slice = Slice.make(nextKey.clustering(), Clustering.EMPTY);
-                Slices slices = Slices.with(memtable.metadata().comparator, slice);
-                FileUtils.closeQuietly(rowIterator);
-                rowIterator = memtable.getPartition(nextKey.partitionKey()).unfilteredIterator(columns, slices, false);
-            }
-        }
+            if (!rowIterator.hasNext())
+                continue;
+            rowIterator = partitionIterator.next();
+            if (nextToken.compareTo(rowIterator.partitionKey().getToken()) <= 0)
+                return;
+            FileUtils.closeQuietly(rowIterator);
+        } while (partitionIterator.hasNext());
     }
 
     @Override
@@ -143,6 +125,37 @@ public class MemtableRangeIterator extends RangeIterator
             }
         }
         return endOfData();
+    }
+
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
+    {
+        while (hasNextRow(rowIterator) || partitionIterator.hasNext())
+        {
+            if (!hasNextRow(rowIterator))
+            {
+                FileUtils.closeQuietly(rowIterator);
+                rowIterator = partitionIterator.next();
+                continue;
+            }
+
+            Unfiltered unfiltered = rowIterator.next();
+            if (unfiltered.isRow())
+            {
+                Row row = (Row) unfiltered;
+                var primaryKey = pkFactory.create(rowIterator.partitionKey(), row.clustering());
+                var cmp = primaryKey.compareTo(otherKey);
+                if (cmp < 0)
+                    continue;
+                if (cmp == 0)
+                    return IntersectionResult.MATCH;
+
+                // Store the primary key
+                setNext(primaryKey);
+                return IntersectionResult.MISS;
+            }
+        }
+        return IntersectionResult.EXHAUSTED;
     }
 
     private static boolean hasNextRow(UnfilteredRowIterator rowIterator)

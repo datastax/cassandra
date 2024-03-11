@@ -27,6 +27,7 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
@@ -67,7 +68,8 @@ public class PostingListRangeIterator extends RangeIterator
     private final AtomicBoolean isClosed = new AtomicBoolean(false);
 
     private boolean needsSkipping = false;
-    private PrimaryKey skipToToken = null;
+    private Token skipToToken = null;
+    private long skipToRowId = -1;
     private long lastSegmentRowId = -1;
 
     /**
@@ -88,16 +90,19 @@ public class PostingListRangeIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(Token nextToken)
     {
-        // If skipToToken is equal to nextKey, we take the nextKey because in practice, it is greater than or equal
-        // to the skipToToken. This is because token only PKs are considered equal to all PKs with the same token,
-        // and for a range query, we first skip on the token-only PK.
-        if (skipToToken != null && skipToToken.compareTo(nextKey) > 0)
+        if (skipToToken != null && skipToToken.compareTo(nextToken) >= 0)
             return;
 
-        skipToToken = nextKey;
+        skipToToken = nextToken;
         needsSkipping = true;
+    }
+
+    private PrimaryKeyWithSource createPrimaryKeyWithSource(long rowId)
+    {
+        var primaryKey = primaryKeyMap.primaryKeyFromRowId(rowId);
+        return new PrimaryKeyWithSource(primaryKey, primaryKeyMap.getSSTableId(), rowId);
     }
 
     @Override
@@ -115,8 +120,7 @@ public class PostingListRangeIterator extends RangeIterator
             if (rowId == PostingList.END_OF_STREAM)
                 return endOfData();
 
-            var primaryKey = primaryKeyMap.primaryKeyFromRowId(rowId);
-            return new PrimaryKeyWithSource(primaryKey, primaryKeyMap.getSSTableId(), rowId);
+            return createPrimaryKeyWithSource(rowId);
         }
         catch (Throwable t)
         {
@@ -156,7 +160,68 @@ public class PostingListRangeIterator extends RangeIterator
 
     private boolean exhausted()
     {
-        return needsSkipping && skipToToken.compareTo(getMaximum()) > 0;
+        return needsSkipping && skipToToken != null && skipToToken.compareTo(getMaximum().token()) > 0;
+    }
+
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
+    {
+        assert skipToToken == null || skipToToken.compareTo(otherKey.token()) <= 0 : "skipToToken should always be less than otherKey";
+        needsSkipping = false;
+        skipToToken = null;
+
+        // TODO is this guard valuable or too expensive? It seems like preventing unnecessary calls
+        // to advance is worth it.
+        if (getMaximum().compareTo(otherKey) < 0)
+            return IntersectionResult.EXHAUSTED;
+        if (otherKey.compareTo(getMinimum()) < 0)
+            return IntersectionResult.MISS;
+        try
+        {
+            long targetRowID;
+            if (otherKey instanceof PrimaryKeyWithSource
+                && ((PrimaryKeyWithSource) otherKey).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
+            {
+                // We know the row is in the sstable, but not whether it's in the postinglist.
+                targetRowID = ((PrimaryKeyWithSource) otherKey).getSourceRowId();
+            }
+            else
+            {
+                targetRowID = primaryKeyMap.exactRowIdOrInvertedCeiling(otherKey);
+                // nextKey is larger than max token in token file
+                if (targetRowID == Long.MIN_VALUE)
+                    return IntersectionResult.EXHAUSTED;
+                // nextKey is not in this sstable, so it cannot be in the posting list
+                if (targetRowID < 0)
+                {
+                    skipToRowId = -targetRowID - 1;
+                    needsSkipping = true;
+                    return IntersectionResult.MISS;
+                }
+            }
+
+            long targetSegmentRowID = targetRowID - searcherContext.segmentRowIdOffset;
+            assert targetSegmentRowID > lastSegmentRowId : "Intersection should always be called with a greater PrimaryKey.";
+
+            // Advance to targetSegmentRowID. We don't need to worry about duplicates because we know
+            // targetSegmentRowID > lastSegmentRowId.
+            lastSegmentRowId = postingList.advance(targetSegmentRowID);
+
+            if (lastSegmentRowId == PostingList.END_OF_STREAM)
+                return IntersectionResult.EXHAUSTED;
+            if (lastSegmentRowId == targetSegmentRowID)
+                return IntersectionResult.MATCH;
+
+            // Create a deferred PrimaryKey. We create a PK because it is O(1) to do so, but O(log(n)) to do
+            // the reverse lookup.
+            var nextPrimaryKey = createPrimaryKeyWithSource(lastSegmentRowId + searcherContext.getSegmentRowIdOffset());
+            setNext(nextPrimaryKey);
+            return IntersectionResult.MISS;
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -167,22 +232,22 @@ public class PostingListRangeIterator extends RangeIterator
         long segmentRowId;
         if (needsSkipping)
         {
-            long targetRowID;
-            if (skipToToken instanceof PrimaryKeyWithSource
-                && ((PrimaryKeyWithSource) skipToToken).getSourceSstableId().equals(primaryKeyMap.getSSTableId()))
+            assert skipToToken != null || skipToRowId >= 0;
+            long targetRowID = skipToRowId;
+            if (skipToToken != null)
             {
-                targetRowID = ((PrimaryKeyWithSource) skipToToken).getSourceRowId();
-            }
-            else
-            {
-                targetRowID = primaryKeyMap.ceiling(skipToToken);
-                // skipToToken is larger than max token in token file
-                if (targetRowID < 0)
-                {
-                    return PostingList.END_OF_STREAM;
-                }
-            }
+                long tokenRowId = primaryKeyMap.exactRowIdOrInvertedCeiling(skipToToken);
 
+                // skipToToken is larger than max token in token file
+                if (tokenRowId == Long.MIN_VALUE)
+                    return PostingList.END_OF_STREAM;
+                if (tokenRowId < 0)
+                    tokenRowId = -tokenRowId - 1;
+
+                // Take the higher of the two
+                targetRowID = Math.max(tokenRowId, skipToRowId);
+                skipToToken = null;
+            }
             segmentRowId = postingList.advance(targetRowID - searcherContext.getSegmentRowIdOffset());
             needsSkipping = false;
         }

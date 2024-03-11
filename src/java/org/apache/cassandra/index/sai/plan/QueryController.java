@@ -56,6 +56,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
@@ -151,7 +152,7 @@ public class QueryController
     private final AbstractBounds<PartitionPosition> mergeRange;
 
     private final PrimaryKey.Factory keyFactory;
-    private final PrimaryKey firstPrimaryKey;
+    private final Token firstToken;
     private final PrimaryKey lastPrimaryKey;
 
     public QueryController(ColumnFamilyStore cfs,
@@ -174,7 +175,7 @@ public class QueryController
         this.mergeRange = ranges.size() == 1 ? first.keyRange() : first.keyRange().withNewRight(last.keyRange().right);
 
         this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
-        this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
+        this.firstToken = mergeRange.left.getToken();
         this.lastPrimaryKey = keyFactory.createTokenOnly(mergeRange.right.getToken());
     }
 
@@ -183,9 +184,9 @@ public class QueryController
         return keyFactory;
     }
 
-    public PrimaryKey firstPrimaryKey()
+    public Token firstToken()
     {
-        return firstPrimaryKey;
+        return firstToken;
     }
 
     public PrimaryKey lastPrimaryKey()

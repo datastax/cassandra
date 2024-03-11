@@ -231,15 +231,15 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
         RangeIterator tokens = builder.build();
         Assert.assertNotNull(tokens);
 
-        tokens.skipTo(LongIterator.fromToken(5L));
+        tokens.skipTo(LongIterator.toToken(5L));
         Assert.assertTrue(tokens.hasNext());
         Assert.assertEquals(5L, tokens.next().token().getLongValue());
 
-        tokens.skipTo(LongIterator.fromToken(7L));
+        tokens.skipTo(LongIterator.toToken(7L));
         Assert.assertTrue(tokens.hasNext());
         Assert.assertEquals(7L, tokens.next().token().getLongValue());
 
-        tokens.skipTo(LongIterator.fromToken(10L));
+        tokens.skipTo(LongIterator.toToken(10L));
         Assert.assertFalse(tokens.hasNext());
         Assert.assertEquals(1L, tokens.getMinimum().token().getLongValue());
         Assert.assertEquals(9L, tokens.getMaximum().token().getLongValue());
@@ -279,19 +279,19 @@ public class RangeUnionIteratorTest extends AbstractRangeIteratorTest
 
         tokens = new LongIterator(new long[] { 0L, 1L, 3L, 5L });
 
-        tokens.skipTo(LongIterator.fromToken(2L));
+        tokens.skipTo(LongIterator.toToken(2L));
         Assert.assertTrue(tokens.hasNext());
         Assert.assertEquals(3L, tokens.peek().token().getLongValue());
         Assert.assertEquals(3L, tokens.next().token().getLongValue());
 
-        tokens.skipTo(LongIterator.fromToken(5L));
+        tokens.skipTo(LongIterator.toToken(5L));
         Assert.assertTrue(tokens.hasNext());
         Assert.assertEquals(5L, tokens.peek().token().getLongValue());
         Assert.assertEquals(5L, tokens.next().token().getLongValue());
 
         LongIterator empty = new LongIterator(new long[0]);
 
-        empty.skipTo(LongIterator.fromToken(3L));
+        empty.skipTo(LongIterator.toToken(3L));
         Assert.assertFalse(empty.hasNext());
     }
 

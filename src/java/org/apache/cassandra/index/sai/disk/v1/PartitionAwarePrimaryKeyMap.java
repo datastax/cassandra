@@ -25,6 +25,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 import javax.annotation.concurrent.ThreadSafe;
 
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -150,9 +151,15 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     }
 
     @Override
+    public long exactRowIdOrInvertedCeiling(Token token)
+    {
+        return rowIdToToken.indexOf(token.getLongValue());
+    }
+
+    @Override
     public long exactRowIdOrInvertedCeiling(PrimaryKey key)
     {
-        return rowIdToToken.indexOf(key.token().getLongValue());
+        return exactRowIdOrInvertedCeiling(key.token());
     }
 
     @Override

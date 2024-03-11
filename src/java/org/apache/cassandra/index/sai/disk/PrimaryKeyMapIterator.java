@@ -98,9 +98,11 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(Token nextToken)
     {
-        this.currentRowId = keys.ceiling(nextKey);
+        currentRowId = keys.exactRowIdOrInvertedCeiling(nextToken);
+        if (currentRowId < 0)
+            currentRowId = -currentRowId - 1;
     }
 
     @Override
@@ -114,6 +116,24 @@ public final class PrimaryKeyMapIterator extends RangeIterator
             return key;
         }
         return endOfData();
+    }
+
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
+    {
+        currentRowId = keys.exactRowIdOrInvertedCeiling(otherKey);
+        if (0 <= currentRowId)
+        {
+            // Move currentRowId forward by one because performIntersect consumes matches.
+            currentRowId++;
+            return IntersectionResult.MATCH;
+        }
+
+        // Invert currentRowId, then determine correct result
+        currentRowId = -currentRowId - 1;
+        if (currentRowId == Long.MAX_VALUE)
+            return IntersectionResult.EXHAUSTED;
+        return IntersectionResult.MISS;
     }
 
     @Override

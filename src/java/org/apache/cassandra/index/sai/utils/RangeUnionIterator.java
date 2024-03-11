@@ -23,6 +23,7 @@ import java.util.List;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -67,13 +68,40 @@ public class RangeUnionIterator extends RangeIterator
         return candidate.next();
     }
 
-    protected void performSkipTo(PrimaryKey nextKey)
+    protected void performSkipTo(Token nextToken)
     {
         // Resist the temptation to call range.hasNext before skipTo: this is a pessimisation, hasNext will invoke
         // computeNext under the hood, which is an expensive operation to produce a value that we plan to throw away.
         // Instead, it is the responsibility of the child iterators to make skipTo fast when the iterator is exhausted.
         for (RangeIterator range : ranges)
-            range.skipTo(nextKey);
+            range.skipTo(nextToken);
+    }
+
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
+    {
+        int countExhausted = 0;
+        boolean isMatch = false;
+        for (var range : ranges)
+        {
+            switch(range.intersect(otherKey))
+            {
+                case MATCH:
+                    // VSTODO is it worth returning early here? We know we have a match. However, if we do, we
+                    // need to keep track of some state to make sure calls to next() and skipTo() are correct.
+                    // We would need to store the otherKey and know which ranges still need intersect() called on them.
+                    // It could be more efficient though because if the next call is to intersect(), then we avoid
+                    // eagerly calling intersect() on the remaining ranges with a lesser PrimaryKey.
+                    isMatch = true;
+                case MISS:
+                    continue;
+                case EXHAUSTED:
+                    countExhausted++;
+            }
+        }
+        if (isMatch)
+            return IntersectionResult.MATCH;
+        return countExhausted == ranges.size() ? IntersectionResult.EXHAUSTED : IntersectionResult.MISS;
     }
 
     public void close() throws IOException

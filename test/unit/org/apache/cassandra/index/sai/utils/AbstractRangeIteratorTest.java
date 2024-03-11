@@ -116,7 +116,7 @@ public class AbstractRangeIteratorTest extends SaiRandomizedTest
 
             // skipping to the same element should also be a no-op
             if (randomBoolean())
-                ri.skipTo(LongIterator.fromToken(totalOrdering[count]));
+                ri.skipTo(LongIterator.toToken(totalOrdering[count]));
 
             // skip a few elements
             if (nextDouble() < 0.1)
@@ -125,7 +125,7 @@ public class AbstractRangeIteratorTest extends SaiRandomizedTest
                 if (count + n < totalOrdering.length)
                 {
                     count += n;
-                    ri.skipTo(LongIterator.fromToken(totalOrdering[count]));
+                    ri.skipTo(LongIterator.toToken(totalOrdering[count]));
                 }
             }
             Assert.assertEquals(totalOrdering[count++], ri.next().token().getLongValue());

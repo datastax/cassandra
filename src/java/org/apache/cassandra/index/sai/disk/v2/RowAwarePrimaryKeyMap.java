@@ -187,12 +187,24 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         // is that it reads partition keys directly from the sstable using the offsets file.
         // While this worked in BDP, it was not efficient and caused problems because the
         // sstable reader was using 64k page sizes, and this caused page cache thrashing.
-        long rowId = rowIdToToken.indexOf(key.token().getLongValue());
+        long rowId = exactRowIdOrInvertedCeiling(key.token());
         if (rowId < 0)
             // No match found, return the inverted ceiling
             return rowId;
         // The first index might not have been the correct match in the case of token collisions.
         return tokenCollisionDetection(key, rowId);
+    }
+
+    /**
+     * Returns the first row Id for a {@link Token}. If there is no such term, returns the `-(next row id) - 1` where
+     * `next row id` is the row id of the next greatest {@link Token} in the map.
+     * @param token the {@link Token} to lookup
+     * @return a row id
+     */
+    @Override
+    public long exactRowIdOrInvertedCeiling(Token token)
+    {
+         return rowIdToToken.indexOf(token.getLongValue());
     }
 
     /**

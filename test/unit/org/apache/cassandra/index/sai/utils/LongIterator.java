@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.function.LongFunction;
 
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.SAITester;
 
 public class LongIterator extends RangeIterator
@@ -53,14 +54,33 @@ public class LongIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(PrimaryKey nextToken)
+    protected void performSkipTo(Token nextToken)
+    {
+        for ( ; currentIdx < keys.size(); currentIdx++)
+        {
+            var token = keys.get(currentIdx).token();
+            if (token.compareTo(nextToken) >= 0)
+                break;
+        }
+    }
+
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
     {
         for ( ; currentIdx < keys.size(); currentIdx++)
         {
             PrimaryKey token = keys.get(currentIdx);
-            if (token.compareTo(nextToken) >= 0)
-                break;
+            int cmp = token.compareTo(otherKey);
+            if (cmp < 0)
+                continue;
+            if (cmp == 0)
+                return IntersectionResult.MATCH;
+
+            // Store the primary key
+            setNext(token);
+            return IntersectionResult.MISS;
         }
+        return IntersectionResult.EXHAUSTED;
     }
 
     @Override
@@ -72,6 +92,10 @@ public class LongIterator extends RangeIterator
         return SAITester.TEST_FACTORY.createTokenOnly(new Murmur3Partitioner.LongToken(token));
     }
 
+    public static Token toToken(long token)
+    {
+        return new Murmur3Partitioner.LongToken(token);
+    }
 
     public static List<Long> convert(RangeIterator tokens)
     {

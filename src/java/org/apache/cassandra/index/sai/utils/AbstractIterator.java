@@ -133,6 +133,14 @@ public abstract class AbstractIterator<T> implements PeekingIterator<T>
         return next;
     }
 
+    protected final void setNext(T next)
+    {
+        if (state != State.NOT_READY)
+            throw new IllegalStateException();
+        state = State.READY;
+        this.next = next;
+    }
+
     public void remove()
     {
         throw new UnsupportedOperationException();

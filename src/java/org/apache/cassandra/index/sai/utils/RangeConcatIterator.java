@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
@@ -52,21 +53,37 @@ public class RangeConcatIterator extends RangeIterator
     }
 
     @Override
-    protected void performSkipTo(PrimaryKey primaryKey)
+    protected void performSkipTo(Token nextToken)
     {
         while (true)
         {
-            if (currentRange.getMaximum().compareTo(primaryKey) >= 0)
+            if (currentRange.getMaximum().token().compareTo(nextToken) >= 0)
             {
-                currentRange.skipTo(primaryKey);
+                currentRange.skipTo(nextToken);
                 return;
             }
             if (!ranges.hasNext())
             {
-                currentRange.skipTo(primaryKey);
+                currentRange.skipTo(nextToken);
                 return;
             }
             currentRange = ranges.next();
+        }
+    }
+
+    @Override
+    protected IntersectionResult performIntersect(PrimaryKey otherKey)
+    {
+        while (true)
+        {
+            var result = currentRange.intersect(otherKey);
+            if (result != IntersectionResult.EXHAUSTED)
+                return result;
+
+            if (ranges.hasNext())
+                currentRange = ranges.next();
+            else
+                return IntersectionResult.EXHAUSTED;
         }
     }
 
