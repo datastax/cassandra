@@ -138,12 +138,12 @@ public class BackgroundCompactionRunner implements Runnable
 
         private void completeInternal(RequestResult t)
         {
-            super.setSuccess(t);
+            super.trySuccess(t);
         }
 
         private void completeExceptionallyInternal(Throwable throwable)
         {
-            super.setFailure(throwable);
+            super.tryFailure(throwable);
         }
     }
 
