@@ -142,7 +142,7 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     }
 
     @DontInline
-    protected long readPrimitiveSlowly(int bytes) throws IOException
+    protected long readBigEndianPrimitiveSlowly(int bytes) throws IOException
     {
         long result = 0;
         for (int i = 0; i < bytes; i++)
@@ -201,7 +201,7 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     {
         if (buffer.remaining() >= 2)
             return buffer.getShort();
-        var result = (short) readPrimitiveSlowly(2);
+        var result = (short) readBigEndianPrimitiveSlowly(2);
         if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
             return Short.reverseBytes(result);
         return result;
@@ -218,7 +218,7 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     {
         if (buffer.remaining() >= 2)
             return buffer.getChar();
-        var result = (char) readPrimitiveSlowly(2);
+        var result = (char) readBigEndianPrimitiveSlowly(2);
         if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
             return Character.reverseBytes(result);
         return result;
@@ -229,7 +229,7 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     {
         if (buffer.remaining() >= 4)
             return buffer.getInt();
-        var result = (int) readPrimitiveSlowly(4);
+        var result = (int) readBigEndianPrimitiveSlowly(4);
         if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
             return Integer.reverseBytes(result);
         return result;
@@ -240,7 +240,7 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     {
         if (buffer.remaining() >= 8)
             return buffer.getLong();
-        var result = readPrimitiveSlowly(8);
+        var result = readBigEndianPrimitiveSlowly(8);
         if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
             return Long.reverseBytes(result);
         return result;
@@ -287,7 +287,7 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     {
         if (buffer.remaining() >= 4)
             return buffer.getFloat();
-        var intBits = (int)readPrimitiveSlowly(4);
+        var intBits = (int) readBigEndianPrimitiveSlowly(4);
         if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
             intBits = Integer.reverseBytes(intBits);
         return Float.intBitsToFloat(intBits);
@@ -298,7 +298,7 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     {
         if (buffer.remaining() >= 8)
             return buffer.getDouble();
-        var longBits = readPrimitiveSlowly(8);
+        var longBits = readBigEndianPrimitiveSlowly(8);
         if (buffer.order() == ByteOrder.LITTLE_ENDIAN)
             longBits = Long.reverseBytes(longBits);
         return Double.longBitsToDouble(longBits);
