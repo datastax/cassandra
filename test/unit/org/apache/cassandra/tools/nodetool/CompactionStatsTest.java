@@ -66,9 +66,13 @@ public class CompactionStatsTest extends CQLTester
                       "                [(-pp | --print-port)] [(-pw <password> | --password <password>)]\n" +
                       "                [(-pwf <passwordFilePath> | --password-file <passwordFilePath>)]\n" +
                       "                [(-u <username> | --username <username>)] compactionstats\n" +
-                      "                [(-H | --human-readable)] [(-V | --vtable)]\n" +
+                      "                [(-A | --aggregate)] [(-H | --human-readable)] [(-V | --vtable)]\n" +
                       "\n" +
                       "OPTIONS\n" +
+                      "        -A, --aggregate\n" +
+                      "            Show the compaction aggregates for the compactions in progress, e.g.\n" +
+                      "            the levels for LCS or the buckets for STCS and TWCS.\n" +
+                      "\n" +
                       "        -h <host>, --host <host>\n" +
                       "            Node hostname or ip address\n" +
                       "\n" +
