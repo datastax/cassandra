@@ -77,8 +77,9 @@ public class RangeCommands
                                                                    command.indexQueryPlan(),
                                                                    keyspace,
                                                                    consistencyLevel);
-        if (command.isTopK())
-            return new ScanAllRangesCommandIterator(keyspace, replicaPlans, command, replicaPlans.size(), queryStartNanoTime, readTracker);
+        // TODO should this be configurable or can we always skip?
+//        if (command.isTopK())
+//            return new ScanAllRangesCommandIterator(keyspace, replicaPlans, command, replicaPlans.size(), queryStartNanoTime, readTracker);
 
         int maxConcurrencyFactor = Math.min(replicaPlans.size(), MAX_CONCURRENT_RANGE_REQUESTS);
         int concurrencyFactor = maxConcurrencyFactor;
