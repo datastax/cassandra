@@ -655,9 +655,6 @@ public class NativeIndexDDLTest extends SAITester
     public void testMaxTermSize() throws Throwable
     {
         createTable(KEYSPACE, "CREATE TABLE %s (k int PRIMARY KEY, v text, m map<text, text>,)");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(ENTRIES(m)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable(KEYSPACE, "idx");
 
         String largeTerm = UTF8Type.instance.compose(ByteBuffer.allocate(FBUtilities.MAX_UNSIGNED_SHORT / 2 + 1));
         ResultSet resultSet = executeNet("INSERT INTO %s (k, v, m) VALUES (0, ?, {'" + largeTerm + "': ''})", largeTerm);
@@ -1279,10 +1276,9 @@ public class NativeIndexDDLTest extends SAITester
 
         Injections.inject(delayIndexBuilderCompletion);
 
-        IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
+        IndexContext numericIndexContext = createIndexContext(createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
 
         waitForAssert(() -> assertTrue(getCompactionTasks() > 0), 1000, TimeUnit.MILLISECONDS);
-        String indexv1Name = createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
 
         // Stop initial index build by interrupting active and pending compactions
         int attempt = 20;
