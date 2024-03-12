@@ -52,6 +52,7 @@ public class SensorsWriteTest
     public static final String CF_STANDARD2 = "Standard2";
     public static final String CF_STANDARD_CLUSTERING = "StandardClustering";
 
+
     private ColumnFamilyStore store;
     private CopyOnWriteArrayList<Message> capturedOutboundMessages;
 
@@ -59,7 +60,6 @@ public class SensorsWriteTest
     public static void defineSchema() throws Exception
     {
         SchemaLoader.prepareServer();
-
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD,
@@ -92,7 +92,6 @@ public class SensorsWriteTest
     public void afterTest()
     {
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).truncateBlocking();
-        Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_CLUSTERING).truncateBlocking();
 
         RequestTracker.instance.set(null);
