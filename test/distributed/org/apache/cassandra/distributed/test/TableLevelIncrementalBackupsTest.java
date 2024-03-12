@@ -31,8 +31,10 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.Feature;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
+import org.apache.cassandra.io.sstable.UUIDBasedSSTableId;
 
 import static org.apache.cassandra.Util.getBackups;
+import static org.apache.cassandra.config.DatabaseDescriptor.isUUIDSSTableIdentifiersEnabled;
 import static org.apache.cassandra.distributed.Cluster.build;
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
 import static org.apache.cassandra.distributed.test.ExecUtil.rethrow;
@@ -156,7 +158,9 @@ public class TableLevelIncrementalBackupsTest extends TestBaseImpl
     private static void assertSSTablesCount(Set<Descriptor> descs, String tableName, int expectedSeqGenIds)
     {
         List<String> seqSSTables = descs.stream()
-                                        .filter(desc -> desc.id instanceof SequenceBasedSSTableId)
+                                        .filter(desc -> isUUIDSSTableIdentifiersEnabled()
+                                                ? desc.id instanceof UUIDBasedSSTableId
+                                                : desc.id instanceof SequenceBasedSSTableId)
                                         .map(descriptor -> descriptor.baseFile().toString())
                                         .sorted()
                                         .collect(Collectors.toList());
