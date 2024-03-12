@@ -42,12 +42,9 @@ import org.apache.cassandra.transport.messages.EventMessage;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 
-import static org.apache.cassandra.concurrent.SharedExecutorPool.SHARED;
-
 public class Dispatcher
 {
     private static final Logger logger = LoggerFactory.getLogger(Dispatcher.class);
-    private static final LocalAwareExecutorService requestExecutor = Stage.NATIVE_TRANSPORT_REQUESTS.executor();
 
     private static final ConcurrentMap<EventLoop, Flusher> flusherLookup = new ConcurrentHashMap<>();
     private final boolean useLegacyFlusher;
@@ -72,7 +69,7 @@ public class Dispatcher
 
     public void dispatch(Channel channel, Message.Request request, FlushItemConverter forFlusher, Overload backpressure)
     {
-        requestExecutor.submit(() -> processRequest(channel, request, forFlusher, backpressure));
+        Stage.NATIVE_TRANSPORT_REQUESTS.submit(() -> processRequest(channel, request, forFlusher, backpressure));
     }
 
     /**
@@ -158,14 +155,6 @@ public class Dispatcher
 
         flusher.enqueue(item);
         flusher.start();
-    }
-
-    public static void shutdown()
-    {
-        if (requestExecutor != null)
-        {
-            requestExecutor.shutdown();
-        }
     }
 
 
