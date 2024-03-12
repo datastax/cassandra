@@ -487,7 +487,6 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
 
     public static void shutdown()
     {
-        requestExecutor.shutdown();
         authExecutor.shutdown();
     }
 
