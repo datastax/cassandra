@@ -107,6 +107,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.repair.messages.ValidationResponse;
 import org.apache.cassandra.repair.state.Completable;
@@ -749,7 +750,7 @@ public abstract class FuzzTestBase extends CQLTester.InMemory
                 state.addApplicationState(ApplicationState.RACK, valueFactory.rack(rack));
                 state.addApplicationState(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
 
-                gossiper.endpoints.put(addressAndPort, state);
+                gossiper.addEndpointState(addressAndPort, state);
 
                 Node node = new Node(hostId, addressAndPort, Collections.singletonList(token), new Messaging(addressAndPort));
                 nodes.put(addressAndPort, node);
@@ -1021,6 +1022,12 @@ public abstract class FuzzTestBase extends CQLTester.InMemory
         private class Gossip implements IGossiper
         {
             private final Map<InetAddressAndPort, EndpointState> endpoints = new HashMap<>();
+            private void addEndpointState(InetAddressAndPort endpoint, EndpointState state)
+            {
+                state.maybeSetUpdater(update -> Nodes.updateLocalOrPeer(endpoint, update, false, true));
+                state.maybeUpdate();
+                endpoints.put(endpoint, state);
+            }
 
             @Override
             public void register(IEndpointStateChangeSubscriber subscriber)
