@@ -260,7 +260,6 @@ public class Dispatcher
 
     public static void shutdown()
     {
-        requestExecutor.shutdown();
         authExecutor.shutdown();
     }
 
