@@ -29,6 +29,8 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -41,10 +43,21 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
     public void doVerb(Message<ReadCommand> message)
     {
-        ColumnFamilyStore cfs = Keyspace.openAndGetStore(message.payload.metadata());
-        if (!cfs.isReadyToServeData())
+        TableMetadata metadata = message.payload.metadata();
+        if (metadata.isVirtual())
         {
-            throw new RuntimeException("Cannot service reads while bootstrapping!");
+            if (StorageService.instance.isBootstrapMode())
+            {
+                throw new RuntimeException("Cannot service reads while bootstrapping!");
+            }
+        }
+        else
+        {
+            ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata);
+            if (!cfs.isReadyToServeData())
+            {
+                throw new RuntimeException("Cannot service reads while bootstrapping!");
+            }
         }
 
         ReadCommand command = message.payload;
