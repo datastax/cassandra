@@ -18,7 +18,6 @@
 package org.apache.cassandra.io.sstable.keycache;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -32,7 +31,6 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.AfterClass;
-import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -52,7 +50,6 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.AbstractRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.big.BigTableReader;
 import org.apache.cassandra.io.sstable.format.big.RowIndexEntry;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -61,7 +58,6 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Refs;
 import org.assertj.core.api.Assertions;
-import org.awaitility.Awaitility;
 import org.hamcrest.Matchers;
 import org.mockito.Mockito;
 import org.mockito.internal.stubbing.answers.AnswersWithDelay;
@@ -345,23 +341,23 @@ public class KeyCacheTest
 
         Util.compactAll(cfs, Integer.MAX_VALUE).get();
 
-        assertKeyCacheSize(2, KEYSPACE1, cf);
+        // after compaction cache should have entries for new SSTables,
+        // but since we have kept a reference to the old sstables,
+        // if we had 2 keys in cache previously it should become 4
+        assertKeyCacheSize(4, KEYSPACE1, cf);
 
         refs.release();
 
         LifecycleTransaction.waitForDeletions();
 
+        // after releasing the reference this should drop to 2
         assertKeyCacheSize(2, KEYSPACE1, cf);
 
         // re-read same keys to verify that key cache didn't grow further
         Util.getAll(Util.cmd(cfs, "key1").build());
         Util.getAll(Util.cmd(cfs, "key2").build());
 
-        assertKeyCacheSize(4, KEYSPACE1, cf);
-
-        CacheService.instance.keyCache.submitWrite(Integer.MAX_VALUE).get();
-
-        Awaitility.await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertKeyCacheSize(2, KEYSPACE1, cf));
+        assertKeyCacheSize( 2, KEYSPACE1, cf);
     }
 
     @Test
@@ -382,7 +378,6 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadTwoTablesTime() throws Exception
     {
-        Assume.assumeTrue(BigFormat.isSelected());
         DatabaseDescriptor.setCacheLoadTimeout(60);
         String columnFamily1 = COLUMN_FAMILY8;
         String columnFamily2 = COLUMN_FAMILY_K2_1;
@@ -405,7 +400,6 @@ public class KeyCacheTest
     @Test
     public void testKeyCacheLoadCacheLoadTimeExceedingLimit() throws Exception
     {
-        Assume.assumeTrue(BigFormat.isSelected());
         DatabaseDescriptor.setCacheLoadTimeout(2);
         int delayMillis = 1000;
         int numberOfRows = 100;
