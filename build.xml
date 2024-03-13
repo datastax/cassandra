@@ -1181,7 +1181,6 @@
         <jvmarg line="${java-jvmargs}"/>
         <!-- disable shrinks in quicktheories CASSANDRA-15554 -->
         <jvmarg value="-DQT_SHRINKS=0"/>
-        <jvmarg value="-Dcassandra.disable_tcactive_openssl=true" />
         <jvmarg value="-Dcassandra.use_nix_recursive_delete=true"/>
         <jvmarg value="-Dcassandra.test.fail_on_forbidden_log_entries=${cassandra.test.fail_on_forbidden_log_entries}"/>
         <jvmarg line="${_std-test-jvmargs} " />
