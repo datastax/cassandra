@@ -43,7 +43,7 @@ public class VersionSupportedFeaturesTest extends AbstractTestVersionSupportedFe
     @Override
     protected Stream<String> getPartitionLevelDeletionPresenceMarkerSupportedVersions()
     {
-        return range("ba", "zz");
+        return range("da", "zz");
     }
 
     @Override
@@ -68,5 +68,65 @@ public class VersionSupportedFeaturesTest extends AbstractTestVersionSupportedFe
     protected Stream<String> getOriginatingHostIdSupportedVersions()
     {
         return Streams.concat(range("ad", "az"), range("bb", "zz"));
+    }
+
+    @Override
+    protected Stream<String> getAccurateMinMaxSupportedVersions()
+    {
+        return range("ac", "az");
+    }
+
+    @Override
+    protected Stream<String> getCommitLogLowerBoundSupportedVersions()
+    {
+        return ALL_VERSIONS.stream();
+    }
+
+    @Override
+    protected Stream<String> getCommitLogIntervalsSupportedVersions()
+    {
+        return ALL_VERSIONS.stream();
+    }
+
+    @Override
+    protected Stream<String> getZeroCopyMetadataSupportedVersions()
+    {
+        return range("ba", "bz");
+    }
+
+    @Override
+    protected Stream<String> getIncrementalNodeSyncMetadataSupportedVersions()
+    {
+        return range("ba", "bz");
+    }
+
+    @Override
+    protected Stream<String> getMaxColumnValueLengthsSupportedVersions()
+    {
+        return range("ba", "bz");
+    }
+
+    @Override
+    protected Stream<String> getIsTransientSupportedVersions()
+    {
+        return range("ca", "zz");
+    }
+
+    @Override
+    protected Stream<String> getMisplacedPartitionLevelDeletionsPresenceMarkerSupportedVersions()
+    {
+        return range("ba", "cz");
+    }
+
+    @Override
+    protected Stream<String> getTokenSpaceCoverageSupportedVersions()
+    {
+        return range("cb", "zz");
+    }
+
+    @Override
+    protected Stream<String> getOldBfFormatSupportedVersions()
+    {
+        return range("aa", "az");
     }
 }
