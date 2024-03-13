@@ -3567,6 +3567,12 @@ public class DatabaseDescriptor
         return metadataDirectory;
     }
 
+   @VisibleForTesting
+    public static void setMetadataDirectory(File metadataDirectory)
+    {
+        DatabaseDescriptor.metadataDirectory = metadataDirectory;
+    }
+
     public static File getSerializedCachePath(CacheType cacheType, String version, String extension)
     {
         String name = cacheType.toString()
