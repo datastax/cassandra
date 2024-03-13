@@ -223,7 +223,7 @@ public class RowIndexEntryTest extends CQLTester
             if (staticRow == null)
                 staticRow = Rows.EMPTY_STATIC_ROW;
             partitionWriter.start(partitionKey, DeletionTime.LIVE);
-            if (staticRow != null)
+            if (!staticRow.isEmpty())
                 partitionWriter.addStaticRow(staticRow);
             AbstractUnfilteredRowIterator rowIter = makeRowIter(staticRow, partitionKey, clusteringIter, dataWriterNew);
             while (rowIter.hasNext())
