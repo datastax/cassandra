@@ -20,6 +20,8 @@ package org.apache.cassandra.io.sstable.format.bti;
 
 import java.util.stream.Stream;
 
+import com.google.common.collect.Streams;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.format.AbstractTestVersionSupportedFeatures;
 import org.apache.cassandra.io.sstable.format.Version;
@@ -41,30 +43,30 @@ public class VersionSupportedFeaturesTest extends AbstractTestVersionSupportedFe
     @Override
     protected Stream<String> getPartitionLevelDeletionPresenceMarkerSupportedVersions()
     {
-        return ALL_VERSIONS.stream();
+        return range("ba", "zz");
     }
 
     @Override
     protected Stream<String> getLegacyMinMaxSupportedVersions()
     {
-        return Stream.empty();
+        return range("aa", "az");
     }
 
     @Override
     protected Stream<String> getImprovedMinMaxSupportedVersions()
     {
-        return ALL_VERSIONS.stream();
+        return range("ba", "zz");
     }
 
     @Override
     protected Stream<String> getKeyRangeSupportedVersions()
     {
-        return ALL_VERSIONS.stream();
+        return range("da", "zz");
     }
 
     @Override
     protected Stream<String> getOriginatingHostIdSupportedVersions()
     {
-        return ALL_VERSIONS.stream();
+        return Streams.concat(range("ad", "az"), range("bb", "zz"));
     }
 }
