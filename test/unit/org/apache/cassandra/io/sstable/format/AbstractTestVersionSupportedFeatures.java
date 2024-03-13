@@ -60,12 +60,12 @@ public abstract class AbstractTestVersionSupportedFeatures
     @Test
     public void testCompatibility()
     {
-        checkPredicateAgainstVersions(Version::hasPendingRepair, getPendingRepairSupportedVersions());
-        checkPredicateAgainstVersions(Version::hasImprovedMinMax, getImprovedMinMaxSupportedVersions());
-        checkPredicateAgainstVersions(Version::hasLegacyMinMax, getLegacyMinMaxSupportedVersions());
-        checkPredicateAgainstVersions(Version::hasPartitionLevelDeletionsPresenceMarker, getPartitionLevelDeletionPresenceMarkerSupportedVersions());
-        checkPredicateAgainstVersions(Version::hasKeyRange, getKeyRangeSupportedVersions());
-        checkPredicateAgainstVersions(Version::hasOriginatingHostId, getOriginatingHostIdSupportedVersions());
+        checkPredicateAgainstVersions(Version::hasPendingRepair, getPendingRepairSupportedVersions(), "hasPendingRepair");
+        checkPredicateAgainstVersions(Version::hasImprovedMinMax, getImprovedMinMaxSupportedVersions(), "hasImprovedMinMax");
+        checkPredicateAgainstVersions(Version::hasLegacyMinMax, getLegacyMinMaxSupportedVersions(), "hasLegacyMinMax");
+        checkPredicateAgainstVersions(Version::hasPartitionLevelDeletionsPresenceMarker, getPartitionLevelDeletionPresenceMarkerSupportedVersions(), "hasPartitionLevelDeletionsPresenceMarker");
+        checkPredicateAgainstVersions(Version::hasKeyRange, getKeyRangeSupportedVersions(), "hasKeyRange");
+        checkPredicateAgainstVersions(Version::hasOriginatingHostId, getOriginatingHostIdSupportedVersions(), "hasOriginatingHostId");
     }
 
     public static Stream<String> range(String fromIncl, String toIncl)
@@ -82,10 +82,10 @@ public abstract class AbstractTestVersionSupportedFeatures
      * @param predicate     predicate to check against version
      * @param versionBounds a stream of versions for which the predicate should return true
      */
-    private void checkPredicateAgainstVersions(Predicate<Version> predicate, Stream<String> versionBounds)
+    private void checkPredicateAgainstVersions(Predicate<Version> predicate, Stream<String> versionBounds, String name)
     {
         List<String> expected = versionBounds.collect(Collectors.toList());
         List<String> actual = ALL_VERSIONS.stream().filter(v -> predicate.test(getVersion(v))).collect(Collectors.toList());
-        Assertions.assertThat(actual).isEqualTo(expected);
+        Assertions.assertThat(actual).describedAs(name).isEqualTo(expected);
     }
 }
