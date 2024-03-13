@@ -324,18 +324,46 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         private final boolean hasAccurateLegacyMinMax;
         private final boolean hasOriginatingHostId;
         private final boolean hasMaxColumnValueLengths;
+        private final boolean hasImprovedMinMax;
+        private final boolean hasLegacyMinMax;
+        private final boolean hasZeroCopyMetadata;
+        private final boolean hasIncrementalNodeSyncMetadata;
+        private final boolean hasIsTransient;
+        private final boolean hasTokenSpaceCoverage;
+        private final boolean hasMisplacedPartitionLevelDeletionsPresenceMarker;
+
 
         private final int correspondingMessagingVersion;
+        private final boolean hasPartitionLevelDeletionsPresenceMarker;
+        private final boolean hasKeyRange;
+        private final boolean hasUIntDeletionTime;
 
         BtiVersion(BtiFormat format, String version)
         {
             super(format, version);
 
+            boolean dOrLater = version.compareTo("d") >= 0;
+            boolean cOrLater = dOrLater || version.startsWith("c");
+            boolean bOrLater = cOrLater || version.startsWith("b");
+            boolean aOrLater = bOrLater || version.startsWith("a");
+
             isLatestVersion = version.compareTo(current_version) == 0;
-            hasOldBfFormat = version.compareTo("b") < 0;
-            hasAccurateLegacyMinMax = version.compareTo("ac") >= 0;
-            hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])") || version.compareTo("ca") >= 0;
-            hasMaxColumnValueLengths = version.matches("b[a-z]"); // DSE only field
+            hasOldBfFormat = aOrLater && !bOrLater;
+            hasImprovedMinMax = bOrLater;
+            hasLegacyMinMax = aOrLater && !bOrLater;
+            hasAccurateLegacyMinMax = !bOrLater && version.compareTo("ac") >= 0;
+            hasOriginatingHostId = bOrLater && version.compareTo("bb") >= 0 || !bOrLater && version.compareTo("ad") >= 0;
+            hasIsTransient = cOrLater;
+            hasTokenSpaceCoverage = version.compareTo("cb") >= 0;
+            hasMisplacedPartitionLevelDeletionsPresenceMarker = bOrLater && !dOrLater;
+            hasPartitionLevelDeletionsPresenceMarker = dOrLater;
+            hasKeyRange = dOrLater;
+            hasUIntDeletionTime = dOrLater;
+
+            hasMaxColumnValueLengths = bOrLater && !cOrLater; // DSE only field
+            hasZeroCopyMetadata = bOrLater && !cOrLater; // DSE only field
+            hasIncrementalNodeSyncMetadata = bOrLater && !cOrLater; // DSE only field
+
             correspondingMessagingVersion = MessagingService.VERSION_50;
         }
 
@@ -379,7 +407,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         @Override
         public boolean hasIsTransient()
         {
-            return version.compareTo("ca") >= 0;
+            return hasIsTransient;
         }
 
         @Override
@@ -402,7 +430,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
         public boolean hasLegacyMinMax()
         {
-            return !hasImprovedMinMax();
+            return hasLegacyMinMax;
         }
 
         @Override
@@ -413,25 +441,31 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
         @Override
         public boolean hasImprovedMinMax() {
-            return version.compareTo("ba") >= 0;
+            return hasImprovedMinMax;
         }
 
         @Override
         public boolean hasTokenSpaceCoverage()
         {
-            return version.compareTo("cb") >= 0;
+            return hasTokenSpaceCoverage;
         }
 
         @Override
         public boolean hasPartitionLevelDeletionsPresenceMarker()
         {
-            return version.compareTo("ba") >= 0;
+            return hasPartitionLevelDeletionsPresenceMarker;
+        }
+
+        @Override
+        public boolean hasMisplacedPartitionLevelDeletionsPresenceMarker()
+        {
+            return hasMisplacedPartitionLevelDeletionsPresenceMarker;
         }
 
         @Override
         public boolean hasKeyRange()
         {
-            return version.compareTo("da") >= 0;
+            return hasKeyRange;
         }
 
         @Override
@@ -449,19 +483,19 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         @Override
         public boolean hasUIntDeletionTime()
         {
-            return true;
+            return hasUIntDeletionTime;
         }
 
         @Override
         public boolean hasZeroCopyMetadata()
         {
-            return version.compareTo("b") >= 0 && version.compareTo("c") < 0;
+            return hasZeroCopyMetadata;
         }
 
         @Override
         public boolean hasIncrementalNodeSyncMetadata()
         {
-            return version.compareTo("b") >= 0 && version.compareTo("c") < 0;
+            return hasIncrementalNodeSyncMetadata;
         }
 
         @Override
