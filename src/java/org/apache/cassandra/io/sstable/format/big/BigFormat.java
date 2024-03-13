@@ -384,27 +384,31 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
         {
             super(format, version);
 
+            boolean oOrLater = version.compareTo("o") >= 0;
+            boolean nOrLater = oOrLater || version.compareTo("n") >= 0;
+            boolean mOrLater = nOrLater || version.compareTo("m") >= 0;
+
             isLatestVersion = version.compareTo(current_version) == 0;
 
             // Note that, we probably forgot to change that to 40 for N version, and therefore we cannot do it now.
             correspondingMessagingVersion = version.compareTo("oa") >= 0 ? MessagingService.VERSION_50 : MessagingService.VERSION_30;
 
-            hasCommitLogLowerBound = version.compareTo("mb") >= 0;
-            hasCommitLogIntervals = version.compareTo("mc") >= 0;
-            hasAccurateMinMax = version.matches("(m[d-z])|(n[a-z])"); // deprecated in 'oa' and to be removed after 'oa'
-            hasLegacyMinMax = version.matches("(m[a-z])|(n[a-z])"); // deprecated in 'oa' and to be removed after 'oa'
+            hasCommitLogLowerBound = mOrLater && version.compareTo("mb") >= 0;
+            hasCommitLogIntervals = mOrLater && version.compareTo("mc") >= 0;
+            hasAccurateMinMax = mOrLater && version.compareTo("md") >= 0 && !oOrLater; // deprecated in 'nc' and to be removed in 'oa'
+            hasLegacyMinMax = mOrLater && !oOrLater; // deprecated in 'nc' and to be removed in 'oa'
             // When adding a new version you might need to add it here
-            hasOriginatingHostId = version.compareTo("nb") >= 0 || version.matches("(m[e-z])");
-            hasMaxCompressedLength = version.compareTo("na") >= 0;
-            hasPendingRepair = version.compareTo("na") >= 0;
-            hasIsTransient = version.compareTo("na") >= 0;
-            hasMetadataChecksum = version.compareTo("na") >= 0;
-            hasOldBfFormat = version.compareTo("na") < 0;
-            hasImprovedMinMax = version.compareTo("oa") >= 0;
-            hasPartitionLevelDeletionPresenceMarker = version.compareTo("oa") >= 0;
-            hasKeyRange = version.compareTo("oa") >= 0;
-            hasUintDeletionTime = version.compareTo("oa") >= 0;
-            hasTokenSpaceCoverage = version.compareTo("oa") >= 0;
+            hasOriginatingHostId = nOrLater && version.compareTo("nb") >= 0 || mOrLater && !nOrLater && version.compareTo("me") >= 0;
+            hasMaxCompressedLength = nOrLater;
+            hasPendingRepair = nOrLater;
+            hasIsTransient = nOrLater;
+            hasMetadataChecksum = nOrLater;
+            hasOldBfFormat = !nOrLater;
+            hasImprovedMinMax = oOrLater;
+            hasPartitionLevelDeletionPresenceMarker = oOrLater;
+            hasKeyRange = oOrLater;
+            hasUintDeletionTime = oOrLater;
+            hasTokenSpaceCoverage = oOrLater;
         }
 
         @Override
@@ -495,6 +499,12 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
         public boolean hasPartitionLevelDeletionsPresenceMarker()
         {
             return hasPartitionLevelDeletionPresenceMarker;
+        }
+
+        @Override
+        public boolean hasMisplacedPartitionLevelDeletionsPresenceMarker()
+        {
+            return false;
         }
 
         @Override

@@ -25,11 +25,10 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.commons.lang3.ArrayUtils;
 import com.google.common.collect.ImmutableMap;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,8 +50,8 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.serializers.AbstractTypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.EstimatedHistogram;
-import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.UUIDSerializer;
 import org.apache.cassandra.utils.streamhist.TombstoneHistogram;
 
@@ -329,7 +328,7 @@ public class StatsMetadata extends MetadataComponent
 
         public int serializedSize(Version version, StatsMetadata component) throws IOException
         {
-            int size = 0;
+            long size = 0;
             size += EstimatedHistogram.serializer.serializedSize(component.estimatedPartitionSize);
             size += EstimatedHistogram.serializer.serializedSize(component.estimatedCellPerPartitionCount);
             size += CommitLogPosition.serializer.serializedSize(component.commitLogIntervals.upperBound().orElse(CommitLogPosition.NONE));
@@ -345,11 +344,11 @@ public class StatsMetadata extends MetadataComponent
                 // min column names
                 size += 4;
                 ClusteringBound<?> minClusteringValues = component.coveredClustering.start();
-                size += countUntilNull(minClusteringValues.getBufferArray()) * 2 /* short length */ + minClusteringValues.dataSize();
+                size += countUntilNull(minClusteringValues.getBufferArray()) * 2L /* short length */ + minClusteringValues.dataSize();
                 // max column names
                 size += 4;
                 ClusteringBound<?> maxClusteringValues = component.coveredClustering.end();
-                size += countUntilNull(maxClusteringValues.getBufferArray()) * 2 /* short length */ + maxClusteringValues.dataSize();
+                size += countUntilNull(maxClusteringValues.getBufferArray()) * 2L /* short length */ + maxClusteringValues.dataSize();
             }
             else if (version.hasImprovedMinMax())
             {
@@ -374,6 +373,7 @@ public class StatsMetadata extends MetadataComponent
             if (version.hasZeroCopyMetadata())
             {
                 size += 1;
+                // TODO: STAR-1907
             }
 
             // we do not have node sync metadata
@@ -394,21 +394,21 @@ public class StatsMetadata extends MetadataComponent
                 size += TypeSizes.sizeof(component.isTransient);
             }
 
+            if (version.hasMisplacedPartitionLevelDeletionsPresenceMarker())
+            {
+                size += TypeSizes.sizeof(component.hasPartitionLevelDeletions);
+            }
+
             if (version.hasOriginatingHostId())
             {
                 size += 1; // boolean: is originatingHostId present
                 if (component.originatingHostId != null)
-                    size += UUIDSerializer.serializer.serializedSize(component.originatingHostId, version.correspondingMessagingVersion());
+                    size += (int) UUIDSerializer.serializer.serializedSize(component.originatingHostId, version.correspondingMessagingVersion());
             }
 
             if (version.hasPartitionLevelDeletionsPresenceMarker())
             {
                 size += TypeSizes.sizeof(component.hasPartitionLevelDeletions);
-            }
-
-            if (version.hasImprovedMinMax() && version.hasLegacyMinMax())
-            {
-                size = improvedMinMaxSize(version, component, size);
             }
 
             if (version.hasKeyRange())
@@ -422,15 +422,15 @@ public class StatsMetadata extends MetadataComponent
                 size += Double.BYTES;
             }
 
-            return size;
+            return Math.toIntExact(size);
         }
 
-        private int improvedMinMaxSize(Version version, StatsMetadata component, int size)
+        private long improvedMinMaxSize(Version version, StatsMetadata component, long size)
         {
             size += typeSerializer.serializedListSize(component.clusteringTypes);
             size += Slice.serializer.serializedSize(component.coveredClustering,
-                                                    version.correspondingMessagingVersion(),
-                                                    component.clusteringTypes);
+                                                          version.correspondingMessagingVersion(),
+                                                          component.clusteringTypes);
             return size;
         }
 
@@ -535,6 +535,11 @@ public class StatsMetadata extends MetadataComponent
                 out.writeBoolean(component.isTransient);
             }
 
+            if (version.hasMisplacedPartitionLevelDeletionsPresenceMarker())
+            {
+                out.writeBoolean(component.hasPartitionLevelDeletions);
+            }
+
             if (version.hasOriginatingHostId())
             {
                 if (component.originatingHostId != null)
@@ -551,11 +556,6 @@ public class StatsMetadata extends MetadataComponent
             if (version.hasPartitionLevelDeletionsPresenceMarker())
             {
                 out.writeBoolean(component.hasPartitionLevelDeletions);
-            }
-
-            if (version.hasImprovedMinMax() && version.hasLegacyMinMax())
-            {
-                serializeImprovedMinMax(version, component, out);
             }
 
             if (version.hasKeyRange())
@@ -711,23 +711,21 @@ public class StatsMetadata extends MetadataComponent
 
             boolean isTransient = version.hasIsTransient() && in.readBoolean();
 
-            UUID originatingHostId = null;
-            if (version.hasOriginatingHostId() && in.readByte() != 0)
-                originatingHostId = UUIDSerializer.serializer.deserialize(in, 0);
-
             // If not recorded, the only time we can guarantee there is no partition level deletion is if there is no
             // deletion at all. Otherwise, we have to assume there may be some.
             boolean hasPartitionLevelDeletions = minLocalDeletionTime != Cell.NO_DELETION_TIME;
-            if (version.hasPartitionLevelDeletionsPresenceMarker())
+            if (version.hasMisplacedPartitionLevelDeletionsPresenceMarker())
             {
                 hasPartitionLevelDeletions = in.readBoolean();
             }
 
-            if (version.hasImprovedMinMax() && version.hasLegacyMinMax())
+            UUID originatingHostId = null;
+            if (version.hasOriginatingHostId() && in.readByte() != 0)
+                originatingHostId = UUIDSerializer.serializer.deserialize(in, 0);
+
+            if (version.hasPartitionLevelDeletionsPresenceMarker())
             {
-                // improvedMinMax will be in this place until legacyMinMax is removed
-                clusteringTypes = typeSerializer.deserializeList(in);
-                coveredClustering = Slice.serializer.deserialize(in, version.correspondingMessagingVersion(), clusteringTypes);
+                hasPartitionLevelDeletions = in.readBoolean();
             }
 
             ByteBuffer firstKey = null;
