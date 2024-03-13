@@ -1576,7 +1576,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     public ShardBoundaries localRangeSplits(int shardCount)
     {
-        if (shardCount == 1 || !getPartitioner().splitter().isPresent() || SchemaConstants.isLocalSystemKeyspace(keyspace.getName()))
+        if (shardCount == 1 ||
+            !getPartitioner().splitter().isPresent() ||
+            // shard PAXOS table like any other table
+            (SchemaConstants.isLocalSystemKeyspace(keyspace.getName()) && !name.equals(SystemKeyspace.PAXOS)))
             return ShardBoundaries.NONE;
 
         ShardBoundaries shardBoundaries = cachedShardBoundaries;
