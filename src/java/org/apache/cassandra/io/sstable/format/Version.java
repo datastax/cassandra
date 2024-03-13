@@ -101,6 +101,12 @@ public abstract class Version
      */
     public abstract boolean hasPartitionLevelDeletionsPresenceMarker();
 
+    /**
+     * Records in th stats if the sstable has any partition deletions. Note that this is DSE specific as we had this
+     * field in some BTI versions in a different place than in the OSS.
+     */
+    public abstract boolean hasMisplacedPartitionLevelDeletionsPresenceMarker();
+
     public abstract boolean hasKeyRange();
 
     /**
