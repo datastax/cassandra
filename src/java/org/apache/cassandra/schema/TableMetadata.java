@@ -74,7 +74,6 @@ import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
 import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR;
 import static org.apache.cassandra.db.Directories.TABLE_DIRECTORY_NAME_SEPARATOR;
-import static org.apache.cassandra.schema.KeyspaceMetadata.validateKeyspaceName;
 import static org.apache.cassandra.schema.SchemaConstants.FILENAME_LENGTH;
 import static org.apache.cassandra.schema.SchemaConstants.TABLE_NAME_LENGTH;
 import static org.apache.cassandra.schema.SchemaConstants.isValidCharsName;
@@ -479,7 +478,7 @@ public class TableMetadata implements SchemaElement
 
     public void validate()
     {
-        validateKeyspaceName(keyspace, this::prepareConfigurationException);
+        KeyspaceMetadata.validateKeyspaceName(keyspace, this::prepareConfigurationException);
 
         validateTableName();
 
