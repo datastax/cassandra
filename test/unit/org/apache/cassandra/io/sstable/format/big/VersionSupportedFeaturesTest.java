@@ -66,4 +66,64 @@ public class VersionSupportedFeaturesTest extends AbstractTestVersionSupportedFe
     {
         return Stream.concat(range("me", "mz"), range("nb", "zz"));
     }
+
+    @Override
+    protected Stream<String> getAccurateMinMaxSupportedVersions()
+    {
+        return range("md", "nz");
+    }
+
+    @Override
+    protected Stream<String> getCommitLogLowerBoundSupportedVersions()
+    {
+        return range("mb", "zz");
+    }
+
+    @Override
+    protected Stream<String> getCommitLogIntervalsSupportedVersions()
+    {
+        return range("mc", "zz");
+    }
+
+    @Override
+    protected Stream<String> getZeroCopyMetadataSupportedVersions()
+    {
+        return Stream.empty();
+    }
+
+    @Override
+    protected Stream<String> getIncrementalNodeSyncMetadataSupportedVersions()
+    {
+        return Stream.empty();
+    }
+
+    @Override
+    protected Stream<String> getMaxColumnValueLengthsSupportedVersions()
+    {
+        return Stream.empty();
+    }
+
+    @Override
+    protected Stream<String> getIsTransientSupportedVersions()
+    {
+        return range("na", "zz");
+    }
+
+    @Override
+    protected Stream<String> getMisplacedPartitionLevelDeletionsPresenceMarkerSupportedVersions()
+    {
+        return Stream.empty();
+    }
+
+    @Override
+    protected Stream<String> getTokenSpaceCoverageSupportedVersions()
+    {
+        return range("oa", "zz");
+    }
+
+    @Override
+    protected Stream<String> getOldBfFormatSupportedVersions()
+    {
+        return range("aa","mz");
+    }
 }
