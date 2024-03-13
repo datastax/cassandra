@@ -45,9 +45,7 @@ abstract class Flusher implements Runnable
 {
     private static final Logger logger = LoggerFactory.getLogger(Flusher.class);
     @VisibleForTesting
-    public static final int MAX_FRAMED_PAYLOAD_SIZE =
-        Math.min(BufferPool.NORMAL_CHUNK_SIZE,
-                 FrameEncoder.Payload.MAX_SIZE - Math.max(FrameEncoderCrc.HEADER_AND_TRAILER_LENGTH, FrameEncoderLZ4.HEADER_AND_TRAILER_LENGTH));
+    public static final int MAX_FRAMED_PAYLOAD_SIZE =FrameEncoder.Payload.MAX_SIZE - Math.max(FrameEncoderCrc.HEADER_AND_TRAILER_LENGTH, FrameEncoderLZ4.HEADER_AND_TRAILER_LENGTH);
 
     static class FlushItem<T>
     {

@@ -436,7 +436,7 @@ public class InboundConnectionInitiator
                 from = InetAddressAndPort.getByAddressOverrideDefaults(address.getAddress(), address.getPort());
             }
 
-            BufferPools.forNetworking().setRecycleWhenFreeForCurrentThread(false);
+            //BufferPools.forNetworking().setRecycleWhenFreeForCurrentThread(false);
             pipeline.replace(this, "streamInbound", new StreamingInboundHandler(from, current_version, null));
 
             logger.info("{} streaming connection established, version = {}, framing = {}, encryption = {}",
@@ -458,12 +458,12 @@ public class InboundConnectionInitiator
             // record the "true" endpoint, i.e. the one the peer is identified with, as opposed to the socket it connected over
             instance().versions.set(from, maxMessagingVersion);
 
-            BufferPools.forNetworking().setRecycleWhenFreeForCurrentThread(false);
+            //BufferPools.forNetworking().setRecycleWhenFreeForCurrentThread(false);
             BufferPoolAllocator allocator = GlobalBufferPoolAllocator.instance;
             if (initiate.type == ConnectionType.LARGE_MESSAGES)
             {
                 // for large messages, swap the global pool allocator for a local one, to optimise utilisation of chunks
-                allocator = new LocalBufferPoolAllocator(pipeline.channel().eventLoop());
+                allocator = new LocalBufferPoolAllocator(pipeline.channel().eventLoop(), BufferPools.forNetworking());
                 pipeline.channel().config().setAllocator(allocator);
             }
 

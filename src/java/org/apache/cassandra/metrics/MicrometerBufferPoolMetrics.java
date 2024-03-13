@@ -58,9 +58,9 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
     {
         super.register(newRegistry, newTags.and(NAME_TAG, scope));
 
-        gauge(TOTAL_SIZE_BYTES, bufferPool, BufferPool::sizeInBytes);
-        gauge(USED_SIZE_BYTES, bufferPool, BufferPool::usedSizeInBytes);
-        gauge(OVERFLOW_SIZE_BYTES, bufferPool, BufferPool::overflowMemoryInBytes);
+        gauge(TOTAL_SIZE_BYTES, bufferPool, BufferPool::allocatedMemoryBytes);
+        gauge(USED_SIZE_BYTES, bufferPool, BufferPool::usedMemoryBytes);
+        gauge(OVERFLOW_SIZE_BYTES, bufferPool, BufferPool::overflowMemoryBytes);
         gauge(OVERFLOW_ALLOCATIONS, misses, Meter::getMeanRate);
         gauge(POOL_ALLOCATIONS, hits, Meter::getMeanRate);
     }
@@ -91,19 +91,19 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
     @Override
     public long overflowSize()
     {
-        return bufferPool.overflowMemoryInBytes();
+        return bufferPool.overflowMemoryBytes();
     }
 
     @Override
     public long usedSize()
     {
-        return bufferPool.usedSizeInBytes();
+        return bufferPool.usedMemoryBytes();
     }
 
     @Override
     public long size()
     {
-        return bufferPool.sizeInBytes();
+        return bufferPool.allocatedMemoryBytes();
     }
 
     @Override

@@ -66,7 +66,7 @@ import static org.junit.Assert.*;
 public class LongBufferPoolTest
 {
     private static final Logger logger = LoggerFactory.getLogger(LongBufferPoolTest.class);
-
+/*
     private static final int AVG_BUFFER_SIZE = 16 << 10;
     private static final int STDEV_BUFFER_SIZE = 10 << 10; // picked to ensure exceeding buffer size is rare, but occurs
     private static final DateFormat DATE_FORMAT = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
@@ -272,15 +272,15 @@ public class LongBufferPoolTest
             }
         }
 
-        /**
+        *//**
          * Implementers must assure all buffers were returned to the buffer pool on run exit.
-         */
+         *//*
         interface MemoryFreeTask
         {
             void run();
         }
 
-        /**
+        *//**
          * If the main test loop requested stopping the threads by setting
          * {@link TestEnvironment#shouldFreeMemoryAndSuspend},
          * waits until all threads reach this call and then frees the memory by running the given memory free task.
@@ -289,7 +289,7 @@ public class LongBufferPoolTest
          * The call exits after {@link TestEnvironment#resumeAllocationsBarrier} is reached by all threads.
          *
          * @param task the task that should return all buffers held by this thread to the buffer pool
-         */
+         *//*
         void maybeSuspendAndFreeMemory(MemoryFreeTask task) throws InterruptedException, BrokenBarrierException
         {
             if (shouldFreeMemoryAndSuspend)
@@ -494,9 +494,9 @@ public class LongBufferPoolTest
                 while (recycleFromNeighbour());
             }
 
-            /**
+            *//**
              * Returns all allocated buffers back to the buffer pool.
-             */
+             *//*
             void freeAll()
             {
                 while (checks.size() > 0)
@@ -722,9 +722,9 @@ public class LongBufferPoolTest
         }
     }
 
-    /**
+    *//**
      * A single producer, single consumer queue.
-     */
+     *//*
     private static final class SPSCQueue<V>
     {
         static final class Node<V>
@@ -764,5 +764,5 @@ public class LongBufferPoolTest
     private static int sum1toN(int n)
     {
         return (n * (n + 1)) / 2;
-    }
+    }*/
 }

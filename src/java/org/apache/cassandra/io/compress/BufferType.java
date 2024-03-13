@@ -19,6 +19,11 @@ package org.apache.cassandra.io.compress;
 
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.metrics.NativeMemoryMetrics;
+import org.apache.cassandra.utils.FileUtils;
+import org.apache.cassandra.utils.UnsafeByteBufferAccess;
+import org.apache.cassandra.utils.UnsafeMemoryAccess;
+
 public enum BufferType
 {
     ON_HEAP
@@ -34,6 +39,13 @@ public enum BufferType
         {
             return ByteBuffer.allocateDirect(size);
         }
+    },
+    OFF_HEAP_ALIGNED
+    {
+        public ByteBuffer allocate(int size)
+        {
+            return allocateDirectAligned(size);
+        }
     };
 
     public abstract ByteBuffer allocate(int size);
@@ -41,5 +53,37 @@ public enum BufferType
     public static BufferType typeOf(ByteBuffer buffer)
     {
         return buffer.isDirect() ? OFF_HEAP : ON_HEAP;
+    }
+
+    private static ByteBuffer allocateDirectAligned(int capacity)
+    {
+        //NativeMemoryMetrics.instance.totalAlignedAllocations.mark();
+
+        int align = UnsafeMemoryAccess.pageSize();
+
+        //if (capacity < NativeMemoryMetrics.smallBufferThreshold)
+        //    NativeMemoryMetrics.instance.smallAlignedAllocations.mark();
+
+        if (Integer.bitCount(align) != 1)
+            throw new IllegalArgumentException("Alignment must be a power of 2");
+
+        ByteBuffer buffer = ByteBuffer.allocateDirect(capacity + align);
+        long address = UnsafeByteBufferAccess.getAddress(buffer);
+        long offset = address & (align -1); // (address % align)
+
+        if (offset == 0)
+        { // already aligned
+            buffer.limit(capacity);
+        }
+        else
+        { // shift by offset
+            int pos = (int)(align - offset);
+            buffer.position(pos);
+            buffer.limit(pos + capacity);
+        }
+
+        // Mark the returned slice as a buffer with a cleanable parent since we want to release the direct
+        // memory when the slice is released
+        return FileUtils.SlicedBufferCleaner.mark(buffer.slice());
     }
 }

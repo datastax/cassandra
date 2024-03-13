@@ -53,11 +53,11 @@ class CodahaleBufferPoolMetrics implements BufferPoolMetrics
 
         misses = Metrics.meter(factory.createMetricName("Misses"));
 
-        overflowSize = Metrics.register(factory.createMetricName("OverflowSize"), bufferPool::overflowMemoryInBytes);
+        overflowSize = Metrics.register(factory.createMetricName("OverflowSize"), bufferPool::overflowMemoryBytes);
 
-        usedSize = Metrics.register(factory.createMetricName("UsedSize"), bufferPool::usedSizeInBytes);
+        usedSize = Metrics.register(factory.createMetricName("UsedSize"), bufferPool::usedMemoryBytes);
 
-        size = Metrics.register(factory.createMetricName("Size"), bufferPool::sizeInBytes);
+        size = Metrics.register(factory.createMetricName("Size"), bufferPool::maxPoolSize);
     }
 
     @Override

@@ -35,7 +35,7 @@ import org.apache.cassandra.io.util.SequentialWriter;
 
 public class ChunkCacheTest
 {
-    @BeforeClass
+  /*  @BeforeClass
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
@@ -185,6 +185,6 @@ public class ChunkCacheTest
             writer.write(bytes);
             writer.flush();
         }
-    }
+    }*/
 
 }

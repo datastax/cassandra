@@ -35,6 +35,7 @@ import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
 
+import com.datastax.bdp.db.utils.leaks.detection.LeaksDetectionParams;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
@@ -3687,5 +3688,22 @@ public class DatabaseDescriptor
     public static ParameterizedClass getDefaultCompaction()
     {
         return conf != null ? conf.default_compaction : null;
+    }
+
+    public static int getTPCCores()
+    {
+        // Checking conf == null allows running micro benchmarks without calling DatabaseDescriptor.daemonInitialization(),
+        // which in turns causes initialization problems when running the micro benchmarks directly from the jar, e.g.
+        // java -jar build/test/benchmarks.jar MyBench
+        final int confCores = FBUtilities.getAvailableProcessors() - 1;
+
+        // allow system property override
+        int cores = Integer.getInteger(Config.PROPERTY_PREFIX + "tpc_cores", confCores);
+        return Math.max(cores, 1);
+    }
+
+    public static LeaksDetectionParams getLeaksDetectionParams(double defaultSamplingProb)
+    {
+        return new LeaksDetectionParams(defaultSamplingProb);
     }
 }

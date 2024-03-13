@@ -71,7 +71,7 @@ public abstract class BufferPoolAllocator extends AbstractByteBufAllocator
 
     ByteBuffer getAtLeast(int size)
     {
-        return bufferPool.getAtLeast(size, BufferType.OFF_HEAP);
+        return bufferPool.get(size, BufferType.OFF_HEAP);
     }
 
     void put(ByteBuffer buffer)
@@ -81,13 +81,13 @@ public abstract class BufferPoolAllocator extends AbstractByteBufAllocator
 
     void putUnusedPortion(ByteBuffer buffer)
     {
-        bufferPool.putUnusedPortion(buffer);
+        bufferPool.put(buffer);
     }
 
     @VisibleForTesting
     public long usedSizeInBytes()
     {
-        return bufferPool.usedSizeInBytes();
+        return bufferPool.usedMemoryBytes();
     }
 
     void release()
@@ -125,7 +125,7 @@ public abstract class BufferPoolAllocator extends AbstractByteBufAllocator
         @Override
         protected ByteBuffer allocateDirect(int initialCapacity)
         {
-            return bufferPool.getAtLeast(initialCapacity, BufferType.OFF_HEAP);
+            return bufferPool.get(initialCapacity, BufferType.OFF_HEAP);
         }
 
         @Override

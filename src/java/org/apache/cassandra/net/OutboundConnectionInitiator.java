@@ -341,7 +341,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 ChannelPipeline pipeline = ctx.pipeline();
                 if (result.isSuccess())
                 {
-                    BufferPools.forNetworking().setRecycleWhenFreeForCurrentThread(false);
+                    //BufferPools.forNetworking().setRecycleWhenFreeForCurrentThread(false);
                     if (type.isMessaging())
                     {
                         assert frameEncoder != null;

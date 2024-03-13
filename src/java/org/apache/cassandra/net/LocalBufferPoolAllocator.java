@@ -20,6 +20,7 @@ package org.apache.cassandra.net;
 import java.nio.ByteBuffer;
 
 import io.netty.channel.EventLoop;
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
 
@@ -32,12 +33,12 @@ import org.apache.cassandra.utils.memory.BufferPools;
  */
 class LocalBufferPoolAllocator extends BufferPoolAllocator
 {
-    private final BufferPool.LocalPool pool;
+    private final BufferPool pool;
     private final EventLoop eventLoop;
 
-    LocalBufferPoolAllocator(EventLoop eventLoop)
+    LocalBufferPoolAllocator(EventLoop eventLoop, BufferPool pool)
     {
-        this.pool = BufferPools.forNetworking().create().recycleWhenFree(false);
+        this.pool = pool;
         this.eventLoop = eventLoop;
     }
 
@@ -46,7 +47,7 @@ class LocalBufferPoolAllocator extends BufferPoolAllocator
     {
         if (!eventLoop.inEventLoop())
             throw new IllegalStateException("get() called from outside of owning event loop");
-        return pool.get(size);
+        return pool.get(size, BufferType.OFF_HEAP);
     }
 
     @Override
@@ -54,12 +55,12 @@ class LocalBufferPoolAllocator extends BufferPoolAllocator
     {
         if (!eventLoop.inEventLoop())
             throw new IllegalStateException("getAtLeast() called from outside of owning event loop");
-        return pool.getAtLeast(size);
+        return pool.getAtLeast(size, BufferType.OFF_HEAP);
     }
 
     @Override
     public void release()
     {
-        pool.release();
+        // no-op
     }
 }
