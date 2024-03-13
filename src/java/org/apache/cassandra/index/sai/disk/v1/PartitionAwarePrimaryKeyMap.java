@@ -75,8 +75,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
             try
             {
                 this.metadata = MetadataSource.loadGroupMetadata(indexDescriptor);
-                NumericValuesMeta offsetsMeta = new NumericValuesMeta(this.metadata.get(indexDescriptor.componentName(IndexComponent.OFFSETS_VALUES)));
-                NumericValuesMeta tokensMeta = new NumericValuesMeta(this.metadata.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES)));
+                NumericValuesMeta offsetsMeta = new NumericValuesMeta(this.metadata.get(indexDescriptor.componentFileName(IndexComponent.OFFSETS_VALUES)));
+                NumericValuesMeta tokensMeta = new NumericValuesMeta(this.metadata.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES)));
 
                 token = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
                 offset = indexDescriptor.createPerSSTableFileHandle(IndexComponent.OFFSETS_VALUES);

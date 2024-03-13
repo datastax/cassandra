@@ -18,27 +18,28 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.cassandra.index.sai.disk.oldlucene.ByteArrayIndexInput;
-import org.apache.lucene.store.IndexInput;
-import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.store.ChecksumIndexInput;
 
 @NotThreadSafe
 public class MetadataSource
 {
     private final Version version;
-    private final Map<String, BytesRef> components;
+    private final Map<String, Supplier<ByteArrayIndexInput>> components;
 
-    private MetadataSource(Version version, Map<String, BytesRef> components)
+    private MetadataSource(Version version, Map<String, Supplier<ByteArrayIndexInput>> components)
     {
         this.version = version;
         this.components = components;
@@ -46,57 +47,65 @@ public class MetadataSource
 
     public static MetadataSource loadGroupMetadata(IndexDescriptor indexDescriptor) throws IOException
     {
-        return MetadataSource.load(indexDescriptor.openPerSSTableInput(IndexComponent.GROUP_META));
+        try (var input = indexDescriptor.openCheckSummedPerSSTableInput(IndexComponent.GROUP_META))
+        {
+            var version = indexDescriptor.getVersion();
+            var order = version.onDiskFormat().byteOrderFor(IndexComponent.GROUP_META, null);
+            return MetadataSource.load(input, version, order);
+        }
     }
 
     public static MetadataSource loadColumnMetadata(IndexDescriptor indexDescriptor, IndexContext indexContext) throws IOException
     {
-        return MetadataSource.load(indexDescriptor.openPerIndexInput(IndexComponent.META, indexContext));
+        try (var input = indexDescriptor.openCheckSummedPerIndexInput(IndexComponent.META, indexContext))
+        {
+            var version = indexDescriptor.getVersion();
+            var order = version.onDiskFormat().byteOrderFor(IndexComponent.META, indexContext);
+            return MetadataSource.load(input, version, order);
+        }
     }
 
-    private static MetadataSource load(IndexInput indexInput) throws IOException
+    private static MetadataSource load(ChecksumIndexInput input, Version expectedVersion, ByteOrder order) throws IOException
     {
-        Map<String, BytesRef> components = new HashMap<>();
-        Version version;
+        Map<String, Supplier<ByteArrayIndexInput>> components = new HashMap<>();
+        Version version = SAICodecUtils.checkHeader(input);
+        if (version != expectedVersion)
+            throw new IllegalStateException("Unexpected version " + version + " in " + input + ", expected " + expectedVersion);
 
-        try (BufferedChecksumIndexInput input = new BufferedChecksumIndexInput(indexInput))
+        final int num = input.readInt();
+
+        for (int x = 0; x < num; x++)
         {
-            version = SAICodecUtils.checkHeader(input);
-            final int num = input.readInt();
-
-            for (int x = 0; x < num; x++)
+            if (input.length() == input.getFilePointer())
             {
-                if (input.length() == input.getFilePointer())
-                {
-                    // we should never get here, because we always add footer to the file
-                    throw new IllegalStateException("Unexpected EOF in " + input);
-                }
-
-                final String name = input.readString();
-                final int length = input.readInt();
-                final byte[] bytes = new byte[length];
-                input.readBytes(bytes, 0, length);
-
-                components.put(name, new BytesRef(bytes));
+                // we should never get here, because we always add footer to the file
+                throw new IllegalStateException("Unexpected EOF in " + input);
             }
 
-            SAICodecUtils.checkFooter(input);
+            final String name = input.readString();
+            final int length = input.readInt();
+            final byte[] bytes = new byte[length];
+            input.readBytes(bytes, 0, length);
+
+            components.put(name, () -> new ByteArrayIndexInput(name, bytes, order));
         }
+
+        SAICodecUtils.checkFooter(input);
 
         return new MetadataSource(version, components);
     }
 
     public IndexInput get(String name)
     {
-        BytesRef bytes = components.get(name);
+        var supplier = components.get(name);
 
-        if (bytes == null)
+        if (supplier == null)
         {
             throw new IllegalArgumentException(String.format("Could not find component '%s'. Available properties are %s.",
                                                              name, components.keySet()));
         }
 
-        return new ByteArrayIndexInput(name, bytes.bytes);
+        return supplier.get();
     }
 
     public Version getVersion()

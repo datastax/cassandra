@@ -68,6 +68,7 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -139,7 +140,7 @@ public class StorageAttachedIndex implements Index
                                 if (!isFullRebuild)
                                 {
                                     ss = sstablesToRebuild.stream()
-                                                          .filter(s -> !IndexDescriptor.create(s).isPerIndexBuildComplete(indexContext))
+                                                          .filter(s -> !IndexDescriptor.createFrom(s).isPerIndexBuildComplete(indexContext))
                                                           .collect(Collectors.toList());
                                 }
 
@@ -202,6 +203,7 @@ public class StorageAttachedIndex implements Index
                                                                      IndexWriterConfig.MAXIMUM_NODE_CONNECTIONS,
                                                                      IndexWriterConfig.CONSTRUCTION_BEAM_WIDTH,
                                                                      IndexWriterConfig.SIMILARITY_FUNCTION,
+                                                                     IndexWriterConfig.SOURCE_MODEL,
                                                                      IndexWriterConfig.OPTIMIZE_FOR,
                                                                      LuceneAnalyzer.INDEX_ANALYZER,
                                                                      LuceneAnalyzer.QUERY_ANALYZER);
@@ -421,7 +423,8 @@ public class StorageAttachedIndex implements Index
         CompactionManager.instance.interruptCompactionFor(Collections.singleton(baseCfs.metadata()),
                                                           OperationType.REWRITES_SSTABLES,
                                                           Predicates.alwaysTrue(),
-                                                          true);
+                                                          true,
+                                                          TableOperation.StopTrigger.INDEX_BUILD);
 
         // Force another flush to make sure on disk index is generated for memtable data before marking it queryable.
         // In case of offline scrub, there is no live memtables.
@@ -734,7 +737,7 @@ public class StorageAttachedIndex implements Index
             //   2. The SSTable is not marked compacted
             //   3. The column index does not have a completion marker
             if (!view.containsSSTable(sstable) && !sstable.isMarkedCompacted() &&
-                !IndexDescriptor.create(sstable).isPerIndexBuildComplete(indexContext))
+                !IndexDescriptor.createFrom(sstable).isPerIndexBuildComplete(indexContext))
             {
                 nonIndexed.add(sstable);
             }

@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.Set;
 
 import org.apache.cassandra.db.ClusteringComparator;
@@ -78,23 +79,6 @@ public interface OnDiskFormat
      * @return the primary key factory
      */
     public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator);
-
-    /**
-     * Returns true if the per-sstable index components have been built and are valid.
-     *
-     * @param indexDescriptor The {@link IndexDescriptor} for the SSTable SAI index
-     * @return true if the per-sstable index components have been built and are complete
-     */
-    public boolean isPerSSTableBuildComplete(IndexDescriptor indexDescriptor);
-
-    /**
-     * Returns true if the per-index index components have been built and are valid.
-     *
-     * @param indexDescriptor The {@link IndexDescriptor} for the SSTable SAI Index
-     * @param indexContext The {@link IndexContext} for the index
-     * @return true if the per-index index components have been built and are complete
-     */
-    public boolean isPerIndexBuildComplete(IndexDescriptor indexDescriptor, IndexContext indexContext);
 
     /**
      * Returns a {@link PrimaryKeyMap.Factory} for the SSTable
@@ -217,4 +201,13 @@ public interface OnDiskFormat
      * @return The number of open per-index files
      */
     public int openFilesPerIndex(IndexContext indexContext);
+
+    /**
+     * Return the {@link ByteOrder} for the given {@link IndexComponent} and {@link IndexContext}.
+     *
+     * @param component - The {@link IndexComponent} for the index
+     * @param context - The {@link IndexContext} for the index
+     * @return The {@link ByteOrder} for the file associated with the {@link IndexComponent}
+     */
+    public ByteOrder byteOrderFor(IndexComponent component, IndexContext context);
 }

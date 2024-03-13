@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -35,13 +36,16 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.TracingTestImpl;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.assertEquals;
 
 public class VectorTypeTest extends VectorTester
 {
@@ -408,6 +412,40 @@ public class VectorTypeTest extends VectorTester
 
         result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 5");
         assertThat(result).hasSize(5);
+    }
+
+    @Test
+    public void defaultOptionsTest()
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+
+        var sim = getCurrentColumnFamilyStore().indexManager;
+        var index = (StorageAttachedIndex) sim.listIndexes().iterator().next();
+        assertEquals(VectorSourceModel.OTHER, index.getIndexContext().getIndexWriterConfig().getSourceModel());
+        assertEquals(VectorSimilarityFunction.COSINE, index.getIndexContext().getIndexWriterConfig().getSimilarityFunction());
+    }
+
+    @Test
+    public void customModelOptionsTest()
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'source_model' : 'ada002' }");
+        waitForIndexQueryable();
+
+        var sim = getCurrentColumnFamilyStore().indexManager;
+        var index = (StorageAttachedIndex) sim.listIndexes().iterator().next();
+        assertEquals(VectorSourceModel.ADA002, index.getIndexContext().getIndexWriterConfig().getSourceModel());
+        assertEquals(VectorSimilarityFunction.DOT_PRODUCT, index.getIndexContext().getIndexWriterConfig().getSimilarityFunction());
+    }
+
+    @Test
+    public void obsoleteOptionsTest()
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'optimize_for' : 'recall' }");
+        waitForIndexQueryable();
+        // as long as CREATE doesn't error out, we're good
     }
 
     @Test

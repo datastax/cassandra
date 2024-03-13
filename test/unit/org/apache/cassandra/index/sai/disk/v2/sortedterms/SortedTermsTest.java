@@ -56,12 +56,12 @@ public class SortedTermsTest extends SaiRandomizedTest
         IndexDescriptor indexDescriptor = newIndexDescriptor();
         try (MetadataWriter metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META)))
         {
-            NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
+            NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         metadataWriter, true);
             IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
             IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
-            try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCKS),
+            try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
                                                                   bytesWriter,
                                                                   blockFPWriter,
@@ -103,10 +103,10 @@ public class SortedTermsTest extends SaiRandomizedTest
         {
             IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
             IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
-            NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
+            NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         metadataWriter, true);
-            try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCKS),
+            try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
                                                                   bytesWriter,
                                                                   blockFPWriter,
@@ -363,10 +363,10 @@ public class SortedTermsTest extends SaiRandomizedTest
         {
             IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
             IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
-            NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
+            NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         metadataWriter, true);
-            try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCKS),
+            try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
                                                                   bytesWriter,
                                                                   blockFPWriter,
@@ -391,10 +391,10 @@ public class SortedTermsTest extends SaiRandomizedTest
         {
             IndexOutputWriter trieWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_TRIE);
             IndexOutputWriter bytesWriter = indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCKS);
-            NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
+            NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         metadataWriter, true);
-            try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCKS),
+            try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
                                                                   bytesWriter,
                                                                   blockFPWriter,
@@ -436,8 +436,8 @@ public class SortedTermsTest extends SaiRandomizedTest
                                        ThrowingConsumer<SortedTermsReader.Cursor> testCode) throws IOException
     {
         MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)));
-        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCKS)));
+        NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)));
+        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS)));
         try (FileHandle trieHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_TRIE);
              FileHandle termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
              FileHandle blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS))
@@ -454,8 +454,8 @@ public class SortedTermsTest extends SaiRandomizedTest
                                        ThrowingConsumer<SortedTermsReader> testCode) throws IOException
     {
         MetadataSource metadataSource = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)));
-        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.componentName(IndexComponent.PRIMARY_KEY_BLOCKS)));
+        NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS)));
+        SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS)));
         try (FileHandle trieHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_TRIE);
              FileHandle termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
              FileHandle blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS))

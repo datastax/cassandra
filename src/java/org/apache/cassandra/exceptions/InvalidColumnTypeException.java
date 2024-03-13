@@ -28,22 +28,11 @@ import org.apache.cassandra.db.marshal.AbstractType;
  */
 public class InvalidColumnTypeException extends ConfigurationException
 {
-    private final ByteBuffer name;
-    private final AbstractType<?> invalidType;
-    private final boolean isPrimaryKeyColumn;
-    private final boolean isCounterTable;
-
     public InvalidColumnTypeException(ByteBuffer name,
                                       AbstractType<?> invalidType,
-                                      boolean isPrimaryKeyColumn,
-                                      boolean isCounterTable,
                                       String reason)
     {
         super(msg(name, invalidType, reason));
-        this.name = name;
-        this.invalidType = invalidType;
-        this.isPrimaryKeyColumn = isPrimaryKeyColumn;
-        this.isCounterTable = isCounterTable;
     }
 
     private static String msg(ByteBuffer name,
@@ -51,54 +40,9 @@ public class InvalidColumnTypeException extends ConfigurationException
                               String reason)
     {
         return String.format("Invalid type %s for column %s: %s",
-                             invalidType.asCQL3Type(),
+                             invalidType.asCQL3Type().toSchemaString(),
                              ColumnIdentifier.toCQLString(name),
                              reason);
     }
 
-    /**
-     * Attempts to return a "fixed" (and thus valid) version of the type. Doing is so is only possible in restrained
-     * case where we know why the type is invalid and are confident we know what it should be.
-     *
-     * @return if we know how to auto-magically fix the invalid type that triggered this exception, the hopefully
-     * fixed version of said type. Otherwise, {@code null}.
-     */
-    public AbstractType<?> tryFix()
-    {
-        AbstractType<?> fixed = tryFixInternal();
-        if (fixed != null)
-        {
-            try
-            {
-                // Make doubly sure the fixed type is valid before returning it.
-                fixed.validateForColumn(name, isPrimaryKeyColumn, isCounterTable);
-                return fixed;
-            }
-            catch (InvalidColumnTypeException e2)
-            {
-                // Continue as if we hadn't been able to fix, since we haven't
-            }
-        }
-        return null;
-    }
-
-    private AbstractType<?> tryFixInternal()
-    {
-        if (isPrimaryKeyColumn)
-        {
-            // The only issue we have a fix to in that case if the type is not frozen; we can then just freeze it.
-            if (invalidType.isMultiCell())
-                return invalidType.freeze();
-        }
-        else
-        {
-            // Here again, it's mainly issues of frozen-ness that are fixable, namely if a multi-cell type has
-            // non-frozen subtypes. In which case, we just freeze all sub-types.
-            if (invalidType.isMultiCell())
-                return invalidType.with(AbstractType.freeze(invalidType.subTypes()), true);
-
-        }
-        // In other case, we don't know how to fix (at least somewhat auto-magically) and will have to fail.
-        return null;
-    }
 }

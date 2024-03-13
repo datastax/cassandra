@@ -39,11 +39,11 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.SingleRestriction;
+import org.apache.cassandra.db.marshal.MultiCellCapableType;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.cql3.*;
@@ -57,10 +57,8 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.aggregation.GroupMaker;
 import org.apache.cassandra.db.filter.*;
-import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.Row;
@@ -1042,10 +1040,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             ComplexColumnData complexData = row.getComplexColumnData(def);
             if (complexData == null)
                 result.add(null);
-            else if (def.type.isCollection())
-                result.add(((CollectionType) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
             else
-                result.add(((UserType) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
+                result.add(((MultiCellCapableType<?>) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
         }
         else
         {

@@ -37,7 +37,6 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.QualifiedName;
@@ -47,6 +46,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -54,21 +54,20 @@ import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
-import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.schema.Views;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
 import org.apache.cassandra.transport.Event.SchemaChange.Target;
-import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 import static com.google.common.collect.Iterables.isEmpty;
 import static com.google.common.collect.Iterables.transform;
@@ -231,7 +230,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
                 {
                     throw ire("Cannot re-add previously dropped column '%s' of type %s, incompatible with previous type %s",
                               name,
-                              type.asCQL3Type(),
+                              type.asCQL3Type().toSchemaString(),
                               droppedColumn.type.asCQL3Type().toSchemaString());
                 }
 
@@ -299,14 +298,6 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
 
             if (currentColumn.isPrimaryKeyColumn())
                 throw ire("Cannot drop PRIMARY KEY column %s", column);
-
-            /*
-             * Cannot allow dropping top-level columns of user defined types that aren't frozen because we cannot convert
-             * the type into an equivalent tuple: we only support frozen tuples currently. And as such we cannot persist
-             * the correct type in system_schema.dropped_columns.
-             */
-            if (currentColumn.type.isUDT() && currentColumn.type.isMultiCell())
-                throw ire("Cannot drop non-frozen column %s of user type %s", column, currentColumn.type.asCQL3Type());
 
             // TODO: some day try and find a way to not rely on Keyspace/IndexManager/Index to find dependent indexes
             Set<IndexMetadata> dependentIndexes = Keyspace.openAndGetStore(table).indexManager.getDependentIndexes(currentColumn);

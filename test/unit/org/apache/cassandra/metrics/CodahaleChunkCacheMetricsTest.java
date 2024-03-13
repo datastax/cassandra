@@ -86,7 +86,7 @@ public class CodahaleChunkCacheMetricsTest
     public void testCommonChunkCacheMetrics()
     {
         // No-op
-        chunkCacheMetrics.recordEviction();
+        chunkCacheMetrics.recordEviction(1, null);
 
         // No-op
         chunkCacheMetrics.recordLoadFailure(25);

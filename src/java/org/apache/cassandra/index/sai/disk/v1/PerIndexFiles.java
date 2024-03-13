@@ -19,9 +19,7 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.Closeable;
-import java.io.FileNotFoundException;
 import java.io.UncheckedIOException;
-import java.nio.file.NoSuchFileException;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -31,9 +29,6 @@ import org.slf4j.Logger;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -50,18 +45,7 @@ public class PerIndexFiles implements Closeable
         this.indexDescriptor = indexDescriptor;
         this.indexContext = indexContext;
 
-        // FIXME we only have one IndexDescriptor + Version per sstable, so this is a hack
-        // to support indexes at different versions.  Vectors are the only types impacted by multiple versions so far.
-        var toOpen = new HashSet<IndexComponent>();
-        if (indexContext.isVector())
-        {
-            toOpen.addAll(V2OnDiskFormat.VECTOR_COMPONENTS_V2);
-            toOpen.addAll(V3OnDiskFormat.VECTOR_COMPONENTS_V3);
-        }
-        else
-        {
-            toOpen.addAll(indexDescriptor.version.onDiskFormat().perIndexComponents(indexContext));
-        }
+        var toOpen = new HashSet<>(indexDescriptor.getVersion(indexContext).onDiskFormat().perIndexComponents(indexContext));
         toOpen.remove(IndexComponent.META);
         toOpen.remove(IndexComponent.COLUMN_COMPLETION_MARKER);
 

@@ -143,6 +143,7 @@ import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -638,6 +639,16 @@ public abstract class CQLTester
     public ColumnFamilyStore getColumnFamilyStore(String keyspace, String table)
     {
         return Keyspace.open(keyspace).getColumnFamilyStore(table);
+    }
+
+    public ColumnMetadata getColumn(String name)
+    {
+        return getCurrentColumnFamilyStore().metadata.get().getColumn(ColumnIdentifier.getInterned(name, true));
+    }
+
+    public ColumnMetadata getDroppedColumn(String name)
+    {
+        return getCurrentColumnFamilyStore().metadata.get().getDroppedColumn(ColumnIdentifier.getInterned(name, true).bytes);
     }
 
     public void flush(boolean forceFlush)

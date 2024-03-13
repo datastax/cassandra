@@ -42,16 +42,18 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
 
     final Rebufferer rebufferer;
     private BufferHolder bufferHolder = Rebufferer.EMPTY;
+    private final ByteOrder order;
 
     /**
      * Only created through Builder
      *
      * @param rebufferer Rebufferer to use
      */
-    RandomAccessReader(Rebufferer rebufferer)
+    RandomAccessReader(Rebufferer rebufferer, ByteOrder order)
     {
-        super(Rebufferer.EMPTY.buffer());
+        super(Rebufferer.EMPTY.buffer(), false);
         this.rebufferer = rebufferer;
+        this.order = order;
     }
 
     /**
@@ -72,8 +74,12 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         bufferHolder = rebufferer.rebuffer(position);
         buffer = bufferHolder.buffer();
         buffer.position(Ints.checkedCast(position - bufferHolder.offset()));
+        buffer.order(order);
+    }
 
-        assert buffer.order() == ByteOrder.BIG_ENDIAN : "Buffer must have BIG ENDIAN byte ordering";
+    public ByteOrder order()
+    {
+        return order;
     }
 
     /**
@@ -427,7 +433,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     {
         RandomAccessReaderWithOwnChannel(Rebufferer rebufferer)
         {
-            super(rebufferer);
+            super(rebufferer, ByteOrder.BIG_ENDIAN);
         }
 
         @Override

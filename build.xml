@@ -666,7 +666,7 @@
           </dependency>
           <dependency groupId="de.huxhorn.sulky" artifactId="de.huxhorn.sulky.ulid" version="8.2.0"/>
           <dependency groupId="com.googlecode.concurrent-trees" artifactId="concurrent-trees" version="2.4.0" />
-          <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" version="2.5.6" />
+          <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" version="3.1.8" />
           <dependency groupId="org.jctools" artifactId="jctools-core" version="3.1.0"/>
           <dependency groupId="org.ow2.asm" artifactId="asm" version="${asm.version}"/>
           <dependency groupId="org.ow2.asm" artifactId="asm-tree" version="${asm.version}" scope="test"/>
@@ -700,7 +700,8 @@
           <dependency groupId="org.agrona" artifactId="agrona" version="1.20.0" />
           <dependency groupId="org.apache.lucene" artifactId="lucene-core" version="9.8.0-5ea8bb4f21" />
           <dependency groupId="org.apache.lucene" artifactId="lucene-analysis-common" version="9.8.0-5ea8bb4f21" />
-          <dependency groupId="io.github.jbellis" artifactId="jvector" version="3.0.0-alpha.5" />
+          <dependency groupId="org.apache.lucene" artifactId="lucene-backward-codecs" version="9.8.0-5ea8bb4f21" />
+          <dependency groupId="io.github.jbellis" artifactId="jvector" version="3.0.0-alpha.6" />
           <dependency groupId="com.bpodgursky" artifactId="jbool_expressions" version="1.14" scope="test"/>
 
           <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" version="2.1.2" scope="test">
@@ -788,6 +789,7 @@
         <dependency groupId="com.bpodgursky" artifactId="jbool_expressions" version="1.14" scope="test"/>
         <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" scope="test"/>
         <dependency groupId="org.apache.lucene" artifactId="lucene-analysis-common"/>
+        <dependency groupId="org.apache.lucene" artifactId="lucene-backward-codecs"/>
         <dependency groupId="io.github.jbellis" artifactId="jvector"/>
       </artifact:pom>
 
@@ -878,6 +880,7 @@
         <dependency groupId="org.apache.lucene" artifactId="lucene-core"/>
         <dependency groupId="com.bpodgursky" artifactId="jbool_expressions" version="1.23" scope="test"/>
         <dependency groupId="org.apache.lucene" artifactId="lucene-analysis-common"/>
+        <dependency groupId="org.apache.lucene" artifactId="lucene-backward-codecs"/>
         <dependency groupId="io.github.jbellis" artifactId="jvector"/>
         <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" scope="test"/>
         <dependency groupId="org.hamcrest" artifactId="hamcrest" scope="test"/>

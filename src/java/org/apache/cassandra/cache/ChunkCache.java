@@ -21,6 +21,9 @@
 package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
+import java.nio.LongBuffer;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -155,6 +158,31 @@ public class ChunkCache
             assert references.get() > 0;
             return buffer.duplicate();
         }
+
+        @Override
+        public FloatBuffer floatBuffer()
+        {
+            assert references.get() > 0;
+            // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
+            return buffer.asFloatBuffer();
+        }
+
+        @Override
+        public IntBuffer intBuffer()
+        {
+            assert references.get() > 0;
+            // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
+            return buffer.asIntBuffer();
+        }
+
+        @Override
+        public LongBuffer longBuffer()
+        {
+            assert references.get() > 0;
+            // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
+            return buffer.asLongBuffer();
+        }
+
 
         @Override
         public long offset()

@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.io.util;
 
+import java.nio.ByteOrder;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -54,6 +55,7 @@ public class FileHandle extends SharedCloseableImpl
     public final ChannelProxy channel;
 
     public final long onDiskLength;
+    private final ByteOrder order;
 
     /*
      * Rebufferer factory to use when constructing RandomAccessReaders
@@ -69,12 +71,14 @@ public class FileHandle extends SharedCloseableImpl
                        ChannelProxy channel,
                        RebuffererFactory rebuffererFactory,
                        CompressionMetadata compressionMetadata,
+                       ByteOrder order,
                        long onDiskLength)
     {
         super(cleanup);
         this.rebuffererFactory = rebuffererFactory;
         this.channel = channel;
         this.compressionMetadata = Optional.ofNullable(compressionMetadata);
+        this.order = order;
         this.onDiskLength = onDiskLength;
     }
 
@@ -84,6 +88,7 @@ public class FileHandle extends SharedCloseableImpl
         channel = copy.channel;
         rebuffererFactory = copy.rebuffererFactory;
         compressionMetadata = copy.compressionMetadata;
+        order = copy.order;
         onDiskLength = copy.onDiskLength;
     }
 
@@ -142,7 +147,7 @@ public class FileHandle extends SharedCloseableImpl
      */
     public RandomAccessReader createReader(RateLimiter limiter)
     {
-        return new RandomAccessReader(instantiateRebufferer(limiter));
+        return new RandomAccessReader(instantiateRebufferer(limiter), order);
     }
 
     public FileDataInput createReader(long position)
@@ -250,6 +255,7 @@ public class FileHandle extends SharedCloseableImpl
         private ChunkCache chunkCache;
         private int bufferSize = RandomAccessReader.DEFAULT_BUFFER_SIZE;
         private BufferType bufferType = BufferType.OFF_HEAP;
+        private ByteOrder order = ByteOrder.BIG_ENDIAN;
 
         private boolean mmapped = false;
         private boolean compressed = false;
@@ -333,6 +339,17 @@ public class FileHandle extends SharedCloseableImpl
             return this;
         }
 
+        /**
+         * Set the byte order to apply to each buffer.
+         * @param order
+         * @return
+         */
+        public Builder order(ByteOrder order)
+        {
+            this.order = order;
+            return this;
+        }
+
         public void withLength(long length)
         {
             this.length = length;
@@ -406,7 +423,7 @@ public class FileHandle extends SharedCloseableImpl
                     }
                 }
                 Cleanup cleanup = new Cleanup(channelCopy, rebuffererFactory, compressionMetadata, chunkCache);
-                return new FileHandle(cleanup, channelCopy, rebuffererFactory, compressionMetadata, length);
+                return new FileHandle(cleanup, channelCopy, rebuffererFactory, compressionMetadata, order, length);
             }
             catch (Throwable t)
             {

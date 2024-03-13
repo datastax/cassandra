@@ -39,6 +39,8 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.disk.v1.postings.FilteringPostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
@@ -53,12 +55,9 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.PointValues.Relation;
-import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.LongValues;
-import org.apache.lucene.util.packed.DirectReader;
-import org.apache.lucene.util.packed.DirectWriter;
 
 /**
  * Handles intersection of a multi-dimensional shape in byte[] space with a block KD-tree previously written with
@@ -245,7 +244,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         final byte[] scratchPackedValue1 = new byte[packedBytesLength];
 
         final SeekingRandomAccessInput randoInput = new SeekingRandomAccessInput(bkdInput);
-        LongValues orderMapReader = DirectReader.getInstance(randoInput, bitsPerValue, orderMapPointer);
+        LongValues orderMapReader = LuceneCompat.directReaderGetInstance(randoInput, bitsPerValue, orderMapPointer);
         for (int x = 0; x < count; x++)
         {
             final short idx = LeafOrderMap.getValue(x, orderMapReader);
@@ -696,7 +695,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
 
             final long orderMapPointer = bkdInput.getFilePointer();
 
-            LongValues orderMapReader = DirectReader.getInstance(bkdRandomInput, bitsPerValue, orderMapPointer);
+            LongValues orderMapReader = LuceneCompat.directReaderGetInstance(bkdRandomInput, bitsPerValue, orderMapPointer);
             for (int x = 0; x < count; x++)
             {
                 origIndex[x] = LeafOrderMap.getValue(x, orderMapReader);

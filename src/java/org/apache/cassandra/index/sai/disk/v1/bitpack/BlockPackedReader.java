@@ -28,7 +28,6 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.lucene.index.CorruptIndexException;
-import org.apache.lucene.store.IndexInput;
 
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.checkBlockSize;
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.numBlocks;
@@ -104,7 +103,7 @@ public class BlockPackedReader implements LongArray.Factory
     @Override
     public LongArray open()
     {
-        final IndexInput indexInput = IndexFileUtils.instance.openInput(file);
+        var indexInput = IndexFileUtils.instance.openInput(file);
         return new AbstractBlockPackedReader(indexInput, blockBitsPerValue, blockShift, blockMask, 0, valueCount)
         {
             @Override

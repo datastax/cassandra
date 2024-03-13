@@ -30,7 +30,6 @@ import com.google.common.base.Throwables;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriterOption;
-import org.apache.lucene.store.IndexInput;
 
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;

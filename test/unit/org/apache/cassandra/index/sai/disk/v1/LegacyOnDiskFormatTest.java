@@ -42,6 +42,7 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.QueryEventListeners;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDReader;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -65,7 +66,6 @@ import static org.junit.Assert.assertTrue;
  * Note: The sstables and SAI indexes used in this test were written with DSE 6.8
  * in order to guarantee the correctness of the V1 on-disk format code.
  */
-@Ignore // FIXME broken due to little-endian upgrade to Lucene 9.5
 public class LegacyOnDiskFormatTest
 {
     private TemporaryFolder temporaryFolder = new TemporaryFolder();
@@ -95,7 +95,7 @@ public class LegacyOnDiskFormatTest
                                      .addRegularColumn("text_value", UTF8Type.instance)
                                      .build();
         sstable = TrieIndexFormat.instance.getReaderFactory().openNoValidation(descriptor, TableMetadataRef.forOfflineTools(tableMetadata));
-        indexDescriptor = IndexDescriptor.create(sstable);
+        indexDescriptor = IndexDescriptor.createFrom(sstable);
     }
 
     @After
@@ -105,15 +105,21 @@ public class LegacyOnDiskFormatTest
     }
 
     @Test
+    public void correctlyIdentifiesPerSSTableFileVersion()
+    {
+        assertEquals(Version.AA, indexDescriptor.getVersion());
+    }
+
+    @Test
     public void canReadPerSSTableMetadata() throws Throwable
     {
         final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
 
-        NumericValuesMeta numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.OFFSETS_VALUES, null)));
+        NumericValuesMeta numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.OFFSETS_VALUES, null)));
 
         assertEquals(100, numericValuesMeta.valueCount);
 
-        numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentName(IndexComponent.TOKEN_VALUES, null)));
+        numericValuesMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES, null)));
 
         assertEquals(100, numericValuesMeta.valueCount);
     }

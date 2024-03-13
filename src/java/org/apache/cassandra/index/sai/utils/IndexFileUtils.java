@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.io.compress.BufferType;
@@ -40,7 +41,6 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.lucene.codecs.CodecUtil;
-import org.apache.lucene.store.IndexInput;
 
 public class IndexFileUtils
 {
