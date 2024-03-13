@@ -28,14 +28,14 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.assertj.core.api.Assertions;
+import org.assertj.core.api.SoftAssertions;
 
 public abstract class AbstractTestVersionSupportedFeatures
 {
-    protected static final List<String> ALL_VERSIONS = IntStream.rangeClosed('a', 'z')
-                                                                .mapToObj(i -> String.valueOf((char) i))
-                                                                .flatMap(first -> IntStream.rangeClosed('a', 'z').mapToObj(second -> first + (char) second))
-                                                                .collect(Collectors.toList());
+    public static final List<String> ALL_VERSIONS = IntStream.rangeClosed('a', 'z')
+                                                             .mapToObj(i -> String.valueOf((char) i))
+                                                             .flatMap(first -> IntStream.rangeClosed('a', 'z').mapToObj(second -> first + (char) second))
+                                                             .collect(Collectors.toList());
 
     protected abstract Version getVersion(String v);
 
@@ -51,6 +51,26 @@ public abstract class AbstractTestVersionSupportedFeatures
 
     protected abstract Stream<String> getOriginatingHostIdSupportedVersions();
 
+    protected abstract Stream<String> getAccurateMinMaxSupportedVersions();
+
+    protected abstract Stream<String> getCommitLogLowerBoundSupportedVersions();
+
+    protected abstract Stream<String> getCommitLogIntervalsSupportedVersions();
+
+    protected abstract Stream<String> getZeroCopyMetadataSupportedVersions();
+
+    protected abstract Stream<String> getIncrementalNodeSyncMetadataSupportedVersions();
+
+    protected abstract Stream<String> getMaxColumnValueLengthsSupportedVersions();
+
+    protected abstract Stream<String> getIsTransientSupportedVersions();
+
+    protected abstract Stream<String> getMisplacedPartitionLevelDeletionsPresenceMarkerSupportedVersions();
+
+    protected abstract Stream<String> getTokenSpaceCoverageSupportedVersions();
+
+    protected abstract Stream<String> getOldBfFormatSupportedVersions();
+
     @BeforeClass
     public static void initDD()
     {
@@ -60,12 +80,27 @@ public abstract class AbstractTestVersionSupportedFeatures
     @Test
     public void testCompatibility()
     {
-        checkPredicateAgainstVersions(Version::hasPendingRepair, getPendingRepairSupportedVersions(), "hasPendingRepair");
-        checkPredicateAgainstVersions(Version::hasImprovedMinMax, getImprovedMinMaxSupportedVersions(), "hasImprovedMinMax");
-        checkPredicateAgainstVersions(Version::hasLegacyMinMax, getLegacyMinMaxSupportedVersions(), "hasLegacyMinMax");
-        checkPredicateAgainstVersions(Version::hasPartitionLevelDeletionsPresenceMarker, getPartitionLevelDeletionPresenceMarkerSupportedVersions(), "hasPartitionLevelDeletionsPresenceMarker");
-        checkPredicateAgainstVersions(Version::hasKeyRange, getKeyRangeSupportedVersions(), "hasKeyRange");
-        checkPredicateAgainstVersions(Version::hasOriginatingHostId, getOriginatingHostIdSupportedVersions(), "hasOriginatingHostId");
+        SoftAssertions assertions = new SoftAssertions();
+        checkPredicateAgainstVersions(Version::hasPendingRepair, getPendingRepairSupportedVersions(), "hasPendingRepair", assertions);
+        checkPredicateAgainstVersions(Version::hasImprovedMinMax, getImprovedMinMaxSupportedVersions(), "hasImprovedMinMax", assertions);
+        checkPredicateAgainstVersions(Version::hasLegacyMinMax, getLegacyMinMaxSupportedVersions(), "hasLegacyMinMax", assertions);
+        checkPredicateAgainstVersions(Version::hasPartitionLevelDeletionsPresenceMarker, getPartitionLevelDeletionPresenceMarkerSupportedVersions(), "hasPartitionLevelDeletionsPresenceMarker", assertions);
+        checkPredicateAgainstVersions(Version::hasKeyRange, getKeyRangeSupportedVersions(), "hasKeyRange", assertions);
+        checkPredicateAgainstVersions(Version::hasOriginatingHostId, getOriginatingHostIdSupportedVersions(), "hasOriginatingHostId", assertions);
+        checkPredicateAgainstVersions(Version::hasAccurateMinMax, getAccurateMinMaxSupportedVersions(), "hasAccurateMinMax", assertions);
+        checkPredicateAgainstVersions(Version::hasCommitLogLowerBound, getCommitLogLowerBoundSupportedVersions(), "hasCommitLogLowerBound", assertions);
+        checkPredicateAgainstVersions(Version::hasCommitLogIntervals, getCommitLogIntervalsSupportedVersions(), "hasCommitLogIntervals", assertions);
+        checkPredicateAgainstVersions(Version::hasZeroCopyMetadata, getZeroCopyMetadataSupportedVersions(), "hasZeroCopyMetadata", assertions);
+        checkPredicateAgainstVersions(Version::hasIncrementalNodeSyncMetadata, getIncrementalNodeSyncMetadataSupportedVersions(), "hasIncrementalNodeSyncMetadata", assertions);
+        checkPredicateAgainstVersions(Version::hasMaxColumnValueLengths, getMaxColumnValueLengthsSupportedVersions(), "hasMaxColumnValueLengths", assertions);
+        checkPredicateAgainstVersions(Version::hasIsTransient, getIsTransientSupportedVersions(), "hasIsTransient", assertions);
+        checkPredicateAgainstVersions(Version::hasMisplacedPartitionLevelDeletionsPresenceMarker, getMisplacedPartitionLevelDeletionsPresenceMarkerSupportedVersions(), "hasMisplacedPartitionLevelDeletionsPresenceMarker", assertions);
+        checkPredicateAgainstVersions(Version::hasTokenSpaceCoverage, getTokenSpaceCoverageSupportedVersions(), "hasTokenSpaceCoverage", assertions);
+        checkPredicateAgainstVersions(Version::hasOldBfFormat, getOldBfFormatSupportedVersions(), "hasOldBfFormat", assertions);
+
+        checkPredicateAgainstVersions(v -> !(v.hasPartitionLevelDeletionsPresenceMarker() && v.hasMisplacedPartitionLevelDeletionsPresenceMarker()), ALL_VERSIONS.stream(), "hasPartitionLevelDeletionsPresenceMarker and hasMisplacedPartitionLevelDeletionsPresenceMarker", assertions);
+
+        assertions.assertAll();;
     }
 
     public static Stream<String> range(String fromIncl, String toIncl)
@@ -81,11 +116,12 @@ public abstract class AbstractTestVersionSupportedFeatures
      *
      * @param predicate     predicate to check against version
      * @param versionBounds a stream of versions for which the predicate should return true
+     * @param assertions
      */
-    private void checkPredicateAgainstVersions(Predicate<Version> predicate, Stream<String> versionBounds, String name)
+    private void checkPredicateAgainstVersions(Predicate<Version> predicate, Stream<String> versionBounds, String name, SoftAssertions assertions)
     {
         List<String> expected = versionBounds.collect(Collectors.toList());
         List<String> actual = ALL_VERSIONS.stream().filter(v -> predicate.test(getVersion(v))).collect(Collectors.toList());
-        Assertions.assertThat(actual).describedAs(name).isEqualTo(expected);
+        assertions.assertThat(actual).describedAs(name).isEqualTo(expected);
     }
 }
