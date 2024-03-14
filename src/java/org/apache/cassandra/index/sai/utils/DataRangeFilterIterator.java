@@ -65,7 +65,7 @@ public class DataRangeFilterIterator extends RangeIterator
             if (!currentKeyRange.right.isMinimum() && currentKeyRange.right.compareTo(key.partitionKey()) <= 0)
             {
                 // We enter this block when currentKeyRange does not contain the current key,
-                // and the current key is greater than the currentKeyRange.
+                // and the current key is greater than the currentKeyRange's right boundary.
                 if (!keyRanges.hasNext())
                     return endOfData();
                 currentKeyRange = keyRanges.next();
