@@ -85,6 +85,7 @@ public class TopPartitionsTest extends CQLTester
     @Test
     public void testTopPartitionsRowTombstoneAndSSTableCount() throws Exception
     {
+        createTable("CREATE TABLE %s (k text, c text, v text, PRIMARY KEY (k, c))");
         int count = 10;
         ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(KEYSPACE, currentTable());
         cfs.disableAutoCompaction();
