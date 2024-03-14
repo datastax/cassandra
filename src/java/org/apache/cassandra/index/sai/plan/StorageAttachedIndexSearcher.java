@@ -24,7 +24,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -60,7 +59,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
@@ -483,16 +481,14 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
     public static class ScoreOrderedResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
-        private final List<AbstractBounds<PartitionPosition>> keyRanges;
-        private final boolean coversFullRing;
         private final CloseableIterator<ScoredPrimaryKey> scoredPrimaryKeyIterator;
         private final FilterTree filterTree;
         private final QueryController controller;
         private final ReadExecutionController executionController;
         private final QueryContext queryContext;
 
-        private HashSet<PrimaryKey> keysSeen;
-        private HashSet<PrimaryKey> updatedKeys;
+        private final HashSet<PrimaryKey> keysSeen;
+        private final HashSet<PrimaryKey> updatedKeys;
 
         private ScoreOrderedResultRetriever(CloseableIterator<ScoredPrimaryKey> scoredPrimaryKeyIterator,
                                             FilterTree filterTree,
@@ -500,15 +496,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                             ReadExecutionController executionController,
                                             QueryContext queryContext)
         {
-            this.keyRanges = controller.dataRanges().stream().map(DataRange::keyRange).collect(Collectors.toList());
-            this.coversFullRing = keyRanges.size() == 1 && RangeUtil.coversFullRing(keyRanges.get(0));
-
             this.scoredPrimaryKeyIterator = scoredPrimaryKeyIterator;
             this.filterTree = filterTree;
             this.controller = controller;
             this.executionController = executionController;
             this.queryContext = queryContext;
-
             this.keysSeen = new HashSet<>();
             this.updatedKeys = new HashSet<>();
         }
@@ -517,66 +509,30 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         public UnfilteredRowIterator computeNext()
         {
             @SuppressWarnings("resource")
-            UnfilteredRowIterator iterator = nextRowIterator(this::nextSelectedKeyInRange);
+            UnfilteredRowIterator iterator = nextRowIterator();
             // Because we know ordered keys are fully qualified, we do not iterate partitions
             return iterator != null ? iterator : endOfData();
         }
 
         /**
-         * Tries to obtain a row iterator for one of the supplied keys by repeatedly calling
-         * {@link ResultRetriever#apply} until it gives a non-null result.
-         * The keySupplier should return the next key with every call to get() and
-         * null when there are no more keys to try.
+         * Tries to obtain a row iterator for the next valid row or returns null if no more rows are available.
          *
          * @return an iterator or null if all keys were tried with no success
          */
-        private @Nullable UnfilteredRowIterator nextRowIterator(@Nonnull Supplier<ScoredPrimaryKey> keySupplier)
-        {
-            UnfilteredRowIterator iterator = null;
-            while (iterator == null)
-            {
-                ScoredPrimaryKey key = keySupplier.get();
-                if (key == null)
-                    return null;
-                iterator = apply(key);
-            }
-            return iterator;
-        }
-
-        /**
-         * Determine if the key is in one of the queried key ranges. We do not iterate through results in
-         * {@link PrimaryKey} order, so we have to check each range.
-         * @param key
-         * @return true if the key is in one of the queried key ranges
-         */
-        private boolean isInRange(DecoratedKey key)
-        {
-            if (coversFullRing)
-                return true;
-
-            for (AbstractBounds<PartitionPosition> range : keyRanges)
-                if (range.contains(key))
-                    return true;
-            return false;
-        }
-
-        /**
-         * Returns the next available key contained by one of the keyRanges and selected by the queryController.
-         * If the next key falls out of the current key range, it skips to the next key range, and so on.
-         * If no more keys acceptd by the controller are available, returns null.
-         */
-        private @Nullable ScoredPrimaryKey nextSelectedKeyInRange()
+        private @Nullable UnfilteredRowIterator nextRowIterator()
         {
             while (scoredPrimaryKeyIterator.hasNext())
             {
-                ScoredPrimaryKey key = scoredPrimaryKeyIterator.next();
-                if (isInRange(key.partitionKey()) && controller.selects(key))
-                    return key;
+                // We do not check if the PrimaryKey is in the DataRanges for the query because materialization from
+                // storage does that for us.
+                UnfilteredRowIterator iterator = materializeRowAndApplyFilter(scoredPrimaryKeyIterator.next());
+                if (iterator != null)
+                    return iterator;
             }
             return null;
         }
 
-        public UnfilteredRowIterator apply(ScoredPrimaryKey key)
+        private UnfilteredRowIterator materializeRowAndApplyFilter(ScoredPrimaryKey key)
         {
             // If we've seen the key already, we can skip it. However, we cannot skip keys that were updated to a
             // worse score because the key's updated value could still be in the topk--we just didn't know when we
