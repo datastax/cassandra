@@ -25,7 +25,6 @@ import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.AbstractIterator;
 
 /**
  * An iterator that filters the input iterator based on the provided list of {@link DataRange}.
