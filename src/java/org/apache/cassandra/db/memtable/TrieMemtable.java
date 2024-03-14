@@ -222,19 +222,6 @@ public class TrieMemtable extends AbstractShardedMemtable
         }
     }
 
-    @Override
-    public void addMemoryUsageTo(MemoryUsage stats)
-    {
-        super.addMemoryUsageTo(stats);
-        for (MemtableShard shard : shards)
-        {
-            stats.ownsOnHeap += shard.allocator.onHeap().owns();
-            stats.ownsOffHeap += shard.allocator.offHeap().owns();
-            stats.ownershipRatioOnHeap += shard.allocator.onHeap().ownershipRatio();
-            stats.ownershipRatioOffHeap += shard.allocator.offHeap().ownershipRatio();
-        }
-    }
-
     /**
      * Technically we should scatter gather on all the core threads because the size in following calls are not
      * using volatile variables, but for metrics purpose this should be good enough.
