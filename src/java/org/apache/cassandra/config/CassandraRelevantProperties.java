@@ -329,6 +329,8 @@ public enum CassandraRelevantProperties
     /** Watcher used when opening sstables to discover extra components, eg. archive component */
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
+    /** Controls whether a vector search scans all ranges, therefore ignoring node's owned token boundaries */
+    SAI_VECTOR_SEARCH_SCAN_ALL_RANGES("cassandra.sai.vector_search.scan_all_ranges", "false"),
     /** Controls the maximum top-k limit for vector search */
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
 

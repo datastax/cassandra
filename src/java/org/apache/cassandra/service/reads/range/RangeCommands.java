@@ -21,6 +21,7 @@ package org.apache.cassandra.service.reads.range;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -48,6 +49,7 @@ public class RangeCommands
      */
     private static final int MAX_CONCURRENT_RANGE_REQUESTS = Math.max(1, Integer.getInteger("cassandra.max_concurrent_range_requests",
                                                                                             FBUtilities.getAvailableProcessors() * 10));
+    private static final boolean SCAN_ALL_RANGES = CassandraRelevantProperties.SAI_VECTOR_SEARCH_SCAN_ALL_RANGES.getBoolean();
 
     @SuppressWarnings("resource") // created iterators will be closed in CQL layer through the chain of transformations
     public static PartitionIterator partitions(PartitionRangeReadCommand command,
@@ -77,9 +79,8 @@ public class RangeCommands
                                                                    command.indexQueryPlan(),
                                                                    keyspace,
                                                                    consistencyLevel);
-        // TODO should this be configurable or can we always skip?
-//        if (command.isTopK())
-//            return new ScanAllRangesCommandIterator(keyspace, replicaPlans, command, replicaPlans.size(), queryStartNanoTime, readTracker);
+        if (command.isTopK() && SCAN_ALL_RANGES)
+            return new ScanAllRangesCommandIterator(keyspace, replicaPlans, command, replicaPlans.size(), queryStartNanoTime, readTracker);
 
         int maxConcurrencyFactor = Math.min(replicaPlans.size(), MAX_CONCURRENT_RANGE_REQUESTS);
         int concurrencyFactor = maxConcurrencyFactor;
