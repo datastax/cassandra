@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -35,7 +36,9 @@ import org.cliffc.high_scale_lib.NonBlockingIdentityHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.benmanes.caffeine.cache.AsyncCache;
 import com.github.benmanes.caffeine.cache.AsyncLoadingCache;
+import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.CacheLoader;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
@@ -52,7 +55,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
 
 public class ChunkCache
-        implements CacheLoader<ChunkCache.Key, ChunkCache.Buffer>, RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
+        implements RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
 {
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
@@ -69,8 +72,8 @@ public class ChunkCache
     // Because compute optimistically updates the set without acquiring a lock, we must use a set that is
     // safe for concurrent access.
     private final NonBlockingIdentityHashMap<String, NonBlockingHashSet<Key>> keysByFile;
-    private final AsyncLoadingCache<Key, Buffer> cache;
-    private final LoadingCache<Key, Buffer> synchronousCache;
+    private final AsyncCache<Key, Buffer> cache;
+    private final Cache<Key, Buffer> synchronousCache;
     private final long cacheSize;
     public final ChunkCacheMetrics metrics;
 
@@ -213,12 +216,12 @@ public class ChunkCache
                         .weigher((key, buffer) -> ((Buffer) buffer).buffer.capacity())
                         .removalListener(this)
                         .recordStats(() -> metrics)
-                        .buildAsync(this);
+                        .buildAsync();
         synchronousCache = cache.synchronous();
     }
 
-    @Override
-    public Buffer load(Key key)
+
+    private Buffer load(Key key)
     {
         ByteBuffer buffer = bufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
         assert buffer != null;
@@ -313,29 +316,53 @@ public class ChunkCache
         }
 
         @Override
-        public Buffer rebuffer(long position)
+        public BufferHolder rebuffer(long position)
         {
-            int spin = 0;
             try
             {
                 long pageAlignedPos = position & alignmentMask;
-                Buffer buf;
-                Key key = new Key(source, internedPath, pageAlignedPos);
+                BufferHolder buf;
+                Key chunkKey = new Key(source, internedPath, pageAlignedPos);
+
+                int spin = 0;
+                //There is a small window when a released buffer/invalidated chunk
+                //is still in the cache. In this case it will return null
+                //so we spin loop while waiting for the cache to re-populate
                 while (true)
                 {
-                    buf = cache.get(key).join().reference();
+                    Buffer chunk;
+                    // Using cache.get(k, compute) results in lots of allocation, rather risk the unlikely race...
+                    CompletableFuture<Buffer> cachedValue = cache.getIfPresent(chunkKey);
+                    if (cachedValue == null)
+                    {
+                        // this blocking read might compete with an another read, but the race is benign (under the assumption that caching is valid)
+                        CompletableFuture<Buffer> entry = new CompletableFuture<>();
+                        // Put the future in the cache first so the window of racing (and loading the same chunk twice) is small
+                        cache.put(chunkKey, entry);
+
+                        try
+                        {
+                            chunk = load(chunkKey);
+                        }
+                        catch (Throwable t)
+                        {
+                            // also signal other waiting readers
+                            entry.completeExceptionally(t);
+                            throw t;
+                        }
+                        entry.complete(chunk);
+                    }
+                    else
+                    {
+                        chunk = cachedValue.join();
+                    }
+
+                    buf = chunk.reference();
                     if (buf != null)
                         return buf;
 
-                    if (++spin == 1000)
-                    {
-                        String msg = String.format("Could not acquire a reference to for %s after 1000 attempts. " +
-                                                   "This is likely due to the chunk cache being too small for the " +
-                                                   "number of concurrently running requests.", key);
-                        throw new RuntimeException(msg);
-                        // Note: this might also be caused by reference counting errors, especially double release of
-                        // chunks.
-                    }
+                    if (++spin == 1024)
+                        logger.error("Spinning for {}", chunkKey);
                 }
             }
             catch (Throwable t)
