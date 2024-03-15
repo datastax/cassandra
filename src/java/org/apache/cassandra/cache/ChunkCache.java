@@ -150,7 +150,7 @@ public class ChunkCache
             buffer.release();
         }
 
-        public synchronized Buffer loadBuffer()
+        public synchronized Buffer loadBufferIfNeeded()
         {
             if (!loaded && buffer.references.get() > 0)
             {
@@ -261,7 +261,7 @@ public class ChunkCache
         // inside the lock of the cache, to avoid blocking other threads that are trying to access
         // the same portion of the cache.
         if (SYNC_LOAD)
-            bufferFuture.loadBuffer();
+            bufferFuture.loadBufferIfNeeded();
 
         // Complete addition within compute remapping function to ensure there is no race condition with removal.
         keysByFile.compute(key.internedPath, (k, v) -> {
@@ -363,7 +363,7 @@ public class ChunkCache
                 Key key = new Key(source, internedPath, pageAlignedPos);
                 while (true)
                 {
-                    buf = cache.get(key).loadBuffer().reference();
+                    buf = getAndLoad(key).reference();
                     if (buf != null)
                         return buf;
 
@@ -382,6 +382,19 @@ public class ChunkCache
             {
                 Throwables.propagateIfInstanceOf(t.getCause(), CorruptSSTableException.class);
                 throw Throwables.propagate(t);
+            }
+        }
+
+        private Buffer getAndLoad(Key key)
+        {
+            BufferFuture future = cache.get(key);
+            try
+            {
+                return future.loadBufferIfNeeded();
+            } catch (Throwable error)
+            {
+                cache.invalidate(key);
+                throw error;
             }
         }
 
