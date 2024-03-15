@@ -152,7 +152,6 @@ public class QueryController
 
     private final PrimaryKey.Factory keyFactory;
     private final PrimaryKey firstPrimaryKey;
-    private final PrimaryKey lastPrimaryKey;
 
     public QueryController(ColumnFamilyStore cfs,
                            ReadCommand command,
@@ -175,7 +174,6 @@ public class QueryController
 
         this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
-        this.lastPrimaryKey = keyFactory.createTokenOnly(mergeRange.right.getToken());
     }
 
     public PrimaryKey.Factory primaryKeyFactory()
@@ -188,10 +186,6 @@ public class QueryController
         return firstPrimaryKey;
     }
 
-    public PrimaryKey lastPrimaryKey()
-    {
-        return lastPrimaryKey;
-    }
 
     public TableMetadata metadata()
     {
@@ -793,7 +787,9 @@ public class QueryController
     {
         if (command instanceof SinglePartitionReadCommand)
         {
-            return Lists.newArrayList(command.dataRange());
+            SinglePartitionReadCommand cmd = (SinglePartitionReadCommand) command;
+            DecoratedKey key = cmd.partitionKey();
+            return Lists.newArrayList(new DataRange(new Bounds<>(key, key), cmd.clusteringIndexFilter()));
         }
         else if (command instanceof PartitionRangeReadCommand)
         {
