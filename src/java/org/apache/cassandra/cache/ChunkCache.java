@@ -35,6 +35,7 @@ import org.cliffc.high_scale_lib.NonBlockingIdentityHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.benmanes.caffeine.cache.AsyncLoadingCache;
 import com.github.benmanes.caffeine.cache.CacheLoader;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
@@ -51,18 +52,12 @@ import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
 
 public class ChunkCache
-        implements CacheLoader<ChunkCache.Key, ChunkCache.LoadingBuffer>, RemovalListener<ChunkCache.Key, ChunkCache.LoadingBuffer>, CacheSize
+        implements CacheLoader<ChunkCache.Key, ChunkCache.Buffer>, RemovalListener<ChunkCache.Key, ChunkCache.Buffer>, CacheSize
 {
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
     public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
-
-    private static final boolean SYNC_LOAD = Boolean.getBoolean("cassandra.chunk_cache.sync_load");
-
-    static {
-        logger.info("cassandra.chunk_cache.sync_load={}", SYNC_LOAD);
-    }
 
     public static final ChunkCache instance = DatabaseDescriptor.getFileCacheEnabled()
                                               ? new ChunkCache(BufferPools.forChunkCache(), DatabaseDescriptor.getFileCacheSizeInMB(), ChunkCacheMetrics::create)
@@ -74,7 +69,8 @@ public class ChunkCache
     // Because compute optimistically updates the set without acquiring a lock, we must use a set that is
     // safe for concurrent access.
     private final NonBlockingIdentityHashMap<String, NonBlockingHashSet<Key>> keysByFile;
-    private final LoadingCache<Key, LoadingBuffer> cache;
+    private final AsyncLoadingCache<Key, Buffer> cache;
+    private final LoadingCache<Key, Buffer> synchronousCache;
     private final long cacheSize;
     public final ChunkCacheMetrics metrics;
 
@@ -128,39 +124,6 @@ public class ChunkCache
             return (position == other.position)
                    && internedPath == other.internedPath // == is okay b/c we explicitly intern
                    && file.chunkSize() == other.file.chunkSize(); // TODO we should not allow different chunk sizes
-        }
-    }
-
-    public static class LoadingBuffer
-    {
-        private final Key key;
-        private final Buffer buffer;
-        private boolean loaded;
-
-        LoadingBuffer(Key key, Function<Key, Buffer> bufferAllocator)
-        {
-            this.key = key;
-            this.buffer = bufferAllocator.apply(key);
-        }
-
-        int size()
-        {
-            return key.file.chunkSize();
-        }
-
-        synchronized void release()
-        {
-            buffer.release();
-        }
-
-        synchronized Buffer loadBufferIfNeeded()
-        {
-            if (!loaded && buffer.references.get() > 0)
-            {
-                key.file.readChunk(key.position, buffer.buffer);
-                loaded = true;
-            }
-            return buffer;
         }
     }
 
@@ -247,30 +210,19 @@ public class ChunkCache
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
                         .executor(MoreExecutors.directExecutor())
-                        .weigher((key, buffer) -> ((LoadingBuffer) buffer).size())
+                        .weigher((key, buffer) -> ((Buffer) buffer).buffer.capacity())
                         .removalListener(this)
                         .recordStats(() -> metrics)
-                        .build(this);
-    }
-
-    private Buffer allocateBuffer(Key key)
-    {
-        ByteBuffer buffer = bufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
-        assert buffer != null;
-        return new Buffer(buffer, key.position);
+                        .buildAsync(this);
+        synchronousCache = cache.synchronous();
     }
 
     @Override
-    public LoadingBuffer load(Key key)
+    public Buffer load(Key key)
     {
-        LoadingBuffer loadingBuffer = new LoadingBuffer(key, this::allocateBuffer);
-
-        // reading from the disk is a blocking operation, so it is better to not do it
-        // inside the lock of the cache, to avoid blocking other threads that are trying to access
-        // the same portion of the cache.
-        if (SYNC_LOAD)
-            loadingBuffer.loadBufferIfNeeded();
-
+        ByteBuffer buffer = bufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
+        assert buffer != null;
+        key.file.readChunk(key.position, buffer);
         // Complete addition within compute remapping function to ensure there is no race condition with removal.
         keysByFile.compute(key.internedPath, (k, v) -> {
             if (v == null)
@@ -278,11 +230,11 @@ public class ChunkCache
             v.add(key);
             return v;
         });
-        return loadingBuffer;
+        return new Buffer(buffer, key.position);
     }
 
     @Override
-    public void onRemoval(Key key, LoadingBuffer buffer, RemovalCause cause)
+    public void onRemoval(Key key, Buffer buffer, RemovalCause cause)
     {
         buffer.release();
         // Complete addition within compute remapping function to ensure there is no race condition with load.
@@ -298,7 +250,7 @@ public class ChunkCache
     {
         // Clear keysByFile first to prevent unnecessary computation in onRemoval method.
         keysByFile.clear();
-        cache.invalidateAll();
+        synchronousCache.invalidateAll();
     }
 
     private RebuffererFactory wrap(ChunkReader file)
@@ -320,7 +272,7 @@ public class ChunkCache
         var keys = keysByFile.remove(internedPath);
         if (keys == null)
             return;
-        keys.forEach(cache::invalidate);
+        keys.forEach(synchronousCache::invalidate);
     }
 
     @VisibleForTesting
@@ -328,7 +280,7 @@ public class ChunkCache
     {
         this.enabled = enabled;
         wrapper = this::wrap;
-        cache.invalidateAll();
+        synchronousCache.invalidateAll();
         metrics.reset();
     }
 
@@ -371,7 +323,7 @@ public class ChunkCache
                 Key key = new Key(source, internedPath, pageAlignedPos);
                 while (true)
                 {
-                    buf = getAndLoad(key).reference();
+                    buf = cache.get(key).join().reference();
                     if (buf != null)
                         return buf;
 
@@ -393,19 +345,6 @@ public class ChunkCache
             }
         }
 
-        private Buffer getAndLoad(Key key)
-        {
-            LoadingBuffer future = cache.get(key);
-            try
-            {
-                return future.loadBufferIfNeeded();
-            } catch (Throwable error)
-            {
-                cache.invalidate(key);
-                throw error;
-            }
-        }
-
         @Override
         public Rebufferer instantiateRebufferer()
         {
@@ -416,7 +355,7 @@ public class ChunkCache
         public void invalidateIfCached(long position)
         {
             long pageAlignedPos = position & alignmentMask;
-            cache.invalidate(new Key(source, internedPath, pageAlignedPos));
+            synchronousCache.invalidate(new Key(source, internedPath, pageAlignedPos));
         }
 
         @Override
@@ -477,9 +416,9 @@ public class ChunkCache
     @Override
     public long weightedSize()
     {
-        return cache.policy().eviction()
-                .map(policy -> policy.weightedSize().orElseGet(cache::estimatedSize))
-                .orElseGet(cache::estimatedSize);
+        return synchronousCache.policy().eviction()
+                .map(policy -> policy.weightedSize().orElseGet(synchronousCache::estimatedSize))
+                .orElseGet(synchronousCache::estimatedSize);
     }
 
     /**
