@@ -51,7 +51,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
 
 public class ChunkCache
-        implements CacheLoader<ChunkCache.Key, ChunkCache.BufferFuture>, RemovalListener<ChunkCache.Key, ChunkCache.BufferFuture>, CacheSize
+        implements CacheLoader<ChunkCache.Key, ChunkCache.LoadingBuffer>, RemovalListener<ChunkCache.Key, ChunkCache.LoadingBuffer>, CacheSize
 {
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
@@ -74,7 +74,7 @@ public class ChunkCache
     // Because compute optimistically updates the set without acquiring a lock, we must use a set that is
     // safe for concurrent access.
     private final NonBlockingIdentityHashMap<String, NonBlockingHashSet<Key>> keysByFile;
-    private final LoadingCache<Key, BufferFuture> cache;
+    private final LoadingCache<Key, LoadingBuffer> cache;
     private final long cacheSize;
     public final ChunkCacheMetrics metrics;
 
@@ -131,16 +131,16 @@ public class ChunkCache
         }
     }
 
-    static class BufferFuture
+    public static class LoadingBuffer
     {
         private final Key key;
         private final Buffer buffer;
         private boolean loaded;
 
-        public BufferFuture(Key key, Buffer buffer)
+        LoadingBuffer(Key key, Function<Key, Buffer> bufferAllocator)
         {
             this.key = key;
-            this.buffer = buffer;
+            this.buffer = bufferAllocator.apply(key);
         }
 
         int size()
@@ -153,7 +153,7 @@ public class ChunkCache
             buffer.release();
         }
 
-        public synchronized Buffer loadBufferIfNeeded()
+        synchronized Buffer loadBufferIfNeeded()
         {
             if (!loaded && buffer.references.get() > 0)
             {
@@ -247,24 +247,29 @@ public class ChunkCache
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
                         .executor(MoreExecutors.directExecutor())
-                        .weigher((key, buffer) -> ((BufferFuture) buffer).size())
+                        .weigher((key, buffer) -> ((LoadingBuffer) buffer).size())
                         .removalListener(this)
                         .recordStats(() -> metrics)
                         .build(this);
     }
 
-    @Override
-    public BufferFuture load(Key key)
+    private Buffer allocateBuffer(Key key)
     {
         ByteBuffer buffer = bufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
         assert buffer != null;
-        BufferFuture bufferFuture =  new BufferFuture(key, new Buffer(buffer, key.position));
+        return new Buffer(buffer, key.position);
+    }
+
+    @Override
+    public LoadingBuffer load(Key key)
+    {
+        LoadingBuffer loadingBuffer = new LoadingBuffer(key, this::allocateBuffer);
 
         // reading from the disk is a blocking operation, so it is better to not do it
         // inside the lock of the cache, to avoid blocking other threads that are trying to access
         // the same portion of the cache.
         if (SYNC_LOAD)
-            bufferFuture.loadBufferIfNeeded();
+            loadingBuffer.loadBufferIfNeeded();
 
         // Complete addition within compute remapping function to ensure there is no race condition with removal.
         keysByFile.compute(key.internedPath, (k, v) -> {
@@ -273,11 +278,11 @@ public class ChunkCache
             v.add(key);
             return v;
         });
-        return bufferFuture;
+        return loadingBuffer;
     }
 
     @Override
-    public void onRemoval(Key key, BufferFuture buffer, RemovalCause cause)
+    public void onRemoval(Key key, LoadingBuffer buffer, RemovalCause cause)
     {
         buffer.release();
         // Complete addition within compute remapping function to ensure there is no race condition with load.
@@ -390,7 +395,7 @@ public class ChunkCache
 
         private Buffer getAndLoad(Key key)
         {
-            BufferFuture future = cache.get(key);
+            LoadingBuffer future = cache.get(key);
             try
             {
                 return future.loadBufferIfNeeded();
