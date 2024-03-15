@@ -46,11 +46,13 @@ import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.apache.cassandra.config.CassandraRelevantProperties.RANGE_READ_ENDPOINT_GROUPING_ENABLED;
 
 @VisibleForTesting
 public abstract class RangeCommandIterator extends AbstractIterator<RowIterator> implements PartitionIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(RangeCommandIterator.class);
+    private static final boolean ENDPOINT_GROUPING_ENABLED = RANGE_READ_ENDPOINT_GROUPING_ENABLED.getBoolean();
 
     @VisibleForTesting
     public final ClientRangeRequestMetrics rangeMetrics;
@@ -83,7 +85,7 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
                                               long queryStartNanoTime,
                                               QueryInfoTracker.ReadTracker readTracker)
     {
-        return supportsEndpointGrouping(command) ? new EndpointGroupingRangeCommandIterator(replicaPlans,
+        return ENDPOINT_GROUPING_ENABLED && supportsEndpointGrouping(command) ? new EndpointGroupingRangeCommandIterator(replicaPlans,
                                                                                             command,
                                                                                             concurrencyFactor,
                                                                                             maxConcurrencyFactor,
