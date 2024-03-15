@@ -49,6 +49,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.cql.GeoDistanceAccuracyTest;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
+import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
@@ -64,7 +65,7 @@ public class VectorDistributedTest extends TestBaseImpl
     public SAITester.FailureWatcher failureRule = new SAITester.FailureWatcher();
 
     private static final String CREATE_KEYSPACE = "CREATE KEYSPACE %%s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': %d}";
-    private static final String CREATE_TABLE = "CREATE TABLE %%s (pk int primary key, val vector<float, %d>)";
+    private static final String CREATE_TABLE = "CREATE TABLE %%s (pk int primary key, num float, val vector<float, %d>)";
     private static final String CREATE_TABLE_TWO_VECTORS = "CREATE TABLE %%s (pk int primary key, val1 vector<float, %d>, val2 vector<float, %d>)";
     private static final String CREATE_INDEX = "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'";
 
@@ -130,7 +131,7 @@ public class VectorDistributedTest extends TestBaseImpl
 
         int pk = 0;
         for (float[] vector : vectors)
-            execute("INSERT INTO %s (pk, val) VALUES (" + (pk++) + ", " + vectorString(vector) + " )");
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", pk++, vector(vector));
 
         // query memtable index
         int limit = Math.min(getRandom().nextIntBetween(10, 50), vectors.size());
@@ -189,7 +190,7 @@ public class VectorDistributedTest extends TestBaseImpl
         {
             List<float[]> vectors = generateVectors(vectorCountPerSSTable);
             for (float[] vector : vectors)
-                execute("INSERT INTO %s (pk, val) VALUES (" + (pk++) + ", " + vectorString(vector) + " )");
+                execute("INSERT INTO %s (pk, val) VALUES (?,?)", pk++, vector(vector));
 
             allVectors.addAll(vectors);
             cluster.forEach(n -> n.flush(KEYSPACE));
@@ -204,6 +205,53 @@ public class VectorDistributedTest extends TestBaseImpl
         List<float[]> resultVectors = getVectors(result);
         assertDescendingScore(queryVector, resultVectors);
         double recall = getRecall(allVectors, queryVector, getVectors(result));
+        assertThat(recall).isGreaterThanOrEqualTo(MIN_RECALL);
+    }
+
+    @Test
+    public void testHybridANNQuery()
+    {
+        cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
+        cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val")));
+        cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "num")));
+        SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
+        // disable compaction
+        String tableName = table;
+        cluster.forEach(n -> n.runOnInstance(() -> {
+            Keyspace keyspace = Keyspace.open(KEYSPACE);
+            keyspace.getColumnFamilyStore(tableName).disableAutoCompaction();
+        }));
+
+        int vectorCountPerSSTable = getRandom().nextIntBetween(200, 500);
+        int sstableCount = getRandom().nextIntBetween(3, 5);
+        List<Pair<Float, float[]>> allVectors = new ArrayList<>(sstableCount * vectorCountPerSSTable);
+
+        int pk = 0;
+        for (int i = 0; i < sstableCount; i++)
+        {
+            List<float[]> vectors = generateVectors(vectorCountPerSSTable);
+            for (float[] vector : vectors)
+            {
+                var num = getRandom().nextFloat();
+                allVectors.add(Pair.create(num, vector));
+                execute("INSERT INTO %s (pk, num, val) VALUES (?,?,?)", pk++, num, vector(vector));
+            }
+
+            cluster.forEach(n -> n.flush(KEYSPACE));
+        }
+
+        // query multiple sstable indexes in multiple node
+        int limit = Math.min(getRandom().nextIntBetween(50, 100), allVectors.size());
+        float[] queryVector = randomVector();
+        float queryNumUpperBound = getRandom().nextFloat();
+        Object[][] result = execute("SELECT val FROM %s WHERE num < ? ORDER BY val ann of ? LIMIT ?",
+                                    queryNumUpperBound, vector(queryVector), limit);
+        assertThat(result).hasSize(limit);
+
+        // expect recall to be at least 0.8
+        List<float[]> resultVectors = getVectors(result);
+        assertDescendingScore(queryVector, resultVectors);
+        double recall = getHybridRecall(allVectors, queryVector, queryNumUpperBound, getVectors(result));
         assertThat(recall).isGreaterThanOrEqualTo(MIN_RECALL);
     }
 
@@ -231,7 +279,7 @@ public class VectorDistributedTest extends TestBaseImpl
         {
             List<float[]> vectors = generateUSBoundedGeoVectors(vectorCountPerSSTable);
             for (float[] vector : vectors)
-                execute("INSERT INTO %s (pk, val) VALUES (" + (pk++) + ", " + vectorString(vector) + " )");
+                execute("INSERT INTO %s (pk, val) VALUES (?,?)", pk++, vector(vector));
 
             allVectors.addAll(vectors);
             cluster.forEach(n -> n.flush(KEYSPACE));
@@ -266,7 +314,7 @@ public class VectorDistributedTest extends TestBaseImpl
 
         int pk = 0;
         for (float[] vector : vectors)
-            execute("INSERT INTO %s (pk, val) VALUES (" + (pk++) + ", " + vectorString(vector) + " )");
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", pk++, vector(vector));
 
         // query memtable index
         for (int executionCount = 0; executionCount < 50; executionCount++)
@@ -302,7 +350,7 @@ public class VectorDistributedTest extends TestBaseImpl
         for (float[] vector : vectors)
         {
             vectorsByToken.put(Murmur3Partitioner.instance.getToken(Int32Type.instance.decompose(pk)).getLongValue(), vector);
-            execute("INSERT INTO %s (pk, val) VALUES (" + (pk++) + ',' + vectorString(vector) + " )");
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", pk++, vector(vector));
         }
 
         // query memtable index
@@ -460,6 +508,12 @@ public class VectorDistributedTest extends TestBaseImpl
         }
     }
 
+    private double getHybridRecall(List<Pair<Float, float[]>> allVectors, float[] queryVector, float numUpperBound, List<float[]> resultVectors)
+    {
+        var expectedVectors = allVectors.stream().filter(p -> p.left < numUpperBound).map(Pair::right).collect(Collectors.toList());
+        return getRecall(expectedVectors, queryVector, resultVectors);
+    }
+
     private double getRecall(List<float[]> vectors, float[] query, List<float[]> result)
     {
         List<float[]> sortedVectors = new ArrayList<>(vectors);
@@ -505,16 +559,6 @@ public class VectorDistributedTest extends TestBaseImpl
         }
 
         return vectors;
-    }
-
-    private String vectorString(float[] vector)
-    {
-        return Arrays.toString(vector);
-    }
-
-    private String randomVectorString()
-    {
-        return vectorString(randomVector());
     }
 
     private float[] randomVector()
@@ -563,9 +607,9 @@ public class VectorDistributedTest extends TestBaseImpl
     }
 
 
-    private static Object[][] execute(String query)
+    private static Object[][] execute(String query, Object... args)
     {
-        return execute(query, ConsistencyLevel.QUORUM);
+        return execute(query, ConsistencyLevel.QUORUM, args);
     }
 
     private static Object[][] executeAll(String query)
@@ -573,9 +617,9 @@ public class VectorDistributedTest extends TestBaseImpl
         return execute(query, ConsistencyLevel.ALL);
     }
 
-    private static Object[][] execute(String query, ConsistencyLevel consistencyLevel)
+    private static Object[][] execute(String query, ConsistencyLevel consistencyLevel, Object... args)
     {
-        return cluster.coordinator(1).execute(formatQuery(query), consistencyLevel);
+        return cluster.coordinator(1).execute(formatQuery(query), consistencyLevel, args);
     }
 
     private static Object[][] executeWithPaging(String query, int pageSize)

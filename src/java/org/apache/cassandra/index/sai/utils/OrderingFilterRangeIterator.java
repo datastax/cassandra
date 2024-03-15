@@ -19,17 +19,13 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
 import java.util.function.Function;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.AbstractIterator;
 
 /**
  * An iterator that consumes a chunk of {@link PrimaryKey}s from the {@link RangeIterator}, passes them to the
@@ -37,7 +33,7 @@ import org.apache.cassandra.utils.Pair;
  * The PKs are currently returned in score order.
  */
 @NotThreadSafe
-public class OrderingFilterRangeIterator<T> implements Iterator<T>, AutoCloseable
+public class OrderingFilterRangeIterator<T> extends AbstractIterator<T>
 {
     private final RangeIterator input;
     private final QueryContext context;
@@ -56,21 +52,14 @@ public class OrderingFilterRangeIterator<T> implements Iterator<T>, AutoCloseabl
     }
 
     @Override
-    public boolean hasNext()
-    {
-        return input.hasNext();
-    }
-
-    @Override
-    public T next()
+    public T computeNext()
     {
         List<PrimaryKey> nextKeys = new ArrayList<>(chunkSize);
-        do
-        {
+        while (nextKeys.size() < chunkSize && input.hasNext())
             nextKeys.add(input.next());
-        }
-        while (nextKeys.size() < chunkSize && input.hasNext());
         context.addRowsFiltered(nextKeys.size());
+        if (nextKeys.isEmpty())
+            return endOfData();
         return nextRangeFunction.apply(nextKeys);
     }
 

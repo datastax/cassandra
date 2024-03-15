@@ -58,6 +58,7 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
+import org.apache.cassandra.index.sai.utils.DataRangeFilterIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -164,15 +165,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private static class ResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
         private final PrimaryKey firstPrimaryKey;
-        private final Iterator<DataRange> keyRanges;
-        private AbstractBounds<PartitionPosition> currentKeyRange;
-
         private final RangeIterator operation;
         private final FilterTree filterTree;
         private final QueryController controller;
         private final ReadExecutionController executionController;
         private final QueryContext queryContext;
-        private final PrimaryKey.Factory keyFactory;
 
         private PrimaryKey lastKey;
 
@@ -182,15 +179,13 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                 ReadExecutionController executionController,
                                 QueryContext queryContext)
         {
-            this.keyRanges = controller.dataRanges().iterator();
-            this.currentKeyRange = keyRanges.next().keyRange();
-
-            this.operation = operation;
+            this.operation = new DataRangeFilterIterator(controller.dataRanges(),
+                                                         controller.primaryKeyFactory(),
+                                                         operation);
             this.filterTree = filterTree;
             this.controller = controller;
             this.executionController = executionController;
             this.queryContext = queryContext;
-            this.keyFactory = controller.primaryKeyFactory();
 
             this.firstPrimaryKey = controller.firstPrimaryKey();
         }
@@ -246,54 +241,19 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
 
         /**
-         * Returns the next available key contained by one of the keyRanges.
-         * If the next key falls out of the current key range, it skips to the next key range, and so on.
-         * If no more keys or no more ranges are available, returns null.
-         */
-        private @Nullable PrimaryKey nextKeyInRange()
-        {
-            PrimaryKey key = nextKey();
-
-            while (key != null && !(currentKeyRange.contains(key.partitionKey())))
-            {
-                if (!currentKeyRange.right.isMinimum() && currentKeyRange.right.compareTo(key.partitionKey()) <= 0)
-                {
-                    // currentKeyRange before the currentKey so need to move currentKeyRange forward
-                    currentKeyRange = nextKeyRange();
-                    if (currentKeyRange == null)
-                        return null;
-                }
-                else
-                {
-                    // the following condition may be false if currentKeyRange.left is not inclusive,
-                    // and key == currentKeyRange.left; in this case we should not try to skipTo the beginning
-                    // of the range because that would be requesting the key to go backwards
-                    // (in some implementations, skipTo can go backwards, and we don't want that)
-                    if (currentKeyRange.left.getToken().compareTo(key.token()) > 0)
-                    {
-                        // key before the current range, so let's move the key forward
-                        skipTo(currentKeyRange.left.getToken());
-                    }
-                    key = nextKey();
-                }
-            }
-            return key;
-        }
-
-        /**
          * Returns the next available key contained by one of the keyRanges and selected by the queryController.
          * If the next key falls out of the current key range, it skips to the next key range, and so on.
          * If no more keys acceptd by the controller are available, returns null.
          */
          private @Nullable PrimaryKey nextSelectedKeyInRange()
         {
-            PrimaryKey key;
-            do
+            while (operation.hasNext())
             {
-                key = nextKeyInRange();
+                PrimaryKey key = operation.next();
+                if (controller.selects(key))
+                    return key;
             }
-            while (key != null && !controller.selects(key));
-            return key;
+            return null;
         }
 
         /**
@@ -318,35 +278,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 if (!operation.peek().partitionKey().equals(partitionKey))
                     return null;
 
-                key = nextKey();
+                key = operation.next();
             }
-            while (key != null && !controller.selects(key));
+            while (!controller.selects(key));
             return key;
-        }
-
-        /**
-         * Gets the next key from the underlying operation.
-         * Returns null if there are no more keys <= lastPrimaryKey.
-         */
-        private @Nullable PrimaryKey nextKey()
-        {
-            return operation.hasNext() ? operation.next() : null;
-        }
-
-        /**
-         * Gets the next key range from the underlying range iterator.
-         */
-        private @Nullable AbstractBounds<PartitionPosition> nextKeyRange()
-        {
-            return keyRanges.hasNext() ? keyRanges.next().keyRange() : null;
-        }
-
-        /**
-         * Convenience function to skip to a given token.
-         */
-        private void skipTo(@Nonnull Token token)
-        {
-            operation.skipTo(keyFactory.createTokenOnly(token));
         }
 
         /**

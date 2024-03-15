@@ -64,6 +64,7 @@ import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.OrderingFilterRangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.DataRangeFilterIterator;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
@@ -184,7 +185,6 @@ public class QueryController
     {
         return firstPrimaryKey;
     }
-
 
     public TableMetadata metadata()
     {
@@ -486,7 +486,8 @@ public class QueryController
     {
         List<CloseableIterator<ScoredPrimaryKey>> scoredPrimaryKeyIterators = new ArrayList<>();
         List<SSTableIndex> indexesToRelease = new ArrayList<>();
-        try (var iter = new OrderingFilterRangeIterator<>(source, ORDER_CHUNK_SIZE, queryContext, list -> this.getTopKRows(list, expression)))
+        var input = new DataRangeFilterIterator(dataRanges(), primaryKeyFactory(), source);
+        try (var iter = new OrderingFilterRangeIterator<>(input, ORDER_CHUNK_SIZE, queryContext, list -> this.getTopKRows(list, expression)))
         {
             while (iter.hasNext())
             {

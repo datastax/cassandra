@@ -106,6 +106,11 @@ public class TestBaseImpl extends DistributedTestBase
         return TupleType.buildValue(bbs);
     }
 
+    protected static ByteBuffer vector(float... v)
+    {
+        return VectorType.getInstance(FloatType.instance, v.length).getSerializer().serializeFloatArray(v);
+    }
+
     protected void bootstrapAndJoinNode(Cluster cluster)
     {
         cluster.stream().forEach(node -> {
