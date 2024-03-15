@@ -131,17 +131,20 @@ public class ChunkCache
         }
     }
 
-    static class BufferFuture {
+    static class BufferFuture
+    {
         private final Key key;
         private final Buffer buffer;
         private boolean loaded;
 
-        public BufferFuture(Key key, Buffer buffer) {
+        public BufferFuture(Key key, Buffer buffer)
+        {
             this.key = key;
             this.buffer = buffer;
         }
 
-        int size() {
+        int size()
+        {
             return key.file.chunkSize();
         }
 
