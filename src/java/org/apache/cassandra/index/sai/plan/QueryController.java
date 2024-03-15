@@ -55,7 +55,6 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
-import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
