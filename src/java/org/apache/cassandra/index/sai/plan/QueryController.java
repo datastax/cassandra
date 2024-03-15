@@ -55,7 +55,6 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
-import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
@@ -153,7 +152,6 @@ public class QueryController
 
     private final PrimaryKey.Factory keyFactory;
     private final PrimaryKey firstPrimaryKey;
-    private final PrimaryKey lastPrimaryKey;
 
     public QueryController(ColumnFamilyStore cfs,
                            ReadCommand command,
@@ -176,7 +174,6 @@ public class QueryController
 
         this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
-        this.lastPrimaryKey = keyFactory.createTokenOnly(mergeRange.right.getToken());
     }
 
     public PrimaryKey.Factory primaryKeyFactory()
@@ -189,10 +186,6 @@ public class QueryController
         return firstPrimaryKey;
     }
 
-    public PrimaryKey lastPrimaryKey()
-    {
-        return lastPrimaryKey;
-    }
 
     public TableMetadata metadata()
     {
@@ -796,7 +789,7 @@ public class QueryController
         {
             SinglePartitionReadCommand cmd = (SinglePartitionReadCommand) command;
             DecoratedKey key = cmd.partitionKey();
-            return Lists.newArrayList(new DataRange(new Range<>(key, key), cmd.clusteringIndexFilter()));
+            return Lists.newArrayList(new DataRange(new Bounds<>(key, key), cmd.clusteringIndexFilter()));
         }
         else if (command instanceof PartitionRangeReadCommand)
         {

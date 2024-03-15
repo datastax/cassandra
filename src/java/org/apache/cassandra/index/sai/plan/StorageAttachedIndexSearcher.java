@@ -164,7 +164,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private static class ResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
         private final PrimaryKey firstPrimaryKey;
-        private final PrimaryKey lastPrimaryKey;
         private final Iterator<DataRange> keyRanges;
         private AbstractBounds<PartitionPosition> currentKeyRange;
 
@@ -194,7 +193,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.keyFactory = controller.primaryKeyFactory();
 
             this.firstPrimaryKey = controller.firstPrimaryKey();
-            this.lastPrimaryKey = controller.lastPrimaryKey();
         }
 
         @Override
@@ -332,18 +330,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
          */
         private @Nullable PrimaryKey nextKey()
         {
-            if (!operation.hasNext())
-                return null;
-            PrimaryKey key = operation.next();
-            return isWithinUpperBound(key) ? key : null;
-        }
-
-        /**
-         * Returns true if the key is not greater than lastPrimaryKey
-         */
-        private boolean isWithinUpperBound(PrimaryKey key)
-        {
-            return lastPrimaryKey.token().isMinimum() || lastPrimaryKey.compareTo(key) >= 0;
+            return operation.hasNext() ? operation.next() : null;
         }
 
         /**
