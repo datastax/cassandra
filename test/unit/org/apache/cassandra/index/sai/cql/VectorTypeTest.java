@@ -794,11 +794,11 @@ public class VectorTypeTest extends VectorTester
                              "SELECT similarity_cosine(['a', 'b'], ['a', 'b']) FROM %s WHERE pk=0");
 
         // different vector sizes, message could be more informative
-        assertInvalidMessage("Required 2 elements, but saw 3",
+        assertInvalidMessage("All arguments must have the same vector dimensions",
                              "SELECT similarity_cosine(value, [2, 4, 6]) FROM %s WHERE pk=0");
-        assertInvalidMessage("Type error: value cannot be passed as argument 1",
+        assertInvalidMessage("All arguments must have the same vector dimensions",
                              "SELECT similarity_cosine([1, 2, 3], value) FROM %s WHERE pk=0");
-        assertInvalidMessage("Required 2 elements, but saw 3",
+        assertInvalidMessage("All arguments must have the same vector dimensions",
                              "SELECT similarity_cosine([1, 2], [3, 4, 5]) FROM %s WHERE pk=0");
     }
 

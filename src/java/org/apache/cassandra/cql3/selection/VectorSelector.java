@@ -21,24 +21,22 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.cassandra.cql3.QueryOptions;
+import com.google.common.base.Preconditions;
+
 import org.apache.cassandra.cql3.Lists;
+import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.filter.ColumnFilter.Builder;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
 
-/**
- * <code>Selector</code> for literal list (e.g. [min(value), max(value), count(value)]).
- *
- */
-final class ListSelector extends Selector
+final class VectorSelector extends Selector
 {
     /**
-     * The list type.
+     * The vector type.
      */
-    private final AbstractType<?> type;
+    private final VectorType<?> type;
 
     /**
      * The list elements
@@ -47,6 +45,8 @@ final class ListSelector extends Selector
 
     public static Factory newFactory(final AbstractType<?> type, final SelectorFactories factories)
     {
+        assert type.isVector() : String.format("Unable to create vector selector from type %s", type.asCQL3Type());
+        VectorType<?> vt = (VectorType<?>) type;
         return new MultiElementFactory(type, factories)
         {
             protected String getColumnName()
@@ -56,7 +56,7 @@ final class ListSelector extends Selector
 
             public Selector newInstance(final QueryOptions options)
             {
-                return new ListSelector(type, factories.newInstances(options));
+                return new VectorSelector(vt, factories.newInstances(options));
             }
         };
     }
@@ -81,7 +81,7 @@ final class ListSelector extends Selector
         {
             buffers.add(elements.get(i).getOutput(protocolVersion));
         }
-        return CollectionSerializer.pack(buffers, buffers.size(), protocolVersion);
+        return type.decomposeRaw(buffers);
     }
 
     public void reset()
@@ -90,7 +90,7 @@ final class ListSelector extends Selector
             elements.get(i).reset();
     }
 
-    public AbstractType<?> getType()
+    public VectorType<?> getType()
     {
         return type;
     }
@@ -101,8 +101,12 @@ final class ListSelector extends Selector
         return Lists.listToString(elements);
     }
 
-    private ListSelector(AbstractType<?> type, List<Selector> elements)
+    private VectorSelector(VectorType<?> type, List<Selector> elements)
     {
+        Preconditions.checkArgument(elements.size() == type.dimension,
+                                    "Unable to create a vector select of type %s from %s elements",
+                                    type.asCQL3Type(),
+                                    elements.size());
         this.type = type;
         this.elements = elements;
     }

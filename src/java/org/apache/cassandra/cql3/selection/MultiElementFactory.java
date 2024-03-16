@@ -27,9 +27,9 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.schema.ColumnMetadata;
 
 /**
- * A base <code>Selector.Factory</code> for collections or tuples.
+ * A base <code>Selector.Factory</code> for collections, tuples, and vectors.
  */
-abstract class CollectionFactory extends Factory
+abstract class MultiElementFactory extends Factory
 {
     /**
      * The collection or tuple type.
@@ -41,7 +41,7 @@ abstract class CollectionFactory extends Factory
      */
     private final SelectorFactories factories;
 
-    public CollectionFactory(AbstractType<?> type, SelectorFactories factories)
+    public MultiElementFactory(AbstractType<?> type, SelectorFactories factories)
     {
         this.type = type;
         this.factories = factories;

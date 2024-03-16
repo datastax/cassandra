@@ -19,17 +19,25 @@
 package org.apache.cassandra.cql3.validation.entities;
 
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
+import java.util.List;
 
-import com.google.common.primitives.Floats;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.functions.NativeFunctions;
+import org.apache.cassandra.cql3.functions.NativeScalarFunction;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.transport.ProtocolVersion;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.assertj.core.api.Assertions;
+
+import static java.lang.String.format;
 
 public class CQLVectorTest extends CQLTester
 {
@@ -37,6 +45,99 @@ public class CQLVectorTest extends CQLTester
     public static void setupClass()
     {
         System.setProperty("cassandra.float_only_vectors", "false");
+    }
+
+    @Test
+    public void select()
+    {
+        createTable(KEYSPACE, "CREATE TABLE %s (pk vector<int, 2> primary key)");
+
+        execute("INSERT INTO %s (pk) VALUES ([1, 2])");
+
+        Vector<Integer> vector = vector(1, 2);
+        Object[] row = row(vector);
+
+        assertRows(execute("SELECT * FROM %s WHERE pk = [1, 2]"), row);
+        assertRows(execute("SELECT * FROM %s WHERE pk = ?", vector), row);
+        assertRows(execute("SELECT * FROM %s WHERE pk = [1, 1 + 1]"), row);
+        assertRows(execute("SELECT * FROM %s WHERE pk = [1, ?]", 2), row);
+        assertRows(execute("SELECT * FROM %s WHERE pk = [1, (int) ?]", 2), row);
+        assertRows(execute("SELECT * FROM %s WHERE pk = [1, 1 + (int) ?]", 1), row);
+
+        assertRows(execute("SELECT * FROM %s WHERE pk IN ([1, 2])"), row);
+        assertRows(execute("SELECT * FROM %s WHERE pk IN ([1, 2], [1, 2])"), row);
+        assertRows(execute("SELECT * FROM %s WHERE pk IN (?)", vector), row);
+        assertRows(execute("SELECT * FROM %s WHERE pk IN ([1, 1 + 1])"), row);
+        assertRows(execute("SELECT * FROM %s WHERE pk IN ([1, ?])", 2), row);
+        assertRows(execute("SELECT * FROM %s WHERE pk IN ([1, (int) ?])", 2), row);
+        assertRows(execute("SELECT * FROM %s WHERE pk IN ([1, 1 + (int) ?])", 1), row);
+
+        assertRows(execute("SELECT * FROM %s WHERE pk > [0, 0] AND pk < [1, 3] ALLOW FILTERING"), row);
+        assertRows(execute("SELECT * FROM %s WHERE token(pk) = token([1, 2])"), row);
+
+        assertRows(execute("SELECT * FROM %s"), row);
+        Assertions.assertThat(execute("SELECT * FROM %s").one().getVector("pk", Int32Type.instance, 2))
+                  .isEqualTo(vector);
+    }
+
+    @Test
+    public void insert()
+    {
+        Runnable test = () -> {
+            assertRows(execute("SELECT * FROM %s"), row(list(1, 2)));
+            execute("TRUNCATE %s");
+            assertRows(execute("SELECT * FROM %s"));
+        };
+
+        createTable(KEYSPACE, "CREATE TABLE %s (pk vector<int, 2> primary key)");
+
+        execute("INSERT INTO %s (pk) VALUES ([1, 2])");
+        test.run();
+
+        execute("INSERT INTO %s (pk) VALUES (?)", vector(1, 2));
+        test.run();
+
+        execute("INSERT INTO %s (pk) VALUES ([1, 1 + 1])");
+        test.run();
+
+        execute("INSERT INTO %s (pk) VALUES ([1, ?])", 2);
+        test.run();
+
+        execute("INSERT INTO %s (pk) VALUES ([1, (int) ?])", 2);
+        test.run();
+
+        execute("INSERT INTO %s (pk) VALUES ([1, 1 + (int) ?])", 1);
+        test.run();
+    }
+
+    @Test
+    public void insertNonPK()
+    {
+        Runnable test = () -> {
+            assertRows(execute("SELECT * FROM %s"), row(0, list(1, 2)));
+            execute("TRUNCATE %s");
+            assertRows(execute("SELECT * FROM %s"));
+        };
+
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<int, 2>)");
+
+        execute("INSERT INTO %s (pk, value) VALUES (0, [1, 2])");
+        test.run();
+
+        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector(1, 2));
+        test.run();
+
+        execute("INSERT INTO %s (pk, value) VALUES (0, [1, 1 + 1])");
+        test.run();
+
+        execute("INSERT INTO %s (pk, value) VALUES (0, [1, ?])", 2);
+        test.run();
+
+        execute("INSERT INTO %s (pk, value) VALUES (0, [1, (int) ?])", 2);
+        test.run();
+
+        execute("INSERT INTO %s (pk, value) VALUES (0, [1, 1 + (int) ?])", 1);
+        test.run();
     }
 
     @Test
@@ -81,6 +182,19 @@ public class CQLVectorTest extends CQLTester
         assertInvalidThrowMessage("Unexpected 2 extraneous bytes after vector<text, 2> value",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, ?)", vector("a", "b", "c"));
+    }
+
+    @Test
+    public void sandwichBetweenUDTs()
+    {
+        createType("CREATE TYPE cql_test_keyspace.b (y int);");
+        createType("CREATE TYPE cql_test_keyspace.a (z vector<frozen<b>, 2>);");
+
+        createTable("CREATE TABLE %s (pk int primary key, value a)");
+
+        execute("INSERT INTO %s (pk, value) VALUES (0, {z: [{y:1}, {y:2}]})");
+        assertRows(execute("SELECT * FROM %s"),
+                   row(0, userType("z", vector(userType("y", 1), userType("y", 2)))));
     }
 
     @Test
@@ -129,126 +243,198 @@ public class CQLVectorTest extends CQLTester
     }
 
     @Test
-    public void randomVectorFunction() throws Throwable
+    public void update()
     {
-        createTable("CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
+        Runnable test = () -> {
+            assertRows(execute("SELECT * FROM %s"), row(0, list(1, 2)));
+            execute("TRUNCATE %s");
+            assertRows(execute("SELECT * FROM %s"));
+        };
 
-        // correct usage
-        execute("INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1, 1))");
-        Assert.assertEquals(1, execute("SELECT value FROM %s WHERE pk = 0").size());
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<int, 2>)");
 
-        // wrong number of arguments
-        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(literal_int, float, float)",
-                                  InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector())");
-        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(literal_int, float, float)",
-                                  InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1))");
-        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(literal_int, float, float)",
-                                  InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1, 1, 0))");
+        execute("UPDATE %s set VALUE = [1, 2] WHERE pk = 0");
+        test.run();
 
-        // mandatory arguments
-        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
-                                  "but found NULL",
-                                  InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(null, null, null))");
-        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
-                                  "but found NULL",
-                                  InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(null, -1, 1))");
-        assertInvalidThrowMessage("Min argument of function system.random_float_vector(literal_int, float, float) must not be null",
-                                  InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, null, null))");
-        assertInvalidThrowMessage("Max argument of function system.random_float_vector(literal_int, float, float) must not be null",
-                                  InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1, null))");
-        assertInvalidThrowMessage("Min argument of function system.random_float_vector(literal_int, float, float) must not be null",
-                                  InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, null, 1))");
+        execute("UPDATE %s set VALUE = ? WHERE pk = 0", vector(1, 2));
+        test.run();
 
-        // wrong argument types
-        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
-                                  "but found 'a'",
-                                  InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector('a', -1, 1))");
-        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
-                                  "but found system.\"_add\"(1, 1)",
-                                  InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(1 + 1, -1, 1))");
-        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
-                                  "but found value",
-                                  InvalidRequestException.class,
-                                  "SELECT random_float_vector(value, -1, 1) FROM %s");
-        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
-                                  "but found 1 + 1",
-                                  InvalidRequestException.class,
-                                  "SELECT random_float_vector(1 + 1, -1, 1) FROM %s");
+        execute("UPDATE %s set VALUE = [1, 1 + 1] WHERE pk = 0");
+        test.run();
 
-        // wrong argument values
-        assertInvalidThrowMessage("Max value must be greater than min value",
-                                  InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, 1, -1))");
+        execute("UPDATE %s set VALUE = [1, ?] WHERE pk = 0", 2);
+        test.run();
 
-        // correct function with wrong receiver type
-        assertInvalidThrowMessage("Type error: cannot assign result of function system.random_float_vector " +
-                                  "(type vector<float, 1>) to value (type vector<float, 2>)",
-                                  InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(1, -1, 1))");
+        execute("UPDATE %s set VALUE = [1, (int) ?] WHERE pk = 0", 2);
+        test.run();
 
-        // test select
-        for (int dimension : new int[]{ 1, 2, 3, 10, 1000 })
-        {
-            assertSelectRandomVectorFunction(dimension, -1, 1);
-            assertSelectRandomVectorFunction(dimension, 0, 1);
-            assertSelectRandomVectorFunction(dimension, -1.5f, 1.5f);
-            assertSelectRandomVectorFunction(dimension, 0.999999f, 1);
-            assertSelectRandomVectorFunction(dimension, 0, 0.000001f);
-            assertSelectRandomVectorFunction(dimension, Float.MIN_VALUE, Float.MAX_VALUE);
-        }
-    }
-
-    private void assertSelectRandomVectorFunction(int dimension, float min, float max)
-    {
-        String functionCall = String.format("random_float_vector(%d, %f, %f)", dimension, min, max);
-        String select = "SELECT " + functionCall + " FROM %s";
-
-        for (int i = 0; i < 100; i++)
-        {
-            UntypedResultSet rs = execute(select);
-            Assertions.assertThat(rs).isNotEmpty();
-            Assertions.assertThat(rs.one().getVector("system." + functionCall, FloatType.instance, dimension))
-                      .hasSize(dimension)
-                      .allSatisfy(v -> Assertions.assertThat(v).isBetween(min, max));
-        }
+        execute("UPDATE %s set VALUE = [1, 1 + (int) ?] WHERE pk = 0", 1);
+        test.run();
     }
 
     @Test
-    public void normalizeL2Function() throws Throwable
+    public void nullValues()
     {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>)");
-
-        float[] components = new float[]{3.0f, 4.0f};
-        execute("INSERT INTO %s (k, v) VALUES (0, ?)", floatVector(components));
-
-        assertRows(execute("SELECT normalize_l2(v) FROM %s"), row(floatVector(0.6f, 0.8f)));
-        assertRows(execute("SELECT k, normalize_l2((vector<float, 2>) null) FROM %s"), row(0, null));
-
-        assertInvalidThrowMessage("Invalid number of arguments for function system.normalize_l2(vector<float, n>)",
-                                  InvalidRequestException.class,
-                                  "SELECT normalize_l2() FROM %s");
-        assertInvalidThrowMessage("Invalid number of arguments for function system.normalize_l2(vector<float, n>)",
-                                  InvalidRequestException.class,
-                                  "SELECT normalize_l2(v, 1) FROM %s");
-        assertInvalidThrowMessage("Function system.normalize_l2(vector<float, n>) requires a float vector argument, " +
-                                  "but found argument 123 of type int",
-                                  InvalidRequestException.class,
-                                  "SELECT normalize_l2(123) FROM %s");
+        assertAcceptsNullValues("int"); // fixed length
+        assertAcceptsNullValues("float"); // fixed length with special/optimized treatment
+        assertAcceptsNullValues("text"); // variable length
     }
 
-    protected final Vector<Float> floatVector(float... values)
+    private void assertAcceptsNullValues(String type)
     {
-        return new Vector<>(Floats.asList(values).toArray(new Float[values.length]));
+        createTable(format("CREATE TABLE %%s (k int primary key, v vector<%s, 2>)", type));
+
+        execute("INSERT INTO %s (k, v) VALUES (0, null)");
+        assertRows(execute("SELECT * FROM %s"), row(0, null));
+
+        execute("INSERT INTO %s (k, v) VALUES (0, ?)", (List<Integer>) null);
+        assertRows(execute("SELECT * FROM %s"), row(0, null));
+    }
+
+    @Test
+    public void emptyValues() throws Throwable
+    {
+        assertRejectsEmptyValues("int"); // fixed length
+        assertRejectsEmptyValues("float"); // fixed length with special/optimized treatment
+        assertRejectsEmptyValues("text"); // variable length
+    }
+
+    private void assertRejectsEmptyValues(String type) throws Throwable
+    {
+        createTable(format("CREATE TABLE %%s (k int primary key, v vector<%s, 2>)", type));
+
+        assertInvalidThrowMessage(format("Invalid HEX constant (0x) for \"v\" of type vector<%s, 2>", type),
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (k, v) VALUES (0, 0x)");
+
+        assertInvalidThrowMessage("Invalid empty vector value",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (k, v) VALUES (0, ?)",
+                                  ByteBufferUtil.EMPTY_BYTE_BUFFER);
+    }
+
+    @Test
+    public void functions()
+    {
+        VectorType<Integer> type = VectorType.getInstance(Int32Type.instance, 2);
+        Vector<Integer> vector = vector(1, 2);
+
+        NativeFunctions.instance.add(new NativeScalarFunction("f", type, type)
+        {
+            @Override
+            public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters) throws InvalidRequestException
+            {
+                return parameters.get(0);
+            }
+        });
+
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<int, 2>)");
+        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector);
+
+        assertRows(execute("SELECT f(value) FROM %s WHERE pk=0"), row(vector));
+        assertRows(execute("SELECT f([1, 2]) FROM %s WHERE pk=0"), row(vector));
+    }
+
+    @Test
+    public void specializedFunctions()
+    {
+        VectorType<Float> type = VectorType.getInstance(FloatType.instance, 2);
+        Vector<Float> vector = vector(1.0f, 2.0f);
+
+        NativeFunctions.instance.add(new NativeScalarFunction("f", type, type, type)
+        {
+            @Override
+            public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters) throws InvalidRequestException
+            {
+                float[] left = type.composeAsFloat(parameters.get(0));
+                float[] right = type.composeAsFloat(parameters.get(1));
+                int size = Math.min(left.length, right.length);
+                float[] sum = new float[size];
+                for (int i = 0; i < size; i++)
+                    sum[i] = left[i] + right[i];
+                return type.getSerializer().serializeFloatArray(sum);
+            }
+        });
+
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
+        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector);
+        execute("INSERT INTO %s (pk, value) VALUES (1, ?)", vector);
+
+        Object[][] expected = { row(vector(2f, 4f)), row(vector(2f, 4f)) };
+        assertRows(execute("SELECT f(value, [1.0, 2.0]) FROM %s"), expected);
+        assertRows(execute("SELECT f([1.0, 2.0], value) FROM %s"), expected);
+    }
+
+    @Test
+    public void token()
+    {
+        createTable(KEYSPACE, "CREATE TABLE %s (pk vector<int, 2> primary key)");
+        execute("INSERT INTO %s (pk) VALUES (?)", vector(1, 2));
+        long tokenColumn = execute("SELECT token(pk) as t FROM %s").one().getLong("t");
+        long tokenTerminal = execute("SELECT token([1, 2]) as t FROM %s").one().getLong("t");
+        Assert.assertEquals(tokenColumn, tokenTerminal);
+    }
+
+    @Test
+    public void udf() throws Throwable
+    {
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<int, 2>)");
+        Vector<Integer> vector = vector(1, 2);
+        execute("INSERT INTO %s (pk, value) VALUES (0, ?)", vector);
+
+        // identity function
+        String f = createFunction(KEYSPACE,
+                                  "",
+                                  "CREATE FUNCTION %s (x vector<int, 2>) " +
+                                  "CALLED ON NULL INPUT " +
+                                  "RETURNS vector<int, 2> " +
+                                  "LANGUAGE java " +
+                                  "AS 'return x;'");
+        assertRows(execute(format("SELECT %s(value) FROM %%s", f)), row(vector));
+        assertRows(execute(format("SELECT %s([2, 3]) FROM %%s", f)), row(vector(2, 3)));
+        assertRows(execute(format("SELECT %s(null) FROM %%s", f)), row((Vector<Integer>) null));
+
+        // identitiy function with nested type
+        f = createFunction(KEYSPACE,
+                           "",
+                           "CREATE FUNCTION %s (x list<vector<int, 2>>) " +
+                           "CALLED ON NULL INPUT " +
+                           "RETURNS list<vector<int, 2>> " +
+                           "LANGUAGE java " +
+                           "AS 'return x;'");
+        assertRows(execute(format("SELECT %s([value]) FROM %%s", f)), row(list(vector)));
+        assertRows(execute(format("SELECT %s([[2, 3]]) FROM %%s", f)), row(list(vector(2, 3))));
+        assertRows(execute(format("SELECT %s(null) FROM %%s", f)), row((Vector<Integer>) null));
+
+        // identitiy function with elements of variable length
+        f = createFunction(KEYSPACE,
+                           "",
+                           "CREATE FUNCTION %s (x vector<text, 2>) " +
+                           "CALLED ON NULL INPUT " +
+                           "RETURNS vector<text, 2> " +
+                           "LANGUAGE java " +
+                           "AS 'return x;'");
+        assertRows(execute(format("SELECT %s(['abc', 'defghij']) FROM %%s", f)), row(vector("abc", "defghij")));
+        assertRows(execute(format("SELECT %s(null) FROM %%s", f)), row((Vector<Integer>) null));
+
+        // Test wrong types on function creation
+        assertInvalidThrowMessage("vectors may only have positive dimensions; given 0",
+                                  InvalidRequestException.class,
+                                  "CREATE FUNCTION %s (x vector<int, 0>) " +
+                                  "CALLED ON NULL INPUT " +
+                                  "RETURNS vector<int, 2> " +
+                                  "LANGUAGE java " +
+                                  "AS 'return x;'");
+        assertInvalidThrowMessage("vectors may only have positive dimensions; given 0",
+                                  InvalidRequestException.class,
+                                  "CREATE FUNCTION %s (x vector<int, 2>) " +
+                                  "CALLED ON NULL INPUT " +
+                                  "RETURNS vector<int, 0> " +
+                                  "LANGUAGE java " +
+                                  "AS 'return x;'");
+
+        // make sure the function referencing the UDT is dropped before dropping the UDT at cleanup
+        execute("DROP FUNCTION " + f);
     }
 
     @SafeVarargs

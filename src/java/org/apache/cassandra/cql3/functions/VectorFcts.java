@@ -39,18 +39,20 @@ public abstract class VectorFcts
 {
     public static void addFunctionsTo(NativeFunctions functions)
     {
-        functions.add(similarity_function("similarity_cosine", VectorSimilarityFunction.COSINE));
-        functions.add(similarity_function("similarity_euclidean", VectorSimilarityFunction.EUCLIDEAN));
-        functions.add(similarity_function("similarity_dot_product", VectorSimilarityFunction.DOT_PRODUCT));
+        functions.add(similarity_function("similarity_cosine", VectorSimilarityFunction.COSINE, false));
+        functions.add(similarity_function("similarity_euclidean", VectorSimilarityFunction.EUCLIDEAN, true));
+        functions.add(similarity_function("similarity_dot_product", VectorSimilarityFunction.DOT_PRODUCT, true));
         functions.add(new RandomFloatVectorFunctionFactory());
         functions.add(new NormalizeL2FunctionFactory());
     }
 
-    private static FunctionFactory similarity_function(String name, VectorSimilarityFunction f)
+    private static FunctionFactory similarity_function(String name,
+                                                       VectorSimilarityFunction f,
+                                                       boolean supportsZeroVectors)
     {
         return new FunctionFactory(name,
-                                   FunctionParameter.sameAs(1, FunctionParameter.vector(CQL3Type.Native.FLOAT)),
-                                   FunctionParameter.sameAs(0, FunctionParameter.vector(CQL3Type.Native.FLOAT)))
+                                   FunctionParameter.sameAs(1, false, FunctionParameter.vector(CQL3Type.Native.FLOAT)),
+                                   FunctionParameter.sameAs(0, false, FunctionParameter.vector(CQL3Type.Native.FLOAT)))
         {
             @Override
             @SuppressWarnings("unchecked")
@@ -63,21 +65,42 @@ public abstract class VectorFcts
                 int dimensions = firstArgType.dimension;
                 if (!argTypes.stream().allMatch(t -> ((VectorType<?>) t).dimension == dimensions))
                     throw new InvalidRequestException("All arguments must have the same vector dimensions");
-                return createSimilarityFunction(name.name, firstArgType, f);
+                return createSimilarityFunction(name.name, firstArgType, f, supportsZeroVectors);
             }
         };
     }
 
-    private static NativeFunction createSimilarityFunction(String name, VectorType<Float> type, VectorSimilarityFunction f)
+    private static NativeFunction createSimilarityFunction(String name,
+                                                           VectorType<Float> type,
+                                                           VectorSimilarityFunction f,
+                                                           boolean supportsZeroVectors)
     {
         return new NativeScalarFunction(name, FloatType.instance, type, type)
         {
             @Override
             public ByteBuffer execute(ProtocolVersion protocolVersion, List<ByteBuffer> parameters) throws InvalidRequestException
             {
+                if (parameters.get(0) == null || parameters.get(1) == null)
+                    return null;
+
                 var v1 = type.getSerializer().deserializeFloatArray(parameters.get(0));
                 var v2 = type.getSerializer().deserializeFloatArray(parameters.get(1));
+
+                if (!supportsZeroVectors)
+                {
+                    if (isAllZero(v1) || isAllZero(v2))
+                        throw new InvalidRequestException("Function " + name + " doesn't support all-zero vectors.");
+                }
+
                 return FloatType.instance.decompose(f.compare(v1, v2));
+            }
+
+            private boolean isAllZero(float[] v)
+            {
+                for (float f : v)
+                    if (f != 0)
+                        return false;
+                return true;
             }
         };
     }
