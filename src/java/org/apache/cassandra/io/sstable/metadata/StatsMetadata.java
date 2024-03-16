@@ -42,11 +42,9 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.io.ISerializer;
-import org.apache.cassandra.io.sstable.UnsupportedSSTableException;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.serializers.AbstractTypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.EstimatedHistogram;
@@ -102,6 +100,8 @@ public class StatsMetadata extends MetadataComponent
 
     private final ImmutableMap<ByteBuffer, Integer> maxColumnValueLengths;
 
+    public final ZeroCopyMetadata zeroCopyMetadata;
+
     public StatsMetadata(EstimatedHistogram estimatedPartitionSize,
                          EstimatedHistogram estimatedCellPerPartitionCount,
                          IntervalSet<CommitLogPosition> commitLogIntervals,
@@ -125,7 +125,8 @@ public class StatsMetadata extends MetadataComponent
                          UUID originatingHostId,
                          UUID pendingRepair,
                          boolean isTransient,
-                         Map<ByteBuffer, Integer> maxColumnValueLengths)
+                         Map<ByteBuffer, Integer> maxColumnValueLengths,
+                         ZeroCopyMetadata zeroCopyMetadata)
     {
         this.estimatedPartitionSize = estimatedPartitionSize;
         this.estimatedCellPerPartitionCount = estimatedCellPerPartitionCount;
@@ -152,6 +153,7 @@ public class StatsMetadata extends MetadataComponent
         this.isTransient = isTransient;
         this.encodingStats = new EncodingStats(minTimestamp, minLocalDeletionTime, minTTL);
         this.maxColumnValueLengths = ImmutableMap.copyOf(maxColumnValueLengths);
+        this.zeroCopyMetadata = zeroCopyMetadata;
     }
 
     public MetadataType getType()
@@ -208,7 +210,8 @@ public class StatsMetadata extends MetadataComponent
                                  originatingHostId,
                                  pendingRepair,
                                  isTransient,
-                                 maxColumnValueLengths);
+                                 maxColumnValueLengths,
+                                 zeroCopyMetadata);
     }
 
     public StatsMetadata mutateRepairedMetadata(long newRepairedAt, UUID newPendingRepair, boolean newIsTransient)
@@ -236,7 +239,8 @@ public class StatsMetadata extends MetadataComponent
                                  originatingHostId,
                                  newPendingRepair,
                                  newIsTransient,
-                                 maxColumnValueLengths);
+                                 maxColumnValueLengths,
+                                 zeroCopyMetadata);
     }
 
     @Override
@@ -269,6 +273,7 @@ public class StatsMetadata extends MetadataComponent
                        .append(originatingHostId, that.originatingHostId)
                        .append(pendingRepair, that.pendingRepair)
                        .append(maxColumnValueLengths, that.maxColumnValueLengths)
+                       .append(zeroCopyMetadata, that.zeroCopyMetadata)
                        .build();
     }
 
@@ -298,6 +303,7 @@ public class StatsMetadata extends MetadataComponent
                        .append(originatingHostId)
                        .append(pendingRepair)
                        .append(maxColumnValueLengths)
+                       .append(zeroCopyMetadata)
                        .build();
     }
 
@@ -351,10 +357,12 @@ public class StatsMetadata extends MetadataComponent
                     size += UUIDSerializer.serializer.serializedSize(component.pendingRepair, 0);
             }
 
-            // we do not have zero copy metadata
+            // we do not have zero copy metadata, but we need to support loading such sstables
             if (version.hasZeroCopyMetadata())
             {
                 size += 1;
+                if (component.zeroCopyMetadata.exists())
+                    size += ZeroCopyMetadata.serializer.serializedSize(component.zeroCopyMetadata);
             }
 
             // we do not have node sync metadata
@@ -461,10 +469,18 @@ public class StatsMetadata extends MetadataComponent
                 }
             }
 
-            // we do not have zero copy metadata
+            // we do not produce such sstables, but we need to be able to rewrite the metadata
             if (version.hasZeroCopyMetadata())
             {
-                out.writeByte(0);
+                if (component.zeroCopyMetadata != null && component.zeroCopyMetadata.exists())
+                {
+                    out.writeByte(1);
+                    ZeroCopyMetadata.serializer.serialize(component.zeroCopyMetadata, out);
+                }
+                else
+                {
+                    out.writeByte(0);
+                }
             }
 
             // we do not have node sync metadata
@@ -594,13 +610,10 @@ public class StatsMetadata extends MetadataComponent
                 pendingRepair = UUIDSerializer.serializer.deserialize(in, 0);
             }
 
+            ZeroCopyMetadata zeroCopyMetadata = ZeroCopyMetadata.EMPTY;
             if (version.hasZeroCopyMetadata() && in.readByte() != 0)
             {
-                throw new UnsupportedSSTableException(String.format("Found DSE zero copy metadata in %s. " +
-                                                                    "Files copied over using partial zero-copy " +
-                                                                    "streaming in DSE are not currently supported.", in),
-                                                      null,
-                                                      in instanceof FileDataInput ? ((FileDataInput) in).getFile() : null);
+                zeroCopyMetadata = ZeroCopyMetadata.serializer.deserialize(in);
             }
 
             if (version.hasIncrementalNodeSyncMetadata())
@@ -666,7 +679,8 @@ public class StatsMetadata extends MetadataComponent
                                      originatingHostId,
                                      pendingRepair,
                                      isTransient,
-                                     maxColumnValueLengths);
+                                     maxColumnValueLengths,
+                                     zeroCopyMetadata);
         }
 
         private int countUntilNull(ByteBuffer[] bufferArray)
