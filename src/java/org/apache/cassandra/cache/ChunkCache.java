@@ -225,7 +225,15 @@ public class ChunkCache
     {
         ByteBuffer buffer = bufferPool.get(key.file.chunkSize(), key.file.preferredBufferType());
         assert buffer != null;
-        key.file.readChunk(key.position, buffer);
+        try
+        {
+            key.file.readChunk(key.position, buffer);
+        }
+        catch (RuntimeException t)
+        {
+            bufferPool.put(buffer);
+            throw t;
+        }
         // Complete addition within compute remapping function to ensure there is no race condition with removal.
         keysByFile.compute(key.internedPath, (k, v) -> {
             if (v == null)
@@ -335,22 +343,27 @@ public class ChunkCache
                     CompletableFuture<Buffer> cachedValue = cache.getIfPresent(chunkKey);
                     if (cachedValue == null)
                     {
-                        // this blocking read might compete with an another read, but the race is benign (under the assumption that caching is valid)
                         CompletableFuture<Buffer> entry = new CompletableFuture<>();
-                        // Put the future in the cache first so the window of racing (and loading the same chunk twice) is small
-                        cache.put(chunkKey, entry);
-
-                        try
+                        CompletableFuture<Buffer> existing = cache.asMap().putIfAbsent(chunkKey, entry);
+                        if (existing == null)
                         {
-                            chunk = load(chunkKey);
+                            try
+                            {
+                                chunk = load(chunkKey);
+                            }
+                            catch (Throwable t)
+                            {
+                                cache.asMap().remove(chunkKey, entry);
+                                // also signal other waiting readers
+                                entry.completeExceptionally(t);
+                                throw t;
+                            }
+                            entry.complete(chunk);
                         }
-                        catch (Throwable t)
+                        else
                         {
-                            // also signal other waiting readers
-                            entry.completeExceptionally(t);
-                            throw t;
+                            chunk = existing.join();
                         }
-                        entry.complete(chunk);
                     }
                     else
                     {
@@ -361,8 +374,15 @@ public class ChunkCache
                     if (buf != null)
                         return buf;
 
-                    if (++spin == 1024)
-                        logger.error("Spinning for {}", chunkKey);
+                    if (++spin == 1000)
+                    {
+                        String msg = String.format("Could not acquire a reference to for %s after 1000 attempts. " +
+                                                   "This is likely due to the chunk cache being too small for the " +
+                                                   "number of concurrently running requests.", chunkKey);
+                        throw new RuntimeException(msg);
+                        // Note: this might also be caused by reference counting errors, especially double release of
+                        // chunks.
+                    }
                 }
             }
             catch (Throwable t)
