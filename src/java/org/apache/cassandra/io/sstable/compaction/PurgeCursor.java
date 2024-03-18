@@ -74,7 +74,7 @@ public class PurgeCursor implements SSTableCursor, DeletionPurger
     public boolean shouldPurge(long timestamp, long localDeletionTime)
     {
         return purgeTombstones
-               && localDeletionTime < gcBefore
+               && (localDeletionTime < gcBefore || controller.realm.shouldIgnoreGcGraceForKey(partitionKey()))
                && getPurgeEvaluator().test(timestamp);
     }
 
