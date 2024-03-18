@@ -24,7 +24,9 @@ import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -74,6 +76,7 @@ public class ChunkCache
     private final NonBlockingIdentityHashMap<String, NonBlockingHashSet<Key>> keysByFile;
     private final AsyncCache<Key, Buffer> cache;
     private final Cache<Key, Buffer> synchronousCache;
+    private final ConcurrentMap<Key, CompletableFuture<Buffer>> cacheAsMap;
     private final long cacheSize;
     public final ChunkCacheMetrics metrics;
 
@@ -218,6 +221,7 @@ public class ChunkCache
                         .recordStats(() -> metrics)
                         .buildAsync();
         synchronousCache = cache.synchronous();
+        cacheAsMap = cache.asMap();
     }
 
 
@@ -344,7 +348,7 @@ public class ChunkCache
                     if (cachedValue == null)
                     {
                         CompletableFuture<Buffer> entry = new CompletableFuture<>();
-                        CompletableFuture<Buffer> existing = cache.asMap().putIfAbsent(chunkKey, entry);
+                        CompletableFuture<Buffer> existing = cacheAsMap.putIfAbsent(chunkKey, entry);
                         if (existing == null)
                         {
                             try
@@ -353,7 +357,9 @@ public class ChunkCache
                             }
                             catch (Throwable t)
                             {
-                                cache.asMap().remove(chunkKey, entry);
+                                // please note that we don't need to remove the entry from the cache here
+                                // because Caffeine automatically removes entries that complete exceptionally
+
                                 // also signal other waiting readers
                                 entry.completeExceptionally(t);
                                 throw t;
@@ -473,6 +479,6 @@ public class ChunkCache
     @VisibleForTesting
     public int sizeOfFile(String filePath) {
         var internedPath = filePath.intern();
-        return (int) cache.asMap().keySet().stream().filter(x -> x.internedPath == internedPath).count();
+        return (int) cacheAsMap.keySet().stream().filter(x -> x.internedPath == internedPath).count();
     }
 }

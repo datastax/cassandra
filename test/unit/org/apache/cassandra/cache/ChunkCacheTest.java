@@ -497,4 +497,68 @@ public class ChunkCacheTest
 
         assertEquals(chunkCache.size(), 0);
     }
+
+    @Test
+    public void tstDontCacheErroredReads() throws Exception
+    {
+        BufferPool pool = mock(BufferPool.class);
+        CopyOnWriteArrayList<ByteBuffer> allocated = new CopyOnWriteArrayList<>();
+        when(pool.get(anyInt(), any(BufferType.class))).thenAnswer(invocation -> {
+            int size = invocation.getArgument(0);
+            ByteBuffer buffer = ByteBuffer.allocate(size);
+            allocated.add(buffer);
+            return buffer;
+        });
+
+        doAnswer(invocation -> {
+            ByteBuffer buffer = invocation.getArgument(0);
+            allocated.remove(buffer);
+            return true;
+        }).when(pool).put(any(ByteBuffer.class));
+
+        ChunkCache chunkCache = new ChunkCache(pool, 512, ChunkCacheMetrics::create);
+        assertEquals(chunkCache.size(), 0);
+        int fileSize = 64;
+        File file1 = FileUtils.createTempFile("foo1", ".tmp");
+        try (MockFileControl mockFileControl1 = new MockFileControl(file1, fileSize, chunkCache);
+             MockFileControl mockFileControl2 = new MockFileControl(file1, fileSize, chunkCache);)
+        {
+
+            mockFileControl1.createFile();
+
+            RandomAccessReader r1 = mockFileControl1.openReader();
+            RandomAccessReader r2 = mockFileControl2.openReader();
+
+            // start 2 threads that will try to read from the same file, the same chunk
+            // they are racing to cache the chunk
+            CompletableFuture<?> thread1 = CompletableFuture.runAsync(r1::reBuffer);
+
+            Awaitility.await().until(() -> mockFileControl1.reading);
+            assertEquals(allocated.size(), 1);
+
+            // in this case thread1 errors before thread2 starts to read
+            RuntimeException error = new RuntimeException("some weird runtime error");
+            mockFileControl1.waitOnRead.completeExceptionally(error);
+            assertSame(error, assertThrows(CompletionException.class, thread1::join).getCause());
+
+            // assert that we didn't leak the buffer
+            assertEquals(allocated.size(), 0);
+            assertEquals(chunkCache.size(), 0);
+
+            // assert that the cache didn't cache the CompletableFuture that completed exceptionally the first time
+            CompletableFuture<?> thread2 = CompletableFuture.runAsync(r2::reBuffer);
+            mockFileControl2.waitOnRead.complete(null);
+            // threads2 completes without error
+            thread2.join();
+            // assert that we have only 1 buffer allocated
+            assertEquals(allocated.size(), 1);
+            assertEquals(chunkCache.size(), 1);
+
+            assertTrue(mockFileControl1.waitOnRead.isDone());
+            // assert that thread2 performed the read
+            assertTrue(mockFileControl2.waitOnRead.isDone());
+        }
+
+        assertEquals(chunkCache.size(), 0);
+    }
 }
