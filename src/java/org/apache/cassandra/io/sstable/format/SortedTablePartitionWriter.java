@@ -26,6 +26,7 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
@@ -161,6 +162,8 @@ public abstract class SortedTablePartitionWriter implements AutoCloseable
 
     protected long finish() throws IOException
     {
+        if (state == State.AWAITING_STATIC_ROW)
+            addStaticRow(Rows.EMPTY_STATIC_ROW);
         checkState(state == State.AWAITING_ROWS);
 
         state = State.COMPLETED;
