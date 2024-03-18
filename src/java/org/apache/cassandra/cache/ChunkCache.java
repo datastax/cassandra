@@ -329,14 +329,14 @@ public class ChunkCache
             try
             {
                 long pageAlignedPos = position & alignmentMask;
-                BufferHolder buf;
+                BufferHolder buf = null;
                 Key chunkKey = new Key(source, internedPath, pageAlignedPos);
 
                 int spin = 0;
                 //There is a small window when a released buffer/invalidated chunk
                 //is still in the cache. In this case it will return null
                 //so we spin loop while waiting for the cache to re-populate
-                while (true)
+                while (buf == null)
                 {
                     Buffer chunk;
                     // Using cache.get(k, compute) results in lots of allocation, rather risk the unlikely race...
@@ -371,10 +371,8 @@ public class ChunkCache
                     }
 
                     buf = chunk.reference();
-                    if (buf != null)
-                        return buf;
 
-                    if (++spin == 1000)
+                    if (buf == null && ++spin == 1000)
                     {
                         String msg = String.format("Could not acquire a reference to for %s after 1000 attempts. " +
                                                    "This is likely due to the chunk cache being too small for the " +
@@ -384,6 +382,7 @@ public class ChunkCache
                         // chunks.
                     }
                 }
+                return buf;
             }
             catch (Throwable t)
             {
