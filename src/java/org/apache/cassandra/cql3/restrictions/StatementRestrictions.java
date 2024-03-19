@@ -473,7 +473,7 @@ public class StatementRestrictions
                 // If partition key restrictions exist and this is a disjunction then we may need filtering
                 if (partitionKeyRestrictions.needFiltering(table) || (!partitionKeyRestrictions.isEmpty() && element.isDisjunction()))
                 {
-                    if (!allowFiltering && !forView && !hasQueriableIndex)
+                    if (!allowFiltering && !forView && !hasQueriableIndex && requiresAllowFilteringIfNotSpecified(table))
                         throw new InvalidRequestException(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
 
                     isKeyRange = true;
@@ -728,7 +728,8 @@ public class StatementRestrictions
         Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table);
         if (unsupported.isEmpty())
         {
-            throw invalidRequest(allowFilteringMessage(state));
+            if (requiresAllowFilteringIfNotSpecified(table))
+                throw invalidRequest(allowFilteringMessage(state));
         }
         else
         {
