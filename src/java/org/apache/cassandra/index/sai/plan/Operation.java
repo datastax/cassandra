@@ -425,7 +425,7 @@ public class Operation
         @Override
         public void analyze(QueryController controller)
         {
-            expressionMap = analyzeGroup(controller, OperationType.AND, List.of(expression));
+            expressionMap = analyzeGroup(controller, OperationType.AND, Collections.singletonList(expression));
         }
 
         @Override
