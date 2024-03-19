@@ -388,21 +388,6 @@ public class Operation
         }
     }
 
-    public static class OrNode extends OperatorNode
-    {
-        @Override
-        protected OperationType operationType()
-        {
-            return OperationType.OR;
-        }
-
-        @Override
-        protected Plan.Builder planBuilder(QueryController controller)
-        {
-            return controller.planFactory.unionBuilder();
-        }
-    }
-
     public static class AndNode extends OperatorNode
     {
         @Override
@@ -415,6 +400,21 @@ public class Operation
         protected Plan.Builder planBuilder(QueryController controller)
         {
             return controller.planFactory.intersectionBuilder();
+        }
+    }
+
+    public static class OrNode extends OperatorNode
+    {
+        @Override
+        protected OperationType operationType()
+        {
+            return OperationType.OR;
+        }
+
+        @Override
+        protected Plan.Builder planBuilder(QueryController controller)
+        {
+            return controller.planFactory.unionBuilder();
         }
     }
 
