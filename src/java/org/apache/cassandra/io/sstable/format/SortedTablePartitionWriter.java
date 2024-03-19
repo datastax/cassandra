@@ -134,6 +134,17 @@ public abstract class SortedTablePartitionWriter implements AutoCloseable
 
     public void addUnfiltered(Unfiltered unfiltered) throws IOException
     {
+        if (state == State.AWAITING_STATIC_ROW)
+        {
+            if (unfiltered.isRow() && ((Row) unfiltered).isStatic())
+            {
+                addStaticRow((Row) unfiltered);
+                return;
+            }
+
+            addStaticRow(Rows.EMPTY_STATIC_ROW);
+        }
+
         checkState(state == State.AWAITING_ROWS);
 
         long pos = currentPosition();
