@@ -356,7 +356,7 @@ public class QueryController implements Plan.Executor
 
     public FilterTree buildFilter()
     {
-        return Operation.Node.buildTree(filterOperation()).buildFilter(this);
+        return Operation.Node.buildTree(filterOperation()).analyzeTree(this).filterTree();
     }
 
     /**

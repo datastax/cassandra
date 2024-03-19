@@ -63,6 +63,12 @@ public abstract class QuerySet extends CQLTester
             // Query full range
             assertRowsIgnoringOrder(tester.execute("SELECT * FROM %s WHERE value >= ? AND value <= ?", allRows[0][2], allRows[NUMBER_OF_VALUES - 1][2]), allRows);
 
+            // Edge cases with IN where we get no and all values. It is not valid to AND an IN predicate and others,
+            // so these two queries are comprehensive
+            assertRows(tester.execute("SELECT * FROM %s WHERE value IN ()"));
+            assertRowsIgnoringOrder(tester.execute("SELECT * FROM %s WHERE value NOT IN ()"), allRows);
+            assertRowsIgnoringOrder(tester.execute("SELECT * FROM %s WHERE (value IN ()) OR (value >= ? AND value <= ?)", allRows[0][2], allRows[NUMBER_OF_VALUES - 1][2]), allRows);
+
             // Query random ranges. This selects a series of random ranges and tests the different possible inclusivity
             // on them. This loops a reasonable number of times to cover as many ranges as possible without taking too long
             for (int range = 0; range < allRows.length / 4; range++)
