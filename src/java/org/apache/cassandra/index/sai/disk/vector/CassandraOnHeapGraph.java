@@ -57,6 +57,7 @@ import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.VectorEncoding;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorUtil;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -71,6 +72,7 @@ import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
@@ -470,6 +472,7 @@ public class CassandraOnHeapGraph<T>
         // Build encoder and compress vectors
         VectorCompressor<?> compressor; // will be null if we can't compress
         Object encoded = null; // byte[][], or long[][]
+        boolean containsUnitVectors;
         // limit the PQ computation and encoding to one index at a time -- goal during flush is to
         // evict from memory ASAP so better to do the PQ build (in parallel) one at a time
         synchronized (CassandraOnHeapGraph.class)
@@ -489,7 +492,17 @@ public class CassandraOnHeapGraph<T>
             // encode (compress) the vectors to save
             if (compressor != null)
                 encoded = compressVectors(reverseOrdinalMapper, compressor);
+
+            containsUnitVectors = IntStream.range(0, vectorValues.size())
+                                           .parallel()
+                                           .mapToObj(vectorValues::vectorValue)
+                                           .allMatch(v -> Math.abs(VectorUtil.dotProduct(v, v) - 1.0f) < 0.01);
         }
+
+        // version and optional fields
+        writer.writeInt(CassandraDiskAnn.PQ_MAGIC);
+        writer.writeInt(1); // version
+        writer.writeBoolean(containsUnitVectors);
 
         // write the compression type
         var actualType = compressor == null ? VectorCompression.CompressionType.NONE : preferredCompression.type;
