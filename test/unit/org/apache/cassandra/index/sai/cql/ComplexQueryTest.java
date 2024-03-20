@@ -127,9 +127,15 @@ public class ComplexQueryTest extends SAITester
         execute("INSERT INTO %s (pk, a, b, c, d) VALUES (?, ?, ?, ?, ?)", 8, 8, 4, 3, 3);
 
 
-        UntypedResultSet resultSet = execute("SELECT pk FROM %s WHERE (a = 1 AND c = 1) OR (b IN (3, 4) AND d = 2)");
 
-        assertRowsIgnoringOrder(resultSet, row(1), row(6), row(7) );
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s WHERE (a = 1 AND c = 1) OR (b IN (3, 4) AND d = 2)"), row(1), row(7), row(6));
+            // Shows that IN with an empty list produces no rows
+            assertRows(execute("SELECT pk FROM %s WHERE (a = 1 AND c = 1) OR (b IN () AND d = 2)"), row(1));
+            assertRows(execute("SELECT pk FROM %s WHERE b IN () AND d = 2"));
+            assertRows(execute("SELECT pk FROM %s WHERE b NOT IN () AND d = 2"), row(7), row(6));
+        });
+
     }
 
     @Test
