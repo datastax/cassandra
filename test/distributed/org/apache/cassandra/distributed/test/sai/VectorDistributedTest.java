@@ -48,6 +48,7 @@ import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.cql.GeoDistanceAccuracyTest;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.index.sai.cql.VectorTester;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
@@ -139,7 +140,7 @@ public class VectorDistributedTest extends TestBaseImpl
 
         List<float[]> resultVectors = getVectors(result);
         assertDescendingScore(queryVector, resultVectors);
-        double memtableRecall = getRecall(vectors, queryVector, resultVectors);
+        double memtableRecall = computeRecall(vectors, queryVector, resultVectors);
         assertThat(memtableRecall).isGreaterThanOrEqualTo(MIN_RECALL);
 
         assertThatThrownBy(() -> searchWithoutLimit(randomVector(), vectorCount))
@@ -151,7 +152,7 @@ public class VectorDistributedTest extends TestBaseImpl
 
         resultVectors = getVectors(result);
         assertDescendingScore(queryVector, resultVectors);
-        double memtableRecallWithPaging = getRecall(vectors, queryVector, resultVectors);
+        double memtableRecallWithPaging = computeRecall(vectors, queryVector, resultVectors);
         assertThat(memtableRecallWithPaging).isGreaterThanOrEqualTo(MIN_RECALL);
 
         assertThatThrownBy(() -> searchWithPageWithoutLimit(randomVector(), 10))
@@ -163,7 +164,7 @@ public class VectorDistributedTest extends TestBaseImpl
         limit = Math.min(getRandom().nextIntBetween(10, 50), vectors.size());
         queryVector = randomVector();
         result = searchWithLimit(queryVector, limit);
-        double sstableRecall = getRecall(vectors, queryVector, getVectors(result));
+        double sstableRecall = computeRecall(vectors, queryVector, getVectors(result));
         assertThat(sstableRecall).isGreaterThanOrEqualTo(MIN_RECALL);
     }
 
@@ -203,7 +204,7 @@ public class VectorDistributedTest extends TestBaseImpl
         // expect recall to be at least 0.8
         List<float[]> resultVectors = getVectors(result);
         assertDescendingScore(queryVector, resultVectors);
-        double recall = getRecall(allVectors, queryVector, getVectors(result));
+        double recall = computeRecall(allVectors, queryVector, getVectors(result));
         assertThat(recall).isGreaterThanOrEqualTo(MIN_RECALL);
     }
 
@@ -326,7 +327,7 @@ public class VectorDistributedTest extends TestBaseImpl
                 assertThat(resultVectors).isEmpty();
             else
             {
-                double recall = getRecall(resultVectors, queryVector, expected);
+                double recall = computeRecall(resultVectors, queryVector, expected);
                 assertThat(recall).isGreaterThanOrEqualTo(0.8);
             }
         }
@@ -354,7 +355,7 @@ public class VectorDistributedTest extends TestBaseImpl
                 assertThat(resultVectors).isEmpty();
             else
             {
-                double recall = getRecall(resultVectors, queryVector, expected);
+                double recall = computeRecall(resultVectors, queryVector, expected);
                 assertThat(recall).isGreaterThanOrEqualTo(0.8);
             }
         }
@@ -460,29 +461,9 @@ public class VectorDistributedTest extends TestBaseImpl
         }
     }
 
-    private double getRecall(List<float[]> vectors, float[] query, List<float[]> result)
+    private static double computeRecall(List<float[]> vectors, float[] query, List<float[]> result)
     {
-        List<float[]> sortedVectors = new ArrayList<>(vectors);
-        sortedVectors.sort((a, b) -> Double.compare(function.compare(b, query), function.compare(a, query)));
-
-        assertThat(sortedVectors).containsAll(result);
-
-        List<float[]> nearestNeighbors = sortedVectors.subList(0, result.size());
-
-        int matches = 0;
-        for (float[] in : nearestNeighbors)
-        {
-            for (float[] out : result)
-            {
-                if (Arrays.compare(in, out) ==0)
-                {
-                    matches++;
-                    break;
-                }
-            }
-        }
-
-        return matches * 1.0 / result.size();
+        return VectorTester.computeRecall(vectors, query, result, function);
     }
 
     private List<float[]> generateVectors(int vectorCount)
