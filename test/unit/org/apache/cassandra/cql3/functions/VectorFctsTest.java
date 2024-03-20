@@ -18,170 +18,140 @@
 
 package org.apache.cassandra.cql3.functions;
 
-import java.util.Arrays;
-import java.util.Collection;
-
-import org.apache.commons.lang3.ArrayUtils;
+import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
-import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.assertj.core.api.Assertions;
 
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.apache.cassandra.config.CassandraRelevantProperties.FLOAT_ONLY_VECTORS;
 
-@RunWith(Parameterized.class)
 public class VectorFctsTest extends CQLTester
 {
-    @Parameterized.Parameter
-    public String function;
-
-    @Parameterized.Parameter(1)
-    public VectorSimilarityFunction luceneFunction;
-
-    @Parameterized.Parameters(name = "{index}: function={0}")
-    public static Collection<Object[]> data()
+    @BeforeClass
+    public static void setupClass()
     {
-        return Arrays.asList(new Object[][]{
-        { "system.similarity_cosine", VectorSimilarityFunction.COSINE },
-        { "system.similarity_euclidean", VectorSimilarityFunction.EUCLIDEAN },
-        { "system.similarity_dot_product", VectorSimilarityFunction.DOT_PRODUCT }
-        });
+        FLOAT_ONLY_VECTORS.setBoolean(false);
     }
 
     @Test
-    public void testVectorSimilarityFunction()
+    public void randomVectorFunction() throws Throwable
     {
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int PRIMARY KEY, value vector<float, 2>, " +
-                              "l list<float>, " + // lists shouldn't be accepted by the functions
-                              "fl frozen<list<float>>, " + // frozen lists shouldn't be accepted by the functions
-                              "v1 vector<float, 1>, " + // 1-dimension vector to test missmatching dimensions
-                              "v_int vector<int, 2>, " + // int vectors shouldn't be accepted by the functions
-                              "v_double vector<double, 2>)");// double vectors shouldn't be accepted by the functions
+        createTable("CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
 
-        float[] values = new float[]{ 1f, 2f };
-        CQLTester.Vector<Float> vector = vector(ArrayUtils.toObject(values));
-        Object[] similarity = row(luceneFunction.compare(values, values));
+        // correct usage
+        execute("INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1, 1))");
+        Assert.assertEquals(1, execute("SELECT value FROM %s WHERE pk = 0").size());
 
-        // basic functionality
-        execute("INSERT INTO %s (pk, value, l, fl, v1, v_int, v_double) VALUES (0, ?, ?, ?, ?, ?, ?)",
-                vector, list(1f, 2f), list(1f, 2f), vector(1f), vector(1, 2), vector(1d, 2d));
-        assertRows(execute("SELECT " + function + "(value, value) FROM %s"), similarity);
+        // wrong number of arguments
+        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(literal_int, float, float)",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector())");
+        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(literal_int, float, float)",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1))");
+        assertInvalidThrowMessage("Invalid number of arguments for function system.random_float_vector(literal_int, float, float)",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1, 1, 0))");
 
-        // literals
-        assertRows(execute("SELECT " + function + "(value, [1, 2]) FROM %s"), similarity);
-        assertRows(execute("SELECT " + function + "([1, 2], value) FROM %s"), similarity);
-        assertRows(execute("SELECT " + function + "([1, 2], [1, 2]) FROM %s"), similarity);
+        // mandatory arguments
+        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
+                                  "but found NULL",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(null, null, null))");
+        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
+                                  "but found NULL",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(null, -1, 1))");
+        assertInvalidThrowMessage("Min argument of function system.random_float_vector(literal_int, float, float) must not be null",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, null, null))");
+        assertInvalidThrowMessage("Max argument of function system.random_float_vector(literal_int, float, float) must not be null",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, -1, null))");
+        assertInvalidThrowMessage("Min argument of function system.random_float_vector(literal_int, float, float) must not be null",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, null, 1))");
 
-        // bind markers
-        assertRows(execute("SELECT " + function + "(value, ?) FROM %s", vector), similarity);
-        assertRows(execute("SELECT " + function + "(?, value) FROM %s", vector), similarity);
-        assertThatThrownBy(() -> execute("SELECT " + function + "(?, ?) FROM %s", vector, vector))
-        .hasMessageContaining("Cannot infer type of argument ?");
+        // wrong argument types
+        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
+                                  "but found 'a'",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector('a', -1, 1))");
+        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
+                                  "but found system.\"_add\"(1, 1)",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(1 + 1, -1, 1))");
+        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
+                                  "but found value",
+                                  InvalidRequestException.class,
+                                  "SELECT random_float_vector(value, -1, 1) FROM %s");
+        assertInvalidThrowMessage("Function system.random_float_vector(literal_int, float, float) requires a literal_int argument, " +
+                                  "but found 1 + 1",
+                                  InvalidRequestException.class,
+                                  "SELECT random_float_vector(1 + 1, -1, 1) FROM %s");
 
-        // bind markers with type hints
-        assertRows(execute("SELECT " + function + "((vector<float, 2>) ?, ?) FROM %s", vector, vector), similarity);
-        assertRows(execute("SELECT " + function + "(?, (vector<float, 2>) ?) FROM %s", vector, vector), similarity);
-        assertRows(execute("SELECT " + function + "((vector<float, 2>) ?, (vector<float, 2>) ?) FROM %s", vector, vector), similarity);
+        // wrong argument values
+        assertInvalidThrowMessage("Max value must be greater than min value",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, 1, -1))");
 
-        // bind markers and literals
-        assertRows(execute("SELECT " + function + "([1, 2], ?) FROM %s", vector), similarity);
-        assertRows(execute("SELECT " + function + "(?, [1, 2]) FROM %s", vector), similarity);
-        assertRows(execute("SELECT " + function + "([1, 2], ?) FROM %s", vector), similarity);
+        // correct function with wrong receiver type
+        assertInvalidThrowMessage("Type error: cannot assign result of function system.random_float_vector " +
+                                  "(type vector<float, 1>) to value (type vector<float, 2>)",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(1, -1, 1))");
 
-        // wrong column types with columns
-        assertThatThrownBy(() -> execute("SELECT " + function + "(l, value) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument l of type list<float>");
-        assertThatThrownBy(() -> execute("SELECT " + function + "(fl, value) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument fl of type frozen<list<float>>");
-        assertThatThrownBy(() -> execute("SELECT " + function + "(value, l) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument l of type list<float>");
-        assertThatThrownBy(() -> execute("SELECT " + function + "(value, fl) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument fl of type frozen<list<float>>");
-
-        // wrong column types with columns and literals
-        assertThatThrownBy(() -> execute("SELECT " + function + "(l, [1, 2]) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument l of type list<float>");
-        assertThatThrownBy(() -> execute("SELECT " + function + "(fl, [1, 2]) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument fl of type frozen<list<float>>");
-        assertThatThrownBy(() -> execute("SELECT " + function + "([1, 2], l) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument l of type list<float>");
-        assertThatThrownBy(() -> execute("SELECT " + function + "([1, 2], fl) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument fl of type frozen<list<float>>");
-
-        // wrong column types with cast literals
-        assertThatThrownBy(() -> execute("SELECT " + function + "((List<Float>)[1, 2], [3, 4]) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument (list<float>)[1, 2] of type frozen<list<float>>");
-        assertThatThrownBy(() -> execute("SELECT " + function + "((List<Float>)[1, 2], (List<Float>)[3, 4]) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument (list<float>)[1, 2] of type frozen<list<float>>");
-        assertThatThrownBy(() -> execute("SELECT " + function + "([1, 2], (List<Float>)[3, 4]) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument (list<float>)[3, 4] of type frozen<list<float>>");
-
-        // wrong non-float vectors
-        assertThatThrownBy(() -> execute("SELECT " + function + "(v_int, [1, 2]) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument v_int of type vector<int, 2>");
-        assertThatThrownBy(() -> execute("SELECT " + function + "(v_double, [1, 2]) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument v_double of type vector<double, 2>");
-        assertThatThrownBy(() -> execute("SELECT " + function + "([1, 2], v_int) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument v_int of type vector<int, 2>");
-        assertThatThrownBy(() -> execute("SELECT " + function + "([1, 2], v_double) FROM %s"))
-        .hasMessageContaining("Function " + function + " requires a float vector argument, but found argument v_double of type vector<double, 2>");
-
-        // mismatching dimensions with literals
-        assertThatThrownBy(() -> execute("SELECT " + function + "([1, 2], [3]) FROM %s", vector(1)))
-        .hasMessageContaining("All arguments must have the same vector dimensions");
-        assertThatThrownBy(() -> execute("SELECT " + function + "(value, [1]) FROM %s", vector(1)))
-        .hasMessageContaining("All arguments must have the same vector dimensions");
-        assertThatThrownBy(() -> execute("SELECT " + function + "([1], value) FROM %s", vector(1)))
-        .hasMessageContaining("All arguments must have the same vector dimensions");
-
-        // mismatching dimensions with bind markers
-        assertThatThrownBy(() -> execute("SELECT " + function + "((vector<float, 1>) ?, value) FROM %s", vector(1)))
-        .hasMessageContaining("All arguments must have the same vector dimensions");
-        assertThatThrownBy(() -> execute("SELECT " + function + "(value, (vector<float, 1>) ?) FROM %s", vector(1)))
-        .hasMessageContaining("All arguments must have the same vector dimensions");
-        assertThatThrownBy(() -> execute("SELECT " + function + "((vector<float, 2>) ?, (vector<float, 1>) ?) FROM %s", vector(1, 2), vector(1)))
-        .hasMessageContaining("All arguments must have the same vector dimensions");
-
-        // mismatching dimensions with columns
-        assertThatThrownBy(() -> execute("SELECT " + function + "(value, v1) FROM %s"))
-        .hasMessageContaining("All arguments must have the same vector dimensions");
-        assertThatThrownBy(() -> execute("SELECT " + function + "(v1, value) FROM %s"))
-        .hasMessageContaining("All arguments must have the same vector dimensions");
-
-        // null arguments with literals
-        assertRows(execute("SELECT " + function + "(value, null) FROM %s"), row((Float) null));
-        assertRows(execute("SELECT " + function + "(null, value) FROM %s"), row((Float) null));
-        assertThatThrownBy(() -> execute("SELECT " + function + "(null, null) FROM %s"))
-        .hasMessageContaining("Cannot infer type of argument NULL in call to function " + function);
-
-        // null arguments with bind markers
-        assertRows(execute("SELECT " + function + "(value, ?) FROM %s", (CQLTester.Vector<Float>) null), row((Float) null));
-        assertRows(execute("SELECT " + function + "(?, value) FROM %s", (CQLTester.Vector<Float>) null), row((Float) null));
-        assertThatThrownBy(() -> execute("SELECT " + function + "(?, ?) FROM %s", null, null))
-        .hasMessageContaining("Cannot infer type of argument ? in call to function " + function);
-
-        // test all-zero vectors, only cosine similarity should reject them
-        if (luceneFunction == VectorSimilarityFunction.COSINE)
+        // test select
+        for (int dimension : new int[]{ 1, 2, 3, 10, 1000 })
         {
-            String expected = "Function " + function + " doesn't support all-zero vectors";
-            assertThatThrownBy(() -> execute("SELECT " + function + "(value, [0, 0]) FROM %s")) .hasMessageContaining(expected);
-            assertThatThrownBy(() -> execute("SELECT " + function + "([0, 0], value) FROM %s")).hasMessageContaining(expected);
+            assertSelectRandomVectorFunction(dimension, -1, 1);
+            assertSelectRandomVectorFunction(dimension, 0, 1);
+            assertSelectRandomVectorFunction(dimension, -1.5f, 1.5f);
+            assertSelectRandomVectorFunction(dimension, 0.999999f, 1);
+            assertSelectRandomVectorFunction(dimension, 0, 0.000001f);
+            assertSelectRandomVectorFunction(dimension, Float.MIN_VALUE, Float.MAX_VALUE);
         }
-        else
-        {
-            float expected = luceneFunction.compare(values, new float[]{ 0, 0 });
-            assertRows(execute("SELECT " + function + "(value, [0, 0]) FROM %s"), row(expected));
-            assertRows(execute("SELECT " + function + "([0, 0], value) FROM %s"), row(expected));
-        }
+    }
 
-        // not-assignable element types
-        assertThatThrownBy(() -> execute("SELECT " + function + "(value, ['a', 'b']) FROM %s WHERE pk=0"))
-            .hasMessageContaining("Type error: ['a', 'b'] cannot be passed as argument 1");
-        assertThatThrownBy(() -> execute("SELECT " + function + "(['a', 'b'], value) FROM %s WHERE pk=0"))
-            .hasMessageContaining("Type error: ['a', 'b'] cannot be passed as argument 0");
-        assertThatThrownBy(() -> execute("SELECT " + function + "(['a', 'b'], ['a', 'b']) FROM %s WHERE pk=0"))
-            .hasMessageContaining("Type error: ['a', 'b'] cannot be passed as argument 0");
+    private void assertSelectRandomVectorFunction(int dimension, float min, float max)
+    {
+        String functionCall = String.format("random_float_vector(%d, %f, %f)", dimension, min, max);
+        String select = "SELECT " + functionCall + " FROM %s";
+
+        for (int i = 0; i < 100; i++)
+        {
+            UntypedResultSet rs = execute(select);
+            Assertions.assertThat(rs).isNotEmpty();
+            Assertions.assertThat(rs.one().getVector("system." + functionCall, FloatType.instance, dimension))
+                      .hasSize(dimension)
+                      .allSatisfy(v -> Assertions.assertThat(v).isBetween(min, max));
+        }
+    }
+
+    @Test
+    public void normalizeL2Function() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>)");
+
+        execute("INSERT INTO %s (k, v) VALUES (0, ?)", vector(3.0f, 4.0f));
+
+        assertRows(execute("SELECT normalize_l2(v) FROM %s"), row(vector(0.6f, 0.8f)));
+        assertRows(execute("SELECT k, normalize_l2((vector<float, 2>) null) FROM %s"), row(0, null));
+
+        assertInvalidThrowMessage("Invalid number of arguments for function system.normalize_l2(vector<float, n>)",
+                                  InvalidRequestException.class,
+                                  "SELECT normalize_l2() FROM %s");
+        assertInvalidThrowMessage("Invalid number of arguments for function system.normalize_l2(vector<float, n>)",
+                                  InvalidRequestException.class,
+                                  "SELECT normalize_l2(v, 1) FROM %s");
+        assertInvalidThrowMessage("Function system.normalize_l2(vector<float, n>) requires a float vector argument, " +
+                                  "but found argument 123 of type int",
+                                  InvalidRequestException.class,
+                                  "SELECT normalize_l2(123) FROM %s");
     }
 }
