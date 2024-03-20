@@ -79,8 +79,16 @@ public class VectorCompressionTest extends VectorTester
         // BERT is more of a family than a specific model
         for (int i : List.of(128, 256, 512, 1024))
         {
-            testOne(VectorSourceModel.BERT, i, new VectorCompression(PRODUCT_QUANTIZATION, (i * 11 / 64)));
+            testOne(VectorSourceModel.BERT, i, new VectorCompression(PRODUCT_QUANTIZATION, i / 4));
         }
+    }
+
+    @Test
+    public void testNV_QA_4() throws IOException
+    {
+        // NV_QA_4 is anecdotally 1024 based on reviewing https://build.nvidia.com/nvidia/embed-qa-4. Couldn't
+        // find supporting documentation for this number, though.
+        testOne(VectorSourceModel.NV_QA_4, 1024, new VectorCompression(PRODUCT_QUANTIZATION, 1024 / 8));
     }
 
     @Test
