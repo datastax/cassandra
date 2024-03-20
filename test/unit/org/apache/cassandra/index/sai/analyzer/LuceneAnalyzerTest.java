@@ -35,6 +35,7 @@ import com.google.common.base.Charsets;
 import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.core.WhitespaceAnalyzer;
@@ -151,7 +152,7 @@ public class LuceneAnalyzerTest
         assertArrayEquals(new String[]{}, list.toArray(new String[0]));
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test(expected = InvalidRequestException.class)
     public void testMissingSynonymArg() throws Exception
     {
         // The synonym filter takes a 'synonyms' argument, not a 'words' argument
