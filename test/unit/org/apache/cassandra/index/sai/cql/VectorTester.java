@@ -142,4 +142,29 @@ public class VectorTester extends SAITester
             }
         });
     }
+
+    public static double computeRecall(List<float[]> vectors, float[] query, List<float[]> result, VectorSimilarityFunction vsf)
+    {
+        List<float[]> sortedVectors = new ArrayList<>(vectors);
+        sortedVectors.sort((a, b) -> Double.compare(vsf.compare(b, query), vsf.compare(a, query)));
+
+        assertThat(sortedVectors).containsAll(result);
+
+        List<float[]> nearestNeighbors = sortedVectors.subList(0, result.size());
+
+        int matches = 0;
+        for (float[] in : nearestNeighbors)
+        {
+            for (float[] out : result)
+            {
+                if (Arrays.compare(in, out) == 0)
+                {
+                    matches++;
+                    break;
+                }
+            }
+        }
+
+        return matches * 1.0 / result.size();
+    }
 }
