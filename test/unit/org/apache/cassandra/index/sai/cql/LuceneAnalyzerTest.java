@@ -589,4 +589,52 @@ public class LuceneAnalyzerTest extends SAITester
         .hasMessage("Term's analyzed size for column val exceeds the cumulative limit for index. Max allowed size 8.000KiB.")
         .isInstanceOf(InvalidRequestException.class);
     }
+
+    @Test
+    public void testInvalidNamesOnConfig()
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
+
+        // Empty config
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'{}'}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Analzyer config requires at least a tokenizer, a filter, or a charFilter, but none found. config={}");
+
+        // Invalid config name, charfilters should be charFilters
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'{\"tokenizer\" : {\"name\" : \"keyword\"},\"charfilters\" : [{\"name\" : \"htmlstrip\"}]}'}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Invalid field name 'charfilters' in analyzer config. Valid fields are: [tokenizer, filters, charFilters]");
+
+        // Invalid tokenizer name
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'{\"tokenizer\":{\"name\" : \"invalid\"}}'}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Unknown tokenizer 'invalid'. Valid options: [");
+
+        // Invalid filter name
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'{\"tokenizer\":{\"name\" : \"keyword\"},\n" +
+                                             "    \"filters\":[{\"name\" : \"invalid\"}]}'}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Unknown filter 'invalid'. Valid options: [");
+
+        // Invalid charFilter name
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'{\"tokenizer\":{\"name\" : \"keyword\"},\n" +
+                                             "    \"charFilters\":[{\"name\" : \"invalid\"}]}'}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Unknown charFilter 'invalid'. Valid options: [");
+
+        // Missing one of the params in the args field
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'{\"tokenizer\":{\"name\" : \"keyword\"},\n" +
+                                             "    \"filters\":[{\"name\" : \"synonym\", \"args\" : {\"words\" : \"as => like\"}},\n" +
+                                             "    {\"name\" : \"lowercase\"}]}'}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Error configuring analyzer's filter 'synonym': Configuration Error: missing parameter 'synonyms'");
+
+
+        // Missing one of the params in the args field
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'{\"tokenizer\":{\"name\" : \"keyword\"},\n" +
+                                             "    \"filters\":[{\"name\" : \"synonym\", \"args\" : {\"synonyms\" : \"as => like\", \"extraParam\": \"xyz\"}},\n" +
+                                             "    {\"name\" : \"lowercase\"}]}'}"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Error configuring analyzer's filter 'synonym': Unknown parameters: {extraParam=xyz}");
+    }
 }
