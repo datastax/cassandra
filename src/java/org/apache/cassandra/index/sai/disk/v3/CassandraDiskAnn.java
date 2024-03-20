@@ -160,11 +160,13 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             }
             else
             {
+                // unit vectors defined with dot product should switch to cosine similarity for compressed
+                // comparisons, since the compression does not maintain unit length
                 var sf = pqUnitVectors && similarityFunction == VectorSimilarityFunction.DOT_PRODUCT
                          ? VectorSimilarityFunction.COSINE
                          : similarityFunction;
                 scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, sf);
-                reranker = i -> sf.compare(queryVector, view.getVector(i));
+                reranker = i -> similarityFunction.compare(queryVector, view.getVector(i));
             }
             var searcher = new GraphSearcher.Builder<>(view).build();
             var result = searcher.search(scoreFunction, reranker, topK, threshold, ordinalsMap.ignoringDeleted(acceptBits));
