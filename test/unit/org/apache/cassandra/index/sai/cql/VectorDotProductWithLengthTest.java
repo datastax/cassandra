@@ -26,7 +26,7 @@ import org.junit.Test;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.db.marshal.FloatType;
 
-public class VectorCompressionTest extends VectorTester
+public class VectorDotProductWithLengthTest extends VectorTester
 {
     @Test
     public void testTrueDotproduct()
