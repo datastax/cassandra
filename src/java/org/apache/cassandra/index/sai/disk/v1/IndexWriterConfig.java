@@ -245,7 +245,7 @@ public class IndexWriterConfig
             }
             if (options.containsKey(SOURCE_MODEL))
             {
-                String option = options.get(SOURCE_MODEL).toUpperCase();
+                String option = options.get(SOURCE_MODEL).toUpperCase().replace("-", "_");
                 try
                 {
                     sourceModel = VectorSourceModel.valueOf(option);
