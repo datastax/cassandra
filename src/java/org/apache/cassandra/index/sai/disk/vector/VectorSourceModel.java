@@ -38,9 +38,9 @@ public enum VectorSourceModel
     ADA002((dimension) -> new VectorCompression(BINARY_QUANTIZATION, dimension / 8), 2.0),
     OPENAI_V3_SMALL((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16), 1.5),
     OPENAI_V3_LARGE((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16), 1.5),
-    BERT((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, (dimension * 11) / 64), 2.0),
+    BERT((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 4), 1.0),
     GECKO((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 8), 1.5),
-    NEMO((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 8), 2.0),
+    NV_QA_4((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 8), 1.5),
 
     OTHER(COSINE, VectorSourceModel::genericCompression, VectorSourceModel::genericOverquery);
 

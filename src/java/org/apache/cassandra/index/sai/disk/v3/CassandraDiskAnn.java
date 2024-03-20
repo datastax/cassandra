@@ -60,12 +60,15 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraDiskAnn.class.getName());
 
+    public static final int PQ_MAGIC = 0xB011A61C; // PQ_MAGIC, with a lot of liberties taken
+
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
     private volatile GraphIndex<float[]> graph;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
+    private final boolean pqUnitVectors;
 
     public CassandraDiskAnn(SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context) throws IOException
     {
@@ -82,6 +85,15 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
              var reader = pqFile.createReader())
         {
             reader.seek(pqSegmentOffset);
+            int version = 0;
+            if (reader.readInt() == PQ_MAGIC) {
+                version = reader.readInt();
+                assert version >= 1 : version;
+                pqUnitVectors = reader.readBoolean();
+            } else {
+                pqUnitVectors = true;
+                reader.seek(pqSegmentOffset);
+            }
             VectorCompression.CompressionType compressionType = VectorCompression.CompressionType.values()[reader.readByte()];
             if (compressionType == VectorCompression.CompressionType.PRODUCT_QUANTIZATION)
                 compressedVectors = PQVectors.load(reader, reader.getFilePointer());
@@ -148,7 +160,12 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             }
             else
             {
-                scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, similarityFunction);
+                // unit vectors defined with dot product should switch to cosine similarity for compressed
+                // comparisons, since the compression does not maintain unit length
+                var sf = pqUnitVectors && similarityFunction == VectorSimilarityFunction.DOT_PRODUCT
+                         ? VectorSimilarityFunction.COSINE
+                         : similarityFunction;
+                scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, sf);
                 reranker = i -> similarityFunction.compare(queryVector, view.getVector(i));
             }
             var searcher = new GraphSearcher.Builder<>(view).build();
