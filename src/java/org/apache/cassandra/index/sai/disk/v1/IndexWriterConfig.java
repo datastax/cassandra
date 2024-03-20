@@ -60,9 +60,6 @@ public class IndexWriterConfig
                                                                 .collect(Collectors.joining(", "));
 
     private static final VectorSourceModel DEFAULT_SOURCE_MODEL = VectorSourceModel.OTHER;
-    private static final String validSourceModels = Arrays.stream(VectorSourceModel.values())
-                                                          .map(Enum::name)
-                                                          .collect(Collectors.joining(", "));
 
     private static final IndexWriterConfig EMPTY_CONFIG = new IndexWriterConfig(null, -1, -1, -1, -1, null, DEFAULT_SOURCE_MODEL);
 
@@ -245,13 +242,16 @@ public class IndexWriterConfig
             }
             if (options.containsKey(SOURCE_MODEL))
             {
-                String option = options.get(SOURCE_MODEL).toUpperCase();
+                String option = options.get(SOURCE_MODEL).toUpperCase().replace("-", "_");
                 try
                 {
                     sourceModel = VectorSourceModel.valueOf(option);
                 }
                 catch (IllegalArgumentException e)
                 {
+                    var validSourceModels = Arrays.stream(VectorSourceModel.values())
+                                                  .map(Enum::name)
+                                                  .collect(Collectors.joining(", "));
                     throw new InvalidRequestException(String.format("source_model '%s' was not recognized for index %s. Valid values are: %s",
                                                                     option, indexName, validSourceModels));
                 }
