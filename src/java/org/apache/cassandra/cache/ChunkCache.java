@@ -62,6 +62,7 @@ public class ChunkCache
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
+    private static final int INITIAL_CAPACITY = Integer.getInteger("cassandra.chunkcache_initialcapacity", 256);
     public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
 
     public static final ChunkCache instance = DatabaseDescriptor.getFileCacheEnabled()
@@ -215,6 +216,7 @@ public class ChunkCache
         keysByFile = new NonBlockingIdentityHashMap<>();
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
+                        .initialCapacity(INITIAL_CAPACITY)
                         .executor(MoreExecutors.directExecutor())
                         .weigher((key, buffer) -> ((Buffer) buffer).buffer.capacity())
                         .removalListener(this)
