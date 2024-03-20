@@ -855,16 +855,13 @@ public interface Selectable extends AssignmentTestable
                 if (type == null)
                     throw invalidRequest("Cannot infer type for term %s in selection clause (try using a cast to force a type)",
                                          this);
-                validateType(cfm, type);
             }
 
-            AbstractType<?> elementsType = type.isVector()
-                                           ? ((VectorType<?>) type).getElementsType()
-                                           : ((ListType<?>) type).getElementsType();
+            ListType<?> listType = (ListType<?>) type;
 
             List<AbstractType<?>> expectedTypes = new ArrayList<>(selectables.size());
             for (int i = 0, m = selectables.size(); i < m; i++)
-                expectedTypes.add(elementsType);
+                expectedTypes.add(listType.getElementsType());
 
             SelectorFactories factories = createFactoriesAndCollectColumnDefinitions(selectables,
                                                                                      expectedTypes,
