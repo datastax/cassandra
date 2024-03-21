@@ -68,12 +68,16 @@ public class ChunkCache
 
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
     private static final int INITIAL_CAPACITY = Integer.getInteger("cassandra.chunkcache_initialcapacity", 16);
+    private static final boolean ASYNC_CLEANUP = Boolean.parseBoolean(System.getProperty("cassandra.chunkcache.async_cleanup", "true"));
+    private static final int CLEANER_THREADS = Integer.getInteger("dse.chunk.cache.cleaner.threads",1);
+
     private static final Class PERFORM_CLEANUP_TASK_CLASS;
 
     static
     {
         try
         {
+            logger.info("-Dcassandra.chunkcache.async_cleanup={} dse.chunk.cache.cleaner.threads={}", ASYNC_CLEANUP, CLEANER_THREADS);
             PERFORM_CLEANUP_TASK_CLASS = Class.forName("com.github.benmanes.caffeine.cache.BoundedLocalCache$PerformCleanupTask");
         }
         catch (ClassNotFoundException e)
@@ -81,7 +85,6 @@ public class ChunkCache
             throw new RuntimeException(e);
         }
     }
-    private static final int CLEANER_THREADS = Integer.getInteger("dse.chunk.cache.cleaner.threads",1);
 
     public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
 
@@ -240,7 +243,7 @@ public class ChunkCache
                         .maximumWeight(cacheSize)
                         .initialCapacity(INITIAL_CAPACITY)
                         .executor(r -> {
-                            if (r.getClass() == PERFORM_CLEANUP_TASK_CLASS)
+                            if (ASYNC_CLEANUP && r.getClass() == PERFORM_CLEANUP_TASK_CLASS)
                                 cleanupExecutor.execute(r);
                             else
                                 r.run();
