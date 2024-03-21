@@ -66,13 +66,17 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static org.apache.cassandra.io.sstable.format.big.BigFormat.Components.*;
+import static org.apache.cassandra.io.sstable.format.big.BigFormat.Components.DATA;
+import static org.apache.cassandra.io.sstable.format.big.BigFormat.Components.FILTER;
+import static org.apache.cassandra.io.sstable.format.big.BigFormat.Components.PRIMARY_INDEX;
+import static org.apache.cassandra.io.sstable.format.big.BigFormat.Components.STATS;
+import static org.apache.cassandra.io.sstable.format.big.BigFormat.Components.TOC;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -118,7 +122,7 @@ public class SSTableHeaderFixTest
         FileUtils.deleteRecursive(temporaryFolder);
     }
 
-    private static final AbstractType<?> udtPK = makeUDT("udt_pk");
+    private static final AbstractType<?> udtPK = makeUDT("udt_pk").freeze();
     private static final AbstractType<?> udtCK = makeUDT("udt_ck");
     private static final AbstractType<?> udtStatic = makeUDT("udt_static");
     private static final AbstractType<?> udtRegular = makeUDT("udt_regular");
@@ -500,7 +504,7 @@ public class SSTableHeaderFixTest
         {
             AbstractType<?> hdrType = header.getRegularColumns().get(ByteBufferUtil.bytes(colSpec.name));
             assertEquals(colSpec.name, colSpec.preFix, hdrType);
-            assertEquals(colSpec.name, colSpec.preFix.isMultiCell(), hdrType.isMultiCell());
+            assertEquals(colSpec.name, colSpec.preFix.isMultiCell, hdrType.isMultiCell);
         }
 
         SSTableHeaderFix headerFix = builder().withPath(sstable.toPath())
@@ -521,7 +525,7 @@ public class SSTableHeaderFixTest
         {
             AbstractType<?> hdrType = header.getRegularColumns().get(ByteBufferUtil.bytes(colSpec.name));
             assertEquals(colSpec.name, colSpec.expect, hdrType);
-            assertEquals(colSpec.name, colSpec.expect.isMultiCell(), hdrType.isMultiCell());
+            assertEquals(colSpec.name, colSpec.expect.isMultiCell, hdrType.isMultiCell);
         }
     }
 
@@ -593,7 +597,7 @@ public class SSTableHeaderFixTest
         SerializationHeader.Component header = readHeader(sstable);
         assertTrue(header.getKeyType() instanceof CompositeType);
         CompositeType keyType = (CompositeType) header.getKeyType();
-        assertEquals(Arrays.asList(UTF8Type.instance, udtPK), keyType.getComponents());
+        assertEquals(Arrays.asList(UTF8Type.instance, udtPK), keyType.subTypes);
 
         SSTableHeaderFix headerFix = builder().withPath(sstable.toPath())
                                               .build();
@@ -606,7 +610,7 @@ public class SSTableHeaderFixTest
         header = readHeader(sstable);
         assertTrue(header.getKeyType() instanceof CompositeType);
         keyType = (CompositeType) header.getKeyType();
-        assertEquals(Arrays.asList(UTF8Type.instance, udtPK.freeze()), keyType.getComponents());
+        assertEquals(Arrays.asList(UTF8Type.instance, udtPK.freeze()), keyType.subTypes);
     }
 
     @Test
@@ -856,17 +860,17 @@ public class SSTableHeaderFixTest
             if (type.getClass() == ListType.class)
             {
                 ListType<?> cHeader = (ListType<?>) type;
-                return ListType.getInstance(freezeUdt(cHeader.getElementsType()), cHeader.isMultiCell());
+                return ListType.getInstance(freezeUdt(cHeader.getElementsType()), cHeader.isMultiCell);
             }
             else if (type.getClass() == SetType.class)
             {
                 SetType<?> cHeader = (SetType<?>) type;
-                return SetType.getInstance(freezeUdt(cHeader.getElementsType()), cHeader.isMultiCell());
+                return SetType.getInstance(freezeUdt(cHeader.getElementsType()), cHeader.isMultiCell);
             }
             else if (type.getClass() == MapType.class)
             {
                 MapType<?, ?> cHeader = (MapType<?, ?>) type;
-                return MapType.getInstance(freezeUdt(cHeader.getKeysType()), freezeUdt(cHeader.getValuesType()), cHeader.isMultiCell());
+                return MapType.getInstance(freezeUdt(cHeader.getKeysType()), freezeUdt(cHeader.getValuesType()), cHeader.isMultiCell);
             }
         }
         else if (type instanceof AbstractCompositeType)
@@ -874,7 +878,7 @@ public class SSTableHeaderFixTest
             if (type.getClass() == CompositeType.class)
             {
                 CompositeType cHeader = (CompositeType) type;
-                return CompositeType.getInstance(cHeader.types.stream().map(this::freezeUdt).collect(Collectors.toList()));
+                return CompositeType.getInstance(cHeader.subTypes.stream().map(this::freezeUdt).collect(Collectors.toList()));
             }
         }
         else if (type instanceof TupleType)
@@ -884,8 +888,8 @@ public class SSTableHeaderFixTest
                 UserType cHeader = (UserType) type;
                 cHeader = cHeader.freeze();
                 return new UserType(cHeader.keyspace, cHeader.name, cHeader.fieldNames(),
-                                    cHeader.allTypes().stream().map(this::freezeUdt).collect(Collectors.toList()),
-                                    cHeader.isMultiCell());
+                                    cHeader.subTypes.stream().map(this::freezeUdt).collect(Collectors.toList()),
+                                    cHeader.isMultiCell);
             }
         }
         return type;
@@ -896,7 +900,7 @@ public class SSTableHeaderFixTest
         AbstractType<?> keyType = header.getKeyType();
         if (keyType instanceof CompositeType)
         {
-            for (AbstractType<?> component : ((CompositeType) keyType).types)
+            for (AbstractType<?> component : ((CompositeType) keyType).subTypes)
                 assertFrozenUdt("partition-key-component", component, frozen, checkInner);
         }
         assertFrozenUdt("partition-key", keyType, frozen, checkInner);
@@ -914,7 +918,7 @@ public class SSTableHeaderFixTest
         if (type instanceof CompositeType)
         {
             if (checkInner)
-                for (AbstractType<?> component : ((CompositeType) type).types)
+                for (AbstractType<?> component : ((CompositeType) type).subTypes)
                     assertFrozenUdt(name, component, frozen, true);
         }
         else if (type instanceof CollectionType)
@@ -925,7 +929,7 @@ public class SSTableHeaderFixTest
                 {
                     MapType map = (MapType) type;
                     // only descend for non-frozen types (checking frozen in frozen is just stupid)
-                    if (map.isMultiCell())
+                    if (map.isMultiCell)
                     {
                         assertFrozenUdt(name + "<map-key>", map.getKeysType(), frozen, true);
                         assertFrozenUdt(name + "<map-value>", map.getValuesType(), frozen, true);
@@ -935,14 +939,14 @@ public class SSTableHeaderFixTest
                 {
                     SetType set = (SetType) type;
                     // only descend for non-frozen types (checking frozen in frozen is just stupid)
-                    if (set.isMultiCell())
+                    if (set.isMultiCell)
                         assertFrozenUdt(name + "<set>", set.getElementsType(), frozen, true);
                 }
                 else if (type instanceof ListType)
                 {
                     ListType list = (ListType) type;
                     // only descend for non-frozen types (checking frozen in frozen is just stupid)
-                    if (list.isMultiCell())
+                    if (list.isMultiCell)
                         assertFrozenUdt(name + "<list>", list.getElementsType(), frozen, true);
                 }
             }
@@ -953,8 +957,8 @@ public class SSTableHeaderFixTest
             {
                 TupleType tuple = (TupleType) type;
                 // only descend for non-frozen types (checking frozen in frozen is just stupid)
-                if (tuple.isMultiCell())
-                    for (AbstractType<?> component : tuple.allTypes())
+                if (tuple.isMultiCell)
+                    for (AbstractType<?> component : tuple.subTypes)
                         assertFrozenUdt(name + "<tuple>", component, frozen, true);
             }
         }
@@ -962,7 +966,7 @@ public class SSTableHeaderFixTest
         if (type instanceof UserType)
         {
             String typeString = type.toString();
-            assertEquals(name + ": " + typeString, frozen, !type.isMultiCell());
+            assertEquals(name + ": " + typeString, frozen, !type.isMultiCell);
             if (typeString.startsWith(UserType.class.getName() + '('))
                 if (frozen)
                     fail(name + ": " + typeString);

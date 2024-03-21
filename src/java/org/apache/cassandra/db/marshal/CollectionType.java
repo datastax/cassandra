@@ -17,11 +17,11 @@
  */
 package org.apache.cassandra.db.marshal;
 
-import java.nio.ByteBuffer;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -49,7 +49,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
  * Please note that this comparator shouldn't be used "manually" (as a custom
  * type for instance).
  */
-public abstract class CollectionType<T> extends AbstractType<T>
+public abstract class CollectionType<T> extends MultiCellCapableType<T>
 {
     public static CellPath.Serializer cellPathSerializer = new CollectionPathSerializer();
 
@@ -82,12 +82,13 @@ public abstract class CollectionType<T> extends AbstractType<T>
 
     public final Kind kind;
 
-    protected CollectionType(ComparisonType comparisonType, Kind kind)
+    protected CollectionType(Kind kind, boolean multiCell, List<AbstractType<?>> components)
     {
-        super(comparisonType);
+        super(multiCell, components);
         this.kind = kind;
     }
 
+    @Override
     public abstract AbstractType<?> nameComparator();
     public abstract AbstractType<?> valueComparator();
 
@@ -124,6 +125,7 @@ public abstract class CollectionType<T> extends AbstractType<T>
         }
     }
 
+    @Override
     public boolean isCollection()
     {
         return true;
@@ -140,7 +142,7 @@ public abstract class CollectionType<T> extends AbstractType<T>
     @Override
     public <V> void validateCellValue(V cellValue, ValueAccessor<V> accessor) throws MarshalException
     {
-        if (isMultiCell())
+        if (isMultiCell)
             valueComparator().validateCellValue(cellValue, accessor);
         else
             super.validateCellValue(cellValue, accessor);
@@ -169,7 +171,7 @@ public abstract class CollectionType<T> extends AbstractType<T>
 
     public ByteBuffer serializeForNativeProtocol(Iterator<Cell<?>> cells)
     {
-        assert isMultiCell();
+        assert isMultiCell;
         List<ByteBuffer> values = serializedValues(cells);
         int size = collectionSize(values);
         return CollectionSerializer.pack(values, ByteBufferAccessor.instance, size);
@@ -185,11 +187,11 @@ public abstract class CollectionType<T> extends AbstractType<T>
             return false;
 
         CollectionType<?> tprev = (CollectionType<?>) previous;
-        if (this.isMultiCell() != tprev.isMultiCell())
+        if (this.isMultiCell != tprev.isMultiCell)
             return false;
 
         // subclasses should handle compatibility checks for frozen collections
-        if (!this.isMultiCell())
+        if (!this.isMultiCell)
             return isCompatibleWithFrozen(tprev);
 
         if (!this.nameComparator().isCompatibleWith(tprev.nameComparator()))
@@ -203,7 +205,7 @@ public abstract class CollectionType<T> extends AbstractType<T>
     public boolean isValueCompatibleWithInternal(AbstractType<?> previous)
     {
         // for multi-cell collections, compatibility and value-compatibility are the same
-        if (this.isMultiCell())
+        if (this.isMultiCell)
             return isCompatibleWith(previous);
 
         if (this == previous)
@@ -213,7 +215,7 @@ public abstract class CollectionType<T> extends AbstractType<T>
             return false;
 
         CollectionType<?> tprev = (CollectionType<?>) previous;
-        if (this.isMultiCell() != tprev.isMultiCell())
+        if (this.isMultiCell != tprev.isMultiCell)
             return false;
 
         // subclasses should handle compatibility checks for frozen collections
@@ -235,6 +237,7 @@ public abstract class CollectionType<T> extends AbstractType<T>
     /** A version of isValueCompatibleWith() to deal with non-multicell (frozen) collections */
     protected abstract boolean isValueCompatibleWithFrozen(CollectionType<?> previous);
 
+    @Override
     public CQL3Type asCQL3Type()
     {
         return new CQL3Type.Collection(this);
@@ -254,7 +257,7 @@ public abstract class CollectionType<T> extends AbstractType<T>
         if (kind != other.kind)
             return false;
 
-        if (isMultiCell() != other.isMultiCell())
+        if (isMultiCell != other.isMultiCell)
             return false;
 
         return nameComparator().equals(other.nameComparator()) && valueComparator().equals(other.valueComparator());
@@ -263,7 +266,7 @@ public abstract class CollectionType<T> extends AbstractType<T>
     @Override
     public int hashCode()
     {
-        return Objects.hash(kind, isMultiCell(), nameComparator(), valueComparator());
+        return Objects.hash(kind, isMultiCell, nameComparator(), valueComparator());
     }
 
     @Override

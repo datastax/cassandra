@@ -22,7 +22,8 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -31,7 +32,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -51,7 +51,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable.Version;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
-import static com.google.common.collect.Iterables.any;
+import static com.google.common.base.Preconditions.checkArgument;
 
 /*
  * The encoding of a DynamicCompositeType column name should be:
@@ -120,10 +120,7 @@ public class DynamicCompositeType extends AbstractCompositeType
 
     public static DynamicCompositeType getInstance(Map<Byte, AbstractType<?>> aliases)
     {
-        DynamicCompositeType dct = instances.get(aliases);
-        return null == dct
-             ? instances.computeIfAbsent(aliases, DynamicCompositeType::new)
-             : dct;
+        return getInstance(instances, aliases, () -> new DynamicCompositeType(Map.copyOf(aliases)));
     }
 
     @Override
@@ -134,22 +131,37 @@ public class DynamicCompositeType extends AbstractCompositeType
 
     private DynamicCompositeType(Map<Byte, AbstractType<?>> aliases)
     {
-        this.aliases = ImmutableMap.copyOf(aliases);
+        super(List.copyOf(aliases.values()));
+        this.aliases = aliases;
         this.serializer = new Serializer(this.aliases);
-        this.inverseMapping = new HashMap<>();
+        Map<AbstractType<?>, Byte> inverseMappingBuilder = new LinkedHashMap<>();
         for (Map.Entry<Byte, AbstractType<?>> en : aliases.entrySet())
-            this.inverseMapping.put(en.getValue(), en.getKey());
+            inverseMappingBuilder.put(en.getValue(), en.getKey());
+        this.inverseMapping = Map.copyOf(inverseMappingBuilder);
+    }
+
+    @Override
+    public AbstractType<?> with(List<AbstractType<?>> subTypes, boolean isMultiCell)
+    {
+        checkArgument(!isMultiCell, "Cannot create a multi-cell DynamicCompositeType");
+
+        Map<Byte, AbstractType<?>> copiedAliases = new LinkedHashMap<>();
+        Iterator<Byte> keysIter = aliases.keySet().iterator();
+        Iterator<AbstractType<?>> subTypesIter = subTypes.iterator();
+        while (keysIter.hasNext())
+        {
+            checkArgument(subTypesIter.hasNext(), "Not enough subtypes provided");
+            copiedAliases.put(keysIter.next(), subTypesIter.next());
+        }
+
+        checkArgument(!subTypesIter.hasNext(),"Too many subtypes provided");
+
+        return new DynamicCompositeType(copiedAliases);
     }
 
     public int size()
     {
         return aliases.size();
-    }
-
-    @Override
-    public List<AbstractType<?>> subTypes()
-    {
-        return new ArrayList<>(aliases.values());
     }
 
     @Override
@@ -561,26 +573,14 @@ public class DynamicCompositeType extends AbstractCompositeType
     }
 
     @Override
-    public <V> boolean referencesUserType(V name, ValueAccessor<V> accessor)
-    {
-        return any(aliases.values(), t -> t.referencesUserType(name, accessor));
-    }
-
-    @Override
     public DynamicCompositeType withUpdatedUserType(UserType udt)
     {
         if (!referencesUserType(udt.name))
             return this;
 
-        instances.remove(aliases);
+        instances.remove(aliases); // TODO why is that? if we get rid of this, we can rely on the super class impl of this method
 
         return getInstance(Maps.transformValues(aliases, v -> v.withUpdatedUserType(udt)));
-    }
-
-    @Override
-    public AbstractType<?> expandUserTypes()
-    {
-        return getInstance(Maps.transformValues(aliases, v -> v.expandUserTypes()));
     }
 
     private class DynamicParsedComparator implements ParsedComparator

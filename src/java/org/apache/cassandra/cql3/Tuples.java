@@ -355,7 +355,7 @@ public class Tuples
                 if (i < receivers.size() - 1)
                     inName.append(",");
 
-                if (receiver.type.isCollection() && receiver.type.isMultiCell())
+                if (receiver.type.isCollection() && receiver.type.isMultiCell)
                     throw new InvalidRequestException("Non-frozen collection columns do not support IN relations");
 
                 types.add(receiver.type);

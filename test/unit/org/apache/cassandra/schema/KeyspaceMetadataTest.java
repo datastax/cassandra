@@ -38,7 +38,10 @@ import org.apache.cassandra.cql3.functions.UserFunction;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.psjava.util.AssertStatus.assertTrue;
 
 public class KeyspaceMetadataTest extends CQLTester
@@ -186,7 +189,7 @@ public class KeyspaceMetadataTest extends CQLTester
 
             // Checks that the updated type is present in the updated Types
             UserType tmp = newTypes.getNullable(updatedUserType.name);
-            tmp = updatedType.isMultiCell() ? tmp : tmp.freeze();
+            tmp = updatedType.isMultiCell ? tmp : tmp.freeze();
             assertEquals(updatedType, tmp);
 
             assertEquals(keyspace, updatedUserType.keyspace);
@@ -195,8 +198,8 @@ public class KeyspaceMetadataTest extends CQLTester
         }
         else if (originalType.referencesUserTypes())
         {
-            List<AbstractType<?>> originalSubTypes = originalType.subTypes();
-            List<AbstractType<?>> updatedSubTypes = updatedType.subTypes();
+            List<AbstractType<?>> originalSubTypes = originalType.subTypes;
+            List<AbstractType<?>> updatedSubTypes = updatedType.subTypes;
 
             assertEquals(originalSubTypes.size(), updatedSubTypes.size());
             for (int i = 0, m = originalSubTypes.size(); i < m; i++)

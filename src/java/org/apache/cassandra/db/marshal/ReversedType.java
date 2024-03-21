@@ -18,10 +18,14 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+
+import com.google.common.base.Preconditions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Term;
@@ -35,25 +39,48 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 public class ReversedType<T> extends AbstractType<T>
 {
+    private final static Logger logger = LoggerFactory.getLogger(ReversedType.class);
+
     // interning instances
     private static final Map<AbstractType<?>, ReversedType> instances = new ConcurrentHashMap<>();
 
     public final AbstractType<T> baseType;
 
-    public static <T> ReversedType<T> getInstance(TypeParser parser)
+    public static AbstractType<?> getInstance(TypeParser parser)
     {
         List<AbstractType<?>> types = parser.getTypeParameters();
         if (types.size() != 1)
             throw new ConfigurationException("ReversedType takes exactly one argument, " + types.size() + " given");
-        return getInstance((AbstractType<T>) types.get(0));
+        return getInstance(types.get(0));
     }
 
-    public static <T> ReversedType<T> getInstance(AbstractType<T> baseType)
+    public static <T> AbstractType<T> getInstance(AbstractType<T> baseType)
     {
-        ReversedType<T> t = instances.get(baseType);
-        return null == t
-             ? instances.computeIfAbsent(baseType, ReversedType::new)
-             : t;
+        ReversedType<T> type = instances.get(baseType);
+        if (type != null)
+            return type;
+
+        // Stacking ReversedType is really useless and would actually break some of the code (typically,
+        // AbstractType#isValueCompatibleWith would end up hitting the exception thrown by
+        // ReversedType#isValueCompatibleWithInternal). So we should throw if we find such stacking. But at the
+        // same time, we can't be 100% no-one ever made that mistake somewhere, and it went un-noticed, and it's
+        // probably not worth risking breaking them. So we log an error but otherwise "cancel-out" the double
+        // reverse.
+        if (baseType instanceof ReversedType<?>)
+        {
+            // Note: users have no way to input ReversedType outside custom types (which are pretty
+            // confidential in the first place), so if this is ever triggered, this will likely be an internal.
+            // So shipping an exception in the logger output to get a stack trace and make debugging easier.
+            logger.error("Detected a type with 2 ReversedType() back-to-back, which is not allowed. This should "
+                         + "be looked at as this is likely unintended, but cancelling out the double reversion in "
+                         + "the meantime", new RuntimeException("Invalid double-reversion"));
+            return ((ReversedType<T>) baseType).baseType;
+        }
+
+        // We avoid constructor calls in Map#computeIfAbsent to avoid recursive update exceptions because the automatic
+        // fixing of subtypes done by the top-level constructor might attempt a recursive update to the instances map.
+        ReversedType<T> instance = new ReversedType<>(baseType);
+        return instances.computeIfAbsent(baseType, k -> instance);
     }
 
     @Override
@@ -68,8 +95,16 @@ public class ReversedType<T> extends AbstractType<T>
 
     private ReversedType(AbstractType<T> baseType)
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.CUSTOM, baseType.isMultiCell, List.of(baseType)); // TODO is it correct? that is - does it make sense to take isMultiCell from baseType and not the subTypes list?
         this.baseType = baseType;
+    }
+
+    @Override
+    public AbstractType<?> with(List<AbstractType<?>> subTypes, boolean isMultiCell)
+    {
+        Preconditions.checkArgument(subTypes.size() == 1,
+                                    "Invalid number of subTypes for ReversedType (got %s)", subTypes.size());
+        return getInstance(subTypes.get(0));
     }
 
     public boolean isEmptyValueMeaningless()
@@ -176,7 +211,7 @@ public class ReversedType<T> extends AbstractType<T>
     }
 
     @Override
-    public ReversedType<?> withUpdatedUserType(UserType udt)
+    public AbstractType<?> withUpdatedUserType(UserType udt)
     {
         if (!referencesUserType(udt.name))
             return this;

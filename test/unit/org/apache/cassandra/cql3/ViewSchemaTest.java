@@ -241,7 +241,7 @@ public class ViewSchemaTest extends ViewAbstractTest
             {
                 createView("mv_" + def.name, "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s WHERE " + def.name + " IS NOT NULL AND k IS NOT NULL PRIMARY KEY (" + def.name + ",k)");
 
-                if (def.type.isMultiCell())
+                if (def.type.isMultiCell)
                     Assert.fail("MV on a multicell should fail " + def);
 
                 if (def.isPartitionKey())
@@ -249,7 +249,7 @@ public class ViewSchemaTest extends ViewAbstractTest
             }
             catch (Exception e)
             {
-                if (!def.type.isMultiCell() && !def.isPartitionKey())
+                if (!def.type.isMultiCell && !def.isPartitionKey())
                     Assert.fail("MV creation failed on " + def);
             }
         }

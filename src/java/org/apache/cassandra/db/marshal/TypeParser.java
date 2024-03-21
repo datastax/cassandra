@@ -30,6 +30,7 @@ import java.util.Map;
 
 import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableMap;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.dht.IPartitioner;
@@ -402,7 +403,7 @@ public class TypeParser
         }
     }
 
-    public Pair<Pair<String, ByteBuffer>, List<Pair<ByteBuffer, AbstractType>>> getUserTypeParameters() throws SyntaxException, ConfigurationException
+    public Pair<Pair<String, ByteBuffer>, List<Pair<ByteBuffer, AbstractType<?>>>> getUserTypeParameters() throws SyntaxException, ConfigurationException
     {
 
         if (isEOS() || str.charAt(idx) != '(')
@@ -414,7 +415,7 @@ public class TypeParser
         String keyspace = readNextIdentifier();
         skipBlankAndComma();
         ByteBuffer typeName = fromHex(readNextIdentifier());
-        List<Pair<ByteBuffer, AbstractType>> defs = new ArrayList<>();
+        List<Pair<ByteBuffer, AbstractType<?>>> defs = new ArrayList<>();
 
         while (skipBlankAndComma())
         {
@@ -432,7 +433,7 @@ public class TypeParser
             skipBlank();
             try
             {
-                AbstractType type = parse();
+                AbstractType<?> type = parse();
                 defs.add(Pair.create(name, type));
             }
             catch (SyntaxException e)

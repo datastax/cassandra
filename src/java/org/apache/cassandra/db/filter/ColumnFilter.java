@@ -409,7 +409,7 @@ public abstract class ColumnFilter
 
         public Builder add(ColumnMetadata c)
         {
-            if (c.isComplex() && c.type.isMultiCell())
+            if (c.isComplex() && c.type.isMultiCell)
             {
                 if (fullySelectedComplexColumns == null)
                     fullySelectedComplexColumns = new HashSet<>();
@@ -439,7 +439,7 @@ public abstract class ColumnFilter
         private Builder addSubSelection(ColumnSubselection subSelection)
         {
             ColumnMetadata column = subSelection.column();
-            assert column.isComplex() && column.type.isMultiCell();
+            assert column.isComplex() && column.type.isMultiCell;
             addInternal(column);
             if (subSelections == null)
                 subSelections = new ArrayList<>();

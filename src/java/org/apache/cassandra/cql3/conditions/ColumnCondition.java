@@ -125,10 +125,10 @@ public abstract class ColumnCondition
 
         public Bound bind(QueryOptions options)
         {
-            if (column.type.isCollection() && column.type.isMultiCell())
+            if (column.type.isCollection() && column.type.isMultiCell)
                 return new MultiCellCollectionBound(column, operator, bindTerms(options));
 
-            if (column.type.isUDT() && column.type.isMultiCell())
+            if (column.type.isUDT() && column.type.isMultiCell)
                 return new MultiCellUdtBound(column, operator, bindAndGetTerms(options), options.getProtocolVersion());
 
             return new SimpleBound(column, operator, bindAndGetTerms(options));
@@ -391,7 +391,7 @@ public abstract class ColumnCondition
 
         private ByteBuffer rowMapValue(MapType<?, ?> type, Row row)
         {
-            if (column.type.isMultiCell())
+            if (column.type.isMultiCell)
             {
                 Cell<?> cell = getCell(row, column, CellPath.create(collectionElement));
                 return cell == null ? null : cell.buffer();
@@ -405,7 +405,7 @@ public abstract class ColumnCondition
 
         private ByteBuffer rowListValue(ListType<?> type, Row row)
         {
-            if (column.type.isMultiCell())
+            if (column.type.isMultiCell)
                 return cellValueAtIndex(getCells(row, column), getListIndex(collectionElement));
 
             Cell<?> cell = getCell(row, column);
@@ -457,7 +457,7 @@ public abstract class ColumnCondition
         public MultiCellCollectionBound(ColumnMetadata column, Operator operator, List<Term.Terminal> values)
         {
             super(column, operator);
-            assert column.type.isMultiCell();
+            assert column.type.isMultiCell;
             this.values = values;
         }
 
@@ -642,7 +642,7 @@ public abstract class ColumnCondition
         {
             UserType userType = (UserType) column.type;
 
-            if (column.type.isMultiCell())
+            if (column.type.isMultiCell)
             {
                 Cell<?> cell = getCell(row, column, userType.cellPathForField(field));
                 return cell == null ? null : cell.buffer();
@@ -697,7 +697,7 @@ public abstract class ColumnCondition
         private MultiCellUdtBound(ColumnMetadata column, Operator op, List<ByteBuffer> values, ProtocolVersion protocolVersion)
         {
             super(column, op);
-            assert column.type.isMultiCell();
+            assert column.type.isMultiCell;
             this.values = values;
             this.protocolVersion = protocolVersion;
         }

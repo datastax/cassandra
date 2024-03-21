@@ -212,7 +212,7 @@ public abstract class AbstractCell<V> extends Cell<V>
             return String.format("[%s=%d ts=%d]", column().name, CounterContext.instance().total(value(), accessor()), timestamp());
 
         AbstractType<?> type = column().type;
-        if (type instanceof CollectionType && type.isMultiCell())
+        if (type instanceof CollectionType && type.isMultiCell)
         {
             CollectionType<?> ct = (CollectionType<?>) type;
             return String.format("[%s[%s]=%s %s]",

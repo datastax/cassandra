@@ -157,12 +157,12 @@ abstract class ElementsSelector extends Selector
                 //     subselection we can do).
                 //  3) the element selected is terminal.
                 return factory.areAllFetchedColumnsKnown()
-                        && (!type.isMultiCell() || !factory.isSimpleSelectorFactory() || key.isTerminal());
+                        && (!type.isMultiCell || !factory.isSimpleSelectorFactory() || key.isTerminal());
             }
 
             public void addFetchedColumns(ColumnFilter.Builder builder)
             {
-                if (!type.isMultiCell() || !factory.isSimpleSelectorFactory())
+                if (!type.isMultiCell || !factory.isSimpleSelectorFactory())
                 {
                     factory.addFetchedColumns(builder);
                     return;
@@ -218,12 +218,12 @@ abstract class ElementsSelector extends Selector
                 //     subselection we can do).
                 //  3) the bound of the selected slice are terminal.
                 return factory.areAllFetchedColumnsKnown()
-                        && (!type.isMultiCell() || !factory.isSimpleSelectorFactory() || (from.isTerminal() && to.isTerminal()));
+                        && (!type.isMultiCell || !factory.isSimpleSelectorFactory() || (from.isTerminal() && to.isTerminal()));
             }
 
             public void addFetchedColumns(ColumnFilter.Builder builder)
             {
-                if (!type.isMultiCell() || !factory.isSimpleSelectorFactory())
+                if (!type.isMultiCell || !factory.isSimpleSelectorFactory())
                 {
                     factory.addFetchedColumns(builder);
                     return;
@@ -289,7 +289,7 @@ abstract class ElementsSelector extends Selector
 
         public void addFetchedColumns(ColumnFilter.Builder builder)
         {
-            if (type.isMultiCell() && selected instanceof SimpleSelector)
+            if (type.isMultiCell && selected instanceof SimpleSelector)
             {
                 ColumnMetadata column = ((SimpleSelector)selected).column;
                 builder.select(column, CellPath.create(key));
@@ -408,7 +408,7 @@ abstract class ElementsSelector extends Selector
 
         public void addFetchedColumns(ColumnFilter.Builder builder)
         {
-            if (type.isMultiCell() && selected instanceof SimpleSelector)
+            if (type.isMultiCell && selected instanceof SimpleSelector)
             {
                 ColumnMetadata column = ((SimpleSelector)selected).column;
                 builder.slice(column, isUnset(from) ? CellPath.BOTTOM : CellPath.create(from), isUnset(to) ? CellPath.TOP  : CellPath.create(to));

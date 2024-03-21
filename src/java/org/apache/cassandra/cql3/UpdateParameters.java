@@ -150,7 +150,7 @@ public class UpdateParameters
         // that enabling or raising this threshold can prevent users from deleting set/map elements that were written
         // when the guardrail was disabled or with a lower value. Deleting the entire column, row or partition is always
         // allowed, since the tombstones created for those operations don't contain the CQL column values.
-        if (path != null && column.type.isMultiCell())
+        if (path != null && column.type.isMultiCell)
             Guardrails.columnValueSize.guard(path.dataSize(), column.name.toString(), false, clientState);
 
         builder.addCell(BufferCell.tombstone(column, timestamp, nowInSec, path));
@@ -165,7 +165,7 @@ public class UpdateParameters
     {
         Guardrails.columnValueSize.guard(value.remaining(), column.name.toString(), false, clientState);
 
-        if (path != null && column.type.isMultiCell())
+        if (path != null && column.type.isMultiCell)
             Guardrails.columnValueSize.guard(path.dataSize(), column.name.toString(), false, clientState);
 
         Cell<?> cell = ttl == LivenessInfo.NO_TTL

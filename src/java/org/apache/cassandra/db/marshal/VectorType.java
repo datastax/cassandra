@@ -20,10 +20,11 @@ package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+
+import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Term;
@@ -74,7 +75,7 @@ public final class VectorType<T> extends AbstractType<List<T>>
     @SuppressWarnings("rawtypes")
     private static final ConcurrentHashMap<Key, VectorType> instances = new ConcurrentHashMap<>();
 
-    public final AbstractType<T> elementType;
+    public final AbstractType<T> elementType; // TODO refactor in a separate commit to use subTypes.get(0) or getElementType()
     public final int dimension;
     private final TypeSerializer<T> elementSerializer;
     private final int valueLengthIfFixed;
@@ -82,7 +83,7 @@ public final class VectorType<T> extends AbstractType<List<T>>
 
     private VectorType(AbstractType<T> elementType, int dimension)
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.CUSTOM, false, List.of(elementType));
         if (dimension <= 0)
             throw new InvalidRequestException(String.format("vectors may only have positive dimensions; given %d", dimension));
         this.elementType = elementType;
@@ -107,6 +108,14 @@ public final class VectorType<T> extends AbstractType<List<T>>
     {
         TypeParser.Vector v = parser.getVectorParameters();
         return getInstance(v.type.freeze(), v.dimension);
+    }
+
+    @Override
+    public AbstractType<?> with(List<AbstractType<?>> subTypes, boolean isMultiCell)
+    {
+        Preconditions.checkArgument(!isMultiCell, "VectorType cannot be multi-cell");
+        Preconditions.checkArgument(subTypes.size() == 1, "VectorType takes exactly 1 type parameter, got: %s", subTypes);
+        return getInstance(subTypes.get(0), dimension);
     }
 
     @Override
@@ -257,12 +266,6 @@ public final class VectorType<T> extends AbstractType<List<T>>
         {
             throw new MarshalException(String.format("cannot parse '%s' as hex bytes", source), e);
         }
-    }
-
-    @Override
-    public List<AbstractType<?>> subTypes()
-    {
-        return Collections.singletonList(elementType);
     }
 
     @Override

@@ -27,7 +27,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
-import java.util.function.Function;
+
+import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.cql3.Maps;
 import org.apache.cassandra.cql3.Term;
@@ -39,11 +40,11 @@ import org.apache.cassandra.serializers.MapSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JsonUtils;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable.Version;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
-import org.apache.cassandra.utils.Pair;
 
 public class MapType<K, V> extends CollectionType<Map<K, V>>
 {
@@ -51,16 +52,13 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     private static final ConcurrentHashMap<Pair<AbstractType<?>, AbstractType<?>>, MapType> instances = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<Pair<AbstractType<?>, AbstractType<?>>, MapType> frozenInstances = new ConcurrentHashMap<>();
 
-    private final AbstractType<K> keys;
-    private final AbstractType<V> values;
     private final MapSerializer<K, V> serializer;
-    private final boolean isMultiCell;
 
     public static MapType<?, ?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
         List<AbstractType<?>> l = parser.getTypeParameters();
         if (l.size() != 2)
-            throw new ConfigurationException("MapType takes exactly 2 type parameters");
+            throw new ConfigurationException("MapType takes exactly 2 type parameters, got: " + l);
 
         return getInstance(l.get(0).freeze(), l.get(1).freeze(), true);
     }
@@ -69,125 +67,46 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     {
         ConcurrentHashMap<Pair<AbstractType<?>, AbstractType<?>>, MapType> internMap = isMultiCell ? instances : frozenInstances;
         Pair<AbstractType<?>, AbstractType<?>> p = Pair.create(keys, values);
-        MapType<K, V> t = internMap.get(p);
-        return null == t
-             ? internMap.computeIfAbsent(p, k -> new MapType<>(k.left, k.right, isMultiCell))
-             : t;
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public MapType<K,V> overrideKeyspace(Function<String, String> overrideKeyspace)
-    {
-        AbstractType<K> newKeyType = keys.overrideKeyspace(overrideKeyspace);
-        AbstractType<V> newValueType = values.overrideKeyspace(overrideKeyspace);
-        if (newKeyType == keys && newValueType == values)
-            return this;
-
-        return getInstance(newKeyType, newValueType, isMultiCell());
+        return getInstance(internMap, p, () -> new MapType<>(keys, values, isMultiCell));
     }
 
     private MapType(AbstractType<K> keys, AbstractType<V> values, boolean isMultiCell)
     {
-        super(ComparisonType.CUSTOM, Kind.MAP);
-        this.keys = keys;
-        this.values = values;
+        super(Kind.MAP, isMultiCell, List.of(keys, values));
         this.serializer = MapSerializer.getInstance(keys.getSerializer(),
                                                     values.getSerializer(),
                                                     keys.comparatorSet);
-        this.isMultiCell = isMultiCell;
     }
 
     @Override
-    public <T> boolean referencesUserType(T name, ValueAccessor<T> accessor)
+    public AbstractType<?> with(List<AbstractType<?>> subTypes, boolean isMultiCell)
     {
-        return keys.referencesUserType(name, accessor) || values.referencesUserType(name, accessor);
-    }
-
-    @Override
-    public MapType<?,?> withUpdatedUserType(UserType udt)
-    {
-        if (!referencesUserType(udt.name))
-            return this;
-
-        (isMultiCell ? instances : frozenInstances).remove(Pair.create(keys, values));
-
-        return getInstance(keys.withUpdatedUserType(udt), values.withUpdatedUserType(udt), isMultiCell);
-    }
-
-    @Override
-    public AbstractType<?> expandUserTypes()
-    {
-        return getInstance(keys.expandUserTypes(), values.expandUserTypes(), isMultiCell);
-    }
-
-    @Override
-    public boolean referencesDuration()
-    {
-        // Maps cannot be created with duration as keys
-        return getValuesType().referencesDuration();
+        Preconditions.checkArgument(subTypes.size() == 2, "MapType should always have exactly two subTypes, got: %s", subTypes);
+        return getInstance(subTypes.get(0), subTypes.get(1), isMultiCell);
     }
 
     public AbstractType<K> getKeysType()
     {
-        return keys;
+        //noinspection unchecked
+        return (AbstractType<K>) subTypes.get(0);
     }
 
     public AbstractType<V> getValuesType()
     {
-        return values;
+        //noinspection unchecked
+        return (AbstractType<V>) subTypes.get(1);
     }
 
+    @Override
     public AbstractType<K> nameComparator()
     {
-        return keys;
+        return getKeysType();
     }
 
+    @Override
     public AbstractType<V> valueComparator()
     {
-        return values;
-    }
-
-    @Override
-    public boolean isMultiCell()
-    {
-        return isMultiCell;
-    }
-
-    @Override
-    public List<AbstractType<?>> subTypes()
-    {
-        return Arrays.asList(keys, values);
-    }
-
-    @Override
-    public AbstractType<?> freeze()
-    {
-        // freeze key/value to match org.apache.cassandra.cql3.CQL3Type.Raw.RawCollection.freeze
-        return isMultiCell ? getInstance(this.keys.freeze(), this.values.freeze(), false) : this;
-    }
-
-    @Override
-    public AbstractType<?> unfreeze()
-    {
-        return isMultiCell ? this : getInstance(this.keys, this.values, true);
-    }
-
-    @Override
-    public AbstractType<?> freezeNestedMulticellTypes()
-    {
-        if (!isMultiCell())
-            return this;
-
-        AbstractType<?> keyType = (keys.isFreezable() && keys.isMultiCell())
-                                ? keys.freeze()
-                                : keys.freezeNestedMulticellTypes();
-
-        AbstractType<?> valueType = (values.isFreezable() && values.isMultiCell())
-                                  ? values.freeze()
-                                  : values.freezeNestedMulticellTypes();
-
-        return getInstance(keyType, valueType, isMultiCell);
+        return getValuesType();
     }
 
     @Override
@@ -195,7 +114,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     {
         assert !isMultiCell;
         MapType<?, ?> tprev = (MapType<?, ?>) previous;
-        return keys.isCompatibleWith(tprev.keys) && values.isCompatibleWith(tprev.values);
+        return getKeysType().isCompatibleWith(tprev.getKeysType()) && getValuesType().isCompatibleWith(tprev.getValuesType());
     }
 
     @Override
@@ -203,12 +122,12 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     {
         assert !isMultiCell;
         MapType<?, ?> tprev = (MapType<?, ?>) previous;
-        return keys.isCompatibleWith(tprev.keys) && values.isValueCompatibleWith(tprev.values);
+        return getKeysType().isCompatibleWith(tprev.getKeysType()) && getValuesType().isValueCompatibleWith(tprev.getValuesType());
     }
 
     public <RL, TR> int compareCustom(RL left, ValueAccessor<RL> accessorL, TR right, ValueAccessor<TR> accessorR)
     {
-        return compareMaps(keys, values, left, accessorL, right, accessorR);
+        return compareMaps(getKeysType(), getValuesType(), left, accessorL, right, accessorR);
     }
 
     public static <TL, TR> int compareMaps(AbstractType<?> keysComparator, AbstractType<?> valuesComparator, TL left, ValueAccessor<TL> accessorL, TR right, ValueAccessor<TR> accessorR)
@@ -322,12 +241,12 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
 
     public String toString(boolean ignoreFreezing)
     {
-        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell;
 
         StringBuilder sb = new StringBuilder();
         if (includeFrozenType)
             sb.append(FrozenType.class.getName()).append("(");
-        sb.append(getClass().getName()).append(TypeParser.stringifyTypeParameters(Arrays.asList(keys, values), ignoreFreezing || !isMultiCell));
+        sb.append(getClass().getName()).append(TypeParser.stringifyTypeParameters(Arrays.asList(getKeysType(), getValuesType()), ignoreFreezing || !isMultiCell));
         if (includeFrozenType)
             sb.append(")");
         return sb.toString();
@@ -366,9 +285,9 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             if (entry.getValue() == null)
                 throw new MarshalException("Invalid null value in map");
 
-            terms.put(keys.fromJSONObject(entry.getKey()), values.fromJSONObject(entry.getValue()));
+            terms.put(getKeysType().fromJSONObject(entry.getKey()), getValuesType().fromJSONObject(entry.getValue()));
         }
-        return new Maps.DelayedValue(keys, terms);
+        return new Maps.DelayedValue(getKeysType(), terms);
     }
 
     @Override
@@ -386,7 +305,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             // map keys must be JSON strings, so convert non-string keys to strings
             ByteBuffer kv = CollectionSerializer.readValue(value, ByteBufferAccessor.instance, offset);
             offset += CollectionSerializer.sizeOfValue(kv, ByteBufferAccessor.instance);
-            String key = keys.toJSONString(kv, protocolVersion);
+            String key = getKeysType().toJSONString(kv, protocolVersion);
             if (key.startsWith("\""))
                 sb.append(key);
             else
@@ -395,7 +314,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             sb.append(": ");
             ByteBuffer vv = CollectionSerializer.readValue(value, ByteBufferAccessor.instance, offset);
             offset += CollectionSerializer.sizeOfValue(vv, ByteBufferAccessor.instance);
-            sb.append(values.toJSONString(vv, protocolVersion));
+            sb.append(getValuesType().toJSONString(vv, protocolVersion));
         }
         return sb.append("}").toString();
     }

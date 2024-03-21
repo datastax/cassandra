@@ -35,7 +35,6 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,6 +53,7 @@ import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.File;
@@ -398,8 +398,8 @@ public abstract class SSTableHeaderFix
         {
             // Note, the logic is similar as just calling 'fixType()' using the composite partition key,
             // but the log messages should use the composite partition key column names.
-            List<AbstractType<?>> headerKeyComponents = ((CompositeType) headerKeyType).types;
-            List<AbstractType<?>> schemaKeyComponents = ((CompositeType) schemaKeyType).types;
+            List<AbstractType<?>> headerKeyComponents = ((CompositeType) headerKeyType).subTypes;
+            List<AbstractType<?>> schemaKeyComponents = ((CompositeType) schemaKeyType).subTypes;
             if (headerKeyComponents.size() != schemaKeyComponents.size())
             {
                 // different number of components in composite partition keys - very suspicious
@@ -676,9 +676,9 @@ public abstract class SSTableHeaderFix
             // different UDT - bummer...
             return null;
 
-        if (cHeader.isMultiCell() != cSchema.isMultiCell())
+        if (cHeader.isMultiCell != cSchema.isMultiCell)
         {
-            if (cHeader.isMultiCell() && !cSchema.isMultiCell())
+            if (cHeader.isMultiCell && !cSchema.isMultiCell)
             {
                 // C* 3.0 writes broken SerializationHeader.Component instances - i.e. broken UDT type
                 // definitions into the sstable -Stats.db file, because 3.0 does not enclose frozen UDTs
@@ -707,9 +707,9 @@ public abstract class SSTableHeaderFix
         // Do not mess around with the UserType in the serialization header, if the column has been dropped.
         // Only fix the multi-cell status when the header contains it as a multicell (non-frozen) UserType,
         // but the schema says "frozen".
-        if (cHeader.isMultiCell() && !cSchema.isMultiCell())
+        if (cHeader.isMultiCell && !cSchema.isMultiCell)
         {
-            return new UserType(cHeader.keyspace, cHeader.name, cHeader.fieldNames(), cHeader.fieldTypes(), cSchema.isMultiCell());
+            return new UserType(cHeader.keyspace, cHeader.name, cHeader.fieldNames(), cHeader.fieldTypes(), cSchema.isMultiCell);
         }
 
         return cHeader;
@@ -732,7 +732,7 @@ public abstract class SSTableHeaderFix
             cHeaderFixed.add(cHeaderCompFixed);
             anyChanged |= cHeaderComp != cHeaderCompFixed;
         }
-        if (anyChanged || cSchema.isMultiCell() != cHeader.isMultiCell())
+        if (anyChanged || cSchema.isMultiCell != cHeader.isMultiCell)
             // TODO this should create a non-frozen tuple type for the sake of handling a dropped, non-frozen UDT
             return new TupleType(cHeaderFixed);
         return cHeader;
@@ -740,15 +740,15 @@ public abstract class SSTableHeaderFix
 
     private AbstractType<?> fixTypeInnerComposite(CompositeType cHeader, CompositeType cSchema, boolean droppedColumnMode)
     {
-        if (cHeader.types.size() != cSchema.types.size())
+        if (cHeader.subTypes.size() != cSchema.subTypes.size())
             // different number of components - bummer...
             return null;
-        List<AbstractType<?>> cHeaderFixed = new ArrayList<>(cHeader.types.size());
+        List<AbstractType<?>> cHeaderFixed = new ArrayList<>(cHeader.subTypes.size());
         boolean anyChanged = false;
-        for (int i = 0; i < cHeader.types.size(); i++)
+        for (int i = 0; i < cHeader.subTypes.size(); i++)
         {
-            AbstractType<?> cHeaderComp = cHeader.types.get(i);
-            AbstractType<?> cHeaderCompFixed = fixTypeInner(cHeaderComp, cSchema.types.get(i), droppedColumnMode);
+            AbstractType<?> cHeaderComp = cHeader.subTypes.get(i);
+            AbstractType<?> cHeaderCompFixed = fixTypeInner(cHeaderComp, cSchema.subTypes.get(i), droppedColumnMode);
             if (cHeaderCompFixed == null)
                 // incompatible, bummer...
                 return null;
@@ -769,7 +769,7 @@ public abstract class SSTableHeaderFix
             return null;
         if (cHeaderElem != cHeaderElemFixed)
             // element type changed
-            return ListType.getInstance(cHeaderElemFixed, cHeader.isMultiCell());
+            return ListType.getInstance(cHeaderElemFixed, cHeader.isMultiCell);
         return cHeader;
     }
 
@@ -782,7 +782,7 @@ public abstract class SSTableHeaderFix
             return null;
         if (cHeaderElem != cHeaderElemFixed)
             // element type changed
-            return SetType.getInstance(cHeaderElemFixed, cHeader.isMultiCell());
+            return SetType.getInstance(cHeaderElemFixed, cHeader.isMultiCell);
         return cHeader;
     }
 
@@ -797,7 +797,7 @@ public abstract class SSTableHeaderFix
             return null;
         if (cHeaderKey != cHeaderKeyFixed || cHeaderVal != cHeaderValFixed)
             // element type changed
-            return MapType.getInstance(cHeaderKeyFixed, cHeaderValFixed, cHeader.isMultiCell());
+            return MapType.getInstance(cHeaderKeyFixed, cHeaderValFixed, cHeader.isMultiCell);
         return cHeader;
     }
 

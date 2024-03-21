@@ -764,7 +764,7 @@ public abstract class CassandraIndex implements Index
             return CassandraIndexFunctions.KEYS_INDEX_FUNCTIONS;
 
         ColumnMetadata indexedColumn = target.left;
-        if (indexedColumn.type.isCollection() && indexedColumn.type.isMultiCell())
+        if (indexedColumn.type.isCollection() && indexedColumn.type.isMultiCell)
         {
             switch (((CollectionType)indexedColumn.type).kind)
             {

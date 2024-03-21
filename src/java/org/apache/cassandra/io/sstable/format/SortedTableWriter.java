@@ -478,7 +478,7 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
 
         for (ColumnMetadata column : row.columns())
         {
-            if (!column.type.isCollection() || !column.type.isMultiCell())
+            if (!column.type.isCollection() || !column.type.isMultiCell)
                 continue;
 
             ComplexColumnData cells = row.getComplexColumnData(column);

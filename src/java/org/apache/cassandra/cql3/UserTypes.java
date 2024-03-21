@@ -287,7 +287,7 @@ public abstract class UserTypes
                 buffers[i] = values.get(i).bindAndGet(options);
                 // Since a frozen UDT value is always written in its entirety Cassandra can't preserve a pre-existing
                 // value by 'not setting' the new value. Reject the query.
-                if (!type.isMultiCell() && buffers[i] == ByteBufferUtil.UNSET_BYTE_BUFFER)
+                if (!type.isMultiCell && buffers[i] == ByteBufferUtil.UNSET_BYTE_BUFFER)
                     throw new InvalidRequestException(String.format("Invalid unset value for field '%s' of user defined type %s", type.fieldNameAsString(i), type.getNameAsString()));
             }
             return buffers;
@@ -338,7 +338,7 @@ public abstract class UserTypes
                 return;
 
             Value userTypeValue = (Value) value;
-            if (column.type.isMultiCell())
+            if (column.type.isMultiCell)
             {
                 // setting a whole UDT at once means we overwrite all cells, so delete existing cells
                 params.setComplexDeletionTimeForOverwrite(column);
@@ -381,7 +381,7 @@ public abstract class UserTypes
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             // we should not get here for frozen UDTs
-            assert column.type.isMultiCell() : "Attempted to set an individual field on a frozen UDT";
+            assert column.type.isMultiCell : "Attempted to set an individual field on a frozen UDT";
 
             Term.Terminal value = t.bind(params.options);
             if (value == UNSET_VALUE)
@@ -408,7 +408,7 @@ public abstract class UserTypes
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
             // we should not get here for frozen UDTs
-            assert column.type.isMultiCell() : "Attempted to delete a single field from a frozen UDT";
+            assert column.type.isMultiCell : "Attempted to delete a single field from a frozen UDT";
 
             CellPath fieldPath = ((UserType) column.type).cellPathForField(field);
             params.addTombstone(column, fieldPath);

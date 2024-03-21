@@ -29,16 +29,15 @@ import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
- * A class avoiding class duplication between CompositeType and
- * DynamicCompositeType.
- * Those two differs only in that for DynamicCompositeType, the comparators
+ * A class avoiding class duplication between CompositeType and DynamicCompositeType.
+ * Those two classes differ only in that for DynamicCompositeType, the comparators
  * are in the encoded column name at the front of each component.
  */
 public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
 {
-    protected AbstractCompositeType()
+    protected AbstractCompositeType(List<AbstractType<?>> components)
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.CUSTOM, false, List.copyOf(components));
     }
 
     public <VL, VR> int compareCustom(VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR)
@@ -96,11 +95,11 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
     protected abstract int startingOffset(boolean isStatic);
 
     /**
-     * Split a composite column names into it's components.
+     * Split a composite column names into its components.
      */
     public ByteBuffer[] split(ByteBuffer bb)
     {
-        List<ByteBuffer> l = new ArrayList<ByteBuffer>();
+        List<ByteBuffer> l = new ArrayList<>();
         boolean isStatic = readIsStatic(bb, ByteBufferAccessor.instance);
         int offset = startingOffset(isStatic);
 
@@ -155,9 +154,9 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
     static List<String> split(String input)
     {
         if (input.isEmpty())
-            return Collections.<String>emptyList();
+            return Collections.emptyList();
 
-        List<String> res = new ArrayList<String>();
+        List<String> res = new ArrayList<>();
         int prev = 0;
         for (int i = 0; i < input.length(); i++)
         {
@@ -167,7 +166,7 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
             res.add(input.substring(prev, i));
             prev = i + 1;
         }
-        res.add(input.substring(prev, input.length()));
+        res.add(input.substring(prev));
         return res;
     }
 
@@ -326,12 +325,12 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
     abstract protected <VL, VR> AbstractType<?> getComparator(int i, VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR, int offsetL, int offsetR);
 
     /**
-     * Adds type information from @param bb to @param sb.  @param i is ignored.
+     * Adds type information from {@param bb} to {@param sb}. {@param i} is ignored.
      */
     abstract protected <V> AbstractType<?> getAndAppendComparator(int i, V value, ValueAccessor<V> accessor, StringBuilder sb, int offset);
 
     /**
-     * Like getComparator, but validates that @param i does not exceed the defined range
+     * Like getComparator, but validates that {@param i} does not exceed the defined range
      */
     abstract protected <V> AbstractType<?> validateComparator(int i, V value, ValueAccessor<V> accessor, int offset) throws MarshalException;
 
@@ -340,7 +339,7 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
      */
     abstract protected ParsedComparator parseComparator(int i, String part);
 
-    protected static interface ParsedComparator
+    protected interface ParsedComparator
     {
         AbstractType<?> getAbstractType();
         String getRemainingPart();

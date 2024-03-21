@@ -1376,7 +1376,7 @@ public class TableMetadata implements SchemaElement
     private static void addUserTypes(AbstractType<?> type, Set<ByteBuffer> types)
     {
         // Reach into subtypes first, so that if the type is a UDT, it's dependencies are recreated first.
-        type.subTypes().forEach(t -> addUserTypes(t, types));
+        type.subTypes.forEach(t -> addUserTypes(t, types));
 
         if (type.isUDT())
             types.add(((UserType)type).name);
@@ -1590,7 +1590,7 @@ public class TableMetadata implements SchemaElement
 
         if (partitionKeyType instanceof CompositeType)
         {
-            List<AbstractType<?>> components = partitionKeyType.getComponents();
+            List<AbstractType<?>> components = partitionKeyType.subTypes;
             int size = components.size();
             literals = new String[size + clusteringSize];
             ByteBuffer[] values = ((CompositeType) partitionKeyType).split(partitionKey);

@@ -411,7 +411,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
              * the type into an equivalent tuple: we only support frozen tuples currently. And as such we cannot persist
              * the correct type in system_schema.dropped_columns.
              */
-            if (currentColumn.type.isUDT() && currentColumn.type.isMultiCell())
+            if (currentColumn.type.isUDT() && currentColumn.type.isMultiCell)
                 throw ire("Cannot drop non-frozen column %s of user type %s", column, currentColumn.type.asCQL3Type());
 
             // TODO: some day try and find a way to not rely on Keyspace/IndexManager/Index to find dependent indexes

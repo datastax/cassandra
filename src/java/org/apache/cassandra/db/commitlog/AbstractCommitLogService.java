@@ -36,7 +36,6 @@ import static com.codahale.metrics.Timer.Context;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
-
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.Daemon.NON_DAEMON;
 import static org.apache.cassandra.concurrent.InfiniteLoopExecutor.Interrupts.SYNCHRONIZED;
@@ -226,6 +225,7 @@ public abstract class AbstractCommitLogService
             }
             catch (Throwable t)
             {
+                logger.error("Failed to persist commits to disk", t);
                 syncError = true;
 
                 if (!CommitLog.handleCommitError("Failed to persist commits to disk", t))

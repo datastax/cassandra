@@ -560,6 +560,7 @@ public class Keyspace
         assert writeBarrier == null : "Keyspace has already been closed to mutations";
         writeBarrier = writeOrder.newBarrier();
         writeBarrier.issue();
+        logger.debug("BARRIER: Issuing new barrier for {}", getName(), new Throwable());
         return writeBarrier;
     }
 

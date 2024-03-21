@@ -411,7 +411,7 @@ public abstract class Maps
                 return;
 
             // delete + put
-            if (column.type.isMultiCell())
+            if (column.type.isMultiCell)
                 params.setComplexDeletionTimeForOverwrite(column);
             Putter.doPut(value, column, params);
         }
@@ -437,7 +437,7 @@ public abstract class Maps
         @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
-            assert column.type.isMultiCell() : "Attempted to set a value for a single key on a frozen map";
+            assert column.type.isMultiCell : "Attempted to set a value for a single key on a frozen map";
             ByteBuffer key = k.bindAndGet(params.options);
             ByteBuffer value = t.bindAndGet(params.options);
             if (key == null)
@@ -468,7 +468,7 @@ public abstract class Maps
         @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
-            assert column.type.isMultiCell() : "Attempted to add items to a frozen map";
+            assert column.type.isMultiCell : "Attempted to add items to a frozen map";
             Term.Terminal value = t.bind(params.options);
             if (value != UNSET_VALUE)
                 doPut(value, column, params);
@@ -479,7 +479,7 @@ public abstract class Maps
             if (value == null)
             {
                 // for frozen maps, we're overwriting the whole cell
-                if (!column.type.isMultiCell())
+                if (!column.type.isMultiCell)
                     params.addTombstone(column);
 
                 return;
@@ -487,7 +487,7 @@ public abstract class Maps
 
             SortedMap<ByteBuffer, ByteBuffer> elements = ((Value) value).map;
 
-            if (column.type.isMultiCell())
+            if (column.type.isMultiCell)
             {
                 if (elements.size() == 0)
                     return;
@@ -524,7 +524,7 @@ public abstract class Maps
         @Override
         public void execute(DecoratedKey partitionKey, UpdateParameters params) throws InvalidRequestException
         {
-            assert column.type.isMultiCell() : "Attempted to delete a single key in a frozen map";
+            assert column.type.isMultiCell : "Attempted to delete a single key in a frozen map";
             Term.Terminal key = t.bind(params.options);
             if (key == null)
                 throw new InvalidRequestException("Invalid null map key");

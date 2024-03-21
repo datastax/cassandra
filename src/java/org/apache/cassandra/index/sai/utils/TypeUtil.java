@@ -325,7 +325,7 @@ public class TypeUtil
 
     private static ByteBuffer cellValue(ColumnMetadata columnMetadata, IndexTarget.Type indexType, Cell<?> cell)
     {
-        if (columnMetadata.type.isCollection() && columnMetadata.type.isMultiCell())
+        if (columnMetadata.type.isCollection() && columnMetadata.type.isMultiCell)
         {
             switch (((CollectionType<?>) columnMetadata.type).kind)
             {
@@ -473,7 +473,7 @@ public class TypeUtil
     public static boolean isFrozen(AbstractType<?> type)
     {
         type = baseType(type);
-        return !type.subTypes().isEmpty() && !type.isMultiCell();
+        return !type.subTypes.isEmpty() && !type.isMultiCell;
     }
 
     /**
@@ -482,7 +482,7 @@ public class TypeUtil
     public static boolean isFrozenCollection(AbstractType<?> type)
     {
         type = baseType(type);
-        return type.isCollection() && !type.isMultiCell();
+        return type.isCollection() && !type.isMultiCell;
     }
 
     /**
@@ -491,7 +491,7 @@ public class TypeUtil
     public static boolean isNonFrozenCollection(AbstractType<?> type)
     {
         type = baseType(type);
-        return type.isCollection() && type.isMultiCell();
+        return type.isCollection() && type.isMultiCell;
     }
 
     /**

@@ -325,7 +325,7 @@ public interface CQL3Type
         @Override
         public String toString()
         {
-            boolean isFrozen = !this.type.isMultiCell();
+            boolean isFrozen = !this.type.isMultiCell;
             StringBuilder sb = new StringBuilder(isFrozen ? "frozen<" : "");
             switch (type.kind)
             {
@@ -442,7 +442,7 @@ public interface CQL3Type
         @Override
         public String toString()
         {
-            if (type.isMultiCell())
+            if (type.isMultiCell)
                 return ColumnIdentifier.maybeQuote(name);
             else
                 return "frozen<" + ColumnIdentifier.maybeQuote(name) + '>';

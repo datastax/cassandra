@@ -235,7 +235,7 @@ public final class CreateViewStatement extends AlterSchemaStatement
 
             AbstractType<?> type = column.type;
 
-            if (type.isMultiCell())
+            if (type.isMultiCell)
             {
                 if (type.isCollection())
                     throw ire("Invalid non-frozen collection type '%s' for PRIMARY KEY column '%s'", type, name);
