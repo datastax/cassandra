@@ -79,7 +79,7 @@ public class ChunkCache
             throw new RuntimeException(e);
         }
     }
-    private static final int CLEANER_THREADS = Integer.getInteger(("dse.chunk.cache.cleaner.threads",1);
+    private static final int CLEANER_THREADS = Integer.getInteger("dse.chunk.cache.cleaner.threads",1);
 
     public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
 
