@@ -65,7 +65,7 @@ public class ChunkCache
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
-    private static final int INITIAL_CAPACITY = Integer.getInteger("cassandra.chunkcache_initialcapacity", 4096);
+    private static final int INITIAL_CAPACITY = Integer.getInteger("cassandra.chunkcache_initialcapacity", 16);
     private static final Class PERFORM_CLEANUP_TASK_CLASS;
 
     static
