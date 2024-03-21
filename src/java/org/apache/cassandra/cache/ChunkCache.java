@@ -49,6 +49,8 @@ import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.github.benmanes.caffeine.cache.RemovalListener;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.concurrent.ParkedExecutor;
+import org.apache.cassandra.concurrent.ShutdownableExecutor;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
@@ -98,7 +100,7 @@ public class ChunkCache
     private final ConcurrentMap<Key, CompletableFuture<Buffer>> cacheAsMap;
     private final long cacheSize;
     public final ChunkCacheMetrics metrics;
-    private final ExecutorService cleanupExecutor;
+    private final ShutdownableExecutor cleanupExecutor;
 
     private boolean enabled;
     private Function<ChunkReader, RebuffererFactory> wrapper = this::wrap;
@@ -229,7 +231,7 @@ public class ChunkCache
     public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
     {
         cacheSize = 1024L * 1024L * Math.max(0, cacheSizeInMB - RESERVED_POOL_SPACE_IN_MB);
-        cleanupExecutor = Executors.newFixedThreadPool(CLEANER_THREADS, new NamedThreadFactory("ChunkCacheCleanup"));
+        cleanupExecutor = ParkedExecutor.createParkedExecutor("ChunkCacheCleanup", CLEANER_THREADS);
         enabled = cacheSize > 0;
         bufferPool = pool;
         metrics = createMetrics.apply(this);
@@ -300,7 +302,14 @@ public class ChunkCache
     public void close()
     {
         clear();
-        cleanupExecutor.shutdown();
+        try
+        {
+            cleanupExecutor.shutdown();
+        }
+        catch (InterruptedException e)
+        {
+            logger.debug("Interrupted during shutdown: ", e);
+        }
     }
 
     private RebuffererFactory wrap(ChunkReader file)
