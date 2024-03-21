@@ -27,6 +27,8 @@ import java.nio.LongBuffer;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -46,6 +48,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.github.benmanes.caffeine.cache.RemovalListener;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
@@ -62,7 +65,22 @@ public class ChunkCache
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
     public static final int RESERVED_POOL_SPACE_IN_MB = 32;
-    private static final int INITIAL_CAPACITY = Integer.getInteger("cassandra.chunkcache_initialcapacity", 256);
+    private static final int INITIAL_CAPACITY = Integer.getInteger("cassandra.chunkcache_initialcapacity", 4096);
+    private static final Class PERFORM_CLEANUP_TASK_CLASS;
+
+    static
+    {
+        try
+        {
+            PERFORM_CLEANUP_TASK_CLASS = Class.forName("com.github.benmanes.caffeine.cache.BoundedLocalCache$PerformCleanupTask");
+        }
+        catch (ClassNotFoundException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+    private static final int CLEANER_THREADS = Integer.getInteger(("dse.chunk.cache.cleaner.threads",1);
+
     public static final boolean roundUp = DatabaseDescriptor.getFileCacheRoundUp();
 
     public static final ChunkCache instance = DatabaseDescriptor.getFileCacheEnabled()
@@ -80,6 +98,7 @@ public class ChunkCache
     private final ConcurrentMap<Key, CompletableFuture<Buffer>> cacheAsMap;
     private final long cacheSize;
     public final ChunkCacheMetrics metrics;
+    private final ExecutorService cleanupExecutor;
 
     private boolean enabled;
     private Function<ChunkReader, RebuffererFactory> wrapper = this::wrap;
@@ -210,6 +229,7 @@ public class ChunkCache
     public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
     {
         cacheSize = 1024L * 1024L * Math.max(0, cacheSizeInMB - RESERVED_POOL_SPACE_IN_MB);
+        cleanupExecutor = Executors.newFixedThreadPool(CLEANER_THREADS, new NamedThreadFactory("ChunkCacheCleanup"));
         enabled = cacheSize > 0;
         bufferPool = pool;
         metrics = createMetrics.apply(this);
@@ -217,7 +237,12 @@ public class ChunkCache
         cache = Caffeine.newBuilder()
                         .maximumWeight(cacheSize)
                         .initialCapacity(INITIAL_CAPACITY)
-                        .executor(MoreExecutors.directExecutor())
+                        .executor(r -> {
+                            if (r.getClass() == PERFORM_CLEANUP_TASK_CLASS)
+                                cleanupExecutor.execute(r);
+                            else
+                                r.run();
+                        })
                         .weigher((key, buffer) -> ((Buffer) buffer).buffer.capacity())
                         .removalListener(this)
                         .recordStats(() -> metrics)
@@ -263,11 +288,19 @@ public class ChunkCache
         });
     }
 
-    public void close()
-    {
+    /**
+     * Clears the cache, used in the CNDB Writer for testing purposes.
+     */
+    public void clear() {
         // Clear keysByFile first to prevent unnecessary computation in onRemoval method.
         keysByFile.clear();
         synchronousCache.invalidateAll();
+    }
+
+    public void close()
+    {
+        clear();
+        cleanupExecutor.shutdown();
     }
 
     private RebuffererFactory wrap(ChunkReader file)
