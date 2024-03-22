@@ -121,6 +121,9 @@ public enum CassandraRelevantProperties
     /** default heartbeating period is 1 minute */
     CHECK_DATA_RESURRECTION_HEARTBEAT_PERIOD("check_data_resurrection_heartbeat_period_milli", "60000"),
     CHRONICLE_ANNOUNCER_DISABLE("chronicle.announcer.disable"),
+    CHUNKCACHE_ASYNC_CLEANUP("cassandra.chunkcache.async_cleanup", "true"),
+    CHUNKCACHE_CLEANER_THREADS("dse.chunk.cache.cleaner.threads","1"),
+    CHUNKCACHE_INITIAL_CAPACITY("cassandra.chunkcache_initialcapacity", "16"),
     CLOCK_GLOBAL("cassandra.clock"),
     CLOCK_MONOTONIC_APPROX("cassandra.monotonic_clock.approx"),
     CLOCK_MONOTONIC_PRECISE("cassandra.monotonic_clock.precise"),
@@ -694,6 +697,9 @@ public enum CassandraRelevantProperties
     TEST_UTIL_ALLOW_TOOL_REINIT_FOR_TEST("org.apache.cassandra.tools.UtilALLOW_TOOL_REINIT_FOR_TEST"),
     /** Activate write survey mode. The node not becoming an active ring member, and you must use JMX StorageService->joinRing() to finalize the ring joining. */
     TEST_WRITE_SURVEY("cassandra.write_survey"),
+    THREAD_MONITOR_AUTO_CALIBRATE("dse.thread_monitor_auto_calibrate", "true"),
+    THREAD_MONITOR_ENABLED("dse.thread_monitor_enabled", "true"),
+    THREAD_MONITOR_SLEEP_INTERVAL_NS("dse.thread_monitor_sleep_nanos", "50000"),
     // Changes the semantic of the "THREE" consistency level to mean "all but one"
     // i.e. that all replicas except for at most one in the cluster (across all DCs) must accept the write for it to be successful.
     THREE_MEANS_ALL_BUT_ONE("dse.consistency_level.three_means_all_but_one", "false"),
