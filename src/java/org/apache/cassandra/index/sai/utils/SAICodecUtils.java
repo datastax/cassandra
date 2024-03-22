@@ -157,6 +157,19 @@ public class SAICodecUtils
         long remaining = in.length() - in.getFilePointer();
         long expected = CodecUtil.footerLength();
 
+        if (remaining >= 4)
+        {
+            final int magic = readBEInt(in);
+
+            if (magic != FOOTER_MAGIC)
+            {
+                String additionalDetails = "";
+                if (remaining != expected)
+                    additionalDetails = " (and invalid number of bytes: remaining=" + remaining + ", expected=" + expected + ", fp=" + in.getFilePointer() + ')';
+                throw new CorruptIndexException("codec footer mismatch (file truncated?): actual footer=" + magic + " vs expected footer=" + FOOTER_MAGIC + additionalDetails, in);
+            }
+        }
+
         if (!padded)
         {
             if (remaining < expected)
@@ -169,12 +182,6 @@ public class SAICodecUtils
             }
         }
 
-        final int magic = readBEInt(in);
-
-        if (magic != FOOTER_MAGIC)
-        {
-            throw new CorruptIndexException("codec footer mismatch (file truncated?): actual footer=" + magic + " vs expected footer=" + FOOTER_MAGIC, in);
-        }
 
         final int algorithmID = readBEInt(in);
 
