@@ -59,7 +59,7 @@ public class CommitLogReader
     public static final int ALL_MUTATIONS = -1;
     private final CRC32 checksum;
     private final Map<TableId, AtomicInteger> invalidMutations;
-    public final Multimap<String, TableId> segmentsWithInvalidMutations;
+    private final List<String> segmentsWithInvalidMutations;
 
     private byte[] buffer;
 
@@ -67,8 +67,13 @@ public class CommitLogReader
     {
         checksum = new CRC32();
         invalidMutations = new HashMap<>();
-        segmentsWithInvalidMutations = ArrayListMultimap.create();
+        segmentsWithInvalidMutations = new ArrayList<>();
         buffer = new byte[4096];
+    }
+
+    public List<String> getSegmentsWithInvalidMutations()
+    {
+        return segmentsWithInvalidMutations;
     }
 
     public Set<Map.Entry<TableId, AtomicInteger>> getInvalidMutations()
@@ -448,7 +453,7 @@ public class CommitLogReader
             {
                 i = new AtomicInteger(1);
                 invalidMutations.put(ex.id, i);
-                segmentsWithInvalidMutations.put(desc.fileName(), ex.id);
+                segmentsWithInvalidMutations.add(desc.fileName());
             }
             else
                 i.incrementAndGet();
@@ -483,9 +488,6 @@ public class CommitLogReader
 
         if (shouldReplay)
             handler.handleMutation(mutation, size, entryLocation, desc);
-
-        // if the commit log segment was previously added to this list due to invalid mutations, it will be removed for those table ids that were successful replayed
-        mutation.getTableIds().forEach(tableid -> segmentsWithInvalidMutations.remove(desc.fileName(), tableid));
     }
 
     /**

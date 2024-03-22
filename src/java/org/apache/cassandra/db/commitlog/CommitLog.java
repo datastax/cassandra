@@ -94,7 +94,7 @@ public class CommitLog implements CommitLogMBean
     public final CommitLogArchiver archiver;
     public final CommitLogMetrics metrics;
     final AbstractCommitLogService executor;
-    public Multimap<String, TableId> segmentsWithInvalidMutations;
+    private List<String> segmentsWithInvalidMutations;
 
     volatile Configuration configuration;
     private boolean started = false;
@@ -238,14 +238,8 @@ public class CommitLog implements CommitLogMBean
 
             for (File f : files)
             {
-                if(!segmentsWithInvalidMutations.get(f.name()).isEmpty())
-                {
-                    logger.debug("File {} should not be deleted as it contains invalid mutations", f.name());
-                }
-                else
-                {
-                    segmentManager.handleReplayedSegment(f);
-                }
+                boolean toBeDeleted = !segmentsWithInvalidMutations.contains(f.name());
+                segmentManager.handleReplayedSegment(f, toBeDeleted);
             }
         }
 
@@ -266,11 +260,8 @@ public class CommitLog implements CommitLogMBean
         CommitLogReplayer replayer = CommitLogReplayer.construct(this, getLocalHostId());
         replayer.replayFiles(clogs);
 
-        /*we need to reload segments with invalid mutations as it may have been updated by the commit log replayer
-          Now, we can do delete removed segments and add new ones or just reload afresh
-          I decided to simply reload as this list is likely to be small, if it exists at all
-         */
-        segmentsWithInvalidMutations = replayer.commitLogReader.segmentsWithInvalidMutations;
+        // we need to reload clogs as new invalid mutations may have been added or old invalid mutations may have been replayed
+        segmentsWithInvalidMutations = replayer.getSegmentsWithInvalidMutations();
         return replayer.blockForWrites(flushReason);
     }
 

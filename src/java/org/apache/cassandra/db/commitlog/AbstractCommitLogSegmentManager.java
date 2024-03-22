@@ -415,9 +415,17 @@ public abstract class AbstractCommitLogSegmentManager
      */
     void handleReplayedSegment(final File file)
     {
-        // (don't decrease managed size, since this was never a "live" segment)
-        logger.trace("(Unopened) segment {} is no longer needed and will be deleted now", file);
-        FileUtils.deleteWithConfirm(file);
+        handleReplayedSegment(file, true);
+    }
+
+    void handleReplayedSegment(final File file, boolean toBeDeleted)
+    {
+        if (toBeDeleted)
+        {
+            // (don't decrease managed size, since this was never a "live" segment)
+            logger.trace("(Unopened) segment {} is no longer needed and will be deleted now", file);
+            FileUtils.deleteWithConfirm(file);
+        }
     }
 
     /**
