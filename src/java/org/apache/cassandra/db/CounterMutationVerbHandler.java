@@ -17,26 +17,14 @@
  */
 package org.apache.cassandra.db;
 
-import java.util.Collection;
-import java.util.Optional;
-import java.util.function.Function;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.NoPayload;
-import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestTracker;
-import org.apache.cassandra.sensors.Sensor;
-import org.apache.cassandra.sensors.SensorsRegistry;
-import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.StorageProxy;
 
 public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
@@ -66,44 +54,7 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         // it's own in that case.
         StorageProxy.applyCounterMutationOnLeader(cm,
                                                   localDataCenter,
-                                                  () -> respond(message, message.from()),
+                                                  new CounterMutationCallback(message, message.from(), sensors),
                                                   queryStartNanoTime);
-    }
-
-    private void respond(Message<?> respondTo, InetAddressAndPort respondToAddress)
-    {
-        Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
-        addSensorsToResponse(response);
-
-        MessagingService.instance().send(response.build(), respondToAddress);
-    }
-
-    private void addSensorsToResponse(Message.Builder<NoPayload> response) {
-        // Add write bytes sensors to the response
-        Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteByteRequestParam;
-        Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteByteTableParam;
-        RequestSensors requestSensors = RequestTracker.instance.get();
-        if (requestSensors != null)
-        {
-            Collection<Sensor> sensors = requestSensors.getSensors(Type.WRITE_BYTES);
-            addSensorsToResponse(sensors, requestParam, tableParam, response);
-        }
-    }
-
-    private void addSensorsToResponse(Collection<Sensor> sensors, Function<String, String> requestParamSupplier, Function<String, String> tableParamSupplier, Message.Builder<NoPayload> response) {
-        for (Sensor requestSensor : sensors)
-        {
-            String requestBytesParam = requestParamSupplier.apply(requestSensor.getContext().getTable());
-            byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(requestSensor.getValue());
-            response.withCustomParam(requestBytesParam, requestBytes);
-
-            // for each table in the mutation, send the global per table counter write bytes as recorded by the registry
-            Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(requestSensor.getContext(), requestSensor.getType());
-            registrySensor.ifPresent(sensor -> {
-                String tableBytesParam = tableParamSupplier.apply(sensor.getContext().getTable());
-                byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
-                response.withCustomParam(tableBytesParam, tableBytes);
-            });
-        }
     }
 }
