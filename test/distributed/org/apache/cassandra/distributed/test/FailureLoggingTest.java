@@ -39,7 +39,7 @@ import org.apache.cassandra.distributed.api.LogResult;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.service.reads.range.RangeCommandIterator;
+import org.apache.cassandra.service.reads.range.NonGroupingRangeCommandIterator;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.junit.Assert.assertEquals;
@@ -141,7 +141,7 @@ public class FailureLoggingTest extends TestBaseImpl
               .make()
               .load(cl, ClassLoadingStrategy.Default.INJECTION);
 
-            bb.redefine(RangeCommandIterator.class)
+            bb.redefine(NonGroupingRangeCommandIterator.class)
               .method(named("sendNextRequests"))
               .intercept(MethodDelegation.to(BBRequestFailures.class))
               .make()
