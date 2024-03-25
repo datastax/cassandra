@@ -22,11 +22,8 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
-import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Stopwatch;
@@ -36,16 +33,15 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.analyzer.ByteLimitedMaterializer;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -62,9 +58,6 @@ public class SSTableIndexWriter implements PerIndexWriter
     private final AbstractAnalyzer analyzer;
     private final NamedMemoryLimiter limiter;
     private final BooleanSupplier isIndexValid;
-
-    private final AtomicInteger updatesInFlight = new AtomicInteger(0);
-    private final QuickSlidingWindowReservoir termSizeReservoir = new QuickSlidingWindowReservoir(100);
 
     private boolean aborted = false;
 
@@ -211,61 +204,19 @@ public class SSTableIndexWriter implements PerIndexWriter
 
         if (currentBuilder == null)
         {
-            currentBuilder = newSegmentBuilder();
+            currentBuilder = newSegmentBuilder(sstableRowId);
         }
         else if (shouldFlush(sstableRowId))
         {
             flushSegment();
-            currentBuilder = newSegmentBuilder();
+            currentBuilder = newSegmentBuilder(sstableRowId);
         }
 
         if (term.remaining() == 0)
             return;
 
-        updatesInFlight.incrementAndGet();
-        ForkJoinPool.commonPool().submit(() -> {
-            try
-            {
-                addTermInternal(term, key, sstableRowId, type);
-            }
-            finally
-            {
-                updatesInFlight.decrementAndGet();
-            }
-        });
-        busyWaitWhile(() -> termSizeReservoir.size() == 0);
-        limiter.increment((long) termSizeReservoir.getMean());
-    }
-
-    private void busyWaitWhile(Supplier<Boolean> condition)
-    {
-        while (condition.get())
-        {
-            try
-            {
-                Thread.sleep(1);
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-    }
-
-    private void addTermInternal(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type)
-    {
-        long termSize = 0;
-        if (TypeUtil.isLiteral(type))
-        {
-            List<ByteBuffer> tokens = ByteLimitedMaterializer.materializeTokens(analyzer, term, indexContext, key);
-            for (ByteBuffer tokenTerm : tokens)
-                termSize += currentBuilder.add(tokenTerm, key, sstableRowId);
-        }
-        else
-        {
-            termSize += currentBuilder.add(term, key, sstableRowId);
-        }
-        termSizeReservoir.update(termSize);
+        long allocated = currentBuilder.addAll(term, type, key, sstableRowId, analyzer, indexContext);
+        limiter.increment(allocated);
     }
 
     private boolean shouldFlush(long sstableRowId)
@@ -289,9 +240,12 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private void flushSegment() throws IOException
     {
-        // addTerm is only called by the compaction thread, serially, so we don't need to worry about new
-        // terms being added while we're waiting -- updatesInFlight can only decrease
-        busyWaitWhile(() -> updatesInFlight.get() > 0);
+        currentBuilder.awaitAsyncAdditions();
+
+        // throw exceptions that occurred during async addInternal()
+        var ae = currentBuilder.getAsyncThrowable();
+        if (ae != null)
+            Throwables.throwAsUncheckedException(ae);
 
         long start = System.nanoTime();
         try
@@ -355,16 +309,16 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
     }
 
-    private SegmentBuilder newSegmentBuilder()
+    private SegmentBuilder newSegmentBuilder(long rowIdOffset)
     {
         SegmentBuilder builder;
 
         if (indexContext.isVector())
-            builder = new SegmentBuilder.VectorSegmentBuilder(indexContext.getValidator(), limiter, indexContext.getIndexWriterConfig());
+            builder = new SegmentBuilder.VectorSegmentBuilder(rowIdOffset, indexContext.getValidator(), limiter, indexContext.getIndexWriterConfig());
         else if (indexContext.isLiteral())
-            builder = new SegmentBuilder.RAMStringSegmentBuilder(indexContext.getValidator(), limiter);
+            builder = new SegmentBuilder.RAMStringSegmentBuilder(rowIdOffset, indexContext.getValidator(), limiter);
         else
-            builder = new SegmentBuilder.KDTreeSegmentBuilder(indexContext.getValidator(), limiter, indexContext.getIndexWriterConfig());
+            builder = new SegmentBuilder.KDTreeSegmentBuilder(rowIdOffset, indexContext.getValidator(), limiter, indexContext.getIndexWriterConfig());
 
         long globalBytesUsed = limiter.increment(builder.totalBytesAllocated());
         logger.debug(indexContext.logMessage("Created new segment builder while flushing SSTable {}. Global segment memory usage now at {}."),
