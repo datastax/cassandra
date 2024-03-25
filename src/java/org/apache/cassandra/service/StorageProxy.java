@@ -1486,10 +1486,8 @@ public class StorageProxy implements StorageProxyMBean
         ReplicaPlan.ForTokenWrite replicaPlan = ReplicaPlans.forWrite(keyspace, consistencyLevel, tk, ReplicaPlans.writeNormal);
         AbstractReplicationStrategy rs = replicaPlan.replicationStrategy();
         AbstractWriteResponseHandler<IMutation> responseHandler = rs.getWriteResponseHandler(replicaPlan, callback, writeType, queryStartNanoTime);
-        if (writeType == WriteType.COUNTER && callback instanceof CounterMutationCallback) {
-            CounterWriteReponseHandler<IMutation> wrapped = new CounterWriteReponseHandler<>(responseHandler, queryStartNanoTime, callback);
-            ((CounterMutationCallback) callback).attachHandler(wrapped);
-            return wrapped;
+        if (callback instanceof CounterMutationCallback) {
+            ((CounterMutationCallback) callback).setReplicaCount(replicaPlan.contacts().size());
         }
         return responseHandler;
     }
