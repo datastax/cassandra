@@ -19,11 +19,8 @@
 package org.apache.cassandra.db;
 
 import java.util.Collection;
-import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
-
-import javax.annotation.Nullable;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
@@ -34,18 +31,16 @@ import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
-import org.apache.cassandra.service.AbstractWriteResponseHandler;
-import org.apache.cassandra.service.CounterWriteReponseHandler;
 
 /**
- * A {@link AbstractWriteResponseHandler} awarte callback to be used when we need to send a response to a counter mutation.
+ * A counter mutation callback that encapsulates {@link RequestSensors} and replica count
  */
 public class CounterMutationCallback implements Runnable
 {
     private final Message<CounterMutation> respondTo;
     private final InetAddressAndPort respondToAddress;
     private final RequestSensors requestSensors;
-    @Nullable private CounterWriteReponseHandler<IMutation> responseHandler;
+    private int replicaCount = 0; // Default to CL.ANY
 
     public CounterMutationCallback(Message<CounterMutation> respondTo, InetAddressAndPort respondToAddress, RequestSensors requestSensors)
     {
@@ -54,51 +49,52 @@ public class CounterMutationCallback implements Runnable
         this.requestSensors = requestSensors;
     }
 
-    public void attachHandler(CounterWriteReponseHandler<IMutation> responseHandler)
+    /**
+     * Sets replica count including the local one.
+     */
+    public void setReplicaCount(Integer replicaCount)
     {
-        this.responseHandler = responseHandler;
+        this.replicaCount = replicaCount;
     }
 
     @Override
     public void run()
     {
         Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
-        if (this.responseHandler != null)
-        {
-            addSensorsToResponse(response, this.responseHandler.replicaSensors());
-        }
-
+        int replicaMultiplier = replicaCount == 0 ?
+                                1 : // replica count was not explictiy set (default) or it is indeed CL.ANY. In both cases, we should send the response accomodating for the local replica (aka. mutation leader) sensor values
+                                replicaCount;
+        addSensorsToResponse(response, requestSensors, replicaMultiplier);
         MessagingService.instance().send(response.build(), respondToAddress);
     }
 
-    private void addSensorsToResponse(Message.Builder<NoPayload> response, Map<String, Double> replicaSensors)
+    private static void addSensorsToResponse(Message.Builder<NoPayload> response, RequestSensors requestSensors, int replicaMultiplier)
     {
         // Add write bytes sensors to the response
         Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteByteRequestParam;
         Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteByteTableParam;
 
-        Collection<Sensor> sensors = this.requestSensors.getSensors(Type.WRITE_BYTES);
-        addSensorsToResponse(sensors, requestParam, tableParam, response, replicaSensors);
+        Collection<Sensor> sensors = requestSensors.getSensors(Type.WRITE_BYTES);
+        addSensorsToResponse(sensors, requestParam, tableParam, response, replicaMultiplier);
     }
 
-    private void addSensorsToResponse(Collection<Sensor> sensors,
-                                      Function<String, String> requestParamSupplier,
-                                      Function<String, String> tableParamSupplier,
-                                      Message.Builder<NoPayload> response,
-                                      Map<String, Double> replicaSensors)
+    private static void addSensorsToResponse(Collection<Sensor> sensors,
+                                             Function<String, String> requestParamSupplier,
+                                             Function<String, String> tableParamSupplier,
+                                             Message.Builder<NoPayload> response,
+                                             int replicaMultiplier)
     {
         for (Sensor requestSensor : sensors)
         {
             String requestBytesParam = requestParamSupplier.apply(requestSensor.getContext().getTable());
-            double replicaSensorsValue = replicaSensors.getOrDefault(requestBytesParam, 0.0);
-            byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(requestSensor.getValue() + replicaSensorsValue);
+            byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(requestSensor.getValue() * replicaMultiplier);
             response.withCustomParam(requestBytesParam, requestBytes);
 
             // for each table in the mutation, send the global per table counter write bytes as recorded by the registry
             Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(requestSensor.getContext(), requestSensor.getType());
             registrySensor.ifPresent(sensor -> {
                 String tableBytesParam = tableParamSupplier.apply(sensor.getContext().getTable());
-                byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue() + replicaSensorsValue);
+                byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue() * replicaMultiplier);
                 response.withCustomParam(tableBytesParam, tableBytes);
             });
         }

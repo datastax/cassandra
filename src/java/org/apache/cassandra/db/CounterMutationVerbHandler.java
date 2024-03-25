@@ -40,8 +40,8 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         logger.trace("Applying forwarded {}", cm);
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = new RequestSensors();
-        ExecutorLocals locals = ExecutorLocals.create(sensors);
+        RequestSensors requestSensors = new RequestSensors();
+        ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
@@ -54,7 +54,7 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         // it's own in that case.
         StorageProxy.applyCounterMutationOnLeader(cm,
                                                   localDataCenter,
-                                                  new CounterMutationCallback(message, message.from(), sensors),
+                                                  new CounterMutationCallback(message, message.from(), requestSensors),
                                                   queryStartNanoTime);
     }
 }
