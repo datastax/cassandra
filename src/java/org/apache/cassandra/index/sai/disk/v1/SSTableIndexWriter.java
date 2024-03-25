@@ -233,11 +233,11 @@ public class SSTableIndexWriter implements PerIndexWriter
                 updatesInFlight.decrementAndGet();
             }
         });
-        busyWait(() -> termSizeReservoir.size() == 0);
+        busyWaitWhile(() -> termSizeReservoir.size() == 0);
         limiter.increment((long) termSizeReservoir.getMean());
     }
 
-    private void busyWait(Supplier<Boolean> condition)
+    private void busyWaitWhile(Supplier<Boolean> condition)
     {
         while (condition.get())
         {
@@ -291,7 +291,7 @@ public class SSTableIndexWriter implements PerIndexWriter
     {
         // addTerm is only called by the compaction thread, serially, so we don't need to worry about new
         // terms being added while we're waiting -- updatesInFlight can only decrease
-        busyWait(() -> updatesInFlight.get() > 0);
+        busyWaitWhile(() -> updatesInFlight.get() > 0);
 
         long start = System.nanoTime();
         try
