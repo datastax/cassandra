@@ -31,6 +31,7 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.SchemaType;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
@@ -144,7 +145,7 @@ public class UpdateStatement extends ModificationStatement
 
             // Created from an INSERT
             checkFalse(metadata.isCounter(), "INSERT statements are not allowed on counter tables, use UPDATE instead");
-
+            checkFalse(metadata.params.schemaType == SchemaType.COLLECTION, "Collections don't support INSERT statements");
             checkFalse(columnNames == null, "Column names for INSERT must be provided when using VALUES");
             checkFalse(columnNames.isEmpty(), "No columns provided to INSERT");
             checkFalse(columnNames.size() != columnValues.size(), "Unmatched column names/values");
@@ -219,6 +220,7 @@ public class UpdateStatement extends ModificationStatement
                                                         Attributes attrs)
         {
             checkFalse(metadata.isCounter(), "INSERT statements are not allowed on counter tables, use UPDATE instead");
+            checkFalse(metadata.params.schemaType == SchemaType.COLLECTION, "Collections don't support INSERT statements");
 
             Collection<ColumnMetadata> defs = metadata.columns();
             Json.Prepared prepared = jsonValue.prepareAndCollectMarkers(metadata, defs, bindVariables);
@@ -301,6 +303,7 @@ public class UpdateStatement extends ModificationStatement
                                                         Conditions conditions,
                                                         Attributes attrs)
         {
+            checkFalse(metadata.params.schemaType == SchemaType.COLLECTION, "Collections don't support UPDATE statements");
             Operations operations = new Operations(type);
 
             for (Pair<ColumnIdentifier, Operation.RawUpdate> entry : updates)
