@@ -26,6 +26,7 @@ import javax.annotation.Nullable;
 
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.Shared;
 import org.apache.cassandra.utils.TimeUUID;
 
 /**
@@ -113,6 +114,7 @@ public interface TableOperation
         }
     }
 
+    @Shared
     enum StopTrigger
     {
         NONE("Unknwon reason", false),
