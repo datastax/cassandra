@@ -28,14 +28,22 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.primitives.Ints;
 
+import org.slf4j.Logger;
+
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.Rebufferer.BufferHolder;
 
 @NotThreadSafe
 public class RandomAccessReader extends RebufferingInputStream implements FileDataInput, io.github.jbellis.jvector.disk.RandomAccessReader
 {
+    private static final Logger logger = org.slf4j.LoggerFactory.getLogger(RandomAccessReader.class);
     // The default buffer size when the client doesn't specify it
-    public static final int DEFAULT_BUFFER_SIZE = 4096;
+    public static final int DEFAULT_BUFFER_SIZE = Integer.getInteger("cassandra.default_randomeaccessreader_buffer_size", 4096);
+
+    static
+    {
+        logger.debug("-Dcassandra.default_randomeaccessreader_buffer_size={}", DEFAULT_BUFFER_SIZE);
+    }
 
     // offset of the last file mark
     private long markedPointer;
