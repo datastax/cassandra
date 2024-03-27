@@ -22,6 +22,9 @@ package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
+import java.nio.LongBuffer;
 
 import org.apache.cassandra.utils.memory.BufferPools;
 
@@ -96,8 +99,27 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
 
     public ByteBuffer buffer()
     {
-        return buffer;
+        return buffer.duplicate();
     }
+
+    @Override
+    public FloatBuffer floatBuffer()
+    {
+        return buffer.asFloatBuffer();
+    }
+
+    @Override
+    public IntBuffer intBuffer()
+    {
+        return buffer.asIntBuffer();
+    }
+
+    @Override
+    public LongBuffer longBuffer()
+    {
+        return buffer.asLongBuffer();
+    }
+
 
     public long offset()
     {
