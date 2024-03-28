@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
@@ -45,23 +46,37 @@ public interface Rebufferer extends ReaderFileProxy
     {
         /**
          * Returns a useable buffer (i.e. one whose position and limit can be freely modified). Its limit will be set
-         * to the size of the available data in the buffer.
+         * to the size of the available data in the buffer. Must call order() before calling this method to ensure
+         * the buffer is in the correct byte order.
          * The buffer must be treated as read-only.
          */
         ByteBuffer buffer();
 
+        /**
+         * Configure this BufferHolder to use the passed ByteOrder for all buffers, including those returned by buffer().
+         * Must be called before the first call to buffer(). Must handle concurrent calls correctly.
+         * @param order
+         */
+        default void order(ByteOrder order)
+        {
+            throw new UnsupportedOperationException("not implemented in " + this.getClass());
+        }
+
         default FloatBuffer floatBuffer()
         {
+            // When implementing this, be sure to implement the order() method as well.
             throw new UnsupportedOperationException("not implemented in " + this.getClass());
         }
 
         default IntBuffer intBuffer()
         {
+            // When implementing this, be sure to implement the order() method as well.
             throw new UnsupportedOperationException("not implemented in " + this.getClass());
         }
 
         default LongBuffer longBuffer()
         {
+            // When implementing this, be sure to implement the order() method as well.
             throw new UnsupportedOperationException("not implemented in " + this.getClass());
         }
 

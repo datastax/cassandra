@@ -39,6 +39,7 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     protected final ChunkReader source;
     protected final ByteBuffer buffer;
     protected long offset = 0;
+    private ByteOrder order = null;
 
     abstract long alignedPosition(long position);
 
@@ -99,24 +100,37 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
 
     public ByteBuffer buffer()
     {
-        return buffer.duplicate();
+        assert order != null;
+        return buffer.duplicate().order(order);
+    }
+
+    @Override
+    public void order(ByteOrder newOrder)
+    {
+        if (order != null && order != newOrder)
+            throw new IllegalStateException("Buffer order cannot be changed");
+        order = newOrder;
+        buffer.order(order);
     }
 
     @Override
     public FloatBuffer floatBuffer()
     {
+        assert order != null : "Order has not been set for buffer.";
         return buffer.asFloatBuffer();
     }
 
     @Override
     public IntBuffer intBuffer()
     {
+        assert order != null : "Order has not been set for buffer.";
         return buffer.asIntBuffer();
     }
 
     @Override
     public LongBuffer longBuffer()
     {
+        assert order != null : "Order has not been set for buffer.";
         return buffer.asLongBuffer();
     }
 

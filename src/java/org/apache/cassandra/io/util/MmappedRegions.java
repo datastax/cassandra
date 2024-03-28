@@ -19,11 +19,13 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.LoggerFactory;
 
@@ -218,6 +220,7 @@ public class MmappedRegions extends SharedCloseableImpl
     {
         public final long offset;
         public final ByteBuffer buffer;
+        private final AtomicReference<ByteOrder> order = new AtomicReference<>(null);
 
         public Region(long offset, ByteBuffer buffer)
         {
@@ -227,23 +230,43 @@ public class MmappedRegions extends SharedCloseableImpl
 
         public ByteBuffer buffer()
         {
-            return buffer.duplicate();
+            var o = order.get();
+            assert o != null : "Order has not been set for buffer.";
+            return buffer.duplicate().order(o);
+        }
+
+        @Override
+        public void order(ByteOrder newOrder)
+        {
+            // Because this BufferHolder is shared among multiple threads, we need to ensure that the order is set
+            // and that we don't change it once it has been set. The {float,int,long}Buffer methods rely implicitly
+            // on buffer order, and we need to ensure that the order is set before they are called.
+            var previousOrder = this.order.getAndSet(newOrder);
+            if (previousOrder == null || previousOrder == newOrder)
+                // Set the order even if the previous order was the same as the new order because we don't explicitly
+                // have safe publication guaranteeing our current thread will see the order set by another thread.
+                buffer.order(newOrder);
+            else
+                throw new IllegalStateException("Order has already been set to " + previousOrder + " and cannot be changed to " + newOrder + " for buffer " + buffer);
         }
 
         public FloatBuffer floatBuffer()
         {
+            assert order.get() != null : "Order has not been set for buffer.";
             // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
             return buffer.asFloatBuffer();
         }
 
         public IntBuffer intBuffer()
         {
+            assert order.get() != null : "Order has not been set for buffer.";
             // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
             return buffer.asIntBuffer();
         }
 
         public LongBuffer longBuffer()
         {
+            assert order.get() != null : "Order has not been set for buffer.";
             // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
             return buffer.asLongBuffer();
         }

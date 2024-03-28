@@ -21,6 +21,7 @@
 package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
@@ -30,6 +31,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -164,6 +166,8 @@ public class ChunkCache
         private final long offset;
         private final AtomicInteger references;
 
+        private final AtomicReference<ByteOrder> order = new AtomicReference<>(null);
+
         public Buffer(ByteBuffer buffer, long offset)
         {
             this.buffer = buffer;
@@ -189,13 +193,31 @@ public class ChunkCache
         public ByteBuffer buffer()
         {
             assert references.get() > 0;
-            return buffer.duplicate();
+            var o = order.get();
+            assert o != null : "Order has not been set for buffer.";
+            return buffer.duplicate().order(o);
+        }
+
+        @Override
+        public void order(ByteOrder newOrder)
+        {
+            // Because this BufferHolder is shared among multiple threads, we need to ensure that the order is set
+            // and that we don't change it once it has been set. The {float,int,long}Buffer methods rely implicitly
+            // on buffer order, and we need to ensure that the order is set before they are called.
+            var previousOrder = this.order.getAndSet(newOrder);
+            if (previousOrder == null || previousOrder == newOrder)
+                // Set the order even if the previous order was the same as the new order because we don't explicitly
+                // have safe publication guaranteeing our current thread will see the order set by another thread.
+                buffer.order(newOrder);
+            else
+                throw new IllegalStateException("Order has already been set to " + previousOrder + " and cannot be changed to " + newOrder + " for buffer " + buffer);
         }
 
         @Override
         public FloatBuffer floatBuffer()
         {
             assert references.get() > 0;
+            assert order.get() != null : "Order has not been set for buffer.";
             // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
             return buffer.asFloatBuffer();
         }
@@ -204,6 +226,7 @@ public class ChunkCache
         public IntBuffer intBuffer()
         {
             assert references.get() > 0;
+            assert order.get() != null : "Order has not been set for buffer.";
             // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
             return buffer.asIntBuffer();
         }
@@ -212,6 +235,7 @@ public class ChunkCache
         public LongBuffer longBuffer()
         {
             assert references.get() > 0;
+            assert order.get() != null : "Order has not been set for buffer.";
             // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
             return buffer.asLongBuffer();
         }

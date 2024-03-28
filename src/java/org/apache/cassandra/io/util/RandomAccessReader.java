@@ -72,9 +72,10 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         bufferHolder.release();
         bufferHolder = Rebufferer.EMPTY; // prevents double release if the call below fails
         bufferHolder = rebufferer.rebuffer(position);
+        bufferHolder.order(order); // Configures bufferHolder to return buffers with the correct byte order
         buffer = bufferHolder.buffer();
+        assert buffer.order() == order : "Buffer order is " + buffer.order() + " but expected " + order;
         buffer.position(Ints.checkedCast(position - bufferHolder.offset()));
-        buffer.order(order);
     }
 
     public ByteOrder order()
@@ -493,13 +494,13 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
         if (buffer.isDirect())
         {
-            temporaryBuffer = ByteBuffer.allocateDirect(size).order(buffer.order());
+            temporaryBuffer = ByteBuffer.allocateDirect(size);
         }
         else
         {
-            temporaryBuffer = ByteBuffer.allocate(size).order(buffer.order());
+            temporaryBuffer = ByteBuffer.allocate(size);
         }
-        return temporaryBuffer;
+        return temporaryBuffer.order(order);
     }
 
 }
