@@ -193,9 +193,7 @@ public class ChunkCache
         public ByteBuffer buffer()
         {
             assert references.get() > 0;
-            var o = order.get();
-            assert o != null : "Order has not been set for buffer.";
-            return buffer.duplicate().order(o);
+            return buffer.duplicate().order(buffer.order());
         }
 
         @Override

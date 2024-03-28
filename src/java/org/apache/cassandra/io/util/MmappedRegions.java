@@ -230,9 +230,7 @@ public class MmappedRegions extends SharedCloseableImpl
 
         public ByteBuffer buffer()
         {
-            var o = order.get();
-            assert o != null : "Order has not been set for buffer.";
-            return buffer.duplicate().order(o);
+            return buffer.duplicate().order(buffer.order());
         }
 
         @Override

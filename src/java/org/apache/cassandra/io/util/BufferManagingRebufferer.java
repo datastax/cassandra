@@ -100,8 +100,7 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
 
     public ByteBuffer buffer()
     {
-        assert order != null;
-        return buffer.duplicate().order(order);
+        return buffer.duplicate().order(buffer.order());
     }
 
     @Override

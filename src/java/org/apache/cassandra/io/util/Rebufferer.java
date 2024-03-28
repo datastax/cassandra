@@ -46,15 +46,15 @@ public interface Rebufferer extends ReaderFileProxy
     {
         /**
          * Returns a useable buffer (i.e. one whose position and limit can be freely modified). Its limit will be set
-         * to the size of the available data in the buffer. Must call order() before calling this method to ensure
-         * the buffer is in the correct byte order.
+         * to the size of the available data in the buffer. If order() is called before buffer(), the buffer will have
+         * the specified ByteOrder.
          * The buffer must be treated as read-only.
          */
         ByteBuffer buffer();
 
         /**
          * Configure this BufferHolder to use the passed ByteOrder for all buffers, including those returned by buffer().
-         * Must be called before the first call to buffer(). Must handle concurrent calls correctly.
+         * Must handle concurrent calls correctly.
          * @param order
          */
         default void order(ByteOrder order)
