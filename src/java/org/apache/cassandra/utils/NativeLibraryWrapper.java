@@ -24,6 +24,7 @@ import com.sun.jna.Pointer;
  * An interface to implement for using OS specific native methods.
  * @see INativeLibrary
  */
+@Shared
 public interface NativeLibraryWrapper
 {
     /**
