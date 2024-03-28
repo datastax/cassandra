@@ -31,6 +31,7 @@ import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
@@ -97,8 +98,11 @@ public class QueryController implements Plan.Executor
      * 0 disables the optimizer.
      * 1 enables the optimizer and tells the optimizer to respect the intersection clause limit.
      * Higher values enable the optimizer and disable the hard intersection clause limit.
+     * Note: the config is not final to simplify testing. It is initialized before other final objects in this class,
+     * so it is safely published.
      */
-    public static final int QUERY_OPT_LEVEL = Integer.getInteger("cassandra.sai.query.optimization.level", 1);
+    @VisibleForTesting
+    public static int QUERY_OPT_LEVEL = Integer.getInteger("cassandra.sai.query.optimization.level", 1);
 
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;

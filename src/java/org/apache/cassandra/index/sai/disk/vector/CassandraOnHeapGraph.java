@@ -26,6 +26,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -324,7 +325,21 @@ public class CassandraOnHeapGraph<T>
                              : new AutoResumingNodeScoreIterator(searcher, result, context::addAnnNodesVisited, topK, true, null);
     }
 
-    public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Function<T, Integer> postingTransformer) throws IOException
+    public Set<Integer> computeDeletedOrdinals(Function<T, Integer> postingTransformer)
+    {
+        var deletedOrdinals = new HashSet<Integer>();
+        postingsMap.values().stream().filter(VectorPostings::isEmpty).forEach(vectorPostings -> deletedOrdinals.add(vectorPostings.getOrdinal()));
+        // remove ordinals that don't have corresponding row ids due to partition/range deletion
+        for (VectorPostings<T> vectorPostings : postingsMap.values())
+        {
+            vectorPostings.computeRowIds(postingTransformer);
+            if (vectorPostings.shouldAppendDeletedOrdinal())
+                deletedOrdinals.add(vectorPostings.getOrdinal());
+        }
+        return deletedOrdinals;
+    }
+
+    public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Set<Integer> deletedOrdinals) throws IOException
     {
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
@@ -343,16 +358,6 @@ public class CassandraOnHeapGraph<T>
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);
             SAICodecUtils.writeHeader(indexOutput);
-
-            var deletedOrdinals = new HashSet<Integer>();
-            postingsMap.values().stream().filter(VectorPostings::isEmpty).forEach(vectorPostings -> deletedOrdinals.add(vectorPostings.getOrdinal()));
-            // remove ordinals that don't have corresponding row ids due to partition/range deletion
-            for (VectorPostings<T> vectorPostings : postingsMap.values())
-            {
-                vectorPostings.computeRowIds(postingTransformer);
-                if (vectorPostings.shouldAppendDeletedOrdinal())
-                    deletedOrdinals.add(vectorPostings.getOrdinal());
-            }
 
             // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
             // null if remapping is not possible

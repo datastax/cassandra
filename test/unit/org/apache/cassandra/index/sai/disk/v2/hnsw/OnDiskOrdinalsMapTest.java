@@ -47,6 +47,7 @@ import org.apache.cassandra.io.util.SequentialWriterOption;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -110,6 +111,48 @@ public class OnDiskOrdinalsMapTest
     public void testForEachFileReading() throws Exception
     {
         testForEach(null);
+    }
+
+    // This test covers a legacy case that is no longer reachable in the current codebase.
+    @Test
+    public void testGraphThatHasOrdinalsButNoMatchingRows() throws Exception
+    {
+        File tempFile = temp("testfile");
+
+        var deletedOrdinals = new HashSet<Integer>();
+        // Delete the only ordinal
+        deletedOrdinals.add(0);
+        RamAwareVectorValues vectorValues = generateVectors(1);
+
+        var postingsMap = generatePostingsMap(vectorValues);
+
+        for (var p: postingsMap.entrySet()) {
+            // Remove all row ids
+            p.getValue().computeRowIds(x -> -1);
+        }
+
+        PostingsMetadata postingsMd = writePostings(null, tempFile, vectorValues, postingsMap, deletedOrdinals);
+        try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
+             FileHandle fileHandle = builder.complete())
+        {
+            var odom = new OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
+
+            try (var ordinalsView = odom.getOrdinalsView();
+                 var rowIdsView = odom.getRowIdsView())
+            {
+                assertEquals(-1, ordinalsView.getOrdinalForRowId(0));
+                final AtomicInteger count = new AtomicInteger(0);
+                ordinalsView.forEachOrdinalInRange(-100, Integer.MAX_VALUE / 2, (rowId, ordinal) -> {
+                    count.incrementAndGet();
+                });
+                assertEquals(0, count.get());
+                assertNull(ordinalsView.buildOrdinalBitSet(0, 5, () -> null));
+
+                assertFalse(rowIdsView.getSegmentRowIdsMatching(0).hasNext());
+            }
+
+            odom.close();
+        }
     }
 
     private void testForEach(HashBiMap<Integer, Integer> ordinalsMap) throws Exception
@@ -206,9 +249,11 @@ public class OnDiskOrdinalsMapTest
                 assertEquals(-1, ordinal);
             }
 
-            boolean rowIdsMatchOrdinals = (boolean) FieldUtils.readField(odom, "rowIdsMatchOrdinals", true);
+            boolean canFastMapRowIdsView = (boolean) FieldUtils.readField(odom, "canFastMapRowIdsView", true);
+            boolean canFastMapOrdinalsView = (boolean) FieldUtils.readField(odom, "canFastMapOrdinalsView", true);
             odom.close();
-            return rowIdsMatchOrdinals;
+            assertEquals(canFastMapRowIdsView, canFastMapOrdinalsView);
+            return canFastMapOrdinalsView;
         }
     }
 
