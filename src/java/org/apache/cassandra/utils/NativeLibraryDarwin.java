@@ -42,6 +42,7 @@ import com.sun.jna.Pointer;
  * @see org.apache.cassandra.utils.NativeLibraryWrapper
  * @see INativeLibrary
  */
+@Shared
 public class NativeLibraryDarwin implements NativeLibraryWrapper
 {
     private static final Logger logger = LoggerFactory.getLogger(NativeLibraryDarwin.class);
