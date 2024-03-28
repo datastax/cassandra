@@ -42,7 +42,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     final Rebufferer rebufferer;
     private BufferHolder bufferHolder = Rebufferer.EMPTY;
     private final ByteOrder order;
-    ByteBuffer temporaryBuffer;
+    private ByteBuffer temporaryBuffer;
 
     /**
      * Only created through Builder
@@ -491,7 +491,14 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             temporaryBuffer.clear();
             return temporaryBuffer;
         }
-        temporaryBuffer = ByteBuffer.allocateDirect(size);
+        if (buffer.isDirect())
+        {
+            temporaryBuffer = ByteBuffer.allocateDirect(size);
+        }
+        else
+        {
+            temporaryBuffer = ByteBuffer.allocate(size);
+        }
         return temporaryBuffer;
     }
 
