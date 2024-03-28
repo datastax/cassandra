@@ -114,7 +114,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
 
         int bytesToRead = Float.BYTES * dest.length;
-        if (dest.length > floatBuffer.remaining())
+        if (bytesToRead > floatBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
             var bb = getTemporaryBuffer(bytesToRead);
@@ -199,7 +199,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
 
         int bytesToRead = Integer.BYTES * count;
-        if (count > intBuffer.remaining())
+        if (bytesToRead > intBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
             var bb = getTemporaryBuffer(bytesToRead);
