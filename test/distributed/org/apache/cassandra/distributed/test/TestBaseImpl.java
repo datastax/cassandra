@@ -126,17 +126,7 @@ public class TestBaseImpl extends DistributedTestBase
 
     protected void bootstrapAndJoinNode(Cluster cluster)
     {
-        cluster.stream().forEach(node -> {
-            assert node.config().has(Feature.NETWORK) : "Network feature must be enabled on the cluster";
-            assert node.config().has(Feature.GOSSIP) : "Gossip feature must be enabled on the cluster";
-        });
-
-        IInstanceConfig config = cluster.newInstanceConfig();
-        config.set("auto_bootstrap", true);
-        IInvokableInstance newInstance = cluster.bootstrap(config);
-        withProperty(BOOTSTRAP_SCHEMA_DELAY_MS, Integer.toString(90 * 1000),
-                     () -> withProperty(JOIN_RING, false, () -> newInstance.startup(cluster)));
-        newInstance.nodetoolResult("join").asserts().success();
+        IInvokableInstance newInstance = bootstrapAndJoinNodeNoWait(cluster);
 
         // Wait until all the other live nodes on the cluster see this node as NORMAL.
         // The old nodes will update their tokens only after the new node announces its NORMAL state through gossip.
@@ -151,6 +141,22 @@ public class TestBaseImpl extends DistributedTestBase
                     return state != null && state.isNormalState();
                 })) : "New node should be seen in NORMAL state by the other nodes in the cluster";
         });
+    }
+
+    protected IInvokableInstance bootstrapAndJoinNodeNoWait(Cluster cluster)
+    {
+        cluster.stream().forEach(node -> {
+            assert node.config().has(Feature.NETWORK) : "Network feature must be enabled on the cluster";
+            assert node.config().has(Feature.GOSSIP) : "Gossip feature must be enabled on the cluster";
+        });
+
+        IInstanceConfig config = cluster.newInstanceConfig();
+        config.set("auto_bootstrap", true);
+        IInvokableInstance newInstance = cluster.bootstrap(config);
+        withProperty(BOOTSTRAP_SCHEMA_DELAY_MS, Integer.toString(90 * 1000),
+                     () -> withProperty(JOIN_RING, false, () -> newInstance.startup(cluster)));
+        newInstance.nodetoolResult("join").asserts().success();
+        return newInstance;
     }
 
     private static InetAddressAndPort nodeAddress(InetSocketAddress address)
