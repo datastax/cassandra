@@ -493,11 +493,11 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
         if (buffer.isDirect())
         {
-            temporaryBuffer = ByteBuffer.allocateDirect(size);
+            temporaryBuffer = ByteBuffer.allocateDirect(size).order(buffer.order());
         }
         else
         {
-            temporaryBuffer = ByteBuffer.allocate(size);
+            temporaryBuffer = ByteBuffer.allocate(size).order(buffer.order());
         }
         return temporaryBuffer;
     }
