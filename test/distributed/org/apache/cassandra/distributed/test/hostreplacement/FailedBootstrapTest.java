@@ -96,8 +96,8 @@ public class FailedBootstrapTest extends TestBaseImpl
                       .until(() -> added.callOnInstance(() -> BB.SETUP_SCHEDULE_COUNTER.get()) >= 42); // why 42?  just need something large enough to make sure multiple attempts happened
 
             // do we have any read metrics have unavailables?
-            ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(null);
             added.runOnInstance(() -> {
+                ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(null);
                 Assertions.assertThat(metrics.readMetrics.unavailables.getCount()).describedAs("read unavailables").isEqualTo(0);
                 Assertions.assertThat(metrics.casReadMetrics.unavailables.getCount()).describedAs("CAS read unavailables").isEqualTo(0);
             });
