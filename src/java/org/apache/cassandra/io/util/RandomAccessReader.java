@@ -23,7 +23,6 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
-
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.primitives.Ints;
@@ -43,6 +42,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     final Rebufferer rebufferer;
     private BufferHolder bufferHolder;
     private final ByteOrder order;
+    private ByteBuffer temporaryBuffer;
 
     /**
      * Only created through Builder
@@ -122,16 +122,17 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             floatBuffer = bb.asFloatBuffer();
         }
 
+        int bytesToRead = Float.BYTES * dest.length;
         if (dest.length > floatBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
-            var bb = ByteBuffer.allocate(Float.BYTES * dest.length);
+            var bb = getTemporaryBuffer(bytesToRead);
             readFully(bb);
             floatBuffer = bb.asFloatBuffer();
         }
 
         floatBuffer.get(dest);
-        seek(position + (long) Float.BYTES * dest.length);
+        seek(position + bytesToRead);
     }
 
     @Override
@@ -157,16 +158,17 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             longBuffer = bb.asLongBuffer();
         }
 
-        if (dest.length > longBuffer.remaining())
+        int bytesToRead = Long.BYTES * dest.length;
+        if (bytesToRead > longBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
-            var bb = ByteBuffer.allocate(Long.BYTES * dest.length);
+            var bb = getTemporaryBuffer(bytesToRead);
             readFully(bb);
             longBuffer = bb.asLongBuffer();
         }
 
         longBuffer.get(dest);
-        seek(position + (long) Long.BYTES * dest.length);
+        seek(position + bytesToRead);
     }
 
     /**
@@ -205,16 +207,17 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             intBuffer = bb.asIntBuffer();
         }
 
+        int bytesToRead = Integer.BYTES * count;
         if (count > intBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
-            var bb = ByteBuffer.allocate(Integer.BYTES * count);
+            var bb = getTemporaryBuffer(bytesToRead);
             readFully(bb);
             intBuffer = bb.asIntBuffer();
         }
 
         intBuffer.get(dest, offset, count);
-        seek(position + (long) Integer.BYTES * count);
+        seek(position + bytesToRead);
     }
 
     @Override
@@ -305,7 +308,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         // close needs to be idempotent.
         if (buffer == null)
             return;
-
+        temporaryBuffer = null;
         bufferHolder.release();
         rebufferer.closeReader();
         buffer = null;
@@ -488,4 +491,24 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             throw t;
         }
     }
+
+    private ByteBuffer getTemporaryBuffer(int size)
+    {
+        if (temporaryBuffer != null
+            && temporaryBuffer.capacity() == size)
+        {
+            temporaryBuffer.clear();
+            return temporaryBuffer;
+        }
+        if (buffer.isDirect())
+        {
+            temporaryBuffer = ByteBuffer.allocateDirect(size).order(buffer.order());
+        }
+        else
+        {
+            temporaryBuffer = ByteBuffer.allocate(size).order(buffer.order());
+        }
+        return temporaryBuffer;
+    }
+
 }
