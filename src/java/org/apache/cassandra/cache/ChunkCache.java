@@ -205,12 +205,11 @@ public class ChunkCache
             // and that we don't change it once it has been set. The {float,int,long}Buffer methods rely implicitly
             // on buffer order, and we need to ensure that the order is set before they are called.
             var previousOrder = this.order.getAndSet(newOrder);
-            if (previousOrder == null || previousOrder == newOrder)
-                // Set the order even if the previous order was the same as the new order because we don't explicitly
-                // have safe publication guaranteeing our current thread will see the order set by another thread.
-                buffer.order(newOrder);
-            else
+            if (previousOrder != null && previousOrder != newOrder)
                 throw new IllegalStateException("Order has already been set to " + previousOrder + " and cannot be changed to " + newOrder + " for buffer " + buffer);
+            // Set the order even if the previous order was the same as the new order because we don't explicitly
+            // have safe publication guaranteeing our current thread will see the order set by another thread.
+            buffer.order(newOrder);
         }
 
         @Override
