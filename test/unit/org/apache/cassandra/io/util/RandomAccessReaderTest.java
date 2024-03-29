@@ -184,22 +184,25 @@ public class RandomAccessReaderTest
     @Test
     public void testReadFullyFloatArrayAligned() throws IOException
     {
-        testReadFullyFloatArray(0);
+        testReadFullyFloatArray(0, ByteOrder.BIG_ENDIAN);
+        testReadFullyFloatArray(0, ByteOrder.LITTLE_ENDIAN);
     }
 
     @Test
     public void testReadFullyFloatArrayNotAligned() throws IOException
     {
-        testReadFullyFloatArray(1);
+        testReadFullyFloatArray(1, ByteOrder.BIG_ENDIAN);
+        testReadFullyFloatArray(1, ByteOrder.LITTLE_ENDIAN);
     }
 
     @Test
     public void testReadFullyFloatArrayAligned2() throws IOException
     {
-        testReadFullyFloatArray(Float.BYTES);
+        testReadFullyFloatArray(Float.BYTES, ByteOrder.BIG_ENDIAN);
+        testReadFullyFloatArray(Float.BYTES, ByteOrder.LITTLE_ENDIAN);
     }
 
-    private void testReadFullyFloatArray(int shift) throws IOException
+    private void testReadFullyFloatArray(int shift, ByteOrder order) throws IOException
     {
         int bufferSize = 2048;
 
@@ -214,7 +217,7 @@ public class RandomAccessReaderTest
         cases.add(new FloatReadArrayCase(2000));
         cases.add(new FloatReadArrayCase(2000));
 
-         int bigArraySize = 1 + (bufferSize / Float.BYTES);
+        int bigArraySize = 1 + (bufferSize / Float.BYTES);
         // ensure that in the test case we have a least one array that is bigger than the buffer size
         cases.add(new FloatReadArrayCase(bigArraySize));
         cases.add(new FloatReadArrayCase(bigArraySize));
@@ -225,6 +228,7 @@ public class RandomAccessReaderTest
         File file = writeFile(writer -> {
             try
             {
+                writer.order(order);
                 // write some garbage in the beginning, in order to not have aligned reads
                 for (int i = 0; i < shift; i++)
                     writer.writeByte(0);
@@ -244,7 +248,9 @@ public class RandomAccessReaderTest
 
         try (ChannelProxy channel = new ChannelProxy(file);
              FileHandle fh = new FileHandle.Builder(channel.file())
-                             .bufferType(BufferType.OFF_HEAP).bufferSize(bufferSize).complete();
+                             .order(order)
+                             .bufferType(BufferType.OFF_HEAP).bufferSize(bufferSize)
+                             .complete();
              RandomAccessReader reader = fh.createReader())
         {
             assertEquals(channel.size(), reader.length());
@@ -285,22 +291,25 @@ public class RandomAccessReaderTest
     @Test
     public void testReadFullyLongArrayAligned() throws IOException
     {
-        testReadFullyLongArray(0);
+        testReadFullyLongArray(0, ByteOrder.BIG_ENDIAN);
+        testReadFullyLongArray(0, ByteOrder.LITTLE_ENDIAN);
     }
 
     @Test
     public void testReadFullyLongArrayNotAligned() throws IOException
     {
-        testReadFullyLongArray(1);
+        testReadFullyLongArray(1, ByteOrder.BIG_ENDIAN);
+        testReadFullyLongArray(1, ByteOrder.LITTLE_ENDIAN);
     }
 
     @Test
     public void testReadFullyLongArrayAligned2() throws IOException
     {
-        testReadFullyLongArray(Long.BYTES);
+        testReadFullyLongArray(Long.BYTES, ByteOrder.BIG_ENDIAN);
+        testReadFullyLongArray(Long.BYTES, ByteOrder.LITTLE_ENDIAN);
     }
 
-    private void testReadFullyLongArray(int shift) throws IOException
+    private void testReadFullyLongArray(int shift, ByteOrder order) throws IOException
     {
         int bufferSize = 2048;
 
@@ -326,6 +335,7 @@ public class RandomAccessReaderTest
         File file = writeFile(writer -> {
             try
             {
+                writer.order(order);
                 // write some garbage in the beginning, in order to not have aligned reads
                 for (int i = 0; i < shift; i++)
                     writer.writeByte(0);
@@ -346,7 +356,9 @@ public class RandomAccessReaderTest
 
         try (ChannelProxy channel = new ChannelProxy(file);
              FileHandle fh = new FileHandle.Builder(channel.file())
-                             .bufferType(BufferType.OFF_HEAP).bufferSize(bufferSize).complete();
+                             .order(order)
+                             .bufferType(BufferType.OFF_HEAP).bufferSize(bufferSize)
+                             .complete();
              RandomAccessReader reader = fh.createReader())
         {
             assertEquals(channel.size(), reader.length());
@@ -388,22 +400,25 @@ public class RandomAccessReaderTest
     @Test
     public void testReadFullyIntArrayAligned() throws IOException
     {
-        testReadFullyIntArray(0);
+        testReadFullyIntArray(0, ByteOrder.BIG_ENDIAN);
+        testReadFullyIntArray(0, ByteOrder.LITTLE_ENDIAN);
     }
 
     @Test
     public void testReadFullyIntArrayNotAligned() throws IOException
     {
-        testReadFullyIntArray(1);
+        testReadFullyIntArray(1, ByteOrder.BIG_ENDIAN);
+        testReadFullyIntArray(1, ByteOrder.LITTLE_ENDIAN);
     }
 
     @Test
     public void testReadFullyIntArrayAligned2() throws IOException
     {
-        testReadFullyIntArray(Integer.BYTES);
+        testReadFullyIntArray(Integer.BYTES, ByteOrder.BIG_ENDIAN);
+        testReadFullyIntArray(Integer.BYTES, ByteOrder.LITTLE_ENDIAN);
     }
 
-    private void testReadFullyIntArray(int shift) throws IOException
+    private void testReadFullyIntArray(int shift, ByteOrder order) throws IOException
     {
         int bufferSize = 2048;
 
@@ -429,6 +444,7 @@ public class RandomAccessReaderTest
         File file = writeFile(writer -> {
             try
             {
+                writer.order(order);
                 // write some garbage in the beginning, in order to not have aligned reads
                 for (int i = 0; i < shift; i++)
                     writer.writeByte(0);
@@ -449,7 +465,9 @@ public class RandomAccessReaderTest
 
         try (ChannelProxy channel = new ChannelProxy(file);
              FileHandle fh = new FileHandle.Builder(channel.file())
-                             .bufferType(BufferType.OFF_HEAP).bufferSize(bufferSize).complete();
+                             .order(order)
+                             .bufferType(BufferType.OFF_HEAP).bufferSize(bufferSize)
+                             .complete();
              RandomAccessReader reader = fh.createReader())
         {
             assertEquals(channel.size(), reader.length());
