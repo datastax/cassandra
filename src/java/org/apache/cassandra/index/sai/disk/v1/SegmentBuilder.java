@@ -297,7 +297,8 @@ public abstract class SegmentBuilder
         ForkJoinPool.commonPool().submit(() -> {
             try
             {
-                addInternal(term, segmentRowId);
+                long bytesAdded = addInternal(term, segmentRowId);
+                termSizeReservoir.update(bytesAdded);
             }
             catch (Throwable th)
             {
