@@ -21,6 +21,7 @@
 package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
@@ -190,6 +191,12 @@ public class ChunkCache
         {
             assert references.get() > 0;
             return buffer.duplicate();
+        }
+
+        @Override
+        public ByteOrder order()
+        {
+            return buffer.order();
         }
 
         @Override
