@@ -299,6 +299,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         // close needs to be idempotent.
         if (buffer == null)
             return;
+        FileUtils.clean(temporaryBuffer);
         temporaryBuffer = null;
         bufferHolder.release();
         rebufferer.closeReader();
@@ -491,6 +492,8 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             temporaryBuffer.clear();
             return temporaryBuffer;
         }
+        // Do not leave direct buffers to full gc
+        FileUtils.clean(temporaryBuffer);
         if (buffer.isDirect())
         {
             temporaryBuffer = ByteBuffer.allocateDirect(size).order(buffer.order());
