@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
@@ -228,6 +229,12 @@ public class MmappedRegions extends SharedCloseableImpl
         public ByteBuffer buffer()
         {
             return buffer.duplicate();
+        }
+
+        @Override
+        public ByteOrder order()
+        {
+            return buffer.order();
         }
 
         public FloatBuffer floatBuffer()
