@@ -21,6 +21,7 @@ package org.apache.cassandra.io.tries;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.function.BiFunction;
@@ -179,6 +180,12 @@ abstract public class AbstractTrieTestBase
         public ByteBuffer buffer()
         {
             return buffer;
+        }
+
+        @Override
+        public ByteOrder order()
+        {
+            return buffer.order();
         }
 
         @Override

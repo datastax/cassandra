@@ -105,11 +105,13 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         long position = getPosition();
 
         FloatBuffer floatBuffer;
-        if (bh.offset() == 0 && position % Float.BYTES == 0)
+        if (bh.offset() == 0 && position % Float.BYTES == 0 && bh.order() == order)
         {
             // this is a separate code path because buffer() and asFloatBuffer() both allocate
             // new and relatively expensive xBuffer objects, so we want to avoid doing that
-            // twice, where possible
+            // twice, where possible. If the BufferHandler has a different underlying
+            // byte order, we duplicate first because there is not yet a way to configure
+            // the buffer handler to use the correct byte order.
             floatBuffer = bh.floatBuffer();
             floatBuffer.position(Ints.checkedCast(position / Float.BYTES));
         }
@@ -118,6 +120,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             // offset is non-zero, and probably not aligned to Float.BYTES, so
             // set the position before converting to FloatBuffer.
             var bb = bh.buffer();
+            bb.order(order);
             bb.position(Ints.checkedCast(position - bh.offset()));
             floatBuffer = bb.asFloatBuffer();
         }
@@ -141,11 +144,13 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         long position = getPosition();
 
         LongBuffer longBuffer;
-        if (bh.offset() == 0 && position % Long.BYTES == 0)
+        if (bh.offset() == 0 && position % Long.BYTES == 0 && bh.order() == order)
         {
             // this is a separate code path because buffer() and asLongBuffer() both allocate
             // new and relatively expensive xBuffer objects, so we want to avoid doing that
-            // twice, where possible
+            // twice, where possible. If the BufferHandler has a different underlying
+            // byte order, we duplicate first because there is not yet a way to configure
+            // the buffer handler to use the correct byte order.
             longBuffer = bh.longBuffer();
             longBuffer.position(Ints.checkedCast(position / Long.BYTES));
         }
@@ -154,6 +159,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             // offset is non-zero, and probably not aligned to Long.BYTES, so
             // set the position before converting to LongBuffer.
             var bb = bh.buffer();
+            bb.order(order);
             bb.position(Ints.checkedCast(position - bh.offset()));
             longBuffer = bb.asLongBuffer();
         }
@@ -190,11 +196,13 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         long position = getPosition();
 
         IntBuffer intBuffer;
-        if (bh.offset() == 0 && position % Integer.BYTES == 0)
+        if (bh.offset() == 0 && position % Integer.BYTES == 0 && bh.order() == order)
         {
             // this is a separate code path because buffer() and asIntBuffer() both allocate
             // new and relatively expensive xBuffer objects, so we want to avoid doing that
-            // twice, where possible
+            // twice, where possible. If the BufferHandler has a different underlying
+            // byte order, we duplicate first because there is not yet a way to configure
+            // the buffer handler to use the correct byte order.
             intBuffer = bh.intBuffer();
             intBuffer.position(Ints.checkedCast(position / Integer.BYTES));
         }
@@ -203,6 +211,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             // offset is non-zero, and probably not aligned to Integer.BYTES, so
             // set the position before converting to IntBuffer.
             var bb = bh.buffer();
+            bb.order(order);
             bb.position(Ints.checkedCast(position - bh.offset()));
             intBuffer = bb.asIntBuffer();
         }
