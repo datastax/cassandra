@@ -104,6 +104,12 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     }
 
     @Override
+    public ByteOrder order()
+    {
+        return buffer.order();
+    }
+
+    @Override
     public FloatBuffer floatBuffer()
     {
         return buffer.asFloatBuffer();
