@@ -18,6 +18,7 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import javax.annotation.concurrent.NotThreadSafe;
 
 /**
@@ -39,6 +40,7 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     protected BufferHolder bufferHolder;
     protected ByteBuffer buffer;
     protected long offset;
+    protected ByteOrder order = null;
 
     public WrappingRebufferer(Rebufferer source)
     {
@@ -50,6 +52,7 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     {
         assert buffer == null;
         bufferHolder = source.rebuffer(position);
+        bufferHolder.order(order);
         buffer = bufferHolder.buffer();
         offset = bufferHolder.offset();
 
@@ -98,6 +101,14 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     {
         assert buffer != null : "Buffer holder has not been acquired";
         return buffer;
+    }
+
+    @Override
+    public void order(ByteOrder newOrder)
+    {
+        assert buffer != null : "Buffer holder has not been acquired";
+        assert order == null || order == newOrder : "Order has been already set to " + order + " and is attempted to be set to " + newOrder;
+        buffer.order(newOrder);
     }
 
     @Override

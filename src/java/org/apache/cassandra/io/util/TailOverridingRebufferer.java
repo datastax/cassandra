@@ -53,7 +53,7 @@ public class TailOverridingRebufferer extends WrappingRebufferer
         }
         else
         {
-            buffer = tail.duplicate();
+            buffer = tail.duplicate().order(order);
             offset = cutoff;
         }
         return this;
