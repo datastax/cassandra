@@ -52,9 +52,11 @@ public interface Rebufferer extends ReaderFileProxy
         ByteBuffer buffer();
 
         /**
-         * Return the order of the {@link ByteBuffer} and other various buffers returned by this class. This is
-         * particularly relevant for the {@link #floatBuffer()}, {@link #intBuffer()} and {@link #longBuffer()} methods
-         * because the caller cannot change the order of those returned buffer objects.
+         * Return the order of the underlying {@link ByteBuffer} held by this class. This is only relevant for the
+         * {@link #floatBuffer()}, {@link #intBuffer()} and {@link #longBuffer()} methods because the caller cannot
+         * change the order of those returned buffer objects. Further, it is not generally relevant for calls to
+         * {@link #buffer()} since the call to {@link ByteBuffer#duplicate()} sets the byte order to
+         * {@link ByteOrder#BIG_ENDIAN} and the caller can change the order of the returned buffer.
          */
         ByteOrder order();
 
