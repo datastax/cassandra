@@ -98,8 +98,7 @@ public class QueryController implements Plan.Executor
      * 0 disables the optimizer.
      * 1 enables the optimizer and tells the optimizer to respect the intersection clause limit.
      * Higher values enable the optimizer and disable the hard intersection clause limit.
-     * Note: the config is not final to simplify testing. It is initialized before other final objects in this class,
-     * so it is safely published.
+     * Note: the config is not final to simplify testing.
      */
     @VisibleForTesting
     public static int QUERY_OPT_LEVEL = Integer.getInteger("cassandra.sai.query.optimization.level", 1);
