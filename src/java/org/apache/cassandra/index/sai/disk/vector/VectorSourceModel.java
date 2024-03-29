@@ -41,6 +41,7 @@ public enum VectorSourceModel
     BERT((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 4), 1.0),
     GECKO((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 8), 1.5),
     NV_QA_4((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 8), 1.5),
+    COHERE_V3((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16), 1.25),
 
     OTHER(COSINE, VectorSourceModel::genericCompression, VectorSourceModel::genericOverquery);
 
