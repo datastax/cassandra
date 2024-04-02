@@ -415,16 +415,20 @@ public abstract class AbstractCommitLogSegmentManager
      */
     void handleReplayedSegment(final File file)
     {
-        handleReplayedSegment(file, true);
+        handleReplayedSegment(file, false);
     }
 
-    void handleReplayedSegment(final File file, boolean toBeDeleted)
+    void handleReplayedSegment(final File file, boolean hasInvalidMutations)
     {
-        if (toBeDeleted)
+        if (!hasInvalidMutations)
         {
             // (don't decrease managed size, since this was never a "live" segment)
             logger.trace("(Unopened) segment {} is no longer needed and will be deleted now", file);
             FileUtils.deleteWithConfirm(file);
+        }
+        else
+        {
+            logger.debug("File {} should not be deleted as it contains invalid mutations", file.name());
         }
     }
 

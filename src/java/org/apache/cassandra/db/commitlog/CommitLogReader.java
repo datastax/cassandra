@@ -57,7 +57,7 @@ public class CommitLogReader
     public static final int ALL_MUTATIONS = -1;
     private final CRC32 checksum;
     private final Map<TableId, AtomicInteger> invalidMutations;
-    private final List<String> segmentsWithInvalidMutations;
+    private final Set<String> segmentsWithInvalidMutations;
 
     private byte[] buffer;
 
@@ -65,11 +65,11 @@ public class CommitLogReader
     {
         checksum = new CRC32();
         invalidMutations = new HashMap<>();
-        segmentsWithInvalidMutations = new ArrayList<>();
+        segmentsWithInvalidMutations = new HashSet<>();
         buffer = new byte[4096];
     }
 
-    public List<String> getSegmentsWithInvalidMutations()
+    public Set<String> getSegmentsWithInvalidMutations()
     {
         return segmentsWithInvalidMutations;
     }
