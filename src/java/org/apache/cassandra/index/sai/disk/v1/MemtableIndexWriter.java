@@ -196,8 +196,19 @@ public class MemtableIndexWriter implements PerIndexWriter
 
     private void flushVectorIndex(DecoratedKey minKey, DecoratedKey maxKey, long startTime, Stopwatch stopwatch) throws IOException
     {
-        VectorMemtableIndex vectorIndex = (VectorMemtableIndex) memtableIndex;
-        SegmentMetadata.ComponentMetadataMap metadataMap = vectorIndex.writeData(indexDescriptor, indexContext, rowMapping::get);
+        var vectorIndex = (VectorMemtableIndex) memtableIndex;
+
+        // Get comprehensive set of deleted ordinals from the row mapping, and skip writing components to disk
+        // if all ordinals are deleted. This is when we account for range and partition deletions.
+        var deletedOrdinals = vectorIndex.computeDeletedOrdinals(rowMapping::get);
+        if (deletedOrdinals.size() == vectorIndex.size())
+        {
+            logger.debug(indexContext.logMessage("Whole graph is deleted. Skipping index flush for {}."), indexDescriptor.descriptor);
+            indexDescriptor.createComponentOnDisk(IndexComponent.COLUMN_COMPLETION_MARKER, indexContext);
+            return;
+        }
+
+        SegmentMetadata.ComponentMetadataMap metadataMap = vectorIndex.writeData(indexDescriptor, indexContext, deletedOrdinals);
 
         completeIndexFlush(rowMapping.size(), startTime, stopwatch);
 
