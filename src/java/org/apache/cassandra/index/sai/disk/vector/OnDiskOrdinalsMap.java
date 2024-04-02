@@ -41,7 +41,7 @@ public class OnDiskOrdinalsMap
 {
     private static final Logger logger = LoggerFactory.getLogger(OnDiskOrdinalsMap.class);
 
-    private final RowIdMatchingOrdinalsView rowIdMatchingOrdinalsView;
+    private final OrdinalsView fastOrdinalsView;
     private static final OrdinalsMatchingRowIdsView ordinalsMatchingRowIdsView = new OrdinalsMatchingRowIdsView();
     private final FileHandle fh;
     private final long ordToRowOffset;
@@ -51,7 +51,8 @@ public class OnDiskOrdinalsMap
     private final long rowOrdinalOffset;
     private final Set<Integer> deletedOrdinals;
 
-    private boolean rowIdsMatchOrdinals = false;
+    private final boolean canFastMapOrdinalsView;
+    private final boolean canFastMapRowIdsView;
 
     public OnDiskOrdinalsMap(FileHandle fh, long segmentOffset, long segmentLength)
     {
@@ -63,9 +64,6 @@ public class OnDiskOrdinalsMap
         {
             reader.seek(segmentOffset);
             int deletedCount = reader.readInt();
-            if (deletedCount == -1) {
-                rowIdsMatchOrdinals = true;
-            }
             for (var i = 0; i < deletedCount; i++)
             {
                 int ordinal = reader.readInt();
@@ -74,9 +72,16 @@ public class OnDiskOrdinalsMap
 
             this.ordToRowOffset = reader.getFilePointer();
             this.size = reader.readInt();
-            this.rowIdMatchingOrdinalsView = new RowIdMatchingOrdinalsView(size);
             reader.seek(segmentEnd - 8);
             this.rowOrdinalOffset = reader.readLong();
+
+            // When rowOrdinalOffset + 8 is equal to segmentEnd, the segment has no postings. Therefore,
+            // we use the EmptyView. That case does not get a fastRowIdsView because we only hit that code after
+            // getting ordinals from the graph, and an EmptyView will not produce any ordinals to search. Importantly,
+            // the file format for the RowIdsView is correct, even if there are no postings.
+            this.canFastMapRowIdsView = deletedCount == -1;
+            this.canFastMapOrdinalsView = deletedCount == -1 || rowOrdinalOffset + 8 == segmentEnd;
+            this.fastOrdinalsView = deletedCount == -1 ? new RowIdMatchingOrdinalsView(size) : new EmptyView();
             assert rowOrdinalOffset < segmentEnd : "rowOrdinalOffset " + rowOrdinalOffset + " is not less than segmentEnd " + segmentEnd;
         }
         catch (Exception e)
@@ -87,7 +92,7 @@ public class OnDiskOrdinalsMap
 
     public RowIdsView getRowIdsView()
     {
-        if (rowIdsMatchOrdinals) {
+        if (canFastMapRowIdsView) {
             return ordinalsMatchingRowIdsView;
         }
 
@@ -197,8 +202,8 @@ public class OnDiskOrdinalsMap
 
     public OrdinalsView getOrdinalsView()
     {
-        if (rowIdsMatchOrdinals) {
-            return rowIdMatchingOrdinalsView;
+        if (canFastMapOrdinalsView) {
+            return fastOrdinalsView;
         }
 
         return new FileReadingOrdinalsView();
@@ -324,6 +329,38 @@ public class OnDiskOrdinalsMap
             int end = Math.min(endRowId + 1, size);
 
             return new MatchRangeBits(start, end);
+        }
+
+        @Override
+        public void close()
+        {
+            // noop
+        }
+    }
+
+    /**
+     * An OrdinalsView that always returns -1 for all rowIds. This is used when the segment has no postings, which
+     * can happen if all the graph's ordinals are in the deletedOrdinals set.
+     */
+    private static class EmptyView implements OrdinalsView
+    {
+        @Override
+        public int getOrdinalForRowId(int rowId) throws IOException
+        {
+            return -1;
+        }
+
+        @Override
+        public boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException
+        {
+            return false;
+        }
+
+        @Override
+        public BitSet buildOrdinalBitSet(int startRowId, int endRowId, Supplier<BitSet> supplier) throws IOException
+        {
+            // Get an empty bitset
+            return supplier.get();
         }
 
         @Override
