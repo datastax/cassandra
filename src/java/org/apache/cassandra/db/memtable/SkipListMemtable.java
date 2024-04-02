@@ -171,30 +171,6 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
         return partitions.size();
     }
 
-    @Override
-    public long rowCount()
-    {
-        DataRange range = DataRange.allData(metadata().partitioner);
-        ColumnFilter columnFilter = ColumnFilter.allRegularColumnsBuilder(metadata(), true).build();
-        return rowCount(columnFilter, range);
-    }
-
-    public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
-    {
-        int total = 0;
-        for (var iter = makePartitionIterator(columnFilter, dataRange); iter.hasNext(); )
-        {
-            for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
-            {
-                Unfiltered uRow = it.next();
-                if (uRow.isRow())
-                    total++;
-            }
-        }
-
-        return total;
-    }
-
     public MemtableUnfilteredPartitionIterator makePartitionIterator(final ColumnFilter columnFilter,
                                                                      final DataRange dataRange)
     {

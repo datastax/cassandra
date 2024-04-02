@@ -51,9 +51,13 @@ import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.memtable.TrieMemtable;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
@@ -783,7 +787,7 @@ public class QueryController implements Plan.Executor
         long rows = 0;
 
         for (Memtable memtable : cfs.getAllMemtables())
-            rows += memtable.rowCount();
+            rows += estimateMemtableRowCount(memtable);
 
         List<Range<Token>> tokenRanges = ranges.stream()
                                                .map(r -> new Range<>(r.startKey().getToken(), r.stopKey().getToken()))
@@ -796,6 +800,42 @@ public class QueryController implements Plan.Executor
         }
 
         return rows;
+    }
+
+    private static long estimateMemtableRowCount(Memtable memtable)
+    {
+        long rowSize = estimateMemtableRowSize(memtable);
+        return rowSize > 0 ? memtable.getLiveDataSize() / rowSize : 0;
+    }
+
+    private static long estimateMemtableRowSize(Memtable memtable)
+    {
+        final long MAX_ROWS = 100;
+
+        DataRange range = DataRange.allData(memtable.metadata().partitioner);
+        ColumnFilter columnFilter = ColumnFilter.allRegularColumnsBuilder(memtable.metadata(), true).build();
+
+        long rowCount = 0;
+        long totalSize = 0;
+
+        try (var partitionsIter = memtable.makePartitionIterator(columnFilter, range))
+        {
+            while (partitionsIter.hasNext() && rowCount < MAX_ROWS)
+            {
+                UnfilteredRowIterator rowsIter = partitionsIter.next();
+                while (rowsIter.hasNext() && rowCount < MAX_ROWS)
+                {
+                    Unfiltered uRow = rowsIter.next();
+                    if (uRow.isRow())
+                    {
+                        rowCount++;
+                        totalSize += ((Row) uRow).dataSize();
+                    }
+                }
+            }
+        }
+
+        return rowCount > 0 ? totalSize / rowCount : 0;
     }
 
     private static class IteratorsAndIndexes
