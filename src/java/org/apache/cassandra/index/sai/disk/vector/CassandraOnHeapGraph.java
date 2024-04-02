@@ -256,7 +256,7 @@ public class CassandraOnHeapGraph<T>
         {
             for (int i = 0; i < vector.length; i++)
             {
-                if (vector[i] > 1E-6)
+                if (vector[i] < -1E-6 || vector[i] > 1E-6)
                     return;
             }
             throw new InvalidRequestException("Zero and near-zero vectors cannot be indexed or queried with cosine similarity");
