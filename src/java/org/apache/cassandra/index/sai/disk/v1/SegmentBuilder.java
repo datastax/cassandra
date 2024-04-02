@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -189,7 +190,11 @@ public abstract class SegmentBuilder
         @Override
         protected SegmentMetadata.ComponentMetadataMap flushInternal(IndexDescriptor indexDescriptor, IndexContext indexContext) throws IOException
         {
-            return graphIndex.writeData(indexDescriptor, indexContext, p -> p);
+            // VSTODO this is a bit of a hack. We call computeDeletedOrdinals to call computeRowIds on each
+            // VectorPostings, which will populate the rowIds field, but if we refactor the code, we could skip that.
+            var deletedOrdinals = graphIndex.computeDeletedOrdinals(p -> p);
+            assert deletedOrdinals.isEmpty() : "Deleted ordinals should be empty when built during compaction";
+            return graphIndex.writeData(indexDescriptor, indexContext, Collections.emptySet());
         }
     }
 
