@@ -76,6 +76,14 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
 
     private final AtomicLong liveDataSize = new AtomicLong(0);
 
+    /**
+     * Keeps an estimate of the average row size in this memtable, computed from a small sample of rows.
+     * Because computing this estimate is potentially costly, as it requires iterating the rows,
+     * the estimate is updated only whenever the number of operations on the memtable increases significantly from the
+     * last update. This estimate is not very accurate but should be ok for planning or diagnostic purposes.
+     */
+    private volatile MemtableAverageRowSize estimatedAverageRowSize;
+
     SkipListMemtable(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(commitLogLowerBound, metadataRef, owner);
@@ -170,6 +178,15 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     {
         return partitions.size();
     }
+
+    @Override
+    public long getEstimatedAverageRowSize()
+    {
+        if (estimatedAverageRowSize == null || currentOperations.get() > estimatedAverageRowSize.operations * 1.5)
+            estimatedAverageRowSize = new MemtableAverageRowSize(this);
+        return estimatedAverageRowSize.rowSize;
+    }
+
 
     public MemtableUnfilteredPartitionIterator makePartitionIterator(final ColumnFilter columnFilter,
                                                                      final DataRange dataRange)

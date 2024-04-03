@@ -215,6 +215,9 @@ public interface Memtable extends Comparable<Memtable>
     /** Size of the data not accounting for any metadata / mapping overheads */
     long getLiveDataSize();
 
+    /** Average size of the data of each row */
+    long getEstimatedAverageRowSize();
+
     /**
      * Number of "operations" (in the sense defined in {@link PartitionUpdate#operationCount()}) the memtable has
      * executed.
