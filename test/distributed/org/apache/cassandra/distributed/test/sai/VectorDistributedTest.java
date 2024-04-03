@@ -379,7 +379,7 @@ public class VectorDistributedTest extends TestBaseImpl
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [1, NaN])")).hasMessage("non-finite value at vector[1]=NaN");
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [1, Infinity])")).hasMessage("non-finite value at vector[1]=Infinity");
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [-Infinity, 1])")).hasMessage("non-finite value at vector[0]=-Infinity");
-        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [0.0, 0.0] LIMIT 2")).hasMessage("Zero vectors cannot be indexed or queried with cosine similarity");
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [0.0, 0.0] LIMIT 2")).hasMessage("Zero and near-zero vectors cannot be indexed or queried with cosine similarity");
         assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [1, NaN] LIMIT 2")).hasMessage("non-finite value at vector[1]=NaN");
         assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [1, Infinity] LIMIT 2")).hasMessage("non-finite value at vector[1]=Infinity");
         assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [-Infinity, 1] LIMIT 2")).hasMessage("non-finite value at vector[0]=-Infinity");
