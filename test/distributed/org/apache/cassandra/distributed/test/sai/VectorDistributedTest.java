@@ -375,7 +375,7 @@ public class VectorDistributedTest extends TestBaseImpl
 
     private static void assertInvalidCosineOperations()
     {
-        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [0.0, 0.0])")).isInstanceOf(InvalidRequestException.class);
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [0.0, 0.0])")).hasMessage("Zero and near-zero vectors cannot be indexed or queried with cosine similarity");
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [1, NaN])")).hasMessage("non-finite value at vector[1]=NaN");
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [1, Infinity])")).hasMessage("non-finite value at vector[1]=Infinity");
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [-Infinity, 1])")).hasMessage("non-finite value at vector[0]=-Infinity");
