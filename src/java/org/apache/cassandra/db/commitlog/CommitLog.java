@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -90,6 +91,7 @@ public class CommitLog implements CommitLogMBean
     public final CommitLogArchiver archiver;
     public final CommitLogMetrics metrics;
     final AbstractCommitLogService executor;
+    private Set<String> segmentsWithInvalidMutations;
 
     volatile Configuration configuration;
     private boolean started = false;
@@ -237,7 +239,10 @@ public class CommitLog implements CommitLogMBean
             logger.info("Log replay complete, {} replayed mutations", replayedKeyspaces.values().stream().reduce(Integer::sum).orElse(0));
 
             for (File f : files)
-                segmentManager.handleReplayedSegment(f);
+            {
+                boolean hasInvalidMutations = segmentsWithInvalidMutations.contains(f.name());
+                segmentManager.handleReplayedSegment(f, hasInvalidMutations);
+            }
         }
 
         return replayedKeyspaces;
@@ -256,6 +261,9 @@ public class CommitLog implements CommitLogMBean
     {
         CommitLogReplayer replayer = CommitLogReplayer.construct(this, getLocalHostId());
         replayer.replayFiles(clogs);
+
+        // fetch clogs with invalid mutations
+        segmentsWithInvalidMutations = replayer.getSegmentsWithInvalidMutations();
         return replayer.blockForWrites(flushReason);
     }
 
