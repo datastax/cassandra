@@ -464,7 +464,7 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
     public PartitionIterator postReconciliationProcessing(PartitionIterator result)
     {
         Index.QueryPlan queryPlan = indexQueryPlan();
-        return queryPlan == null ? result : queryPlan.postProcessor(this).apply(result);
+        return queryPlan == null ? result : queryPlan.postProcessor().apply(result);
     }
 
     @Override

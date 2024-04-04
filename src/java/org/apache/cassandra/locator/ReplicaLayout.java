@@ -19,7 +19,6 @@
 package org.apache.cassandra.locator;
 
 import com.google.common.annotations.VisibleForTesting;
-
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
@@ -346,4 +345,5 @@ public abstract class ReplicaLayout<E extends Endpoints<E>>
         replicas = replicas.filter(FailureDetector.isReplicaAlive);
         return new ReplicaLayout.ForRangeRead(replicationStrategy, range, replicas);
     }
+
 }

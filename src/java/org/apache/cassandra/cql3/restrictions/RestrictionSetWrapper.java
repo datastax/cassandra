@@ -85,18 +85,6 @@ class RestrictionSetWrapper implements Restrictions
     }
 
     @Override
-    public Index findSupportingIndex(IndexRegistry indexRegistry)
-    {
-        return restrictions.findSupportingIndex(indexRegistry);
-    }
-
-    @Override
-    public Index findSupportingIndexFromQueryPlan(Index.QueryPlan indexQueryPlan)
-    {
-        return restrictions.findSupportingIndexFromQueryPlan(indexQueryPlan);
-    }
-
-    @Override
     public boolean needsFiltering(Index.Group indexGroup)
     {
         return restrictions.needsFiltering(indexGroup);

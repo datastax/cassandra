@@ -27,7 +27,6 @@ import org.apache.cassandra.index.sai.disk.KDTreeIndexSearcher;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 
-
 public class IndexGroupMetricsTest extends AbstractMetricsTest
 {
     @Before
