@@ -24,6 +24,8 @@ import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.NoPayload;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.Type;
@@ -46,6 +48,8 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
         PaxosState.commit(message.payload, p -> MutatorProvider.getCustomOrDefault().onAppliedProposal(p));
 
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
-        MessagingService.instance().send(message.emptyResponse(), message.from());
+        Message.Builder<NoPayload> reply = message.emptyResponseBuilder();
+        SensorsCustomParams.addWriteSensorToResponse(reply, sensors, context);
+        MessagingService.instance().send(reply.build(), message.from());
     }
 }

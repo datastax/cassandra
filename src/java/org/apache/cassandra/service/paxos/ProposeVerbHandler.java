@@ -23,6 +23,7 @@ import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.Type;
@@ -47,7 +48,9 @@ public class ProposeVerbHandler implements IVerbHandler<Commit>
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
-        Message<Boolean> reply = message.responseWith(doPropose(message.payload));
-        MessagingService.instance().send(reply, message.from());
+        Message.Builder<Boolean> reply = message.responseWithBuilder(doPropose(message.payload));
+        SensorsCustomParams.addWriteSensorToResponse(reply, sensors, context);
+        SensorsCustomParams.addReadSensorToResponse(reply, sensors, context);
+        MessagingService.instance().send(reply.build(), message.from());
     }
 }
