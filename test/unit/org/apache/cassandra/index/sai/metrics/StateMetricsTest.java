@@ -56,8 +56,12 @@ public class StateMetricsTest extends AbstractMetricsTest
         assertEquals(1, rows.all().size());
         assertEquals(1L, getTableStateMetrics(keyspace, table, "TotalIndexCount"));
 
-        // If we drop the last index on the table, we should no longer see the table-level state metrics:
+        // If we drop the last index on the table, table-level state metrics should still be visible:
         dropIndex(String.format("DROP INDEX %s." + index, keyspace));
+        assertEquals(0L, getTableStateMetrics(keyspace, table, "TotalIndexCount"));
+
+        // When the whole table is dropped, we should finally fail to find table-level state metrics:
+        dropTable(String.format("DROP TABLE %s." + table, keyspace));
         assertThatThrownBy(() -> getTableStateMetrics(keyspace, table, "TotalIndexCount")).hasCauseInstanceOf(InstanceNotFoundException.class);
     }
 
