@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.index.sai;
 
-import java.lang.invoke.MethodHandles;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -70,7 +69,7 @@ import org.apache.cassandra.utils.Throwables;
  */
 public class StorageAttachedIndexGroup implements Index.Group, INotificationConsumer, Iterable<StorageAttachedIndex>
 {
-    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+    private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexGroup.class);
 
     private final TableQueryMetrics queryMetrics;
     private final TableStateMetrics stateMetrics;
@@ -96,7 +95,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     @Nullable
     public static StorageAttachedIndexGroup getIndexGroup(ColumnFamilyStore cfs)
     {
-        return (StorageAttachedIndexGroup)cfs.indexManager.getIndexGroup(StorageAttachedIndexGroup.class);
+        return (StorageAttachedIndexGroup) cfs.indexManager.getIndexGroup(StorageAttachedIndexGroup.class);
     }
 
     @Override

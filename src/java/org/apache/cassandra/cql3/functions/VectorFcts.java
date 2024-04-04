@@ -39,7 +39,7 @@ public class VectorFcts
     }
 
     private static FunctionFactory createSimilarityFunctionFactory(String name,
-                                                                   VectorSimilarityFunction vectorSimilarityFunction,
+                                                                   VectorSimilarityFunction luceneFunction,
                                                                    boolean supportsZeroVectors)
     {
         return new FunctionFactory(name,
@@ -55,7 +55,7 @@ public class VectorFcts
                 int dimensions = firstArgType.dimension;
                 if (!argTypes.stream().allMatch(t -> ((VectorType<?>) t).dimension == dimensions))
                     throw new InvalidRequestException("All arguments must have the same vector dimensions");
-                return createSimilarityFunction(name.name, firstArgType, vectorSimilarityFunction, supportsZeroVectors);
+                return createSimilarityFunction(name.name, firstArgType, luceneFunction, supportsZeroVectors);
             }
         };
     }

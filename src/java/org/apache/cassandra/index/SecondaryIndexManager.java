@@ -186,7 +186,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /**
      * The groups of all the registered indexes
      */
-    private final Map<Index.Group.Key, Index.Group> indexGroups = Maps.newConcurrentMap();
+    private final Map<Object, Index.Group> indexGroups = Maps.newConcurrentMap();
 
     /**
      * The count of pending index builds for each index.
@@ -368,16 +368,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     public synchronized void removeIndex(String indexName)
     {
-        Index removedIndex = indexes.remove(indexName);
-
-        if (removedIndex != null)
+        Index index = unregisterIndex(indexName);
+        if (null != index)
         {
-            removedIndex.unregister(this);
-
             markIndexRemoved(indexName);
-            executeBlocking(removedIndex.getInvalidateTask(), null);
+            executeBlocking(index.getInvalidateTask(), null);
         }
     }
+
 
     public Set<IndexMetadata> getDependentIndexes(ColumnMetadata column)
     {
@@ -1350,8 +1348,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /*
      * IndexRegistry methods
      */
-    @Override
-    public void registerIndex(Index index, Index.Group.Key groupKey, Supplier<Index.Group> groupSupplier)
+    public void registerIndex(Index index, Object groupKey, Supplier<Index.Group> groupSupplier)
     {
         String name = index.getIndexMetadata().name;
         indexes.put(name, index);
@@ -1361,26 +1358,41 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         Index.Group group = indexGroups.computeIfAbsent(groupKey, k -> groupSupplier.get());
 
         // add the created index to its group if it is not a singleton group
-        group.addIndex(index);
+        if (!(group instanceof SingletonIndexGroup))
+        {
+            if (index.getBackingTable().isPresent())
+                throw new InvalidRequestException("Indexes belonging to a group of indexes shouldn't have a backing table");
+
+            group.addIndex(index);
+        }
     }
 
-    @Override
-    public void unregisterIndex(Index removed, Index.Group.Key groupKey)
+    private Index unregisterIndex(String name)
     {
-        Index.Group group = indexGroups.get(groupKey);
-        if (group != null && group.containsIndex(removed))
-        {
-            // Remove the index from non-singleton groups...
-            group.removeIndex(removed);
+        Index removed = indexes.remove(name);
+        logger.trace(removed == null ? "Index {} was not registered" : "Removed index {} from registry", name);
 
-            // if the group is a singleton or there are no more indexes left in the group, remove it
-            if (group.isSingleton() || group.getIndexes().isEmpty())
+        if (removed != null)
+        {
+            // Remove the index from any non-singleton groups...
+            for (Index.Group group : listIndexGroups())
             {
-                Index.Group removedGroup = indexGroups.remove(groupKey);
-                if (removedGroup != null)
-                    removedGroup.invalidate();
+                if (!(group instanceof SingletonIndexGroup) && group.containsIndex(removed))
+                {
+                    group.removeIndex(removed);
+
+                    if (group.getIndexes().isEmpty())
+                    {
+                        indexGroups.remove(group);
+                    }
+                }
             }
+
+            // ...and remove singleton groups entirely.
+            indexGroups.remove(removed);
         }
+
+        return removed;
     }
 
     public Index getIndex(IndexMetadata metadata)
@@ -1398,14 +1410,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return ImmutableSet.copyOf(indexGroups.values());
     }
 
-    public Index.Group getIndexGroup(Index.Group.Key key)
+    public Index.Group getIndexGroup(Object key)
     {
         return indexGroups.get(key);
     }
 
     /**
      * Returns the {@link Index.Group} the specified index belongs to, as specified during registering with
-     * {@link #registerIndex(Index, Index.Group.Key, Supplier)}.
+     * {@link #registerIndex(Index, Object, Supplier)}.
      *
      * @param metadata the index metadata
      * @return the group the index belongs to, or {@code null} if the index is not registered or if it hasn't been
