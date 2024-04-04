@@ -19,13 +19,36 @@
 package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
+import java.util.UUID;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.SensorsRegistry;
+import org.apache.cassandra.sensors.Type;
+
+import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 public class SensorsCustomParamsTest
 {
+    @BeforeClass
+    public static void setUpClass() throws Exception
+    {
+        // enables constructuing Messages with custom parameters
+        DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setCrossNodeTimeout(true);
+    }
+
     @Test
     public void testSensorValueAsBytes()
     {
@@ -60,5 +83,73 @@ public class SensorsCustomParamsTest
         String expectedParam = String.format("WRITE_BYTES_TABLE.%s", "t1");
         String actualParam = SensorsCustomParams.encodeTableInWriteByteTableParam(table);
         assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testAddWriteSensorToResponse()
+    {
+        RequestSensors sensors = new RequestSensors();
+        UUID tableId = UUID.randomUUID();
+        KeyspaceMetadata ksm = KeyspaceMetadata.create("ks1", null);
+        TableMetadata tm = TableMetadata.builder("ks1", "t1", TableId.fromString(tableId.toString()))
+                                        .addPartitionKeyColumn("pk", AsciiType.instance)
+                                        .build();
+        SensorsRegistry.instance.onCreateKeyspace(ksm);
+        SensorsRegistry.instance.onCreateTable(tm);
+
+        Context context = new Context("ks1", "t1", tableId.toString());
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        sensors.incrementSensor(context, Type.WRITE_BYTES, 17.0);
+        sensors.syncAllSensors();
+
+        Message.Builder<NoPayload> builder =
+        Message.builder(Verb._TEST_1, noPayload)
+               .withId(1);
+
+        SensorsCustomParams.addWriteSensorToResponse(builder, sensors, context);
+
+        Message<NoPayload> msg = builder.build();
+        assertNotNull(msg.header.customParams());
+        assertEquals(2, msg.header.customParams().size());
+        String requestParam = SensorsCustomParams.encodeTableInWriteByteRequestParam("t1");
+        String tableParam = SensorsCustomParams.encodeTableInWriteByteTableParam("t1");
+        assertTrue(msg.header.customParams().containsKey(requestParam));
+        assertTrue(msg.header.customParams().containsKey(tableParam));
+        double epsilon = 0.000001;
+        assertEquals(17.0, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(requestParam)), epsilon);
+        assertEquals(17.0, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(tableParam)), epsilon);
+    }
+
+    @Test
+    public void testAddReadSensorToResponse()
+    {
+        RequestSensors sensors = new RequestSensors();
+        UUID tableId = UUID.randomUUID();
+        KeyspaceMetadata ksm = KeyspaceMetadata.create("ks1", null);
+        TableMetadata tm = TableMetadata.builder("ks1", "t1", TableId.fromString(tableId.toString()))
+                                        .addPartitionKeyColumn("pk", AsciiType.instance)
+                                        .build();
+        SensorsRegistry.instance.onCreateKeyspace(ksm);
+        SensorsRegistry.instance.onCreateTable(tm);
+
+        Context context = new Context("ks1", "t1", tableId.toString());
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.incrementSensor(context, Type.READ_BYTES, 13.0);
+        sensors.syncAllSensors();
+
+        Message.Builder<NoPayload> builder =
+        Message.builder(Verb._TEST_1, noPayload)
+               .withId(1);
+
+        SensorsCustomParams.addReadSensorToResponse(builder, sensors, context);
+
+        Message<NoPayload> msg = builder.build();
+        assertNotNull(msg.header.customParams());
+        assertEquals(2, msg.header.customParams().size());
+        assertTrue(msg.header.customParams().containsKey(SensorsCustomParams.READ_BYTES_REQUEST));
+        assertTrue(msg.header.customParams().containsKey(SensorsCustomParams.READ_BYTES_REQUEST));
+        double epsilon = 0.000001;
+        assertEquals(13.0, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(SensorsCustomParams.READ_BYTES_REQUEST)), epsilon);
+        assertEquals(13.0, SensorsCustomParams.sensorValueFromBytes(msg.header.customParams().get(SensorsCustomParams.READ_BYTES_REQUEST)), epsilon);
     }
 }
