@@ -447,17 +447,6 @@ public enum CassandraRelevantProperties
     SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "5"),
     SAI_MAX_STRING_TERM_SIZE("cassandra.sai.max_string_term_size_kb", "1"),
 
-    /** Whether to allow the user to specify custom options to the hnsw index */
-    SAI_VECTOR_ALLOW_CUSTOM_PARAMETERS("cassandra.sai.vector.allow_custom_parameters", "false"),
-
-    /** Controls the maximum top-k limit for vector search */
-    SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
-
-    /**
-     * Controls the maximum number of PrimaryKeys that will be read into memory at one time when ordering/limiting
-     * the results of an ANN query constrained by non-ANN predicates.
-     */
-    SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE("cassandra.sai.vector_search.order_chunk_size", "100000"),
     SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT("cassandra.test.sai.segment_build_memory_limit"),
 
     SCHEMA_PULL_INTERVAL_MS("cassandra.schema_pull_interval_ms", "60000"),

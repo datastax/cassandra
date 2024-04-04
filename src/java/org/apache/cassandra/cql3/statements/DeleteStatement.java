@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import java.util.Collections;
 import java.util.List;
 
 import org.apache.cassandra.audit.AuditLogContext;
@@ -168,8 +167,7 @@ public class DeleteStatement extends ModificationStatement
                                                                  bindVariables,
                                                                  operations,
                                                                  whereClause,
-                                                                 conditions,
-                                                                 Collections.emptyList());
+                                                                 conditions);
 
             DeleteStatement stmt = new DeleteStatement(bindVariables,
                                                        metadata,

@@ -183,7 +183,6 @@ public class UpdateStatement extends ModificationStatement
                                                                            metadata,
                                                                            whereClause.build(),
                                                                            bindVariables,
-                                                                           Collections.emptyList(),
                                                                            applyOnlyToStaticColumns,
                                                                            false,
                                                                            false);
@@ -254,7 +253,6 @@ public class UpdateStatement extends ModificationStatement
                                                                            metadata,
                                                                            whereClause.build(),
                                                                            bindVariables,
-                                                                           Collections.emptyList(),
                                                                            applyOnlyToStaticColumns,
                                                                            false,
                                                                            false);
@@ -322,8 +320,7 @@ public class UpdateStatement extends ModificationStatement
                                                                  bindVariables,
                                                                  operations,
                                                                  whereClause,
-                                                                 conditions,
-                                                                 Collections.emptyList());
+                                                                 conditions);
 
             return new UpdateStatement(type,
                                        bindVariables,

@@ -130,18 +130,6 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
     }
 
     @Override
-    public Index findSupportingIndex(IndexRegistry indexRegistry)
-    {
-        return null;
-    }
-
-    @Override
-    public Index findSupportingIndexFromQueryPlan(Index.QueryPlan indexQueryPlan)
-    {
-        return null;
-    }
-
-    @Override
     public boolean needsFiltering(Index.Group indexGroup)
     {
         return false;
