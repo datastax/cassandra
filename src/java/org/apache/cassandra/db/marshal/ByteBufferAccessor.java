@@ -20,7 +20,6 @@ package org.apache.cassandra.db.marshal;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.FloatBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.util.UUID;
@@ -242,18 +241,6 @@ public class ByteBufferAccessor implements ValueAccessor<ByteBuffer>
     public float toFloat(ByteBuffer value)
     {
         return ByteBufferUtil.toFloat(value);
-    }
-
-    @Override
-    public float[] toFloatArray(ByteBuffer value, int dimension)
-    {
-        FloatBuffer floatBuffer = value.asFloatBuffer();
-        if (floatBuffer.remaining() != dimension)
-            throw new IllegalArgumentException(String.format("Could not convert to a float[] with different dimension. " +
-                                                             "Was expecting %d but got %d", dimension, floatBuffer.remaining()));
-        float[] floatArray = new float[floatBuffer.remaining()];
-        floatBuffer.get(floatArray);
-        return floatArray;
     }
 
     @Override

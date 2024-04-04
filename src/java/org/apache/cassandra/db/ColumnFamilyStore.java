@@ -111,7 +111,6 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Splitter;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.internal.CassandraIndex;
@@ -1503,12 +1502,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
         catch (RuntimeException e)
         {
-            String message = e.getMessage() + " for ks: " + keyspace.getName() + ", table: " + name;
-
-            if (e instanceof InvalidRequestException)
-                throw new InvalidRequestException(message, e);
-
-            throw new RuntimeException(message, e);
+            throw new RuntimeException(e.getMessage()
+                                       + " for ks: "
+                                       + getKeyspaceName() + ", table: " + name, e);
         }
     }
     

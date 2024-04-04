@@ -23,10 +23,8 @@ import java.util.Collections;
 
 import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Multimap;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.ReplicaPlans;
 
@@ -37,12 +35,6 @@ import static org.junit.Assert.assertTrue;
 public class BatchlogEndpointFilterTest
 {
     private static final String LOCAL = "local";
-
-    @BeforeClass
-    public static void initialiseServer()
-    {
-        DatabaseDescriptor.daemonInitialization();
-    }
 
     @Test
     public void shouldSelect2HostsFromNonLocalRacks() throws UnknownHostException

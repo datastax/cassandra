@@ -139,10 +139,4 @@ public class PartitionRangeQueryPager extends AbstractQueryPager<PartitionRangeR
              ? new IncludingExcludingBounds<>(lastReturnedKey, bounds.right)
              : new ExcludingBounds<>(lastReturnedKey, bounds.right);
     }
-
-    @Override
-    public boolean isTopK()
-    {
-        return query.isTopK();
-    }
 }
