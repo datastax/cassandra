@@ -271,12 +271,6 @@ public abstract class ReadCommand extends AbstractReadQuery
         return indexQueryPlan;
     }
 
-    @Override
-    public boolean isTopK()
-    {
-        return indexQueryPlan != null && indexQueryPlan.isTopK();
-    }
-
     @VisibleForTesting
     public Index.Searcher indexSearcher()
     {

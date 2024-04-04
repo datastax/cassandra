@@ -140,7 +140,7 @@ public class TypeUtil
      */
     public static ByteComparable max(ByteComparable a, ByteComparable b)
     {
-        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS50) < 0) ? a : b;
+        return a == null ? b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS50) < 0) ? a : b;
     }
 
     /**
