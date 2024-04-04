@@ -19,9 +19,13 @@ package org.apache.cassandra.service.paxos;
  * under the License.
  * 
  */
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Type;
 
 public class PrepareVerbHandler implements IVerbHandler<Commit>
 {
@@ -34,6 +38,15 @@ public class PrepareVerbHandler implements IVerbHandler<Commit>
 
     public void doVerb(Message<Commit> message)
     {
+        // Initialize the sensor and set ExecutorLocals
+        Context context = Context.from(message.payload.update.metadata());
+        RequestSensors sensors = new RequestSensors();
+        // Propse incorpporate a read to check the cas condition, so we here we register a read sensor
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        ExecutorLocals locals = ExecutorLocals.create(sensors);
+        ExecutorLocals.set(locals);
+
         Message<PrepareResponse> reply = message.responseWith(doPrepare(message.payload));
         MessagingService.instance().send(reply, message.from());
     }

@@ -20,9 +20,13 @@
  */
 package org.apache.cassandra.service.paxos;
 
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.MutatorProvider;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -32,6 +36,13 @@ public class CommitVerbHandler implements IVerbHandler<Commit>
 
     public void doVerb(Message<Commit> message)
     {
+        // Initialize the sensor and set ExecutorLocals
+        RequestSensors sensors = new RequestSensors();
+        Context context = Context.from(message.payload.update.metadata());
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        ExecutorLocals locals = ExecutorLocals.create(sensors);
+        ExecutorLocals.set(locals);
+
         PaxosState.commit(message.payload, p -> MutatorProvider.getCustomOrDefault().onAppliedProposal(p));
 
         Tracing.trace("Enqueuing acknowledge to {}", message.from());
