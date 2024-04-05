@@ -44,6 +44,7 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
@@ -52,14 +53,11 @@ import org.apache.cassandra.utils.BloomFilter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-public class SensorsSearchTest
+public class SensorsIndexReadTest
 {
-    public static final String KEYSPACE1 = "SensorsSearchTest";
+    public static final String KEYSPACE1 = "SensorsIndexReadTest";
     public static final String CF_STANDARD_SAI = "StandardSAI";
     public static final String CF_STANDARD_SECONDARY_INDEX = "StandardSecondaryIndex";
-
-    private static final String SEARCH_BYTES_REQUEST = "SEARCH_BYTES_REQUEST";
-    private static final String SEARCH_BYTES_TABLE = "SEARCH_BYTES_TABLE";
 
     private ColumnFamilyStore store;
     private CopyOnWriteArrayList<Message> capturedOutboundMessages;
@@ -77,12 +75,11 @@ public class SensorsSearchTest
 
         // build secondary indexes
         Indexes.Builder secondaryIndexes = Indexes.builder();
-        secondaryIndexes.add(IndexMetadata.fromIndexTargets(
-        Collections.singletonList(
-        new IndexTarget(
-        new ColumnIdentifier("val", true), IndexTarget.Type.VALUES)), CF_STANDARD_SECONDARY_INDEX + "_val",
-        IndexMetadata.Kind.COMPOSITES,
-        Collections.emptyMap()));
+        secondaryIndexes.add(IndexMetadata.fromIndexTargets(Collections.singletonList(
+                                                            new IndexTarget(
+                                                            new ColumnIdentifier("val", true), IndexTarget.Type.VALUES)), CF_STANDARD_SECONDARY_INDEX + "_val",
+                                                            IndexMetadata.Kind.COMPOSITES,
+                                                            Collections.emptyMap()));
 
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
@@ -148,8 +145,46 @@ public class SensorsSearchTest
 
         assertRequestAndRegistrySensorsEquality(context);
 
-        Sensor requestSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.SEARCH_BYTES);
+        Sensor requestSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INDEX_READ_BYTES);
         assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
+    }
+
+    @Test
+    public void testSAISingleRowSearchVSIndexScan()
+    {
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_STANDARD_SAI);
+        Context context = new Context(KEYSPACE1, CF_STANDARD_SAI, store.metadata.id.toString());
+
+        int numRows = 10;
+        for (int j = 0; j < numRows; j++)
+        {
+            new RowUpdateBuilder(store.metadata(), j, String.valueOf(j))
+            .add("val", (long)j)
+            .build()
+            .applyUnsafe();
+        }
+
+        // Match a single row
+        ReadCommand readCommand = Util.cmd(store)
+                                      .columns("val")
+                                      .filterOn("val", Operator.EQ, 0L)
+                                      .build();
+        handleReadCommand(readCommand);
+
+        // Store the request sensor value for comparison with full index scan
+        Sensor indexReadSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INDEX_READ_BYTES);
+        double singleRowSearchBytes = indexReadSensor.getValue();
+        indexReadSensor.reset();
+
+        // Scan the whole index
+        readCommand = Util.cmd(store)
+                          .columns("val")
+                          .filterOn("val", Operator.GTE, 0L)
+                          .build();
+        handleReadCommand(readCommand);
+
+        double fullIndexScanBytes = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INDEX_READ_BYTES).getValue();
+        assertThat(fullIndexScanBytes).isEqualTo(numRows * singleRowSearchBytes);
     }
 
     @Test
@@ -176,7 +211,7 @@ public class SensorsSearchTest
 
         assertRequestAndRegistrySensorsEquality(context);
 
-        Sensor requestSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.SEARCH_BYTES);
+        Sensor requestSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INDEX_READ_BYTES);
         assertResponseSensors(requestSensor.getValue(), requestSensor.getValue());
     }
 
@@ -187,10 +222,10 @@ public class SensorsSearchTest
 
     private void assertRequestAndRegistrySensorsEquality(Context context)
     {
-        Sensor localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.SEARCH_BYTES);
+        Sensor localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.INDEX_READ_BYTES);
         assertThat(localSensor.getValue()).isGreaterThan(0);
 
-        Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.SEARCH_BYTES);
+        Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.INDEX_READ_BYTES);
         assertThat(registrySensor).isEqualTo(localSensor);
     }
 
@@ -209,11 +244,11 @@ public class SensorsSearchTest
     private void assertResponseSensors(Message message, double requestValue, double registryValue)
     {
         assertThat(message.header.customParams()).isNotNull();
-        assertThat(message.header.customParams()).containsKey(SEARCH_BYTES_REQUEST);
-        assertThat(message.header.customParams()).containsKey(SEARCH_BYTES_TABLE);
+        assertThat(message.header.customParams()).containsKey(SensorsCustomParams.INDEX_READ_BYTES_REQUEST);
+        assertThat(message.header.customParams()).containsKey(SensorsCustomParams.INDEX_READ_BYTES_TABLE);
 
-        double requestReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(SEARCH_BYTES_REQUEST));
-        double tableReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(SEARCH_BYTES_TABLE));
+        double requestReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(SensorsCustomParams.INDEX_READ_BYTES_REQUEST));
+        double tableReadBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(SensorsCustomParams.INDEX_READ_BYTES_TABLE));
         assertThat(requestReadBytes).isEqualTo(requestValue);
         assertThat(tableReadBytes).isEqualTo(registryValue);
     }

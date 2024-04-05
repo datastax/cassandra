@@ -51,9 +51,9 @@ import org.apache.cassandra.utils.BloomFilter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-public class SensorsIndexTest
+public class SensorsIndexWriteTest
 {
-    public static final String KEYSPACE1 = "SensorsIndexTest";
+    public static final String KEYSPACE1 = "SensorsIndexWriteTest";
     public static final String CF_STANDARD = "Standard";
     public static final String CF_STANDARD_SAI = "StandardSAI";
     public static final String CF_STANDARD_SECONDARY_INDEX = "StandardSecondaryIndex";
@@ -75,12 +75,11 @@ public class SensorsIndexTest
 
         // build secondary indexes
         Indexes.Builder secondaryIndexes = Indexes.builder();
-        secondaryIndexes.add(IndexMetadata.fromIndexTargets(
-        Collections.singletonList(
-        new IndexTarget(
-        new ColumnIdentifier("val", true), IndexTarget.Type.VALUES)), CF_STANDARD_SECONDARY_INDEX + "_val",
-        IndexMetadata.Kind.COMPOSITES,
-        Collections.emptyMap()));
+        secondaryIndexes.add(IndexMetadata.fromIndexTargets(Collections.singletonList(
+                                                            new IndexTarget(
+                                                            new ColumnIdentifier("val", true), IndexTarget.Type.VALUES)), CF_STANDARD_SECONDARY_INDEX + "_val",
+                                                            IndexMetadata.Kind.COMPOSITES,
+                                                            Collections.emptyMap()));
 
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
@@ -155,10 +154,10 @@ public class SensorsIndexTest
                                .build();
         handleMutation(saiMutation);
 
-        Sensor saiSensor = SensorsTestUtil.getThreadLocalRequestSensor(saiContext, Type.INDEX_BYTES);
+        Sensor saiSensor = SensorsTestUtil.getThreadLocalRequestSensor(saiContext, Type.INDEX_WRITE_BYTES);
         // Writing the same amount of data to an SAI indexed column should generate at least the same number of bytes (the SAI write >= the vanilla write bytes)
         assertThat(saiSensor.getValue()).isGreaterThanOrEqualTo(standardSensor.getValue());
-        Sensor saiRegistrySensor = SensorsTestUtil.getRegistrySensor(saiContext, Type.INDEX_BYTES);
+        Sensor saiRegistrySensor = SensorsTestUtil.getRegistrySensor(saiContext, Type.INDEX_WRITE_BYTES);
         assertThat(saiRegistrySensor).isEqualTo(saiSensor);
 
         // check global registry is synchronized for SAI table
@@ -195,10 +194,10 @@ public class SensorsIndexTest
                                           .build();
         handleMutation(secondaryIndexMutation);
 
-        Sensor secondaryIndexSensor = SensorsTestUtil.getThreadLocalRequestSensor(secondaryIndexContext, Type.INDEX_BYTES);
-        // Writing the same amount of data to an indexed column should generate at the same number of bytes (the SecondaryIndex write bytes >= the vanilla write bytes)
+        Sensor secondaryIndexSensor = SensorsTestUtil.getThreadLocalRequestSensor(secondaryIndexContext, Type.INDEX_WRITE_BYTES);
+        // Writing the same amount of data to an indexed column should generate at least the same number of bytes (the SecondaryIndex write bytes >= the vanilla write bytes)
         assertThat(secondaryIndexSensor.getValue()).isGreaterThanOrEqualTo(standardSensor.getValue());
-        Sensor secondartyIndexRegistrySensor = SensorsTestUtil.getRegistrySensor(secondaryIndexContext, Type.INDEX_BYTES);
+        Sensor secondartyIndexRegistrySensor = SensorsTestUtil.getRegistrySensor(secondaryIndexContext, Type.INDEX_WRITE_BYTES);
         assertThat(secondartyIndexRegistrySensor).isEqualTo(secondaryIndexSensor);
 
         // check global registry is synchronized for Secondary Index table
@@ -228,8 +227,8 @@ public class SensorsIndexTest
 
     private void assertIndexResponseSensors(double requestValue, double registryValue, String table)
     {
-        String expectedRequestParam = String.format(SensorsCustomParams.INDEX_BYTES_REQUEST_TEMPLATE, table);
-        String expectedTableParam = String.format(SensorsCustomParams.INDEX_BYTES_TABLE_TEMPLATE, table);
+        String expectedRequestParam = String.format(SensorsCustomParams.INDEX_WRITE_BYTES_REQUEST_TEMPLATE, table);
+        String expectedTableParam = String.format(SensorsCustomParams.INDEX_WRITE_BYTES_TABLE_TEMPLATE, table);
 
         // verify against the last message to enable testing of multiple mutations in a for loop
         Message message = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);

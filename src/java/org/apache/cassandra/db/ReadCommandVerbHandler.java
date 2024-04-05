@@ -67,9 +67,9 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         String tableBytesParam;
         if (command.indexQueryPlan != null)
         {
-             type = Type.SEARCH_BYTES;
-             requestBytesParam = SensorsCustomParams.SEARCH_BYTES_REQUEST;
-             tableBytesParam = SensorsCustomParams.SEARCH_BYTES_TABLE;
+             type = Type.INDEX_READ_BYTES;
+             requestBytesParam = SensorsCustomParams.INDEX_READ_BYTES_REQUEST;
+             tableBytesParam = SensorsCustomParams.INDEX_READ_BYTES_TABLE;
         }
         else
         {

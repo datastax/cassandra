@@ -27,8 +27,8 @@ public enum Type
     INTERNODE_BYTES,
 
     READ_BYTES,
-    SEARCH_BYTES,
+    INDEX_READ_BYTES,
 
     WRITE_BYTES,
-    INDEX_BYTES
+    INDEX_WRITE_BYTES
 }

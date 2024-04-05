@@ -52,21 +52,23 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         MessagingService.instance().send(response.build(), respondToAddress);
     }
 
-    private void addSensorsToResponse(Message.Builder<NoPayload> response) {
+    private void addSensorsToResponse(Message.Builder<NoPayload> response)
+    {
         // Add write bytes sensors to the response
         Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteByteRequestParam;
         Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteByteTableParam;
         Collection<Sensor> sensors = RequestTracker.instance.get().getSensors(Type.WRITE_BYTES);
         addSensorsToResponse(sensors, requestParam, tableParam, response);
 
-        // Add index bytes sensors to the response
-        requestParam = SensorsCustomParams::encodeTableInIndexByteRequestParam;
-        tableParam = SensorsCustomParams::encodeTableInIndexByteTableParam;
-        sensors = RequestTracker.instance.get().getSensors(Type.INDEX_BYTES);
+        // Add index write bytes sensors to the response
+        requestParam = SensorsCustomParams::encodeTableInIndexWriteBytesRequestParam;
+        tableParam = SensorsCustomParams::encodeTableInIndexWriteBytesTableParam;
+        sensors = RequestTracker.instance.get().getSensors(Type.INDEX_WRITE_BYTES);
         addSensorsToResponse(sensors, requestParam, tableParam, response);
     }
 
-    private void addSensorsToResponse(Collection<Sensor> sensors, Function<String, String> requestParamSupplier, Function<String, String> tableParamSupplier, Message.Builder<NoPayload> response) {
+    private void addSensorsToResponse(Collection<Sensor> sensors, Function<String, String> requestParamSupplier, Function<String, String> tableParamSupplier, Message.Builder<NoPayload> response)
+    {
         for (Sensor requestSensor : sensors)
         {
             String requestBytesParam = requestParamSupplier.apply(requestSensor.getContext().getTable());

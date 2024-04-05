@@ -146,7 +146,7 @@ public class MemtableIndex
 
         RequestSensors sensors = requestTracker.get();
         if (sensors != null)
-            sensors.registerSensor(sensorContext, Type.INDEX_BYTES);
+            sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
         rangeIndexes[boundaries.getShardForKey(key)].add(key,
                                                          clustering,
                                                          value,
@@ -154,13 +154,13 @@ public class MemtableIndex
                                                              memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
                                                              estimatedOnHeapMemoryUsed.add(allocatedBytes);
                                                              if (sensors != null)
-                                                                 sensors.incrementSensor(sensorContext, Type.INDEX_BYTES, allocatedBytes);
+                                                                 sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, allocatedBytes);
                                                          },
                                                          allocatedBytes -> {
                                                              memtable.markExtraOffHeapUsed(allocatedBytes, opGroup);
                                                              estimatedOffHeapMemoryUsed.add(allocatedBytes);
                                                              if (sensors != null)
-                                                                 sensors.incrementSensor(sensorContext, Type.INDEX_BYTES, allocatedBytes);
+                                                                 sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, allocatedBytes);
                                                          });
         writeCount.increment();
     }

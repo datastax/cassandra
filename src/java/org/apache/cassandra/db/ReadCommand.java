@@ -405,7 +405,7 @@ public abstract class ReadCommand extends AbstractReadQuery
 
         Context context = Context.from(this);
         UnfilteredPartitionIterator iterator = (null == searcher) ? Transformation.apply(queryStorage(cfs, executionController), new TrackingRowIterator(context, Type.READ_BYTES))
-                                                                  : Transformation.apply(searchStorage(searcher, executionController), new TrackingRowIterator(context, Type.SEARCH_BYTES));
+                                                                  : Transformation.apply(searchStorage(searcher, executionController), new TrackingRowIterator(context, Type.INDEX_READ_BYTES));
 
         iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
 
