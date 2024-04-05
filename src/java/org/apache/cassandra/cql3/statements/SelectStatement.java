@@ -39,11 +39,16 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.SingleRestriction;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.TupleType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaType;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.cql3.*;
@@ -82,6 +87,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.FBUtilities;
 
+import org.apache.commons.el.NullLiteral;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
@@ -1106,6 +1112,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
     public static class RawStatement extends QualifiedStatement<SelectStatement>
     {
+        private static final ColumnIdentifier COLLECTION_INTERNAL_KEY_COLUMN = ColumnIdentifier.getInterned("key", true);
+        private static final ColumnIdentifier COLLECTION_ID_COLUMN = ColumnIdentifier.getInterned("id", true);
+
+
         public final Parameters parameters;
         public final List<RawSelector> selectClause;
         public final WhereClause whereClause;
@@ -1214,7 +1224,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             assert docJsonColumn != null : "A collection table must have doc_json column";
 
             Selection selection = Selection.forColumns(table, Collections.singletonList(docJsonColumn), true,false);
-            WhereClause whereClause = WhereClause.empty();
+            WhereClause whereClause = this.whereClause.mutateRelations(this::relationToShredded);
             StatementRestrictions restrictions = StatementRestrictions.create(StatementType.SELECT,
                                                                               table,
                                                                               whereClause,
@@ -1242,8 +1252,38 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        prepareLimit(bindVariables, limit, ks, limitReceiver()),
                                        prepareLimit(bindVariables, perPartitionLimit, ks, perPartitionLimitReceiver()),
                                                         null);
-
         }
+
+        private Relation relationToShredded(Relation relation)
+        {
+            checkTrue(relation instanceof SingleColumnRelation, "Multicolumn relations are not supported in collection queries: " + relation.toCQLString());
+            SingleColumnRelation scRelation = (SingleColumnRelation) relation;
+
+            if (scRelation.isEQ() && scRelation.getEntity().equals(COLLECTION_ID_COLUMN))
+            {
+                Term.Raw id = scRelation.getValue();
+                AbstractType<?> idType = id.getCompatibleTypeIfKnown(keyspace());
+
+                int typeDiscriminatorInt = 1;
+                if (Int32Type.instance.equals(idType))
+                    typeDiscriminatorInt = 2;
+                if (BooleanType.instance.equals(idType))
+                    typeDiscriminatorInt = 3;
+                if (id.equals(Constants.NULL_LITERAL))
+                    typeDiscriminatorInt = 4;
+                // TODO what to do with dates?
+
+                if (id instanceof Constants.Literal && (idType == null || !UTF8Type.instance.isValueCompatibleWith(idType)))
+                    id = Constants.Literal.string(id.getText());
+
+                Term.Raw typeDiscriminator = Constants.Literal.integer("" + typeDiscriminatorInt);
+                Term.Raw keyValue = new Tuples.Literal(List.of(typeDiscriminator, id));
+                return new SingleColumnRelation(COLLECTION_INTERNAL_KEY_COLUMN, Operator.EQ, keyValue);
+            }
+
+            throw new InvalidRequestException("Relation not supported in collection queries: " + relation.toCQLString());
+        }
+
 
         private Set<ColumnMetadata> getResultSetOrdering(StatementRestrictions restrictions, Map<ColumnMetadata, Ordering> orderingColumns)
         {
