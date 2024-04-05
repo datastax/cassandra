@@ -71,6 +71,8 @@ public final class WhereClause
         return new WhereClause(rootElement.rename(from, to));
     }
 
+
+
     /**
      * Allows mutation of the relations held within the where clause element
      * hierarchy

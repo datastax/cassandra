@@ -31,6 +31,7 @@ import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.SchemaType;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Pair;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -148,6 +149,7 @@ public class DeleteStatement extends ModificationStatement
                                                         Attributes attrs)
         {
             checkFalse(metadata.isVirtual(), "Virtual tables don't support DELETE statements");
+            checkFalse(metadata.params.schemaType == SchemaType.COLLECTION, "Collections don't support DELETE statements");
 
             Operations operations = new Operations(type);
 
