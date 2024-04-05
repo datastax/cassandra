@@ -632,7 +632,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
             if (isBatch)
                 Iterables.addAll(defs, metadata.primaryKeyColumns());
             Iterables.addAll(defs, columnsWithConditions);
-            selection = Selection.forColumns(metadata, new ArrayList<>(defs), false);
+            selection = Selection.forColumns(metadata, new ArrayList<>(defs), false, false);
 
         }
 

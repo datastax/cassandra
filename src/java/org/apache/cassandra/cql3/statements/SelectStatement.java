@@ -1207,16 +1207,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         private SelectStatement prepareSelectFromShreddedCollection(TableMetadata table)
         {
-            if (!selectClause.isEmpty())
-                throw new InvalidRequestException("Projections are not supported in SELECT JSON on collections");
+            checkTrue(selectClause.isEmpty(), "Projections are not supported in SELECT JSON on collections");
 
             String ks = table.keyspace;
             ColumnMetadata docJsonColumn = table.getColumn(ColumnIdentifier.getInterned("doc_json", true));
             assert docJsonColumn != null : "A collection table must have doc_json column";
 
-            Selection selection = Selection.forColumns(table, Collections.singletonList(docJsonColumn), false);
-
-
+            Selection selection = Selection.forColumns(table, Collections.singletonList(docJsonColumn), true,false);
             WhereClause whereClause = WhereClause.empty();
             StatementRestrictions restrictions = StatementRestrictions.create(StatementType.SELECT,
                                                                               table,
@@ -1231,7 +1228,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 Collections.emptyList(),
                 parameters.isDistinct,
                 parameters.allowFiltering,
-                false
+                true
             );
             return new SelectStatement(rawCQLStatement,
                                        table,

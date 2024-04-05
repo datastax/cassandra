@@ -42,7 +42,7 @@ public abstract class Selection
      */
     private static final Predicate<ColumnMetadata> STATIC_COLUMN_FILTER = (column) -> column.isStatic();
 
-    private final TableMetadata table;
+    protected final TableMetadata table;
     private final List<ColumnMetadata> columns;
     private final SelectionColumnMapping columnMapping;
     protected final ResultSet.ResultMetadata metadata;
@@ -147,9 +147,9 @@ public abstract class Selection
                              returnStaticContentOnPartitionWithNoRows);
     }
 
-    public static Selection forColumns(TableMetadata table, List<ColumnMetadata> columns, boolean returnStaticContentOnPartitionWithNoRows)
+    public static Selection forColumns(TableMetadata table, List<ColumnMetadata> columns, boolean isJson, boolean returnStaticContentOnPartitionWithNoRows)
     {
-        return new SimpleSelection(table, columns, Collections.emptySet(), false, false, returnStaticContentOnPartitionWithNoRows);
+        return new SimpleSelection(table, columns, Collections.emptySet(), false, isJson, returnStaticContentOnPartitionWithNoRows);
     }
 
     public void addFunctionsTo(List<Function> functions)
@@ -462,7 +462,8 @@ public abstract class Selection
 
                 public List<ByteBuffer> getOutputRow()
                 {
-                    if (isJson)
+                    // for collections we get the document already as json, so no need to convert it
+                    if (isJson && !table.isCollection())
                         return rowToJson(current, options.getProtocolVersion(), metadata, orderingColumns);
                     return current;
                 }
