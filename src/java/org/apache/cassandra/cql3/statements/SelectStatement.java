@@ -43,7 +43,7 @@ import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaType;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.cql3.*;
@@ -140,6 +140,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                                                        false,
                                                                        false);
 
+    private final SelectStatement innerStatement;
+
     public SelectStatement(String queryString,
                            TableMetadata table,
                            VariableSpecifications bindVariables,
@@ -150,7 +152,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                            AggregationSpecification aggregationSpec,
                            ColumnComparator<List<ByteBuffer>> orderingComparator,
                            Term limit,
-                           Term perPartitionLimit)
+                           Term perPartitionLimit,
+                           SelectStatement innerStatement)
     {
         this.rawCQLStatement = queryString;
         this.table = table;
@@ -163,6 +166,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         this.parameters = parameters;
         this.limit = limit;
         this.perPartitionLimit = perPartitionLimit;
+        this.innerStatement = innerStatement;
     }
 
     @Override
@@ -227,6 +231,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    null,
                                    null,
                                    null,
+                                   null,
                                    null);
     }
 
@@ -276,7 +281,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    aggregationSpec,
                                    orderingComparator,
                                    limit,
-                                   perPartitionLimit);
+                                   perPartitionLimit,
+                                   innerStatement);
     }
 
     /**
@@ -297,7 +303,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    aggregationSpec,
                                    orderingComparator,
                                    limit,
-                                   perPartitionLimit);
+                                   perPartitionLimit,
+                                   innerStatement);
     }
 
     private void validateQueryOptions(QueryState queryState, QueryOptions options)
@@ -1132,6 +1139,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             String ks = keyspaceMapper.apply(keyspace());
             TableMetadata table = Schema.instance.validateTable(ks, name());
 
+            if (table.isCollection() && parameters.isJson)
+                return prepareSelectFromShreddedCollection(table);
+
             List<Selectable> selectables = RawSelector.toSelectables(selectClause, table);
             boolean containsOnlyStaticColumns = selectOnlyStaticColumns(table, selectables);
 
@@ -1191,7 +1201,51 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        aggregationSpec,
                                        orderingComparator,
                                        prepareLimit(bindVariables, limit, ks, limitReceiver()),
-                                       prepareLimit(bindVariables, perPartitionLimit, ks, perPartitionLimitReceiver()));
+                                       prepareLimit(bindVariables, perPartitionLimit, ks, perPartitionLimitReceiver()),
+                                       null);
+        }
+
+        private SelectStatement prepareSelectFromShreddedCollection(TableMetadata table)
+        {
+            if (!selectClause.isEmpty())
+                throw new InvalidRequestException("Projections are not supported in SELECT JSON on collections");
+
+            String ks = table.keyspace;
+            ColumnMetadata docJsonColumn = table.getColumn(ColumnIdentifier.getInterned("doc_json", true));
+            assert docJsonColumn != null : "A collection table must have doc_json column";
+
+            Selection selection = Selection.forColumns(table, Collections.singletonList(docJsonColumn), false);
+
+
+            WhereClause whereClause = WhereClause.empty();
+            StatementRestrictions restrictions = StatementRestrictions.create(StatementType.SELECT,
+                                                                              table,
+                                                                              whereClause,
+                                                                              bindVariables,
+                                                                              Collections.emptyList(),
+                                                                              false,
+                                                                              parameters.allowFiltering,
+                                                                              false);
+            SelectStatement.Parameters innerParams = new Parameters(
+                Collections.emptyList(),
+                Collections.emptyList(),
+                parameters.isDistinct,
+                parameters.allowFiltering,
+                false
+            );
+            return new SelectStatement(rawCQLStatement,
+                                       table,
+                                       bindVariables,
+                                       innerParams,
+                                       selection,
+                                       restrictions,
+                                       false,
+                                       null,
+                                       null,
+                                       prepareLimit(bindVariables, limit, ks, limitReceiver()),
+                                       prepareLimit(bindVariables, perPartitionLimit, ks, perPartitionLimitReceiver()),
+                                                        null);
+
         }
 
         private Set<ColumnMetadata> getResultSetOrdering(StatementRestrictions restrictions, Map<ColumnMetadata, Ordering> orderingColumns)

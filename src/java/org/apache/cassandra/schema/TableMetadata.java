@@ -219,6 +219,11 @@ public class TableMetadata implements SchemaElement
         return kind == Kind.INDEX;
     }
 
+    public boolean isCollection()
+    {
+        return params.schemaType == SchemaType.COLLECTION;
+    }
+
     public TableMetadata withSwapped(TableParams params)
     {
         return unbuild().params(params).build();
