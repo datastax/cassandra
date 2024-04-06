@@ -54,7 +54,7 @@ public class StaticColumnIndexTest extends SAITester
         execute("INSERT INTO %s(pk, ck,       val2) VALUES(?, ?,    ?)", 1, 2,     2000);
         execute("INSERT INTO %s(pk, ck, val1, val2) VALUES(?, ?, ?, ?)", 2, 1, 40, 2000);
 
-        beforeAndAfterFlush(() -> assertRows(execute("SELECT pk, ck, val1, val2 FROM %s WHERE val1 = 20 AND val2 = 2000"),
+        beforeAndAfterFlush(() -> assertRows(execute("SELECT pk, ck, val1, val2 FROM %s WHERE val1 = 20 AND val2 = 2000 ALLOW FILTERING"),
                                              row(1, 2, 20, 2000)));
     }
 
