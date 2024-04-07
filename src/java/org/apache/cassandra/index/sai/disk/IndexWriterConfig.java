@@ -37,7 +37,7 @@ public class IndexWriterConfig
     private static final IndexWriterConfig EMPTY_CONFIG = new IndexWriterConfig(null, -1, -1);
 
     /**
-     * Fully qualified index name, in the format "<keyspace>.<table>.<index_name>".
+     * Fully qualified index name, in the format {@literal "<keyspace>.<table>.<index_name>"}.
      */
     private final String indexName;
 
