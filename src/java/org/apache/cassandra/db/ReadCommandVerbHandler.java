@@ -62,22 +62,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         // Initialize the sensor and set ExecutorLocals
         Context context = Context.from(command);
         RequestSensors sensors = new RequestSensors();
-        Type type;
-        String requestBytesParam;
-        String tableBytesParam;
-        if (command.indexQueryPlan != null)
-        {
-             type = Type.INDEX_READ_BYTES;
-             requestBytesParam = SensorsCustomParams.INDEX_READ_BYTES_REQUEST;
-             tableBytesParam = SensorsCustomParams.INDEX_READ_BYTES_TABLE;
-        }
-        else
-        {
-             type = Type.READ_BYTES;
-             requestBytesParam = SensorsCustomParams.READ_BYTES_REQUEST;
-             tableBytesParam = SensorsCustomParams.READ_BYTES_TABLE;
-        }
-        sensors.registerSensor(context, type);
+        sensors.registerSensor(context, Type.READ_BYTES);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
 
@@ -99,17 +84,28 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         }
 
         Tracing.trace("Enqueuing response to {}", message.from());
-
-        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(context, type);
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
+        addReadBytesSensorToResponse(reply, context);
+        MessagingService.instance().send(reply.build(), message.from());
+    }
+
+    private void addReadBytesSensorToResponse(Message.Builder<ReadResponse> reply, Context context)
+    {
+        addSensorDataToResponse(reply, context, Type.READ_BYTES, SensorsCustomParams.READ_BYTES_REQUEST, SensorsCustomParams.READ_BYTES_TABLE);
+    }
+
+    /**
+     * TODO: Refactor on the basis of https://github.com/datastax/cassandra/pull/1074/files#diff-2d48c168d5192fe4989baf96618533f271cafab1db3f212f6a0ff1b3dff3d606R88-R124 once CNDB-8772 is merged.
+     */
+    private void addSensorDataToResponse(Message.Builder<ReadResponse> reply, Context context, Type type, String requestBytesParam, String tableBytesParam)
+    {
+        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(context, type);
         readRequestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue()))
                          .ifPresent(bytes -> reply.withCustomParam(requestBytesParam, bytes));
 
-        Optional<Sensor> readTableSensor = SensorsRegistry.instance.getSensor(Context.from(command), type);
+        Optional<Sensor> readTableSensor = SensorsRegistry.instance.getSensor(context, type);
         readTableSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue()))
                        .ifPresent(bytes -> reply.withCustomParam(tableBytesParam, bytes));
-
-        MessagingService.instance().send(reply.build(), message.from());
     }
 
     private void validateTransientStatus(Message<ReadCommand> message)
