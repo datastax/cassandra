@@ -296,6 +296,24 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
         return value <= bucketOffsets[firstCandidate] ? firstCandidate : firstCandidate + 1;
     }
 
+    /**
+     * this is almost a copy-paste from DSE DecayingEstimatedHistogram::BucketProperties::getIndex
+     * Almost, because:
+     * 1. C* and DSE differently implement the "considerZeroes" flag.
+     * The zeroesCorrection variable is used to adjust the index in the C* case.
+     * <p/>
+     * 2. C* and DSE differently implement the histogram overflow.
+     * In DSE, there is a separate flag isOverflowed which is set when a value doesn't fit in buckets; the getIndex
+     * function is supposed to always return index for an actual bucket.
+     * In C* there is a special bucket for overflowed values, and the findIndex function is supposed to return
+     * the index of this additional bucket if the value doesn't fit in the regular buckets.
+     * This is the origin of the min() function in the return statement.
+     *
+     * @param bucketOffsets the offsets of the histogram buckets (upper inclusive bounds)
+     * @param value the value with which we want to update the histogram
+     * @return index of the bucket that keeps track of the value OR the index of the last bucket which is used for
+     * overflowed values
+     */
     private static int findIndexDse(long[] bucketOffsets, long value)
     {
         if (value < 0) {
@@ -868,6 +886,20 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
         }
     }
 
+    /**
+     * this is almost a copy-paste from DSE DecayingEstimatedHistogram::makeOffsets, except that it's been adjusted
+     * to the C*-specific ability of specifying the number of buckets.
+     * Please note, that DSE bucket offsets are inclusive lower bounds and C* bucket offsets are inclusive upper bounds.
+     * For simplicity, we use the same bucket offsets in both cases, but this means there might be a slight
+     * difference for any samples that are exactly on the bucket boundary. I think we can safely ignore that.
+     *
+     * @param size the number of regular buckets to create; the special bucket for overflow values is not included
+     *             in this count
+     * @param considerZeroes whether to include a separate bucket for zero values
+     * @return the offsets for the buckets; in that context offsets mean the upper inclusive bounds of each bucket
+     *         the name "offset" stays for historic reasons.
+     *
+     */
     public static long[] newDseOffsets(int size, boolean considerZeroes)
     {
         ArrayList<Long> ret = new ArrayList<>();
