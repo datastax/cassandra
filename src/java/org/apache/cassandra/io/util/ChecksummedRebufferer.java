@@ -28,9 +28,9 @@ class ChecksummedRebufferer extends BufferManagingRebufferer
     private final DataIntegrityMetadata.ChecksumValidator validator;
 
     @SuppressWarnings("resource") // chunk reader is closed by super::close()
-    ChecksummedRebufferer(ChannelProxy channel, DataIntegrityMetadata.ChecksumValidator validator)
+    ChecksummedRebufferer(ChannelProxy channel, DataIntegrityMetadata.ChecksumValidator validator, long startOffset)
     {
-        super(new SimpleChunkReader(channel, channel.size(), BufferType.ON_HEAP, validator.chunkSize));
+        super(new SimpleChunkReader(channel, channel.size(), BufferType.ON_HEAP, validator.chunkSize, startOffset));
         this.validator = validator;
     }
 

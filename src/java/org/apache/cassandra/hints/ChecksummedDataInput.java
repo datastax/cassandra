@@ -29,7 +29,6 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.RebufferingInputStream;
-import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.Throwables;
 
 /**
@@ -226,7 +225,7 @@ public class ChecksummedDataInput extends RebufferingInputStream
 
     public void tryUncacheRead()
     {
-        INativeLibrary.instance.trySkipCache(getChannel().getFileDescriptor(), 0, getSourcePosition(), getFile().toString());
+        getChannel().trySkipCache(0, getSourcePosition());
     }
 
     private void updateCrc()

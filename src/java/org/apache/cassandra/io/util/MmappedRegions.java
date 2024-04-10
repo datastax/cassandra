@@ -56,9 +56,9 @@ public class MmappedRegions extends SharedCloseableImpl
      */
     private volatile State copy;
 
-    private MmappedRegions(ChannelProxy channel, CompressionMetadata metadata, long length)
+    private MmappedRegions(ChannelProxy channel, CompressionMetadata metadata, long length, long startOffset)
     {
-        this(new State(channel), metadata, length);
+        this(new State(channel, startOffset), metadata, length);
     }
 
     private MmappedRegions(State state, CompressionMetadata metadata, long length)
@@ -88,7 +88,7 @@ public class MmappedRegions extends SharedCloseableImpl
 
     public static MmappedRegions empty(ChannelProxy channel)
     {
-        return new MmappedRegions(channel, null, 0);
+        return new MmappedRegions(channel, null, 0, 0);
     }
 
     /**
@@ -101,15 +101,15 @@ public class MmappedRegions extends SharedCloseableImpl
         if (metadata == null)
             throw new IllegalArgumentException("metadata cannot be null");
 
-        return new MmappedRegions(channel, metadata, 0);
+        return new MmappedRegions(channel, metadata, 0, 0);
     }
 
-    public static MmappedRegions map(ChannelProxy channel, long length)
+    public static MmappedRegions map(ChannelProxy channel, long length, long startOffset)
     {
         if (length <= 0)
             throw new IllegalArgumentException("Length must be positive");
 
-        return new MmappedRegions(channel, null, length);
+        return new MmappedRegions(channel, null, length, startOffset);
     }
 
     /**
@@ -160,7 +160,7 @@ public class MmappedRegions extends SharedCloseableImpl
 
         while (offset < metadata.dataLength)
         {
-            CompressionMetadata.Chunk chunk = metadata.chunkFor(offset);
+            CompressionMetadata.Chunk chunk = metadata.chunkFor(offset + metadata.uncompressedOffset);
 
             //Reached a new mmap boundary
             if (segmentSize + chunk.length + 4 > MAX_SEGMENT_SIZE)
@@ -198,7 +198,7 @@ public class MmappedRegions extends SharedCloseableImpl
         assert !isCleanedUp() : "Attempted to use closed region";
         return state.floor(position);
     }
-    
+
     public void closeQuietly()
     {
         Throwable err = close(null);
@@ -260,13 +260,16 @@ public class MmappedRegions extends SharedCloseableImpl
         /** The index to the last region added */
         private int last;
 
-        private State(ChannelProxy channel)
+        private final long startOffset;
+
+        private State(ChannelProxy channel, long startOffset)
         {
             this.channel = channel.sharedCopy();
             this.buffers = new ByteBuffer[REGION_ALLOC_SIZE];
             this.offsets = new long[REGION_ALLOC_SIZE];
             this.length = 0;
             this.last = -1;
+            this.startOffset = startOffset;
         }
 
         private State(State original)
@@ -276,6 +279,7 @@ public class MmappedRegions extends SharedCloseableImpl
             this.offsets = original.offsets;
             this.length = original.length;
             this.last = original.last;
+            this.startOffset = original.startOffset;
         }
 
         private boolean isEmpty()
@@ -290,9 +294,9 @@ public class MmappedRegions extends SharedCloseableImpl
 
         private Region floor(long position)
         {
-            assert 0 <= position && position <= length : String.format("%d > %d", position, length);
+            assert startOffset <= position && position <= length : String.format("%d > %d", position, length);
 
-            int idx = Arrays.binarySearch(offsets, 0, last +1, position);
+            int idx = Arrays.binarySearch(offsets, 0, last + 1, position);
             assert idx != -1 : String.format("Bad position %d for regions %s, last %d in %s", position, Arrays.toString(offsets), last, channel);
             if (idx < 0)
                 idx = -(idx + 2); // round down to entry at insertion point
@@ -302,12 +306,12 @@ public class MmappedRegions extends SharedCloseableImpl
 
         private long getPosition()
         {
-            return last < 0 ? 0 : offsets[last] + buffers[last].capacity();
+            return last < 0 ? startOffset : offsets[last] + buffers[last].capacity();
         }
 
         private void add(long pos, long size)
         {
-            ByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, pos, size);
+            ByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, pos - startOffset, size);
 
             ++last;
 

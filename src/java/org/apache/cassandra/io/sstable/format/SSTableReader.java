@@ -257,7 +257,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     // indexfile and datafile: might be null before a call to load()
     protected final FileHandle ifile;
-    protected final FileHandle dfile;
+    public final FileHandle dfile;
     protected final IFilter bf;
     public final IndexSummary indexSummary;
 

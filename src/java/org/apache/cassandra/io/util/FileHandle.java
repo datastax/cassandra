@@ -20,6 +20,7 @@ package org.apache.cassandra.io.util;
 import java.util.Objects;
 import java.util.Optional;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,13 +28,12 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressionMetadata;
-import org.apache.cassandra.utils.INativeLibrary;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
 
 import static org.apache.cassandra.utils.Throwables.maybeFail;
-import org.apache.cassandra.utils.Throwables;
 
 /**
  * {@link FileHandle} provides access to a file for reading, including the ones written by various {@link SequentialWriter}
@@ -55,6 +55,8 @@ public class FileHandle extends SharedCloseableImpl
 
     public final long onDiskLength;
 
+    public final SliceDescriptor sliceDescriptor;
+
     /*
      * Rebufferer factory to use when constructing RandomAccessReaders
      */
@@ -69,13 +71,15 @@ public class FileHandle extends SharedCloseableImpl
                        ChannelProxy channel,
                        RebuffererFactory rebuffererFactory,
                        CompressionMetadata compressionMetadata,
-                       long onDiskLength)
+                       long onDiskLength,
+                       SliceDescriptor sliceDescriptor)
     {
         super(cleanup);
         this.rebuffererFactory = rebuffererFactory;
         this.channel = channel;
         this.compressionMetadata = Optional.ofNullable(compressionMetadata);
         this.onDiskLength = onDiskLength;
+        this.sliceDescriptor = sliceDescriptor;
     }
 
     private FileHandle(FileHandle copy)
@@ -85,6 +89,7 @@ public class FileHandle extends SharedCloseableImpl
         rebuffererFactory = copy.rebuffererFactory;
         compressionMetadata = copy.compressionMetadata;
         onDiskLength = copy.onDiskLength;
+        sliceDescriptor = copy.sliceDescriptor;
     }
 
     /**
@@ -97,7 +102,7 @@ public class FileHandle extends SharedCloseableImpl
 
     public long dataLength()
     {
-        return compressionMetadata.map(c -> c.dataLength).orElseGet(rebuffererFactory::fileLength);
+        return rebuffererFactory.fileLength();
     }
 
     public RebuffererFactory rebuffererFactory()
@@ -142,10 +147,13 @@ public class FileHandle extends SharedCloseableImpl
      */
     public RandomAccessReader createReader(RateLimiter limiter)
     {
-        return new RandomAccessReader(instantiateRebufferer(limiter));
+        RandomAccessReader reader = new RandomAccessReader(instantiateRebufferer(limiter));
+        if (sliceDescriptor.dataStart > sliceDescriptor.sliceStart)
+            reader.seek(sliceDescriptor.dataStart);
+        return reader;
     }
 
-    public FileDataInput createReader(long position)
+    public RandomAccessReader createReader(long position)
     {
         RandomAccessReader reader = createReader();
         reader.seek(position);
@@ -164,8 +172,8 @@ public class FileHandle extends SharedCloseableImpl
                 return 0L;
             else
                 return metadata.chunkFor(before).offset;
-        }).orElse(before);
-        INativeLibrary.instance.trySkipCache(channel.getFileDescriptor(), 0, position, path());
+        }).orElse(before - sliceDescriptor.sliceStart);
+        channel.trySkipCache(0, position);
     }
 
     public Rebufferer instantiateRebufferer()
@@ -251,6 +259,8 @@ public class FileHandle extends SharedCloseableImpl
         private int bufferSize = RandomAccessReader.DEFAULT_BUFFER_SIZE;
         private BufferType bufferType = BufferType.OFF_HEAP;
 
+        private SliceDescriptor sliceDescriptor = SliceDescriptor.NONE;
+
         private boolean mmapped = false;
         private boolean compressed = false;
         private long length = -1;
@@ -260,6 +270,7 @@ public class FileHandle extends SharedCloseableImpl
             this.file = file;
         }
 
+        @VisibleForTesting
         public Builder(ChannelProxy channel)
         {
             this.channel = channel;
@@ -333,9 +344,16 @@ public class FileHandle extends SharedCloseableImpl
             return this;
         }
 
-        public void withLength(long length)
+        public Builder withLength(long length)
         {
             this.length = length;
+            return this;
+        }
+
+        public Builder slice(SliceDescriptor sliceDescriptor)
+        {
+            this.sliceDescriptor = sliceDescriptor;
+            return this;
         }
 
         /**
@@ -369,9 +387,13 @@ public class FileHandle extends SharedCloseableImpl
             try
             {
                 if (compressed && compressionMetadata == null)
-                    compressionMetadata = CompressionMetadata.create(channelCopy.getFile());
+                    compressionMetadata = CompressionMetadata.create(channelCopy.getFile(), sliceDescriptor);
 
-                long length = overrideLength > 0 ? overrideLength : compressed ? compressionMetadata.compressedFileLength : channelCopy.size();
+                long length = overrideLength > 0
+                              ? overrideLength
+                              : compressed
+                                ? compressionMetadata.compressedFileLength
+                                : channelCopy.size();
 
                 RebuffererFactory rebuffererFactory;
                 if (length == 0)
@@ -383,13 +405,12 @@ public class FileHandle extends SharedCloseableImpl
                     if (compressed)
                     {
                         regions = MmappedRegions.map(channelCopy, compressionMetadata);
-                        rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channelCopy, compressionMetadata,
-                                                                                       regions));
+                        rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channelCopy, compressionMetadata, regions, sliceDescriptor.sliceStart));
                     }
                     else
                     {
-                        updateRegions(channelCopy, length);
-                        rebuffererFactory = new MmapRebufferer(channelCopy, length, regions.sharedCopy());
+                        updateRegions(channelCopy, sliceDescriptor.dataEndOr(length), sliceDescriptor.sliceStart);
+                        rebuffererFactory = new MmapRebufferer(channelCopy, sliceDescriptor.dataEndOr(length), regions.sharedCopy());
                     }
                 }
                 else
@@ -397,16 +418,20 @@ public class FileHandle extends SharedCloseableImpl
                     regions = null;
                     if (compressed)
                     {
-                        rebuffererFactory = maybeCached(new CompressedChunkReader.Standard(channelCopy, compressionMetadata));
+                        rebuffererFactory = maybeCached(new CompressedChunkReader.Standard(channelCopy, compressionMetadata, sliceDescriptor.sliceStart));
                     }
                     else
                     {
                         int chunkSize = DiskOptimizationStrategy.roundForCaching(bufferSize, ChunkCache.roundUp);
-                        rebuffererFactory = maybeCached(new SimpleChunkReader(channelCopy, length, bufferType, chunkSize));
+                        if (sliceDescriptor.chunkSize > 0 && sliceDescriptor.chunkSize < chunkSize)
+                            // if the chunk size in the slice was smaller than the one we used in the rebufferer,
+                            // we could end up aligning the file position to the value lower than the slice start
+                            chunkSize = sliceDescriptor.chunkSize;
+                        rebuffererFactory = maybeCached(new SimpleChunkReader(channelCopy, sliceDescriptor.dataEndOr(length), bufferType, chunkSize, sliceDescriptor.sliceStart));
                     }
                 }
                 Cleanup cleanup = new Cleanup(channelCopy, rebuffererFactory, compressionMetadata, chunkCache);
-                return new FileHandle(cleanup, channelCopy, rebuffererFactory, compressionMetadata, length);
+                return new FileHandle(cleanup, channelCopy, rebuffererFactory, compressionMetadata, length, sliceDescriptor);
             }
             catch (Throwable t)
             {
@@ -443,7 +468,7 @@ public class FileHandle extends SharedCloseableImpl
             return reader;
         }
 
-        private void updateRegions(ChannelProxy channel, long length)
+        private void updateRegions(ChannelProxy channel, long length, long startOffset)
         {
             if (regions != null && !regions.isValid(channel))
             {
@@ -455,7 +480,7 @@ public class FileHandle extends SharedCloseableImpl
             }
 
             if (regions == null)
-                regions = MmappedRegions.map(channel, length);
+                regions = MmappedRegions.map(channel, length, startOffset);
             else
                 regions.extend(length);
         }

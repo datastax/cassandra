@@ -19,7 +19,6 @@
 package org.apache.cassandra.io.sstable.format;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
@@ -52,6 +51,7 @@ import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.ChecksummedSequentialWriter;
 import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.File;
@@ -95,7 +95,7 @@ public abstract class SortedTableWriter extends SSTableWriter
         lifecycleNewTracker.trackNew(this); // must track before any files are created
 
         dataFile = constructDataFileWriter(descriptor, metadata, metadataCollector, lifecycleNewTracker, writerOption);
-        dbuilder = SSTableReaderBuilder.defaultDataHandleBuilder(descriptor).compressed(compression);
+        dbuilder = SSTableReaderBuilder.defaultDataHandleBuilder(descriptor, ZeroCopyMetadata.EMPTY).compressed(compression);
         isInternalKeyspace = SchemaConstants.isInternalKeyspace(metadata.keyspace);
     }
 

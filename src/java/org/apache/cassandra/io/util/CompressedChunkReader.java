@@ -35,12 +35,14 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 {
     final CompressionMetadata metadata;
     final int maxCompressedLength;
+    protected final long startOffset;
 
-    protected CompressedChunkReader(ChannelProxy channel, CompressionMetadata metadata)
+    protected CompressedChunkReader(ChannelProxy channel, CompressionMetadata metadata, long startOffset)
     {
-        super(channel, metadata.dataLength);
+        super(channel, metadata.dataLength + startOffset);
         this.metadata = metadata;
         this.maxCompressedLength = metadata.maxCompressedLength();
+        this.startOffset = startOffset;
         assert Integer.bitCount(metadata.chunkLength()) == 1; //must be a power of two
     }
 
@@ -58,12 +60,13 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     @Override
     public String toString()
     {
-        return String.format("CompressedChunkReader.%s(%s - %s, chunk length %d, data length %d)",
+        return String.format("CompressedChunkReader.%s(%s - %s, chunk length %d, data length %d, slice offset %s)",
                              getClass().getSimpleName(),
                              channel.filePath(),
                              metadata.compressor().getClass().getSimpleName(),
                              metadata.chunkLength(),
-                             metadata.dataLength);
+                             metadata.dataLength,
+                             startOffset);
     }
 
     @Override
@@ -91,7 +94,12 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 
         public Standard(ChannelProxy channel, CompressionMetadata metadata)
         {
-            super(channel, metadata);
+            this(channel, metadata, 0);
+        }
+
+        public Standard(ChannelProxy channel, CompressionMetadata metadata, long startOffset)
+        {
+            super(channel, metadata, startOffset);
             bufferHolder = new ThreadLocalByteBufferHolder(metadata.compressor().preferredBufferType());
         }
 
@@ -182,7 +190,12 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 
         public Mmap(ChannelProxy channel, CompressionMetadata metadata, MmappedRegions regions)
         {
-            super(channel, metadata);
+            this(channel, metadata, regions, 0);
+        }
+
+        public Mmap(ChannelProxy channel, CompressionMetadata metadata, MmappedRegions regions, long startOffset)
+        {
+            super(channel, metadata, startOffset);
             this.regions = regions;
         }
 

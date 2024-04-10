@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.tries.SerializationNode;
 import org.apache.cassandra.io.tries.TrieNode;
 import org.apache.cassandra.io.tries.TrieSerializer;
@@ -169,13 +170,21 @@ public class PartitionIndex implements Closeable
                                       IPartitioner partitioner,
                                       boolean preload) throws IOException
     {
+        return load(fhBuilder, partitioner, preload, null);
+    }
+
+    public static PartitionIndex load(FileHandle.Builder fhBuilder,
+                                      IPartitioner partitioner,
+                                      boolean preload,
+                                      ZeroCopyMetadata zeroCopyMetadata) throws IOException
+    {
         try (FileHandle fh = fhBuilder.complete())
         {
-            return load(fh, partitioner, preload);
+            return load(fh, partitioner, preload, zeroCopyMetadata);
         }
     }
 
-    public static PartitionIndex load(FileHandle fh, IPartitioner partitioner, boolean preload) throws IOException
+    public static PartitionIndex load(FileHandle fh, IPartitioner partitioner, boolean preload, ZeroCopyMetadata zeroCopyMetadata) throws IOException
     {
         try (FileDataInput rdr = fh.createReader(fh.dataLength() - FOOTER_LENGTH))
         {
@@ -197,7 +206,26 @@ public class PartitionIndex implements Closeable
                 logger.trace("Checksum {}", csum);      // Note: trace is required so that reads aren't optimized away.
             }
 
-            return new PartitionIndex(fh, root, keyCount, first, last, null, null);
+            DecoratedKey filterFirst = null;
+            DecoratedKey filterLast = null;
+
+            // Adjust keys estimate plus bounds if ZeroCopy, otherwise we would see un-owned data from the index:
+            if (zeroCopyMetadata != null && zeroCopyMetadata.exists() && partitioner != null)
+            {
+                DecoratedKey newFirst = partitioner.decorateKey(zeroCopyMetadata.firstKey());
+                DecoratedKey newLast = partitioner.decorateKey(zeroCopyMetadata.lastKey());
+                if (!newFirst.equals(first))
+                {
+                    filterFirst = first = newFirst;
+                }
+                if (!newLast.equals(last))
+                {
+                    filterLast = last = newLast;
+                }
+                keyCount = zeroCopyMetadata.estimatedKeys();
+            }
+
+            return new PartitionIndex(fh, root, keyCount, first, last, filterFirst, filterLast);
         }
     }
 

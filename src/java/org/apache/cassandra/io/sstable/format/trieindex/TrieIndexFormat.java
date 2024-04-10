@@ -197,8 +197,8 @@ public class TrieIndexFormat implements SSTableFormat
 
                 try (FileHandle.Builder piBuilder = defaultIndexHandleBuilder(desc, Component.PARTITION_INDEX);
                      FileHandle.Builder riBuilder = defaultIndexHandleBuilder(desc, Component.ROW_INDEX);
-                     FileHandle.Builder dBuilder = defaultDataHandleBuilder(desc).compressed(compressedData);
-                     PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false);
+                     FileHandle.Builder dBuilder = defaultDataHandleBuilder(desc, stats.zeroCopyMetadata).compressed(compressedData);
+                     PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false, stats.zeroCopyMetadata);
                      FileHandle dFile = dBuilder.complete();
                      FileHandle riFile = riBuilder.complete())
                 {

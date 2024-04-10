@@ -216,12 +216,12 @@ public class TrieIndexSSTableReader extends SSTableReader
 
     protected boolean filterFirst()
     {
-        return openReason == OpenReason.MOVED_START;
+        return openReason == OpenReason.MOVED_START || sstableMetadata.zeroCopyMetadata.exists();
     }
 
     protected boolean filterLast()
     {
-        return false;
+        return sstableMetadata.zeroCopyMetadata.exists();
     }
 
     public long estimatedKeys()
@@ -1018,7 +1018,7 @@ public class TrieIndexSSTableReader extends SSTableReader
         IFilter bloomFilter = null;
         boolean compressedData = descriptor.fileFor(Component.COMPRESSION_INFO).exists();
 
-        try (FileHandle.Builder dataFHBuilder = defaultDataHandleBuilder(descriptor).compressed(compressedData);
+        try (FileHandle.Builder dataFHBuilder = defaultDataHandleBuilder(descriptor, statsMetadata.zeroCopyMetadata).compressed(compressedData);
              @Nonnull IFilter bf = getBloomFilter(descriptor, components, validationMetadata, isOffline, metadata.get(), statsMetadata.totalRows))
         {
             TrieIndexSSTableReader sstable;
@@ -1031,7 +1031,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                      FileHandle.Builder rowIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX))
                 {
                     rowIdxFH = rowIdxFHBuilder.complete();
-                    partitionIndex = PartitionIndex.load(partitionIdxFHBuilder, metadata.get().partitioner, bloomFilter == FilterFactory.AlwaysPresent);
+                    partitionIndex = PartitionIndex.load(partitionIdxFHBuilder, metadata.get().partitioner, bloomFilter == FilterFactory.AlwaysPresent, statsMetadata.zeroCopyMetadata);
                     sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                                   components,
                                                                   metadata,

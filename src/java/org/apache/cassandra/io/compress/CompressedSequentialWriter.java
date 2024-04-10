@@ -139,6 +139,15 @@ public class CompressedSequentialWriter extends SequentialWriter
     {
         seekToChunkStart(); // why is this necessary? seems like it should always be at chunk start in normal operation
 
+        if (buffer.limit() == 0)
+        {
+            // nothing to compress
+            if (runPostFlush != null)
+                runPostFlush.run();
+
+            return;
+        }
+
         try
         {
             // compressing data with buffer re-use
