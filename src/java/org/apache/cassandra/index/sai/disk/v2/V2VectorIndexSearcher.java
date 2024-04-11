@@ -24,12 +24,14 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.PriorityQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.pq.CompressedVectors;
+import io.github.jbellis.jvector.util.BitSet;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseFixedBitSet;
 import org.agrona.collections.IntArrayList;
@@ -50,7 +52,6 @@ import org.apache.cassandra.index.sai.disk.v2.hnsw.CassandraOnDiskHnsw;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CloseableReranker;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
-import org.apache.cassandra.index.sai.disk.vector.OverqueryUtils;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -90,7 +91,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                  IndexDescriptor indexDescriptor,
                                  IndexContext indexContext) throws IOException
     {
-        this(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext, new CassandraOnDiskHnsw(segmentMetadata.componentMetadatas, perIndexFiles, indexContext));
+        this(primaryKeyMapFactory,
+             perIndexFiles,
+             segmentMetadata,
+             indexDescriptor,
+             indexContext,
+             new CassandraOnDiskHnsw(segmentMetadata.componentMetadatas, perIndexFiles, indexContext));
     }
 
     protected V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
@@ -149,7 +155,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (exp.getOp() != Expression.Op.ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + exp));
 
-        int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
+        int topK = indexContext.getIndexWriterConfig().getSourceModel().topKFor(limit, graph.getCompressedVectors());
         float[] queryVector = exp.lower.value.vector;
 
         var result = searchInternal(keyRange, context, queryVector, limit, topK, 0);
@@ -220,29 +226,24 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             }
 
             // create a bitset of ordinals corresponding to the rows in the given key range
-            SparseFixedBitSet bits = bitSetForSearch();
-            boolean hasMatches = false;
+            final BitSet bits;
             try (var ordinalsView = graph.getOrdinalsView())
             {
-                for (long sstableRowId = minSSTableRowId; sstableRowId <= maxSSTableRowId; sstableRowId++)
-                {
-                    int segmentRowId = metadata.toSegmentRowId(sstableRowId);
-                    int ordinal = ordinalsView.getOrdinalForRowId(segmentRowId);
-                    if (ordinal >= 0)
-                    {
-                        bits.set(ordinal);
-                        hasMatches = true;
-                    }
-                }
+                int startSegmentRowId = metadata.toSegmentRowId(minSSTableRowId);
+                int endSegmentRowId = metadata.toSegmentRowId(maxSSTableRowId);
+
+                bits = ordinalsView.buildOrdinalBitSet(startSegmentRowId, endSegmentRowId, this::bitSetForSearch);
             }
             catch (IOException e)
             {
                 throw new RuntimeException(e);
             }
-            // We can make a more accurate cost estimate now
-            var betterCostEstimate = estimateCost(topK, bits.cardinality());
 
-            if (!hasMatches)
+            int cardinality = bits.cardinality();
+            // We can make a more accurate cost estimate now
+            var betterCostEstimate = estimateCost(topK, cardinality);
+
+            if (cardinality == 0)
                 return CloseableIterator.emptyIterator();
 
             return graph.search(queryVector, topK, threshold, bits, context, visited -> {
@@ -474,7 +475,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (keysInRange.isEmpty())
             return CloseableIterator.emptyIterator();
 
-        int topK = OverqueryUtils.topKFor(limit, graph.getCompressedVectors());
+        int topK = indexContext.getIndexWriterConfig().getSourceModel().topKFor(limit, graph.getCompressedVectors());
         // Convert PKs to segment row ids and then to ordinals, skipping any that don't exist in this segment
         var bitsAndRows = flatmapPrimaryKeysToBitsAndRows(keysInRange);
         var bits = bitsAndRows.left;

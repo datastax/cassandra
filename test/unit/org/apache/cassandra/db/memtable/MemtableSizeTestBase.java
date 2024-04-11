@@ -228,4 +228,24 @@ public abstract class MemtableSizeTestBase extends CQLTester
         long rowCount = ((TrieMemtable)cfs.getTracker().getView().getCurrentMemtable()).rowCount(builder.build(), DataRange.allData(cfs.getPartitioner()));
         Assert.assertEquals(rowCount, partitions*rowsPerPartition);
     }
+
+    @Test
+    public void testRowSize() throws Throwable
+    {
+        buildAndFillTable(memtableClass);
+
+        String writeStatement = "INSERT INTO " + table + "(userid,picid,commentid)VALUES(?,?,?)";
+
+        Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
+        System.out.println("Writing " + partitions + " partitions of " + rowsPerPartition + " rows");
+        for (long i = 0; i < partitions; ++i)
+        {
+            for (long j = 0; j < rowsPerPartition; ++j)
+                execute(writeStatement, i, j, i + j);
+        }
+
+        long rowSize = memtable.getEstimatedAverageRowSize();
+        double expectedRowSize = (double) memtable.getLiveDataSize() / (partitions * rowsPerPartition);
+        Assert.assertEquals(expectedRowSize, rowSize, (partitions * rowsPerPartition) * 0.05);  // 5% accuracy
+    }
 }

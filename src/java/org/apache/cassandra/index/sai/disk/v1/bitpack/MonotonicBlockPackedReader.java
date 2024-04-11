@@ -26,7 +26,6 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.lucene.index.CorruptIndexException;
-import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
 
@@ -89,7 +88,7 @@ public class MonotonicBlockPackedReader implements LongArray.Factory
     @SuppressWarnings("resource")
     public LongArray open()
     {
-        final IndexInput indexInput = IndexFileUtils.instance.openInput(file);
+        var indexInput = IndexFileUtils.instance.openInput(file);
         return new AbstractBlockPackedReader(indexInput, blockBitsPerValue, blockShift, blockMask, 0, valueCount)
         {
             @Override

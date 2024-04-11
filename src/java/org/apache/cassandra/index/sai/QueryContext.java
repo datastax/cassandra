@@ -61,15 +61,9 @@ public class QueryContext
 
     private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
 
-    // Total count of rows in all sstables and memtables.
-    private Long totalAvailableRows = null;
-
     // Determines the order of using indexes for filtering and sorting.
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
-
-    // Estimates the probability of a row picked by the index to be accepted by the post filter.
-    private float postFilterSelectivityEstimate = 1.0f;
 
     @VisibleForTesting
     public QueryContext()
@@ -145,16 +139,6 @@ public class QueryContext
         annNodesVisited.add(val);
     }
 
-    public void setTotalAvailableRows(long totalAvailableRows)
-    {
-        this.totalAvailableRows = totalAvailableRows;
-    }
-
-    public void setPostFilterSelectivityEstimate(float postFilterSelectivityEstimate)
-    {
-        this.postFilterSelectivityEstimate = postFilterSelectivityEstimate;
-    }
-
     public void setFilterSortOrder(FilterSortOrder filterSortOrder)
     {
         this.filterSortOrder = filterSortOrder;
@@ -218,19 +202,9 @@ public class QueryContext
         return annNodesVisited.longValue();
     }
 
-    public Long totalAvailableRows()
-    {
-        return totalAvailableRows;
-    }
-
     public FilterSortOrder filterSortOrder()
     {
         return filterSortOrder;
-    }
-
-    public Float postFilterSelectivityEstimate()
-    {
-        return postFilterSelectivityEstimate;
     }
 
     public void checkpoint()

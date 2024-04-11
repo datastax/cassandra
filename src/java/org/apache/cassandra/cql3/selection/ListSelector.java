@@ -25,7 +25,6 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Lists;
 import org.apache.cassandra.db.filter.ColumnFilter.Builder;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -48,7 +47,7 @@ final class ListSelector extends Selector
 
     public static Factory newFactory(final AbstractType<?> type, final SelectorFactories factories)
     {
-        return new CollectionFactory(type, factories)
+        return new MultiElementFactory(type, factories)
         {
             protected String getColumnName()
             {
@@ -82,9 +81,7 @@ final class ListSelector extends Selector
         {
             buffers.add(elements.get(i).getOutput(protocolVersion));
         }
-        return type.isVector()
-               ? ((VectorType<?>) type).decomposeRaw(buffers)
-               : CollectionSerializer.pack(buffers, buffers.size(), protocolVersion);
+        return CollectionSerializer.pack(buffers, buffers.size(), protocolVersion);
     }
 
     public void reset()

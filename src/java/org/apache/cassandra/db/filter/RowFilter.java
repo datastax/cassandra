@@ -346,10 +346,11 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
             add(CustomExpression.build(metadata, targetIndex, value));
         }
 
-        private void add(Expression expression)
+        public Builder add(Expression expression)
         {
             expression.validate();
             current.expressions.add(expression);
+            return this;
         }
 
         public void addUserExpression(UserExpression e)

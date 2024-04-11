@@ -140,7 +140,7 @@ public class StorageAttachedIndex implements Index
                                 if (!isFullRebuild)
                                 {
                                     ss = sstablesToRebuild.stream()
-                                                          .filter(s -> !IndexDescriptor.create(s).isPerIndexBuildComplete(indexContext))
+                                                          .filter(s -> !IndexDescriptor.createFrom(s).isPerIndexBuildComplete(indexContext))
                                                           .collect(Collectors.toList());
                                 }
 
@@ -737,7 +737,7 @@ public class StorageAttachedIndex implements Index
             //   2. The SSTable is not marked compacted
             //   3. The column index does not have a completion marker
             if (!view.containsSSTable(sstable) && !sstable.isMarkedCompacted() &&
-                !IndexDescriptor.create(sstable).isPerIndexBuildComplete(indexContext))
+                !IndexDescriptor.createFrom(sstable).isPerIndexBuildComplete(indexContext))
             {
                 nonIndexed.add(sstable);
             }

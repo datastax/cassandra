@@ -31,7 +31,6 @@ import org.apache.cassandra.auth.FunctionResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.*;
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.functions.FunctionName;
@@ -102,11 +101,11 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
             throw ire("Duplicate argument names for given function %s with argument names %s", functionName, argumentNames);
 
         rawArgumentTypes.stream()
-                        .filter(raw -> !raw.isTuple() && raw.isFrozen())
+                        .filter(raw -> !raw.isImplicitlyFrozen() && raw.isFrozen())
                         .findFirst()
                         .ifPresent(t -> { throw ire("Argument '%s' cannot be frozen; remove frozen<> modifier from '%s'", t, t); });
 
-        if (!rawReturnType.isTuple() && rawReturnType.isFrozen())
+        if (!rawReturnType.isImplicitlyFrozen() && rawReturnType.isFrozen())
             throw ire("Return type '%s' cannot be frozen; remove frozen<> modifier from '%s'", rawReturnType, rawReturnType);
 
         KeyspaceMetadata keyspace = schema.getNullable(keyspaceName);

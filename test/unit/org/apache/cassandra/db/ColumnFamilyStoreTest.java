@@ -691,13 +691,13 @@ public class ColumnFamilyStoreTest
             }
 
             @Override
-            public long rowCount()
+            public long getLiveDataSize()
             {
                 return 0;
             }
 
             @Override
-            public long getLiveDataSize()
+            public long getEstimatedAverageRowSize()
             {
                 return 0;
             }

@@ -900,6 +900,58 @@ public class VectorUpdateDeleteTest extends VectorTester
         });
     }
 
+    @Test
+    public void testVectorIndexWithAllOrdinalsDeletedViaRangeDeletion() throws Throwable
+    {
+        QueryController.QUERY_OPT_LEVEL = 0;
+        setMaxBruteForceRows(0);
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, a))");
+        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+        disableCompaction(KEYSPACE);
+
+        // Insert a row with a vector
+        execute("INSERT INTO %s (pk, a, str_val, val) VALUES (1, 1, 'A', [1.0, 2.0, 3.0])");
+
+        // Range delete that row
+        execute("DELETE FROM %s WHERE pk = 1");
+
+        // Insert another row without a vector
+        execute("INSERT INTO %s (pk, a, str_val) VALUES (2, 1, 'A')");
+        flush();
+
+        assertRows(execute("SELECT PK FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 1"));
+    }
+
+    @Test
+    public void testVectorIndexWithAllOrdinalsDeletedAndSomeViaRangeDeletion() throws Throwable
+    {
+        QueryController.QUERY_OPT_LEVEL = 0;
+        setMaxBruteForceRows(0);
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, str_val text, val vector<float, 3>, PRIMARY KEY(pk, a))");
+        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+        disableCompaction(KEYSPACE);
+
+        // Insert two rows with different vectors to get different ordinals
+        execute("INSERT INTO %s (pk, a, str_val, val) VALUES (1, 1, 'A', [1.0, 2.0, 3.0])");
+        execute("INSERT INTO %s (pk, a, str_val, val) VALUES (2, 1, 'A', [1.0, 2.0, 4.0])");
+
+        // Range delete the first row
+        execute("DELETE FROM %s WHERE pk = 1");
+        // Specifically delete the vector column second to hit a different code path.
+        execute("DELETE FROM %s WHERE pk = 2 AND a = 1");
+
+        // Insert another row without a vector
+        execute("INSERT INTO %s (pk, a, str_val) VALUES (2, 1, 'A')");
+        flush();
+
+        assertRows(execute("SELECT PK FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 1"));
+        getCurrentColumnFamilyStore().getLiveSSTables();
+    }
+
     private static void setChunkSize(final int selectivityLimit) throws Exception
     {
         Field selectivity = QueryController.class.getDeclaredField("ORDER_CHUNK_SIZE");

@@ -686,6 +686,11 @@ public interface CQL3Type
             return this.frozen;
         }
 
+        public boolean isImplicitlyFrozen()
+        {
+            return isTuple() || isVector();
+        }
+
         public boolean isDuration()
         {
             return false;

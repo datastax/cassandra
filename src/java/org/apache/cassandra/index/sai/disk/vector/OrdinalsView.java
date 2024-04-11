@@ -19,10 +19,25 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
+import java.util.function.Supplier;
+
+import io.github.jbellis.jvector.util.BitSet;
 
 public interface OrdinalsView extends AutoCloseable
 {
+    interface OrdinalConsumer
+    {
+        void accept(long rowId, int ordinal) throws IOException;
+    }
+
     int getOrdinalForRowId(int rowId) throws IOException;
+
+    /** iterates over all ordinals in the view.
+     * return true if consumer was called at least once.
+     * */
+    boolean forEachOrdinalInRange(int startRowId, int endRowId, OrdinalConsumer consumer) throws IOException;
+
+    BitSet buildOrdinalBitSet(int startRowId, int endRowId, Supplier<BitSet> bitsetSupplier) throws IOException;
 
     @Override
     void close();

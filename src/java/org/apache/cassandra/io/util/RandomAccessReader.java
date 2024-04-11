@@ -23,7 +23,6 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
-
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.primitives.Ints;
@@ -42,16 +41,19 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
 
     final Rebufferer rebufferer;
     private BufferHolder bufferHolder = Rebufferer.EMPTY;
+    private final ByteOrder order;
+    private ByteBuffer temporaryBuffer;
 
     /**
      * Only created through Builder
      *
      * @param rebufferer Rebufferer to use
      */
-    RandomAccessReader(Rebufferer rebufferer)
+    RandomAccessReader(Rebufferer rebufferer, ByteOrder order)
     {
-        super(Rebufferer.EMPTY.buffer());
+        super(Rebufferer.EMPTY.buffer(), false);
         this.rebufferer = rebufferer;
+        this.order = order;
     }
 
     /**
@@ -72,8 +74,12 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         bufferHolder = rebufferer.rebuffer(position);
         buffer = bufferHolder.buffer();
         buffer.position(Ints.checkedCast(position - bufferHolder.offset()));
+        buffer.order(order);
+    }
 
-        assert buffer.order() == ByteOrder.BIG_ENDIAN : "Buffer must have BIG ENDIAN byte ordering";
+    public ByteOrder order()
+    {
+        return order;
     }
 
     /**
@@ -90,11 +96,13 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         long position = getPosition();
 
         FloatBuffer floatBuffer;
-        if (bh.offset() == 0 && position % Float.BYTES == 0)
+        if (bh.offset() == 0 && position % Float.BYTES == 0 && bh.order() == order)
         {
             // this is a separate code path because buffer() and asFloatBuffer() both allocate
             // new and relatively expensive xBuffer objects, so we want to avoid doing that
-            // twice, where possible
+            // twice, where possible. If the BufferHandler has a different underlying
+            // byte order, we duplicate first because there is not yet a way to configure
+            // the buffer handler to use the correct byte order.
             floatBuffer = bh.floatBuffer();
             floatBuffer.position(Ints.checkedCast(position / Float.BYTES));
         }
@@ -103,20 +111,22 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             // offset is non-zero, and probably not aligned to Float.BYTES, so
             // set the position before converting to FloatBuffer.
             var bb = bh.buffer();
+            bb.order(order);
             bb.position(Ints.checkedCast(position - bh.offset()));
             floatBuffer = bb.asFloatBuffer();
         }
 
+        int bytesToRead = Float.BYTES * dest.length;
         if (dest.length > floatBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
-            var bb = ByteBuffer.allocate(Float.BYTES * dest.length);
+            var bb = getTemporaryBuffer(bytesToRead);
             readFully(bb);
             floatBuffer = bb.asFloatBuffer();
         }
 
         floatBuffer.get(dest);
-        seek(position + (long) Float.BYTES * dest.length);
+        seek(position + bytesToRead);
     }
 
     @Override
@@ -125,11 +135,13 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         long position = getPosition();
 
         LongBuffer longBuffer;
-        if (bh.offset() == 0 && position % Long.BYTES == 0)
+        if (bh.offset() == 0 && position % Long.BYTES == 0 && bh.order() == order)
         {
             // this is a separate code path because buffer() and asLongBuffer() both allocate
             // new and relatively expensive xBuffer objects, so we want to avoid doing that
-            // twice, where possible
+            // twice, where possible. If the BufferHandler has a different underlying
+            // byte order, we duplicate first because there is not yet a way to configure
+            // the buffer handler to use the correct byte order.
             longBuffer = bh.longBuffer();
             longBuffer.position(Ints.checkedCast(position / Long.BYTES));
         }
@@ -138,20 +150,22 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             // offset is non-zero, and probably not aligned to Long.BYTES, so
             // set the position before converting to LongBuffer.
             var bb = bh.buffer();
+            bb.order(order);
             bb.position(Ints.checkedCast(position - bh.offset()));
             longBuffer = bb.asLongBuffer();
         }
 
-        if (dest.length > longBuffer.remaining())
+        int bytesToRead = Long.BYTES * dest.length;
+        if (bytesToRead > longBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
-            var bb = ByteBuffer.allocate(Long.BYTES * dest.length);
+            var bb = getTemporaryBuffer(bytesToRead);
             readFully(bb);
             longBuffer = bb.asLongBuffer();
         }
 
         longBuffer.get(dest);
-        seek(position + (long) Long.BYTES * dest.length);
+        seek(position + bytesToRead);
     }
 
     /**
@@ -173,11 +187,13 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         long position = getPosition();
 
         IntBuffer intBuffer;
-        if (bh.offset() == 0 && position % Integer.BYTES == 0)
+        if (bh.offset() == 0 && position % Integer.BYTES == 0 && bh.order() == order)
         {
             // this is a separate code path because buffer() and asIntBuffer() both allocate
             // new and relatively expensive xBuffer objects, so we want to avoid doing that
-            // twice, where possible
+            // twice, where possible. If the BufferHandler has a different underlying
+            // byte order, we duplicate first because there is not yet a way to configure
+            // the buffer handler to use the correct byte order.
             intBuffer = bh.intBuffer();
             intBuffer.position(Ints.checkedCast(position / Integer.BYTES));
         }
@@ -186,20 +202,22 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             // offset is non-zero, and probably not aligned to Integer.BYTES, so
             // set the position before converting to IntBuffer.
             var bb = bh.buffer();
+            bb.order(order);
             bb.position(Ints.checkedCast(position - bh.offset()));
             intBuffer = bb.asIntBuffer();
         }
 
+        int bytesToRead = Integer.BYTES * count;
         if (count > intBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
-            var bb = ByteBuffer.allocate(Integer.BYTES * count);
+            var bb = getTemporaryBuffer(bytesToRead);
             readFully(bb);
             intBuffer = bb.asIntBuffer();
         }
 
         intBuffer.get(dest, offset, count);
-        seek(position + (long) Integer.BYTES * count);
+        seek(position + bytesToRead);
     }
 
     @Override
@@ -290,7 +308,8 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         // close needs to be idempotent.
         if (buffer == null)
             return;
-
+        FileUtils.clean(temporaryBuffer);
+        temporaryBuffer = null;
         bufferHolder.release();
         rebufferer.closeReader();
         buffer = null;
@@ -427,7 +446,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     {
         RandomAccessReaderWithOwnChannel(Rebufferer rebufferer)
         {
-            super(rebufferer);
+            super(rebufferer, ByteOrder.BIG_ENDIAN);
         }
 
         @Override
@@ -473,4 +492,26 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             throw t;
         }
     }
+
+    private ByteBuffer getTemporaryBuffer(int size)
+    {
+        if (temporaryBuffer != null
+            && temporaryBuffer.capacity() == size)
+        {
+            temporaryBuffer.clear();
+            return temporaryBuffer;
+        }
+        // Do not leave direct buffers to full gc
+        FileUtils.clean(temporaryBuffer);
+        if (buffer.isDirect())
+        {
+            temporaryBuffer = ByteBuffer.allocateDirect(size).order(buffer.order());
+        }
+        else
+        {
+            temporaryBuffer = ByteBuffer.allocate(size).order(buffer.order());
+        }
+        return temporaryBuffer;
+    }
+
 }

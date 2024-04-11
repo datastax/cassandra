@@ -87,7 +87,9 @@ public class TokenFct extends NativeScalarFunction
             }
 
             @Override
-            protected NativeFunction doGetOrCreateFunction(List<AbstractType<?>> argTypes, AbstractType<?> receiverType)
+            protected NativeFunction doGetOrCreateFunction(List<? extends AssignmentTestable> args,
+                                                           List<AbstractType<?>> argTypes,
+                                                           AbstractType<?> receiverType)
             {
                 throw new AssertionError("Should be unreachable");
             }

@@ -79,6 +79,8 @@ public class TermIterator extends RangeIterator
                 queryContext.addSstablesHit(1);
                 assert !index.isReleased();
 
+
+
                 RangeIterator keyIterator = index.search(e, keyRange, queryContext, defer, limit);
 
                 if (keyIterator == null || !keyIterator.hasNext())

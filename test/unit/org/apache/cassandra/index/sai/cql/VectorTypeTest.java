@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -35,13 +36,16 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.TracingTestImpl;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.assertEquals;
 
 public class VectorTypeTest extends VectorTester
 {
@@ -411,6 +415,40 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
+    public void defaultOptionsTest()
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+
+        var sim = getCurrentColumnFamilyStore().indexManager;
+        var index = (StorageAttachedIndex) sim.listIndexes().iterator().next();
+        assertEquals(VectorSourceModel.OTHER, index.getIndexContext().getIndexWriterConfig().getSourceModel());
+        assertEquals(VectorSimilarityFunction.COSINE, index.getIndexContext().getIndexWriterConfig().getSimilarityFunction());
+    }
+
+    @Test
+    public void customModelOptionsTest()
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'source_model' : 'ada002' }");
+        waitForIndexQueryable();
+
+        var sim = getCurrentColumnFamilyStore().indexManager;
+        var index = (StorageAttachedIndex) sim.listIndexes().iterator().next();
+        assertEquals(VectorSourceModel.ADA002, index.getIndexContext().getIndexWriterConfig().getSourceModel());
+        assertEquals(VectorSimilarityFunction.DOT_PRODUCT, index.getIndexContext().getIndexWriterConfig().getSimilarityFunction());
+    }
+
+    @Test
+    public void obsoleteOptionsTest()
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'optimize_for' : 'recall' }");
+        waitForIndexQueryable();
+        // as long as CREATE doesn't error out, we're good
+    }
+
+    @Test
     public void bindVariablesTest() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
@@ -756,11 +794,11 @@ public class VectorTypeTest extends VectorTester
                              "SELECT similarity_cosine(['a', 'b'], ['a', 'b']) FROM %s WHERE pk=0");
 
         // different vector sizes, message could be more informative
-        assertInvalidMessage("Required 2 elements, but saw 3",
+        assertInvalidMessage("All arguments must have the same vector dimensions",
                              "SELECT similarity_cosine(value, [2, 4, 6]) FROM %s WHERE pk=0");
-        assertInvalidMessage("Type error: value cannot be passed as argument 1",
+        assertInvalidMessage("All arguments must have the same vector dimensions",
                              "SELECT similarity_cosine([1, 2, 3], value) FROM %s WHERE pk=0");
-        assertInvalidMessage("Required 2 elements, but saw 3",
+        assertInvalidMessage("All arguments must have the same vector dimensions",
                              "SELECT similarity_cosine([1, 2], [3, 4, 5]) FROM %s WHERE pk=0");
     }
 

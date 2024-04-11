@@ -361,9 +361,19 @@ public class VectorMemtableIndex implements MemtableIndex
         throw new UnsupportedOperationException();
     }
 
-    public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Function<PrimaryKey, Integer> postingTransformer) throws IOException
+    public Set<Integer> computeDeletedOrdinals(Function<PrimaryKey, Integer> ordinalMapper)
     {
-        return graph.writeData(indexDescriptor, indexContext, postingTransformer);
+        return graph.computeDeletedOrdinals(ordinalMapper);
+    }
+
+    public int size()
+    {
+        return graph.size();
+    }
+
+    public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Set<Integer> deletedOrdinals) throws IOException
+    {
+        return graph.writeData(indexDescriptor, indexContext, deletedOrdinals);
     }
 
     @Override

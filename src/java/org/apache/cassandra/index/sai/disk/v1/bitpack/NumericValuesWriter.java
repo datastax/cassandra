@@ -53,7 +53,7 @@ public class NumericValuesWriter implements Closeable
                                boolean monotonic,
                                int blockSize) throws IOException
     {
-        this(indexDescriptor.componentName(component),
+        this(indexDescriptor.componentFileName(component),
              indexDescriptor.openPerSSTableOutput(component),
              metadataWriter,
              monotonic,

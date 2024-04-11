@@ -45,10 +45,12 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.cql.GeoDistanceAccuracyTest;
-import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.index.sai.cql.VectorTester;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
@@ -68,7 +70,7 @@ public class VectorDistributedTest extends TestBaseImpl
     private static final String CREATE_TABLE_TWO_VECTORS = "CREATE TABLE %%s (pk int primary key, val1 vector<float, %d>, val2 vector<float, %d>)";
     private static final String CREATE_INDEX = "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'";
 
-    private static final VectorSimilarityFunction function = IndexWriterConfig.DEFAULT_SIMILARITY_FUNCTION;
+    private static final VectorSimilarityFunction function = VectorSourceModel.OTHER.defaultSimilarityFunction;
 
     private static final String INVALID_LIMIT_MESSAGE = "Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than 1000";
 
@@ -139,7 +141,7 @@ public class VectorDistributedTest extends TestBaseImpl
 
         List<float[]> resultVectors = getVectors(result);
         assertDescendingScore(queryVector, resultVectors);
-        double memtableRecall = getRecall(vectors, queryVector, resultVectors);
+        double memtableRecall = computeRecall(vectors, queryVector, resultVectors);
         assertThat(memtableRecall).isGreaterThanOrEqualTo(MIN_RECALL);
 
         assertThatThrownBy(() -> searchWithoutLimit(randomVector(), vectorCount))
@@ -151,7 +153,7 @@ public class VectorDistributedTest extends TestBaseImpl
 
         resultVectors = getVectors(result);
         assertDescendingScore(queryVector, resultVectors);
-        double memtableRecallWithPaging = getRecall(vectors, queryVector, resultVectors);
+        double memtableRecallWithPaging = computeRecall(vectors, queryVector, resultVectors);
         assertThat(memtableRecallWithPaging).isGreaterThanOrEqualTo(MIN_RECALL);
 
         assertThatThrownBy(() -> searchWithPageWithoutLimit(randomVector(), 10))
@@ -163,7 +165,7 @@ public class VectorDistributedTest extends TestBaseImpl
         limit = Math.min(getRandom().nextIntBetween(10, 50), vectors.size());
         queryVector = randomVector();
         result = searchWithLimit(queryVector, limit);
-        double sstableRecall = getRecall(vectors, queryVector, getVectors(result));
+        double sstableRecall = computeRecall(vectors, queryVector, getVectors(result));
         assertThat(sstableRecall).isGreaterThanOrEqualTo(MIN_RECALL);
     }
 
@@ -203,7 +205,7 @@ public class VectorDistributedTest extends TestBaseImpl
         // expect recall to be at least 0.8
         List<float[]> resultVectors = getVectors(result);
         assertDescendingScore(queryVector, resultVectors);
-        double recall = getRecall(allVectors, queryVector, getVectors(result));
+        double recall = computeRecall(allVectors, queryVector, getVectors(result));
         assertThat(recall).isGreaterThanOrEqualTo(MIN_RECALL);
     }
 
@@ -326,7 +328,7 @@ public class VectorDistributedTest extends TestBaseImpl
                 assertThat(resultVectors).isEmpty();
             else
             {
-                double recall = getRecall(resultVectors, queryVector, expected);
+                double recall = computeRecall(resultVectors, queryVector, expected);
                 assertThat(recall).isGreaterThanOrEqualTo(0.8);
             }
         }
@@ -354,7 +356,7 @@ public class VectorDistributedTest extends TestBaseImpl
                 assertThat(resultVectors).isEmpty();
             else
             {
-                double recall = getRecall(resultVectors, queryVector, expected);
+                double recall = computeRecall(resultVectors, queryVector, expected);
                 assertThat(recall).isGreaterThanOrEqualTo(0.8);
             }
         }
@@ -365,15 +367,19 @@ public class VectorDistributedTest extends TestBaseImpl
     {
         dimensionCount = 2;
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
-        // geo requries euclidean similarity function
         cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val") + " WITH OPTIONS = {'similarity_function' : 'cosine'}"));
         SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
 
-        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [0.0, 0.0])")).hasMessage("Zero vectors cannot be indexed or queried with cosine similarity");
+        assertInvalidCosineOperations();
+    }
+
+    private static void assertInvalidCosineOperations()
+    {
+        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [0.0, 0.0])")).hasMessage("Zero and near-zero vectors cannot be indexed or queried with cosine similarity");
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [1, NaN])")).hasMessage("non-finite value at vector[1]=NaN");
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [1, Infinity])")).hasMessage("non-finite value at vector[1]=Infinity");
         assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [-Infinity, 1])")).hasMessage("non-finite value at vector[0]=-Infinity");
-        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [0.0, 0.0] LIMIT 2")).hasMessage("Zero vectors cannot be indexed or queried with cosine similarity");
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [0.0, 0.0] LIMIT 2")).hasMessage("Zero and near-zero vectors cannot be indexed or queried with cosine similarity");
         assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [1, NaN] LIMIT 2")).hasMessage("non-finite value at vector[1]=NaN");
         assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [1, Infinity] LIMIT 2")).hasMessage("non-finite value at vector[1]=Infinity");
         assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [-Infinity, 1] LIMIT 2")).hasMessage("non-finite value at vector[0]=-Infinity");
@@ -384,18 +390,10 @@ public class VectorDistributedTest extends TestBaseImpl
     {
         dimensionCount = 2;
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
-        // geo requries euclidean similarity function
         cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val")));
         SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
 
-        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [0.0, 0.0])")).hasMessage("Zero vectors cannot be indexed or queried with cosine similarity");
-        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [1, NaN])")).hasMessage("non-finite value at vector[1]=NaN");
-        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [1, Infinity])")).hasMessage("non-finite value at vector[1]=Infinity");
-        assertThatThrownBy(() -> execute("INSERT INTO %s (pk, val) VALUES (0, [-Infinity, 1])")).hasMessage("non-finite value at vector[0]=-Infinity");
-        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [0.0, 0.0] LIMIT 2")).hasMessage("Zero vectors cannot be indexed or queried with cosine similarity");
-        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [1, NaN] LIMIT 2")).hasMessage("non-finite value at vector[1]=NaN");
-        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [1, Infinity] LIMIT 2")).hasMessage("non-finite value at vector[1]=Infinity");
-        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val ann of [-Infinity, 1] LIMIT 2")).hasMessage("non-finite value at vector[0]=-Infinity");
+        assertInvalidCosineOperations();
     }
 
     private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize) throws Throwable
@@ -460,29 +458,9 @@ public class VectorDistributedTest extends TestBaseImpl
         }
     }
 
-    private double getRecall(List<float[]> vectors, float[] query, List<float[]> result)
+    private static double computeRecall(List<float[]> vectors, float[] query, List<float[]> result)
     {
-        List<float[]> sortedVectors = new ArrayList<>(vectors);
-        sortedVectors.sort((a, b) -> Double.compare(function.compare(b, query), function.compare(a, query)));
-
-        assertThat(sortedVectors).containsAll(result);
-
-        List<float[]> nearestNeighbors = sortedVectors.subList(0, result.size());
-
-        int matches = 0;
-        for (float[] in : nearestNeighbors)
-        {
-            for (float[] out : result)
-            {
-                if (Arrays.compare(in, out) ==0)
-                {
-                    matches++;
-                    break;
-                }
-            }
-        }
-
-        return matches * 1.0 / result.size();
+        return VectorTester.computeRecall(vectors, query, result, function);
     }
 
     private List<float[]> generateVectors(int vectorCount)

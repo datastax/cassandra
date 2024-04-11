@@ -26,6 +26,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -57,6 +58,7 @@ import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.VectorEncoding;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorUtil;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -71,6 +73,7 @@ import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
@@ -94,7 +97,7 @@ public class CassandraOnHeapGraph<T>
     private final NonBlockingHashMapLong<VectorPostings<T>> postingsByOrdinal;
     private final NonBlockingHashMap<T, float[]> vectorsByKey;
     private final AtomicInteger nextOrdinal = new AtomicInteger();
-    private final VectorSourceModel vectorSourceModel;
+    private final VectorSourceModel sourceModel;
     private volatile boolean hasDeletions;
 
     /**
@@ -107,7 +110,7 @@ public class CassandraOnHeapGraph<T>
         serializer = (VectorType.VectorSerializer)termComparator.getSerializer();
         vectorValues = new ConcurrentVectorValues(((VectorType<?>) termComparator).dimension);
         similarityFunction = indexConfig.getSimilarityFunction();
-        vectorSourceModel = indexConfig.getSourceModel();
+        sourceModel = indexConfig.getSourceModel();
         // We need to be able to inexpensively distinguish different vectors, with a slower path
         // that identifies vectors that are equal but not the same reference.  A comparison-
         // based Map (which only needs to look at vector elements until a difference is found)
@@ -254,10 +257,10 @@ public class CassandraOnHeapGraph<T>
         {
             for (int i = 0; i < vector.length; i++)
             {
-                if (vector[i] != 0)
+                if (vector[i] < -1E-6 || vector[i] > 1E-6)
                     return;
             }
-            throw new InvalidRequestException("Zero vectors cannot be indexed or queried with cosine similarity");
+            throw new InvalidRequestException("Zero and near-zero vectors cannot be indexed or queried with cosine similarity");
         }
     }
 
@@ -313,7 +316,7 @@ public class CassandraOnHeapGraph<T>
         NodeSimilarity.ExactScoreFunction scoreFunction = node2 -> {
             return similarityFunction.compare(queryVector, ((RandomAccessVectorValues<float[]>) vectorValues).vectorValue(node2));
         };
-        var topK = OverqueryUtils.topKFor(limit, null);
+        var topK = sourceModel.topKFor(limit, null);
         var result = searcher.search(scoreFunction, null, topK, threshold, bits);
         Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         context.addAnnNodesVisited(result.getVisitedCount());
@@ -322,7 +325,21 @@ public class CassandraOnHeapGraph<T>
                              : new AutoResumingNodeScoreIterator(searcher, result, context::addAnnNodesVisited, topK, true, null);
     }
 
-    public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Function<T, Integer> postingTransformer) throws IOException
+    public Set<Integer> computeDeletedOrdinals(Function<T, Integer> postingTransformer)
+    {
+        var deletedOrdinals = new HashSet<Integer>();
+        postingsMap.values().stream().filter(VectorPostings::isEmpty).forEach(vectorPostings -> deletedOrdinals.add(vectorPostings.getOrdinal()));
+        // remove ordinals that don't have corresponding row ids due to partition/range deletion
+        for (VectorPostings<T> vectorPostings : postingsMap.values())
+        {
+            vectorPostings.computeRowIds(postingTransformer);
+            if (vectorPostings.shouldAppendDeletedOrdinal())
+                deletedOrdinals.add(vectorPostings.getOrdinal());
+        }
+        return deletedOrdinals;
+    }
+
+    public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Set<Integer> deletedOrdinals) throws IOException
     {
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
@@ -341,16 +358,6 @@ public class CassandraOnHeapGraph<T>
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);
             SAICodecUtils.writeHeader(indexOutput);
-
-            var deletedOrdinals = new HashSet<Integer>();
-            postingsMap.values().stream().filter(VectorPostings::isEmpty).forEach(vectorPostings -> deletedOrdinals.add(vectorPostings.getOrdinal()));
-            // remove ordinals that don't have corresponding row ids due to partition/range deletion
-            for (VectorPostings<T> vectorPostings : postingsMap.values())
-            {
-                vectorPostings.computeRowIds(postingTransformer);
-                if (vectorPostings.shouldAppendDeletedOrdinal())
-                    deletedOrdinals.add(vectorPostings.getOrdinal());
-            }
 
             // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
             // null if remapping is not possible
@@ -465,11 +472,12 @@ public class CassandraOnHeapGraph<T>
 
     private long writePQ(SequentialWriter writer, IntUnaryOperator reverseOrdinalMapper, IndexContext indexContext) throws IOException
     {
-        var preferredCompression = vectorSourceModel.preferredCompression(vectorValues.dimension());
+        var preferredCompression = sourceModel.compressionProvider.apply(vectorValues.dimension());
 
         // Build encoder and compress vectors
         VectorCompressor<?> compressor; // will be null if we can't compress
         Object encoded = null; // byte[][], or long[][]
+        boolean containsUnitVectors;
         // limit the PQ computation and encoding to one index at a time -- goal during flush is to
         // evict from memory ASAP so better to do the PQ build (in parallel) one at a time
         synchronized (CassandraOnHeapGraph.class)
@@ -489,7 +497,17 @@ public class CassandraOnHeapGraph<T>
             // encode (compress) the vectors to save
             if (compressor != null)
                 encoded = compressVectors(reverseOrdinalMapper, compressor);
+
+            containsUnitVectors = IntStream.range(0, vectorValues.size())
+                                           .parallel()
+                                           .mapToObj(vectorValues::vectorValue)
+                                           .allMatch(v -> Math.abs(VectorUtil.dotProduct(v, v) - 1.0f) < 0.01);
         }
+
+        // version and optional fields
+        writer.writeInt(CassandraDiskAnn.PQ_MAGIC);
+        writer.writeInt(1); // version
+        writer.writeBoolean(containsUnitVectors);
 
         // write the compression type
         var actualType = compressor == null ? VectorCompression.CompressionType.NONE : preferredCompression.type;
@@ -548,7 +566,9 @@ public class CassandraOnHeapGraph<T>
 
     private long postingsBytesUsed()
     {
-        return postingsMap.values().stream().mapToLong(VectorPostings::ramBytesUsed).sum();
+        return RamEstimation.concurrentHashMapRamUsed(postingsByOrdinal.size()) // NBHM is close to CHM
+               + 3 * RamEstimation.concurrentHashMapRamUsed(postingsMap.size()) // CSLM is much less efficient than CHM
+               + postingsMap.values().stream().mapToLong(VectorPostings::ramBytesUsed).sum();
     }
 
     private long exactRamBytesUsed()
