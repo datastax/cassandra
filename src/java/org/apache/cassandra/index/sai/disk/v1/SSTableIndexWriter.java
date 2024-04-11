@@ -227,7 +227,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (reachMemoryLimit)
         {
             logger.debug(indexContext.logMessage("Global limit of {} and minimum flush size of {} exceeded. " +
-                                            "Current builder usage is {} for {} cells. Global Usage is {}. Flushing..."),
+                                                 "Current builder usage is {} for {} cells. Global Usage is {}. Flushing..."),
                          FBUtilities.prettyPrintMemory(limiter.limitBytes()),
                          FBUtilities.prettyPrintMemory(currentBuilder.getMinimumFlushBytes()),
                          FBUtilities.prettyPrintMemory(currentBuilder.totalBytesAllocated()),
@@ -241,6 +241,12 @@ public class SSTableIndexWriter implements PerIndexWriter
     private void flushSegment() throws IOException
     {
         currentBuilder.awaitAsyncAdditions();
+        if (currentBuilder.supportsAsyncAdd()
+            && currentBuilder.totalBytesAllocatedConcurrent.sum() > 1.1 * currentBuilder.totalBytesAllocated())
+        {
+            logger.warn("Concurrent memory usage is higher than estimated: {} vs {}",
+                        currentBuilder.totalBytesAllocatedConcurrent.sum(), currentBuilder.totalBytesAllocated());
+        }
 
         // throw exceptions that occurred during async addInternal()
         var ae = currentBuilder.getAsyncThrowable();

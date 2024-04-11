@@ -24,6 +24,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
 
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -78,8 +79,11 @@ public abstract class SegmentBuilder
 
     final AbstractType<?> termComparator;
 
+    // track memory usage for this segment so we can flush when it gets too big
     private final NamedMemoryLimiter limiter;
     long totalBytesAllocated;
+    // when we're adding terms asynchronously, totalBytesAllocated will be an approximation and this tracks the exact size
+    final LongAdder totalBytesAllocatedConcurrent = new LongAdder();
 
     private final long lastValidSegmentRowID;
 
@@ -116,8 +120,9 @@ public abstract class SegmentBuilder
             int typeSize = TypeUtil.fixedSizeOf(termComparator);
             this.kdTreeRamBuffer = new BKDTreeRamBuffer(1, typeSize);
             this.buffer = new byte[typeSize];
-            this.totalBytesAllocated = this.kdTreeRamBuffer.ramBytesUsed();
             this.indexWriterConfig = indexWriterConfig;
+            totalBytesAllocated = kdTreeRamBuffer.ramBytesUsed();
+            totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
 
         public boolean isEmpty()
@@ -158,6 +163,7 @@ public abstract class SegmentBuilder
 
             ramIndexer = new RAMStringIndexer(termComparator);
             totalBytesAllocated = ramIndexer.estimatedBytesUsed();
+            totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
 
         public boolean isEmpty()
@@ -190,6 +196,8 @@ public abstract class SegmentBuilder
         {
             super(rowIdOffset, termComparator, limiter);
             graphIndex = new CassandraOnHeapGraph<>(termComparator, indexWriterConfig, false);
+            totalBytesAllocated = graphIndex.ramBytesUsed();
+            totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
 
         @Override
@@ -298,6 +306,7 @@ public abstract class SegmentBuilder
             try
             {
                 long bytesAdded = addInternal(term, segmentRowId);
+                totalBytesAllocatedConcurrent.add(bytesAdded);
                 termSizeReservoir.update(bytesAdded);
             }
             catch (Throwable th)
