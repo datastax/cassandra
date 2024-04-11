@@ -26,6 +26,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.io.util.File;
 
 public class CQLSSTableWriterClientTest extends CQLSSTableWriterTest
 {
@@ -40,6 +41,7 @@ public class CQLSSTableWriterClientTest extends CQLSSTableWriterTest
                                                     config.data_file_directories = new String[]{ dataDir.absolutePath() };
                                                     return config;
                                                 });
+        DatabaseDescriptor.setDataDirectories(new File[] { dataDir});
         CassandraRelevantProperties.FORCE_LOAD_LOCAL_KEYSPACES.setBoolean(true);
         oldPartitioner = DatabaseDescriptor.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
         Keyspace.setInitialized();
