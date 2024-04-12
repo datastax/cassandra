@@ -22,9 +22,13 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.StorageProxy;
 
 public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
@@ -43,6 +47,24 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         RequestSensors requestSensors = new RequestSensors();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
+
+        // split the internode message bytes and count into between tables in the mutation
+        int sensorsCount = message.payload.getPartitionUpdates().size();
+        double internodeBytesPerTable = (double) message.serializedSize(MessagingService.current_version) / sensorsCount;
+        double internodeCountPerTable = 1.0d / sensorsCount;
+
+        // register write sensors and increment internode message sensors so they can be synced with the various Mutation#apply methods
+        for (PartitionUpdate update : message.payload.getPartitionUpdates())
+        {
+            Context context = Context.from(update.metadata());
+            // mutation bytes are update later on via ColumnFamilyStore#apply
+            requestSensors.registerSensor(context, Type.WRITE_BYTES);
+
+            requestSensors.registerSensor(context, Type.INTERNODE_MSG_BYTES);
+            requestSensors.registerSensor(context, Type.INTERNODE_MSG_COUNT);
+            requestSensors.incrementSensor(context, Type.INTERNODE_MSG_BYTES, internodeBytesPerTable);
+            requestSensors.incrementSensor(context, Type.INTERNODE_MSG_COUNT, internodeCountPerTable);
+        }
 
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
         // We should not wait for the result of the write in this thread,
