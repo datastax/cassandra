@@ -1508,4 +1508,19 @@ public class FBUtilities
             return sb.toString();
         }
     }
+
+    public static void busyWaitWhile(Supplier<Boolean> condition)
+    {
+        while (condition.get())
+        {
+            try
+            {
+                Thread.sleep(1);
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+    }
 }
