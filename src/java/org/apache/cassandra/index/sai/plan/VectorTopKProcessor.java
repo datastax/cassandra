@@ -20,9 +20,7 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
@@ -35,12 +33,14 @@ import java.util.concurrent.CompletionException;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
-import com.google.common.base.Strings;
 import org.apache.commons.lang3.tuple.Triple;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.concurrent.ImmediateExecutor;
 import org.apache.cassandra.concurrent.LocalAwareExecutorService;
 import org.apache.cassandra.concurrent.SharedExecutorPool;
@@ -66,7 +66,6 @@ import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.InMemoryPartitionIterator;
 import org.apache.cassandra.index.sai.utils.InMemoryUnfilteredPartitionIterator;
 import org.apache.cassandra.index.sai.utils.PartitionInfo;
-import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -93,9 +92,11 @@ public class VectorTopKProcessor
 {
     protected static final Logger logger = LoggerFactory.getLogger(VectorTopKProcessor.class);
     private static final LocalAwareExecutorService PARALLEL_EXECUTOR = getExecutor();
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+
     private final ReadCommand command;
     private final IndexContext indexContext;
-    private final float[] queryVector;
+    private final VectorFloat<?> queryVector;
 
     private final int limit;
 
@@ -107,7 +108,7 @@ public class VectorTopKProcessor
         Preconditions.checkNotNull(annIndexAndExpression);
 
         this.indexContext = annIndexAndExpression.left;
-        this.queryVector = annIndexAndExpression.right;
+        this.queryVector = vts.createFloatVector(annIndexAndExpression.right);
         this.limit = command.limits().count();
     }
 
@@ -356,7 +357,7 @@ public class VectorTopKProcessor
         ByteBuffer value = indexContext.getValueOf(key, row, FBUtilities.nowInSeconds());
         if (value != null)
         {
-            float[] vector = TypeUtil.decomposeVector(indexContext, value);
+            var vector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, value));
             return indexContext.getIndexWriterConfig().getSimilarityFunction().compare(vector, queryVector);
         }
         return 0;

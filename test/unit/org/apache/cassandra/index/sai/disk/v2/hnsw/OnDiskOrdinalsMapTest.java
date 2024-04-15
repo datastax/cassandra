@@ -32,6 +32,10 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.github.jbellis.jvector.util.BitSet;
+import io.github.jbellis.jvector.vector.ArrayVectorFloat;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
@@ -54,6 +58,7 @@ import static org.junit.Assert.fail;
 
 public class OnDiskOrdinalsMapTest
 {
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     final private int dimension = 10;
 
@@ -146,7 +151,7 @@ public class OnDiskOrdinalsMapTest
                     count.incrementAndGet();
                 });
                 assertEquals(0, count.get());
-                assertNull(ordinalsView.buildOrdinalBitSet(0, 5, () -> null));
+                assertNull(ordinalsView.buildOrdinalBits(0, 5, () -> null));
 
                 assertFalse(rowIdsView.getSegmentRowIdsMatching(0).hasNext());
             }
@@ -257,7 +262,11 @@ public class OnDiskOrdinalsMapTest
         }
     }
 
-    private static PostingsMetadata writePostings(HashBiMap<Integer, Integer> ordinalsMap, File tempFile, RamAwareVectorValues vectorValues, Map<float[], VectorPostings<Integer>> postingsMap, HashSet<Integer> deletedOrdinals) throws IOException
+    private static PostingsMetadata writePostings(HashBiMap<Integer, Integer> ordinalsMap,
+                                                  File tempFile,
+                                                  RamAwareVectorValues vectorValues,
+                                                  Map<VectorFloat<?>, VectorPostings<Integer>> postingsMap,
+                                                  HashSet<Integer> deletedOrdinals) throws IOException
     {
         SequentialWriter writer = new SequentialWriter(tempFile,
                                                        SequentialWriterOption.newBuilder().finishOnClose(true).build());
@@ -272,8 +281,7 @@ public class OnDiskOrdinalsMapTest
         long postingsLength = postingsPosition - postingsOffset;
 
         writer.close();
-        PostingsMetadata postingsMd = new PostingsMetadata(postingsOffset, postingsLength);
-        return postingsMd;
+        return new PostingsMetadata(postingsOffset, postingsLength);
     }
 
     private static class PostingsMetadata
@@ -288,14 +296,15 @@ public class OnDiskOrdinalsMapTest
         }
     }
 
-    private Map<float[], VectorPostings<Integer>> generatePostingsMap(RamAwareVectorValues vectorValues)
+    private Map<VectorFloat<?>, VectorPostings<Integer>> generatePostingsMap(RamAwareVectorValues vectorValues)
     {
-        Map<float[], VectorPostings<Integer>> postingsMap = new ConcurrentSkipListMap<>(Arrays::compare);
+        Map<VectorFloat<?>, VectorPostings<Integer>> postingsMap = new ConcurrentSkipListMap<>((a, b) -> {
+            return Arrays.compare(((ArrayVectorFloat) a).get(), ((ArrayVectorFloat) b).get());
+        });
 
-        for (int i = 0; i < vectorValues.size(); i++)
+        for (int ordinal = 0; ordinal < vectorValues.size(); ordinal++)
         {
-            float[] vector = vectorValues.vectorValue(i);
-            int ordinal = i;
+            var vector = vectorValues.getVector(ordinal);
             var vp = new VectorPostings<>(ordinal);
             vp.setOrdinal(ordinal);
             postingsMap.put(vector, vp);
@@ -311,7 +320,7 @@ public class OnDiskOrdinalsMapTest
         {
             float[] rawVector = new float[dimension];
             Arrays.fill(rawVector, (float) i);
-            vectorValues.add(i, rawVector);
+            vectorValues.add(i, vts.createFloatVector(rawVector));
         }
         return vectorValues;
     }

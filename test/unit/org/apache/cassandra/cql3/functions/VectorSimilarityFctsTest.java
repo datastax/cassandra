@@ -28,6 +28,9 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.cql3.CQLTester;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,11 +38,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @RunWith(Parameterized.class)
 public class VectorSimilarityFctsTest extends CQLTester
 {
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+
     @Parameterized.Parameter
     public String function;
 
     @Parameterized.Parameter(1)
-    public VectorSimilarityFunction luceneFunction;
+    public VectorSimilarityFunction rawFunction;
 
     @Parameterized.Parameters(name = "{index}: function={0}")
     public static Collection<Object[]> data()
@@ -67,9 +72,10 @@ public class VectorSimilarityFctsTest extends CQLTester
                               "v_int vector<int, 2>, " + // int vectors shouldn't be accepted by the functions
                               "v_double vector<double, 2>)");// double vectors shouldn't be accepted by the functions
 
-        float[] values = new float[]{ 1f, 2f };
-        Vector<Float> vector = vector(ArrayUtils.toObject(values));
-        Object[] similarity = row(luceneFunction.compare(values, values));
+        float[] rawVector = new float[]{ 1f, 2f };
+        Vector<Float> vector = vector(ArrayUtils.toObject(rawVector));
+        VectorFloat<?> v = vts.createFloatVector(rawVector);
+        Object[] similarity = row(rawFunction.compare(v, v));
 
         // basic functionality
         execute("INSERT INTO %s (pk, value, l, fl, v1, v_int, v_double) VALUES (0, ?, ?, ?, ?, ?, ?)",
@@ -170,7 +176,7 @@ public class VectorSimilarityFctsTest extends CQLTester
         .hasMessageContaining("Cannot infer type of argument ? in call to function " + function);
 
         // test all-zero vectors, only cosine similarity should reject them
-        if (luceneFunction == VectorSimilarityFunction.COSINE)
+        if (rawFunction == VectorSimilarityFunction.COSINE)
         {
             String expected = "doesn't support all-zero vectors";
             assertThatThrownBy(() -> execute("SELECT " + function + "(value, [0, 0]) FROM %s")) .hasMessageContaining(expected);
@@ -178,7 +184,7 @@ public class VectorSimilarityFctsTest extends CQLTester
         }
         else
         {
-            float expected = luceneFunction.compare(values, new float[]{ 0, 0 });
+            float expected = rawFunction.compare(v, vts.createFloatVector(new float[]{ 0, 0 }));
             assertRows(execute("SELECT " + function + "(value, [0, 0]) FROM %s"), row(expected));
             assertRows(execute("SELECT " + function + "([0, 0], value) FROM %s"), row(expected));
         }

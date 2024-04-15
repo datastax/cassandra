@@ -39,6 +39,8 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -61,6 +63,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class VectorDistributedTest extends TestBaseImpl
 {
     private static final Logger logger = LoggerFactory.getLogger(VectorDistributedTest.class);
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     @Rule
     public SAITester.FailureWatcher failureRule = new SAITester.FailureWatcher();
@@ -450,7 +453,7 @@ public class VectorDistributedTest extends TestBaseImpl
         float prevScore = -1;
         for (float[] current : resultVectors)
         {
-            float score = function.compare(current, queryVector);
+            float score = function.compare(vts.createFloatVector(current), vts.createFloatVector(queryVector));
             if (prevScore >= 0)
                 assertThat(score).isLessThanOrEqualTo(prevScore);
 

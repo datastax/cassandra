@@ -26,16 +26,18 @@ import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.disk.CachingGraphIndex;
-import io.github.jbellis.jvector.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.GraphSearcher;
-import io.github.jbellis.jvector.graph.NodeSimilarity;
+import io.github.jbellis.jvector.graph.disk.CachingGraphIndex;
+import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
+import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
+import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
 import io.github.jbellis.jvector.pq.BQVectors;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -64,7 +66,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
-    private volatile GraphIndex<float[]> graph;
+    private volatile GraphIndex graph;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
@@ -78,7 +80,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
         SegmentMetadata.ComponentMetadata termsMetadata = getComponentMetadata(IndexComponent.TERMS_DATA);
         graphHandle = indexFiles.termsData();
-        graph = new OnDiskGraphIndex<>(graphHandle::createReader, termsMetadata.offset);
+        graph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
 
         long pqSegmentOffset = getComponentMetadata(IndexComponent.PQ).offset;
         try (var pqFile = indexFiles.pq();
@@ -136,7 +138,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
      * a similarity score >= threshold will be returned.
      */
     @Override
-    public CloseableIterator<ScoredRowId> search(float[] queryVector,
+    public CloseableIterator<ScoredRowId> search(VectorFloat<?> queryVector,
                                                  int topK,
                                                  float threshold,
                                                  Bits acceptBits,
@@ -150,13 +152,10 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         var view = getView();
         try
         {
-            NodeSimilarity.ScoreFunction scoreFunction;
-            NodeSimilarity.Reranker reranker;
+            SearchScoreProvider ssp;
             if (compressedVectors == null)
             {
-                scoreFunction = (NodeSimilarity.ExactScoreFunction)
-                                i -> similarityFunction.compare(queryVector, view.getVector(i));
-                reranker = null;
+                ssp = new SearchScoreProvider(view.rerankerFor(queryVector, similarityFunction), null);
             }
             else
             {
@@ -165,11 +164,12 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
                 var sf = pqUnitVectors && similarityFunction == VectorSimilarityFunction.DOT_PRODUCT
                          ? VectorSimilarityFunction.COSINE
                          : similarityFunction;
-                scoreFunction = compressedVectors.approximateScoreFunctionFor(queryVector, sf);
-                reranker = i -> similarityFunction.compare(queryVector, view.getVector(i));
+                var asf = compressedVectors.scoreFunctionFor(queryVector, sf);
+                var rr = view.rerankerFor(queryVector, sf);
+                ssp = new SearchScoreProvider(asf, rr);
             }
-            var searcher = new GraphSearcher.Builder<>(view).build();
-            var result = searcher.search(scoreFunction, reranker, topK, threshold, ordinalsMap.ignoringDeleted(acceptBits));
+            var searcher = new GraphSearcher(view);
+            var result = searcher.search(ssp, topK, threshold, ordinalsMap.ignoringDeleted(acceptBits));
             Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
             // Threshold based searches are comprehensive and do not need to resume the search.
             if (threshold > 0)
@@ -218,7 +218,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         return new ANNVectorSupplier(getView());
     }
 
-    private GraphIndex.View<float[]> getView()
+    private GraphIndex.ScoringView getView()
     {
         // asynchronously cache the most-accessed parts of the graph
         if (!(graph instanceof CachingGraphIndex))
@@ -231,26 +231,26 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
                     // target 1% of the vectors with a max distance of 3
                     int distance = Math.min(logBaseX(0.01d * graph.size(), graph.maxDegree()), 3);
                     logger.debug("Caching {}@{} to distance {}", this, graphHandle.path(), distance);
-                    graph = new CachingGraphIndex((OnDiskGraphIndex<float[]>) graph, distance);
+                    graph = new CachingGraphIndex((OnDiskGraphIndex) graph, distance);
                 }
             });
         }
-        return graph.getView();
+        return (GraphIndex.ScoringView) graph.getView();
     }
 
     private static class ANNVectorSupplier implements VectorSupplier
     {
-        private final GraphIndex.View<float[]> view;
+        private final GraphIndex.ScoringView view;
 
-        private ANNVectorSupplier(GraphIndex.View<float[]> view)
+        private ANNVectorSupplier(GraphIndex.ScoringView view)
         {
             this.view = view;
         }
 
         @Override
-        public float[] getVectorForOrdinal(int ordinal)
+        public ScoreFunction.ExactScoreFunction getScoreFunction(VectorFloat<?> queryVector, VectorSimilarityFunction similarityFunction)
         {
-            return view.getVector(ordinal);
+            return view.rerankerFor(queryVector, similarityFunction);
         }
 
         @Override

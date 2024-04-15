@@ -82,15 +82,8 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         return order;
     }
 
-    /**
-     * Read a float[] at the current position.
-     *
-     * @param dest the array to read into (always the entire array will be filled)
-     *
-     * Will change the buffer position.
-     */
     @Override
-    public void readFully(float[] dest) throws IOException
+    public void read(float[] dest, int offset, int count) throws IOException
     {
         var bh = bufferHolder;
         long position = getPosition();
@@ -108,7 +101,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         }
         else
         {
-            // offset is non-zero, and probably not aligned to Float.BYTES, so
+            // bufferHolder offset is non-zero, and probably not aligned to Float.BYTES, so
             // set the position before converting to FloatBuffer.
             var bb = bh.buffer();
             bb.order(order);
@@ -116,8 +109,8 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             floatBuffer = bb.asFloatBuffer();
         }
 
-        int bytesToRead = Float.BYTES * dest.length;
-        if (dest.length > floatBuffer.remaining())
+        int bytesToRead = Float.BYTES * count;
+        if (count > floatBuffer.remaining())
         {
             // slow path -- desired slice is across region boundaries
             var bb = getTemporaryBuffer(bytesToRead);
@@ -125,7 +118,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             floatBuffer = bb.asFloatBuffer();
         }
 
-        floatBuffer.get(dest);
+        floatBuffer.get(dest, offset, count);
         seek(position + bytesToRead);
     }
 
