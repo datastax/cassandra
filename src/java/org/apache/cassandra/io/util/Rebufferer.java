@@ -82,7 +82,7 @@ public interface Rebufferer extends ReaderFileProxy
         }
     };
 
-    static BufferHolder emptyBufferHolder(long offset)
+    static BufferHolder emptyBufferHolderAt(long offset)
     {
         return new BufferHolder()
         {

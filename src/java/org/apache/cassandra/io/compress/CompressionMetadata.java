@@ -324,10 +324,10 @@ public class CompressionMetadata
         return new Chunk(chunkOffset, Math.toIntExact(nextChunkOffset - chunkOffset - 4)); // "4" bytes reserved for checksum
     }
 
-    private Chunk chunk(int relChunkIdx)
+    private Chunk chunk(int chunkIdx)
     {
-        long chunkOffset = chunkOffset(relChunkIdx);
-        long nextChunkOffset = nextChunkOffset(relChunkIdx);
+        long chunkOffset = chunkOffset(chunkIdx);
+        long nextChunkOffset = nextChunkOffset(chunkIdx);
         return chunk(chunkOffset, nextChunkOffset);
     }
 
@@ -385,12 +385,12 @@ public class CompressionMetadata
         return offsets.toArray(new Chunk[offsets.size()]);
     }
 
-    private long chunkOffset(int relChunkIdx)
+    private long chunkOffset(int chunkIdx)
     {
-        if (relChunkIdx >= chunkOffsets.size())
-            throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d", relChunkIdx, chunkOffsets.size())), indexFilePath);
+        if (chunkIdx >= chunkOffsets.size())
+            throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d", chunkIdx, chunkOffsets.size())), indexFilePath);
 
-        return chunkOffsets.get(relChunkIdx) - compressedOffset;
+        return chunkOffsets.get(chunkIdx) - compressedOffset;
     }
 
     private int chunkIndex(long uncompressedDataPosition)

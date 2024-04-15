@@ -272,7 +272,7 @@ public class Verifier implements Closeable
 
         try(PartitionIndexIterator indexIterator = sstable.allKeysIterator())
         {
-            if (indexIterator.dataPosition() != sstable.dfile.sliceDescriptor.dataStart)
+            if (indexIterator.dataPosition() != sstable.getDataFileSliceDescriptor().dataStart)
                 markAndThrow(new RuntimeException("First row position from index != 0: " + indexIterator.dataPosition()));
 
             List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(

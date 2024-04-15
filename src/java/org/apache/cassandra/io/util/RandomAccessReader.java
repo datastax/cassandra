@@ -65,7 +65,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         bufferHolder.release();
         if (position == length())
         {
-            bufferHolder = Rebufferer.emptyBufferHolder(position);
+            bufferHolder = Rebufferer.emptyBufferHolderAt(position);
             buffer = bufferHolder.buffer();
         }
         else

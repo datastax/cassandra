@@ -60,7 +60,9 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     @Override
     public String toString()
     {
-        return String.format("CompressedChunkReader.%s(%s - %s, chunk length %d, data length %d, slice offset %s)",
+        return String.format(startOffset > 0
+                             ? "CompressedChunkReader.%s(%s - %s, chunk length %d, data length %d, slice offset %s)"
+                             : "CompressedChunkReader.%s(%s - %s, chunk length %d, data length %d)",
                              getClass().getSimpleName(),
                              channel.filePath(),
                              metadata.compressor().getClass().getSimpleName(),

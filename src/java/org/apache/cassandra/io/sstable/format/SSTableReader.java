@@ -122,6 +122,7 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.SliceDescriptor;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.Schema;
@@ -257,7 +258,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     // indexfile and datafile: might be null before a call to load()
     protected final FileHandle ifile;
-    public final FileHandle dfile;
+    protected final FileHandle dfile;
     protected final IFilter bf;
     public final IndexSummary indexSummary;
 
@@ -777,6 +778,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         this.openReason = openReason;
         tidy = new InstanceTidier(descriptor, metadata.id);
         selfRef = new Ref<>(this, tidy);
+    }
+
+    public SliceDescriptor getDataFileSliceDescriptor()
+    {
+        return dfile.sliceDescriptor;
     }
 
     public abstract PartitionIndexIterator allKeysIterator() throws IOException;

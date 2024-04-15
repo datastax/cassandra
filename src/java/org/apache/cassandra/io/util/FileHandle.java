@@ -173,7 +173,9 @@ public class FileHandle extends SharedCloseableImpl
             else
                 return metadata.chunkFor(before).offset;
         }).orElse(before - sliceDescriptor.sliceStart);
-        channel.trySkipCache(0, position);
+
+        if (position > 0)
+            channel.trySkipCache(0, position);
     }
 
     public Rebufferer instantiateRebufferer()

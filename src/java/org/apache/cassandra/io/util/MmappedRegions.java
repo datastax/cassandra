@@ -56,6 +56,9 @@ public class MmappedRegions extends SharedCloseableImpl
      */
     private volatile State copy;
 
+    /**
+     * Note that creating a new MmappedRegions with non-null compression metadata and non-zero start offset is invalid.
+     */
     private MmappedRegions(ChannelProxy channel, CompressionMetadata metadata, long length, long startOffset)
     {
         this(new State(channel, startOffset), metadata, length);

@@ -217,7 +217,7 @@ public class Scrubber implements Closeable
         try (SSTableRewriter writer = SSTableRewriter.construct(realm, transaction, false, sstable.maxDataAge);
              Refs<SSTableReader> refs = Refs.ref(Collections.singleton(sstable)))
         {
-            assert !indexAvailable() || indexIterator.dataPosition() == sstable.dfile.sliceDescriptor.dataStart : indexIterator.dataPosition();
+            assert !indexAvailable() || indexIterator.dataPosition() == sstable.getDataFileSliceDescriptor().dataStart : indexIterator.dataPosition();
 
             StatsMetadata metadata = sstable.getSSTableMetadata();
             writer.switchWriter(CompactionManager.createWriter(realm, destination, expectedBloomFilterSize, metadata.repairedAt, metadata.pendingRepair, metadata.isTransient, sstable, transaction));
