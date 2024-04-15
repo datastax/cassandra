@@ -716,6 +716,8 @@ public enum CassandraRelevantProperties
     UNSAFE_SYSTEM("cassandra.unsafesystem"),
     /** User's home directory. */
     USER_HOME("user.home"),
+    /** Set this property to true in order to use DSE-like histogram bucket boundaries and behaviour */
+    USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES("cassandra.use_dse_compatible_histogram_boundaries", "false"),
     /** Set this property to true in order to switch to micrometer metrics */
     USE_MICROMETER("cassandra.use_micrometer_metrics", "false"),
     /** When enabled, recursive directory deletion will be executed using a unix command `rm -rf` instead of traversing
