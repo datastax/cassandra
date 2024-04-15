@@ -20,7 +20,12 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -29,24 +34,32 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.analyzer.ByteLimitedMaterializer;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.io.BytesRefUtil;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
+import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.InvalidVectorBehavior.IGNORE;
+import static org.apache.cassandra.utils.FBUtilities.busyWaitWhile;
 
 /**
  * Creates an on-heap index data structure to be flushed to an SSTable index.
+ * <p>
+ * Not threadsafe, but does potentially make concurrent calls to addInternal by
+ * delegating them to an asynchronous executor.  This will be done when supportsAsyncAdd is true.
+ * Callers should check getAsyncThrowable when they are done adding rows to see if there was an error.
  */
 @NotThreadSafe
 public abstract class SegmentBuilder
@@ -65,8 +78,11 @@ public abstract class SegmentBuilder
 
     final AbstractType<?> termComparator;
 
+    // track memory usage for this segment so we can flush when it gets too big
     private final NamedMemoryLimiter limiter;
     long totalBytesAllocated;
+    // when we're adding terms asynchronously, totalBytesAllocated will be an approximation and this tracks the exact size
+    final LongAdder totalBytesAllocatedConcurrent = new LongAdder();
 
     private final long lastValidSegmentRowID;
 
@@ -86,21 +102,26 @@ public abstract class SegmentBuilder
     private ByteBuffer minTerm;
     private ByteBuffer maxTerm;
 
+    private final AtomicInteger updatesInFlight = new AtomicInteger(0);
+    private final QuickSlidingWindowReservoir termSizeReservoir = new QuickSlidingWindowReservoir(100);
+    protected AtomicReference<Throwable> asyncThrowable = new AtomicReference<>();
+
     public static class KDTreeSegmentBuilder extends SegmentBuilder
     {
         protected final byte[] buffer;
         private final BKDTreeRamBuffer kdTreeRamBuffer;
         private final IndexWriterConfig indexWriterConfig;
 
-        KDTreeSegmentBuilder(AbstractType<?> termComparator, NamedMemoryLimiter limiter, IndexWriterConfig indexWriterConfig)
+        KDTreeSegmentBuilder(long rowIdOffset, AbstractType<?> termComparator, NamedMemoryLimiter limiter, IndexWriterConfig indexWriterConfig)
         {
-            super(termComparator, limiter);
+            super(rowIdOffset, termComparator, limiter);
 
             int typeSize = TypeUtil.fixedSizeOf(termComparator);
             this.kdTreeRamBuffer = new BKDTreeRamBuffer(1, typeSize);
             this.buffer = new byte[typeSize];
-            this.totalBytesAllocated = this.kdTreeRamBuffer.ramBytesUsed();
             this.indexWriterConfig = indexWriterConfig;
+            totalBytesAllocated = kdTreeRamBuffer.ramBytesUsed();
+            totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
 
         public boolean isEmpty()
@@ -135,12 +156,13 @@ public abstract class SegmentBuilder
 
         final BytesRefBuilder stringBuffer = new BytesRefBuilder();
 
-        RAMStringSegmentBuilder(AbstractType<?> termComparator, NamedMemoryLimiter limiter)
+        RAMStringSegmentBuilder(long rowIdOffset, AbstractType<?> termComparator, NamedMemoryLimiter limiter)
         {
-            super(termComparator, limiter);
+            super(rowIdOffset, termComparator, limiter);
 
             ramIndexer = new RAMStringIndexer(termComparator);
             totalBytesAllocated = ramIndexer.estimatedBytesUsed();
+            totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
 
         public boolean isEmpty()
@@ -169,10 +191,12 @@ public abstract class SegmentBuilder
     {
         private final CassandraOnHeapGraph<Integer> graphIndex;
 
-        public VectorSegmentBuilder(AbstractType<?> termComparator, NamedMemoryLimiter limiter, IndexWriterConfig indexWriterConfig)
+        public VectorSegmentBuilder(long rowIdOffset, AbstractType<?> termComparator, NamedMemoryLimiter limiter, IndexWriterConfig indexWriterConfig)
         {
-            super(termComparator, limiter);
+            super(rowIdOffset, termComparator, limiter);
             graphIndex = new CassandraOnHeapGraph<>(termComparator, indexWriterConfig, false);
+            totalBytesAllocated = graphIndex.ramBytesUsed();
+            totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
 
         @Override
@@ -196,12 +220,19 @@ public abstract class SegmentBuilder
             assert deletedOrdinals.isEmpty() : "Deleted ordinals should be empty when built during compaction";
             return graphIndex.writeData(indexDescriptor, indexContext, Collections.emptySet());
         }
+
+        @Override
+        public boolean supportsAsyncAdd()
+        {
+            return true;
+        }
     }
 
-    private SegmentBuilder(AbstractType<?> termComparator, NamedMemoryLimiter limiter)
+    private SegmentBuilder(long rowIdOffset, AbstractType<?> termComparator, NamedMemoryLimiter limiter)
     {
         this.termComparator = termComparator;
         this.limiter = limiter;
+        this.segmentRowIdOffset = rowIdOffset;
         this.lastValidSegmentRowID = testLastValidSegmentRowId >= 0 ? testLastValidSegmentRowId : LAST_VALID_SEGMENT_ROW_ID;
 
         minimumFlushBytes = limiter.limitBytes() / ACTIVE_BUILDER_COUNT.getAndIncrement();
@@ -223,7 +254,23 @@ public abstract class SegmentBuilder
         return new SegmentMetadata(segmentRowIdOffset, rowCount, minSSTableRowId, maxSSTableRowId, minKey, maxKey, minTerm, maxTerm, indexMetas);
     }
 
-    public long add(ByteBuffer term, PrimaryKey key, long sstableRowId)
+    public long addAll(ByteBuffer term, AbstractType<?> type, PrimaryKey key, long sstableRowId, AbstractAnalyzer analyzer, IndexContext indexContext)
+    {
+        long totalSize = 0;
+        if (TypeUtil.isLiteral(type))
+        {
+            List<ByteBuffer> tokens = ByteLimitedMaterializer.materializeTokens(analyzer, term, indexContext, key);
+            for (ByteBuffer tokenTerm : tokens)
+                totalSize += add(tokenTerm, key, sstableRowId);
+        }
+        else
+        {
+            totalSize += add(term, key, sstableRowId);
+        }
+        return totalSize;
+    }
+
+    private long add(ByteBuffer term, PrimaryKey key, long sstableRowId)
     {
         assert !flushed : "Cannot add to flushed segment.";
         assert sstableRowId >= maxSSTableRowId;
@@ -237,12 +284,6 @@ public abstract class SegmentBuilder
         minTerm = TypeUtil.min(term, minTerm, termComparator);
         maxTerm = TypeUtil.max(term, maxTerm, termComparator);
 
-        if (rowCount == 0)
-        {
-            // use first global rowId in the segment as segment rowId offset
-            segmentRowIdOffset = sstableRowId;
-        }
-
         rowCount++;
 
         // segmentRowIdOffset should encode sstableRowId into Integer
@@ -253,10 +294,55 @@ public abstract class SegmentBuilder
 
         maxSegmentRowId = Math.max(maxSegmentRowId, segmentRowId);
 
-        long bytesAllocated = addInternal(term, segmentRowId);
+        long bytesAllocated = supportsAsyncAdd()
+                              ? addInternalAsync(term, segmentRowId)
+                              : addInternal(term, segmentRowId);
         totalBytesAllocated += bytesAllocated;
 
         return bytesAllocated;
+    }
+
+    private long addInternalAsync(ByteBuffer term, int segmentRowId)
+    {
+        updatesInFlight.incrementAndGet();
+        ForkJoinPool.commonPool().submit(() -> {
+            try
+            {
+                long bytesAdded = addInternal(term, segmentRowId);
+                totalBytesAllocatedConcurrent.add(bytesAdded);
+                termSizeReservoir.update(bytesAdded);
+            }
+            catch (Throwable th)
+            {
+                asyncThrowable.compareAndExchange(null, th);
+            }
+            finally
+            {
+                updatesInFlight.decrementAndGet();
+            }
+        });
+        // bytes allocated will be approximated immediately as the average of recently added terms,
+        // rather than waiting until the async update completes to get the exact value.  The latter could
+        // result in a dangerously large discrepancy between the amount of memory actually consumed
+        // and the amount the limiter knows about if the queue depth grows.
+        busyWaitWhile(() -> termSizeReservoir.size() == 0);
+        return (long) termSizeReservoir.getMean();
+    }
+
+    public boolean supportsAsyncAdd() {
+        return false;
+    }
+
+    public Throwable getAsyncThrowable()
+    {
+        return asyncThrowable.get();
+    }
+
+    public void awaitAsyncAdditions()
+    {
+        // addTerm is only called by the compaction thread, serially, so we don't need to worry about new
+        // terms being added while we're waiting -- updatesInFlight can only decrease
+        busyWaitWhile(() -> updatesInFlight.get() > 0);
     }
 
     long totalBytesAllocated()
