@@ -22,6 +22,7 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLongArray;
@@ -32,6 +33,7 @@ import com.google.common.primitives.Ints;
 import com.codahale.metrics.Clock;
 import com.codahale.metrics.Reservoir;
 import com.codahale.metrics.Snapshot;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.EstimatedHistogram;
 
 import static java.lang.Math.max;
@@ -90,15 +92,32 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
     private static final int[] DISTRIBUTION_PRIMES = new int[] { 17, 19, 23, 29 };
 
     // The offsets used with a default sized bucket array without a separate bucket for zero values.
-    public static final long[] DEFAULT_WITHOUT_ZERO_BUCKET_OFFSETS = EstimatedHistogram.newOffsets(DEFAULT_BUCKET_COUNT, false);
+    private static final long[] DEFAULT_WITHOUT_ZERO_BUCKET_OFFSETS = EstimatedHistogram.newCassandraOffsets(DEFAULT_BUCKET_COUNT, false);
 
     // The offsets used with a default sized bucket array with a separate bucket for zero values.
-    public static final long[] DEFAULT_WITH_ZERO_BUCKET_OFFSETS = EstimatedHistogram.newOffsets(DEFAULT_BUCKET_COUNT, true);
+    private static final long[] DEFAULT_WITH_ZERO_BUCKET_OFFSETS = EstimatedHistogram.newCassandraOffsets(DEFAULT_BUCKET_COUNT, true);
 
     private static final int TABLE_BITS = 4;
     private static final int TABLE_MASK = -1 >>> (32 - TABLE_BITS);
     private static final float[] LOG2_TABLE = computeTable(TABLE_BITS);
     private static final float log2_12_recp = (float) (1d / slowLog2(1.2d));
+
+    // DSE COMPATIBILITY CHANGES START
+    // The DSE-compatible offsets used with a default sized bucket array without a separate bucket for zero values.
+    private static final long[] DEFAULT_DSE_WITHOUT_ZERO_BUCKET_OFFSETS = newDseOffsets(DEFAULT_BUCKET_COUNT, false);
+
+    // The DSE-compatibleoffsets used with a default sized bucket array with a separate bucket for zero values.
+    private static final long[] DEFAULT_DSE_WITH_ZERO_BUCKET_OFFSETS = newDseOffsets(DEFAULT_BUCKET_COUNT, true);
+
+    /** Values for calculating buckets and indexes */
+    final static int subBucketCount = 8;  // number of sub-buckets in each bucket
+    final static int subBucketHalfCount = subBucketCount / 2;
+    final static int unitMagnitude = 0; // power of two of the unit in bucket zero (2^0 = 1)
+    final static int subBucketCountMagnitude = 3; // power of two of the number of sub buckets
+    final static int subBucketHalfCountMagnitude = subBucketCountMagnitude - 1; // power of two of half the number of sub-buckets
+    final static long subBucketMask = (long)(subBucketCount - 1) << unitMagnitude;
+    final static int leadingZeroCountBase = 64 - unitMagnitude - subBucketHalfCountMagnitude - 1;
+    // DSE COMPATIBILITY CHANGES END
 
     private static float[] computeTable(int bits)
     {
@@ -198,14 +217,10 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
 
         if (bucketCount == DEFAULT_BUCKET_COUNT)
         {
-            if (considerZeroes == true)
-            {
-                bucketOffsets = DEFAULT_WITH_ZERO_BUCKET_OFFSETS;
-            }
+            if (CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean())
+                bucketOffsets = considerZeroes ? DEFAULT_DSE_WITH_ZERO_BUCKET_OFFSETS : DEFAULT_DSE_WITHOUT_ZERO_BUCKET_OFFSETS;
             else
-            {
-                bucketOffsets = DEFAULT_WITHOUT_ZERO_BUCKET_OFFSETS;
-            }
+                bucketOffsets = considerZeroes ? DEFAULT_WITH_ZERO_BUCKET_OFFSETS : DEFAULT_WITHOUT_ZERO_BUCKET_OFFSETS;
         }
         else
         {
@@ -258,6 +273,9 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
     @VisibleForTesting
     public static int findIndex(long[] bucketOffsets, long value)
     {
+        if (CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean())
+            return findIndexDse(bucketOffsets, value);
+
         // values below zero are nonsense, but we have never failed when presented them
         value = max(value, 0);
 
@@ -276,6 +294,66 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
 
         int firstCandidate = max(0, min(bucketOffsets.length - 1, ((int) fastLog12(value)) - offset));
         return value <= bucketOffsets[firstCandidate] ? firstCandidate : firstCandidate + 1;
+    }
+
+    /**
+     * this is almost a copy-paste from DSE DecayingEstimatedHistogram::BucketProperties::getIndex
+     * Almost, because:
+     * 1. C* and DSE differently implement the "considerZeroes" flag.
+     * The zeroesCorrection variable is used to adjust the index in the C* case.
+     * <p/>
+     * 2. C* and DSE differently implement the histogram overflow.
+     * In DSE, there is a separate flag isOverflowed which is set when a value doesn't fit in buckets; the getIndex
+     * function is supposed to always return index for an actual bucket.
+     * In C* there is a special bucket for overflowed values, and the findIndex function is supposed to return
+     * the index of this additional bucket if the value doesn't fit in the regular buckets.
+     * This is the origin of the min() function in the return statement.
+     *
+     * @param bucketOffsets the offsets of the histogram buckets (upper inclusive bounds)
+     * @param value the value with which we want to update the histogram
+     * @return index of the bucket that keeps track of the value OR the index of the last bucket which is used for
+     * overflowed values
+     */
+    private static int findIndexDse(long[] bucketOffsets, long value)
+    {
+        if (value < 0) {
+            throw new ArrayIndexOutOfBoundsException("Histogram recorded value cannot be negative.");
+        }
+
+        // Calculates the number of powers of two by which the value is greater than the biggest value that fits in
+        // bucket 0. This is the bucket index since each successive bucket can hold a value 2x greater.
+        // The mask maps small values to bucket 0.
+        final int bucketIndex = leadingZeroCountBase - Long.numberOfLeadingZeros(value | subBucketMask);
+
+        // For bucketIndex 0, this is just value, so it may be anywhere in 0 to subBucketCount.
+        // For other bucketIndex, this will always end up in the top half of subBucketCount: assume that for some bucket
+        // k > 0, this calculation will yield a value in the bottom half of 0 to subBucketCount. Then, because of how
+        // buckets overlap, it would have also been in the top half of bucket k-1, and therefore would have
+        // returned k-1 in getBucketIndex(). Since we would then shift it one fewer bits here, it would be twice as big,
+        // and therefore in the top half of subBucketCount.
+        final int subBucketIndex = (int)(value >>> (bucketIndex + unitMagnitude));
+
+        //assert(subBucketIndex < subBucketCount);
+        //assert(bucketIndex == 0 || (subBucketIndex >= subBucketHalfCount));
+        // Calculate the index for the first entry that will be used in the bucket (halfway through subBucketCount).
+        // For bucketIndex 0, all subBucketCount entries may be used, but bucketBaseIndex is still set in the middle.
+        final int bucketBaseIndex = (bucketIndex + 1) << subBucketHalfCountMagnitude;
+
+        // Calculate the offset in the bucket. This subtraction will result in a positive value in all buckets except
+        // the 0th bucket (since a value in that bucket may be less than half the bucket's 0 to subBucketCount range).
+        // However, this works out since we give bucket 0 twice as much space.
+        final int offsetInBucket = subBucketIndex - subBucketHalfCount;
+
+        // The following is the equivalent of ((subBucketIndex  - subBucketHalfCount) + bucketBaseIndex,
+        final int dseBucket = bucketBaseIndex + offsetInBucket;
+
+        // DSE bucket for zero values always exists, and during snapshot creation it is added to the second bucket
+        // if the histogram should not "considerZeroes".
+        // Cassandra does that differently. We either have or have not a separate bucket for zeroes.
+        // Thus, we should subtract 1 from the DSE index if we don't consider zeroes AND the value > 0.
+        final int zeroesCorrection = bucketOffsets[0] > 0 && value > 0 ? 1 : 0;
+
+        return min(bucketOffsets.length, bucketBaseIndex + offsetInBucket - zeroesCorrection);
     }
 
     /**
@@ -806,5 +884,50 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
         {
             return Objects.hash(min, max);
         }
+    }
+
+    /**
+     * this is almost a copy-paste from DSE DecayingEstimatedHistogram::makeOffsets, except that it's been adjusted
+     * to the C*-specific ability of specifying the number of buckets.
+     * Please note, that DSE bucket offsets are inclusive lower bounds and C* bucket offsets are inclusive upper bounds.
+     * For simplicity, we use the same bucket offsets in both cases, but this means there might be a slight
+     * difference for any samples that are exactly on the bucket boundary. I think we can safely ignore that.
+     *
+     * @param size the number of regular buckets to create; the special bucket for overflow values is not included
+     *             in this count
+     * @param considerZeroes whether to include a separate bucket for zero values
+     * @return the offsets for the buckets; in that context offsets mean the upper inclusive bounds of each bucket
+     *         the name "offset" stays for historic reasons.
+     *
+     */
+    public static long[] newDseOffsets(int size, boolean considerZeroes)
+    {
+        ArrayList<Long> ret = new ArrayList<>();
+        if (considerZeroes)
+            ret.add(0L);
+
+        for (int i = 1; i <= subBucketCount && ret.size() < size; i++)
+        {
+            ret.add((long) i);
+        }
+
+        long last = subBucketCount;
+        long unit = 1 << (unitMagnitude + 1);
+
+        while (ret.size() < size)
+        {
+            for (int i = 0; i < subBucketHalfCount; i++)
+            {
+                assert last + unit > last : "Overflow in DSE histogram bucket calculation; too big size requested: " + size;
+                last += unit;
+                ret.add(last);
+                if (ret.size() >= size)
+                    break;
+            }
+            unit *= 2;
+        }
+
+        assert ret.size() == size : "DSE histogram bucket count mismatch: " + ret.size() + " != " + size;
+        return ret.stream().mapToLong(i->i).toArray();
     }
 }
