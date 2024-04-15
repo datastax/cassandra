@@ -303,6 +303,7 @@ public class StatementRestrictions
      */
     public static class Builder
     {
+        private final ClientState state;
         private final StatementType type;
         private final TableMetadata table;
         private final WhereClause whereClause;
@@ -322,6 +323,7 @@ public class StatementRestrictions
                        boolean allowFiltering,
                        boolean forView)
         {
+            this.state = state;
             this.type = type;
             this.table = table;
             this.whereClause = whereClause;
@@ -503,7 +505,7 @@ public class StatementRestrictions
                 if (partitionKeyRestrictions.needFiltering(table) || (!partitionKeyRestrictions.isEmpty() && element.isDisjunction()))
                 {
                     if (!allowFiltering && !forView && !hasQueriableIndex && requiresAllowFilteringIfNotSpecified(table))
-                        throw new InvalidRequestException(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+                        throw new InvalidRequestException(allowFilteringMessage(state));
     
                     isKeyRange = true;
                     usesSecondaryIndexing = hasQueriableIndex;
@@ -667,7 +669,7 @@ public class StatementRestrictions
                                                                                          nonPrimaryKeyRestrictions);
             if (unsupported.isEmpty())
             {
-                throw invalidRequest(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+                throw new InvalidRequestException(allowFilteringMessage(state));
             }
             else
             {
