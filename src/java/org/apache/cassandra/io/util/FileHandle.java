@@ -171,11 +171,13 @@ public class FileHandle extends SharedCloseableImpl
             if (before >= metadata.dataLength)
                 return 0L;
             else
-                return metadata.chunkFor(before).offset;
+                return metadata.chunkFor(before).offset - metadata.chunkFor(sliceDescriptor.sliceStart).offset;
         }).orElse(before - sliceDescriptor.sliceStart);
 
         if (position > 0)
             channel.trySkipCache(0, position);
+        else
+            channel.trySkipCache(0, onDiskLength);
     }
 
     public Rebufferer instantiateRebufferer()
@@ -406,7 +408,7 @@ public class FileHandle extends SharedCloseableImpl
                 {
                     if (compressed)
                     {
-                        regions = MmappedRegions.map(channelCopy, compressionMetadata);
+                        regions = MmappedRegions.map(channelCopy, compressionMetadata, sliceDescriptor.sliceStart);
                         rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channelCopy, compressionMetadata, regions, sliceDescriptor.sliceStart));
                     }
                     else

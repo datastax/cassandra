@@ -85,7 +85,7 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
                 while (bytesTransferred < length)
                 {
                     int toTransfer = (int) Math.min(CHUNK_SIZE, length - bytesTransferred);
-                    long position = section.start + bytesTransferred;
+                    long position = section.start + bytesTransferred - sstable.getCompressionMetadata().chunkFor(sstable.getDataFileSliceDescriptor().sliceStart).offset;
 
                     out.writeToChannel(bufferSupplier -> {
                         ByteBuffer outBuffer = bufferSupplier.get(toTransfer);

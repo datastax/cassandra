@@ -88,17 +88,7 @@ public class CompressionMetadata
      */
     private final int chunkLengthBits;
 
-    /**
-     * If we deal with a slice of the compressed file, this is the position in the original compressed file of the first
-     * chunk stored in the compressed slice. See {@link #uncompressedOffset}.
-     */
-    private final long compressedOffset;
-
-    /**
-     * If we deal with a slice of the compressed file, this is the position in the original uncompressed data of the
-     * first chunk stored in the compressed slice. See {@link #compressedOffset}.
-     */
-    public final long uncompressedOffset;
+    private final int startChunkIndex;
 
     /**
      * Create metadata about given compressed file including uncompressed data length, chunk size
@@ -138,7 +128,7 @@ public class CompressionMetadata
     private CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor)
     {
         this.indexFilePath = indexFilePath;
-        this.uncompressedOffset = sliceDescriptor.exists() ? sliceDescriptor.sliceStart : 0;
+        long uncompressedOffset = sliceDescriptor.exists() ? sliceDescriptor.sliceStart : 0;
         long uncompressedLength = sliceDescriptor.exists() ? sliceDescriptor.dataEnd - sliceDescriptor.sliceStart : -1;
 
         try (FileInputStreamPlus stream = indexFilePath.newInputStream())
@@ -170,10 +160,10 @@ public class CompressionMetadata
             long readDataLength = stream.readLong();
             dataLength = uncompressedLength >= 0 ? uncompressedLength : readDataLength;
 
-            int startChunkIndex = chunkIndex(this.uncompressedOffset);
+            startChunkIndex = Math.toIntExact(uncompressedOffset >> chunkLengthBits);
             assert uncompressedOffset == (long) startChunkIndex << chunkLengthBits;
 
-            int endChunkIndex = chunkIndex(this.uncompressedOffset + dataLength - 1) + 1;
+            int endChunkIndex = Math.toIntExact((uncompressedOffset + dataLength - 1) >> chunkLengthBits) + 1;
 
             Pair<Memory.LongArray, Long> offsetsAndLimit = readChunkOffsets(stream, startChunkIndex, endChunkIndex, compressedLength);
             chunkOffsets = offsetsAndLimit.left;
@@ -182,8 +172,6 @@ public class CompressionMetadata
             // Obvously, we could use the compressed file length for that purpose but unfortunately, sometimes there is
             // an empty chunk added to the end of the file thus we cannot rely on the file length.
             compressedFileLength = offsetsAndLimit.right;
-
-            compressedOffset = chunkOffsets.size() > 0 ? chunkOffsets.get(0) : 0;
         }
         catch (FileNotFoundException | NoSuchFileException e)
         {
@@ -198,7 +186,7 @@ public class CompressionMetadata
 
     // do not call this constructor directly, unless used in testing
     @VisibleForTesting
-    private CompressionMetadata(File filePath, CompressionParams parameters, Memory.LongArray offsets, long dataLength, long compressedLength, long uncompressedOffset)
+    private CompressionMetadata(File filePath, CompressionParams parameters, Memory.LongArray offsets, long dataLength, long compressedLength)
     {
         this.indexFilePath = filePath;
         this.parameters = parameters;
@@ -207,9 +195,8 @@ public class CompressionMetadata
         this.compressedFileLength = compressedLength;
         assert offsets != null;
         this.chunkOffsets = offsets;
-        this.uncompressedOffset = uncompressedOffset;
         this.dataLength = dataLength;
-        this.compressedOffset = chunkOffsets.size() > 0 ? chunkOffsets.get(0) : 0;
+        this.startChunkIndex = 0;
     }
 
     public ICompressor compressor()
@@ -315,7 +302,7 @@ public class CompressionMetadata
      */
     public Chunk chunkFor(long uncompressedDataPosition)
     {
-        int chunkIdx = chunkIndex(uncompressedDataPosition - uncompressedOffset);
+        int chunkIdx = chunkIndex(uncompressedDataPosition);
         return chunk(chunkIdx);
     }
 
@@ -341,8 +328,8 @@ public class CompressionMetadata
         int lastIncludedChunkIdx = -1;
         for (SSTableReader.PartitionPositionBounds section : sections)
         {
-            int sectionStartIdx = Math.max(chunkIndex(section.lowerPosition - uncompressedOffset), lastIncludedChunkIdx + 1);
-            int sectionEndIdx = chunkIndex(section.upperPosition - 1 - uncompressedOffset); // we need to include the last byte of the seciont but not the upper position (which is excludded)
+            int sectionStartIdx = Math.max(chunkIndex(section.lowerPosition), lastIncludedChunkIdx + 1);
+            int sectionEndIdx = chunkIndex(section.upperPosition - 1); // we need to include the last byte of the seciont but not the upper position (which is excludded)
 
             for (int idx = sectionStartIdx; idx <= sectionEndIdx; idx++)
             {
@@ -358,7 +345,7 @@ public class CompressionMetadata
     private long nextChunkOffset(int chunkIdx)
     {
         if (chunkIdx == chunkOffsets.size() - 1)
-            return compressedFileLength;
+            return compressedFileLength + chunkOffsets.get(0);
         return chunkOffset(chunkIdx + 1);
     }
 
@@ -375,8 +362,8 @@ public class CompressionMetadata
 
         for (SSTableReader.PartitionPositionBounds section : sections)
         {
-            int sectionStartIdx = chunkIndex(section.lowerPosition - uncompressedOffset);
-            int sectionEndIdx = chunkIndex(section.upperPosition - 1 - uncompressedOffset); // we need to include the last byte of the seciont but not the upper position (which is excludded)
+            int sectionStartIdx = chunkIndex(section.lowerPosition);
+            int sectionEndIdx = chunkIndex(section.upperPosition - 1); // we need to include the last byte of the seciont but not the upper position (which is excludded)
 
             for (int idx = sectionStartIdx; idx <= sectionEndIdx; idx++)
                 offsets.add(chunk(idx));
@@ -390,12 +377,12 @@ public class CompressionMetadata
         if (chunkIdx >= chunkOffsets.size())
             throw new CorruptSSTableException(new EOFException(String.format("Chunk %d out of bounds: %d", chunkIdx, chunkOffsets.size())), indexFilePath);
 
-        return chunkOffsets.get(chunkIdx) - compressedOffset;
+        return chunkOffsets.get(chunkIdx);
     }
 
     private int chunkIndex(long uncompressedDataPosition)
     {
-        return Math.toIntExact(uncompressedDataPosition >> chunkLengthBits);
+        return Math.toIntExact(uncompressedDataPosition >> chunkLengthBits) - startChunkIndex;
     }
 
     public void close()
@@ -518,7 +505,7 @@ public class CompressionMetadata
             if (tCount < this.count)
                 compressedLength = tOffsets.getLong(tCount * 8L);
 
-            return new CompressionMetadata(filePath, parameters, new Memory.LongArray(tOffsets, tCount), dataLength, compressedLength, 0);
+            return new CompressionMetadata(filePath, parameters, new Memory.LongArray(tOffsets, tCount), dataLength, compressedLength);
         }
 
         /**

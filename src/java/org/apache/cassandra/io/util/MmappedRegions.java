@@ -56,15 +56,12 @@ public class MmappedRegions extends SharedCloseableImpl
      */
     private volatile State copy;
 
-    /**
-     * Note that creating a new MmappedRegions with non-null compression metadata and non-zero start offset is invalid.
-     */
     private MmappedRegions(ChannelProxy channel, CompressionMetadata metadata, long length, long startOffset)
     {
-        this(new State(channel, startOffset), metadata, length);
+        this(new State(channel, metadata != null ? metadata.chunkFor(startOffset).offset : startOffset), metadata, length, startOffset);
     }
 
-    private MmappedRegions(State state, CompressionMetadata metadata, long length)
+    private MmappedRegions(State state, CompressionMetadata metadata, long length, long startOffset)
     {
         super(new Tidier(state));
 
@@ -73,7 +70,7 @@ public class MmappedRegions extends SharedCloseableImpl
         if (metadata != null)
         {
             assert length == 0 : "expected no length with metadata";
-            updateState(metadata);
+            updateState(metadata, startOffset);
         }
         else if (length > 0)
         {
@@ -99,12 +96,12 @@ public class MmappedRegions extends SharedCloseableImpl
      * @param metadata
      * @return new instance
      */
-    public static MmappedRegions map(ChannelProxy channel, CompressionMetadata metadata)
+    public static MmappedRegions map(ChannelProxy channel, CompressionMetadata metadata, long startOffset)
     {
         if (metadata == null)
             throw new IllegalArgumentException("metadata cannot be null");
 
-        return new MmappedRegions(channel, metadata, 0, 0);
+        return new MmappedRegions(channel, metadata, 0, startOffset);
     }
 
     public static MmappedRegions map(ChannelProxy channel, long length, long startOffset)
@@ -155,15 +152,15 @@ public class MmappedRegions extends SharedCloseableImpl
         }
     }
 
-    private void updateState(CompressionMetadata metadata)
+    private void updateState(CompressionMetadata metadata, long startOffset)
     {
         long offset = 0;
-        long lastSegmentOffset = 0;
+        long lastSegmentOffset = state.startOffset;
         long segmentSize = 0;
 
         while (offset < metadata.dataLength)
         {
-            CompressionMetadata.Chunk chunk = metadata.chunkFor(offset + metadata.uncompressedOffset);
+            CompressionMetadata.Chunk chunk = metadata.chunkFor(offset + startOffset);
 
             //Reached a new mmap boundary
             if (segmentSize + chunk.length + 4 > MAX_SEGMENT_SIZE)

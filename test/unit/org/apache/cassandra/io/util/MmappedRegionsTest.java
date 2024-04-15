@@ -313,7 +313,7 @@ public class MmappedRegionsTest
 
         CompressionMetadata metadata = new CompressionMetadata(cf, f.length(), true);
         try(ChannelProxy channel = new ChannelProxy(f);
-            MmappedRegions regions = MmappedRegions.map(channel, metadata))
+            MmappedRegions regions = MmappedRegions.map(channel, metadata, 0))
         {
 
             assertFalse(regions.isEmpty());
@@ -369,7 +369,7 @@ public class MmappedRegionsTest
     {
         ByteBuffer buffer = allocateBuffer(1024);
         try(ChannelProxy channel = new ChannelProxy(writeFile("testIllegalArgForMap3", buffer));
-            MmappedRegions regions = MmappedRegions.map(channel, null))
+            MmappedRegions regions = MmappedRegions.map(channel, null, 0))
         {
             assertTrue(regions.isEmpty());
         }
