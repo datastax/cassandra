@@ -59,7 +59,7 @@ public class MetadataSource
     {
         try (var input = indexDescriptor.openCheckSummedPerIndexInput(IndexComponent.META, indexContext))
         {
-            var version = indexDescriptor.getVersion();
+            var version = indexDescriptor.getVersion(indexContext);
             var order = version.onDiskFormat().byteOrderFor(IndexComponent.META, indexContext);
             return MetadataSource.load(input, version, order);
         }
