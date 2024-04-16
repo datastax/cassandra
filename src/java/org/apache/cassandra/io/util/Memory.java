@@ -407,4 +407,61 @@ public class Memory implements AutoCloseable, ReadableMemory
     {
         return String.format("Memory@[%x..%x)", peer, peer + size);
     }
+
+    public static class LongArray implements AutoCloseable
+    {
+        public final Memory memory;
+        private final long size;
+
+        public LongArray(Memory memory)
+        {
+            assert (memory.size & 7) == 0;
+            this.memory = memory;
+            this.size = memory.size >> 3;
+        }
+
+        public LongArray(long size)
+        {
+            assert size >= 0;
+            this.memory = size > 0 ? Memory.allocate(size << 3) : null;
+            this.size = size;
+        }
+
+        public LongArray(SafeMemory memory, long cnt)
+        {
+            assert cnt <= memory.size >> 3;
+            this.memory = memory;
+            this.size = cnt;
+        }
+
+        public void set(long offset, long value)
+        {
+            checkBounds(offset);
+            memory.setLong(offset << 3, value);
+        }
+
+        public long get(long offset)
+        {
+            checkBounds(offset);
+            return memory.getLong(offset << 3);
+        }
+
+        public long size()
+        {
+            return size;
+        }
+
+        @Override
+        public void close()
+        {
+            if (memory != null)
+                memory.close();
+        }
+
+        private void checkBounds(long offset)
+        {
+            if (memory == null || offset < 0 || offset >= size)
+                throw new IndexOutOfBoundsException();
+        }
+    }
 }
