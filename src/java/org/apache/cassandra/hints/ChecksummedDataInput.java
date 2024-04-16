@@ -25,7 +25,6 @@ import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.*;
-import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.Throwables;
 
 /**
@@ -221,7 +220,7 @@ public class ChecksummedDataInput extends RebufferingInputStream
 
     public void tryUncacheRead()
     {
-        INativeLibrary.instance.trySkipCache(getChannel().getFileDescriptor(), 0, getSourcePosition(), getFile().toString());
+        getChannel().trySkipCache(0, getSourcePosition());
     }
 
     private void updateCrc()
