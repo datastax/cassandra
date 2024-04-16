@@ -95,11 +95,10 @@ public class BtiTableScrubber extends SortedTableScrubber<BtiTableReader> implem
     @Override
     public void scrubInternal(SSTableRewriter writer)
     {
-        if (indexAvailable() && indexIterator.dataPosition() != 0)
+        if (indexAvailable() && indexIterator.dataPosition() != sstable.getDataFileSliceDescriptor().dataStart)
         {
-            outputHandler.warn("First position reported by index should be 0, was " +
-                               indexIterator.dataPosition() +
-                               ", continuing without index.");
+            outputHandler.warn("First position reported by index should be {}, was {}, continuing without index.",
+                               sstable.getDataFileSliceDescriptor().dataStart, indexIterator.dataPosition());
             indexIterator.close();
             indexIterator = null;
         }
