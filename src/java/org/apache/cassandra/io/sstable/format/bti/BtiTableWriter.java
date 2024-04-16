@@ -385,7 +385,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
             }
             catch (RuntimeException | Error ex)
             {
-                Throwables.closeAndAddSuppressed(ex, mmappedRegionsCache);
+                Throwables.closeNonNullAndAddSuppressed(ex, mmappedRegionsCache);
                 throw ex;
             }
             finally
