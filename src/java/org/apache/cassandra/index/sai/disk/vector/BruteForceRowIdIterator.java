@@ -68,7 +68,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
     private final PriorityQueue<RowWithApproximateScore> approximateScoreQueue;
     // Priority queue with full resolution scores
     private final PriorityQueue<ScoredRowId> exactScoreQueue;
-    private final CloseableReranker reranker;
+    private final JVectorLuceneOnDiskGraph.CloseableReranker reranker;
     private final int topK;
     private final int limit;
     private int rerankedCount;
@@ -80,7 +80,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<ScoredRowId>
      * @param topK The number of vectors to resolve and score before returning results
      */
     public BruteForceRowIdIterator(PriorityQueue<RowWithApproximateScore> approximateScoreQueue,
-                                   CloseableReranker reranker,
+                                   JVectorLuceneOnDiskGraph.CloseableReranker reranker,
                                    int limit,
                                    int topK)
     {
