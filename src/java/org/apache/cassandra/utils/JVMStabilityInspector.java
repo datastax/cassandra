@@ -89,17 +89,17 @@ public final class JVMStabilityInspector
         }
         JVMStabilityInspector.inspectThrowable(t);
     }
-    
+
     public static void setGlobalErrorHandler(Consumer<Throwable> errorHandler)
     {
         globalHandler = errorHandler;
     }
-    
+
     @VisibleForTesting
     public static Consumer<Throwable> getGlobalErrorHandler()
     {
         return globalHandler;
-    } 
+    }
 
     public static void setDiskErrorHandler(Consumer<Throwable> errorHandler)
     {

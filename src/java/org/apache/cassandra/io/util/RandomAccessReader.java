@@ -19,7 +19,6 @@ package org.apache.cassandra.io.util;
 
 import java.io.IOException;
 import java.nio.ByteOrder;
-
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.primitives.Ints;
@@ -37,16 +36,17 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     private long markedPointer;
 
     final Rebufferer rebufferer;
-    private BufferHolder bufferHolder = Rebufferer.EMPTY;
+    private BufferHolder bufferHolder;
 
     /**
      * Only created through Builder
      *
      * @param rebufferer Rebufferer to use
      */
-    RandomAccessReader(Rebufferer rebufferer)
+    RandomAccessReader(Rebufferer rebufferer, BufferHolder bufferHolder)
     {
-        super(Rebufferer.EMPTY.buffer());
+        super(bufferHolder.buffer());
+        this.bufferHolder = bufferHolder;
         this.rebufferer = rebufferer;
     }
 
@@ -64,10 +64,18 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     private void reBufferAt(long position)
     {
         bufferHolder.release();
-        bufferHolder = Rebufferer.EMPTY; // prevents double release if the call below fails
-        bufferHolder = rebufferer.rebuffer(position);
-        buffer = bufferHolder.buffer();
-        buffer.position(Ints.checkedCast(position - bufferHolder.offset()));
+        if (position == length())
+        {
+            bufferHolder = Rebufferer.emptyBufferHolderAt(position);
+            buffer = bufferHolder.buffer();
+        }
+        else
+        {
+            bufferHolder = Rebufferer.EMPTY; // prevents double release if the call below fails
+            bufferHolder = rebufferer.rebuffer(position);
+            buffer = bufferHolder.buffer();
+            buffer.position(Ints.checkedCast(position - bufferHolder.offset()));
+        }
 
         assert buffer.order() == ByteOrder.BIG_ENDIAN : "Buffer must have BIG ENDIAN byte ordering";
     }
@@ -297,7 +305,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     {
         RandomAccessReaderWithOwnChannel(Rebufferer rebufferer)
         {
-            super(rebufferer);
+            super(rebufferer, Rebufferer.EMPTY);
         }
 
         @Override
