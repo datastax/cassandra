@@ -44,7 +44,6 @@ import org.cliffc.high_scale_lib.NonBlockingHashMapLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.SearchResult;
@@ -68,7 +67,6 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.ByteSequence;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -112,6 +110,9 @@ public class CassandraOnHeapGraph<T>
     private final VectorSourceModel sourceModel;
     private volatile boolean hasDeletions;
 
+    // we don't need to explicitly close these since only on-heap resources are involved
+    private final ThreadLocal<GraphSearcher> searchers;
+
     /**
      * @param termComparator the vector type -- passed as AbstractType for caller's convenience
      * @param indexConfig
@@ -139,6 +140,7 @@ public class CassandraOnHeapGraph<T>
                                         indexConfig.getConstructionBeamWidth(),
                                         1.2f,
                                         1.2f);
+        searchers = ThreadLocal.withInitial(() -> new GraphSearcher(builder.getGraph()));
     }
 
     public int size()
@@ -334,9 +336,7 @@ public class CassandraOnHeapGraph<T>
             return CloseableIterator.emptyIterator();
 
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
-        // VSTODO re-use searcher objects
-        GraphIndex graph = builder.getGraph();
-        var searcher = new GraphSearcher(graph.getView());
+        var searcher = searchers.get();
         var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
         var topK = sourceModel.topKFor(limit, null);
         var result = searcher.search(ssf, topK, threshold, bits);
@@ -344,7 +344,7 @@ public class CassandraOnHeapGraph<T>
         context.addAnnNodesVisited(result.getVisitedCount());
         // Threshold based searches do not support resuming the search.
         return threshold > 0 ? CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator())
-                             : new AutoResumingNodeScoreIterator(searcher, result, context::addAnnNodesVisited, topK, true, null);
+                             : new AutoResumingNodeScoreIterator(searcher, result, context::addAnnNodesVisited, topK, true);
     }
 
     public Set<Integer> computeDeletedOrdinals(Function<T, Integer> postingTransformer)
@@ -361,7 +361,7 @@ public class CassandraOnHeapGraph<T>
         return deletedOrdinals;
     }
 
-    public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor indexDescriptor, IndexContext indexContext, Set<Integer> deletedOrdinals) throws IOException
+    public SegmentMetadata.ComponentMetadataMap writeData(IndexDescriptor descriptor, IndexContext indexContext, Set<Integer> deletedOrdinals) throws IOException
     {
         int nInProgress = builder.insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
@@ -373,25 +373,32 @@ public class CassandraOnHeapGraph<T>
                                                                                   postingsMap.keySet().size(), vectorValues.size());
         logger.debug("Writing graph with {} rows and {} distinct vectors", postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), vectorValues.size());
 
-        try (var pqOutput = IndexFileUtils.instance().openOutput(indexDescriptor.fileFor(IndexComponent.PQ, indexContext), true, indexDescriptor.getVersion(indexContext));
-             var postingsOutput = IndexFileUtils.instance().openOutput(indexDescriptor.fileFor(IndexComponent.POSTING_LISTS, indexContext), true, indexDescriptor.getVersion(indexContext));
-             var indexOutput = IndexFileUtils.instance().openRandomAccessOutput(indexDescriptor.fileFor(IndexComponent.TERMS_DATA, indexContext), true))
+        // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
+        // null if remapping is not possible
+        final BiMap <Integer, Integer> ordinalMap = deletedOrdinals.isEmpty() ? buildOrdinalMap() : null;
+        boolean canFastFindRows = ordinalMap != null;
+        IntUnaryOperator reverseOrdinalMapper = canFastFindRows
+                                                ? x -> ordinalMap.inverse().getOrDefault(x, x)
+                                                : x -> x;
+        var finalOrdinalMap = ordinalMap == null ? OnDiskGraphIndexWriter.sequentialRenumbering(builder.getGraph()) : ordinalMap;
+
+        var indexFile = descriptor.fileFor(IndexComponent.TERMS_DATA, indexContext);
+        long termsOffset = SAICodecUtils.headerSize();
+        if (indexFile.exists())
+            termsOffset += indexFile.length();
+        try (var pqOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.PQ, indexContext), true, descriptor.getVersion(indexContext));
+             var postingsOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.POSTING_LISTS, indexContext), true, descriptor.getVersion(indexContext));
+             var indexWriter = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
+                               .withMap(finalOrdinalMap)
+                               .with(new InlineVectors(vectorValues.dimension()))
+                               .withStartOffset(termsOffset)
+                               .build())
         {
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);
-            SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexOutput));
-
-            // map of existing ordinal to rowId (aka new ordinal if remapping is possible)
-            // null if remapping is not possible
-            final BiMap <Integer, Integer> ordinalMap = deletedOrdinals.isEmpty() ? buildOrdinalMap() : null;
-
-            boolean canFastFindRows = ordinalMap != null && CassandraRelevantProperties.VSEARCH_11_9_UPGRADES.getBoolean();
-            IntUnaryOperator ordinalMapper = canFastFindRows
-                                                ? x -> ordinalMap.getOrDefault(x, x)
-                                                : x -> x;
-            IntUnaryOperator reverseOrdinalMapper = canFastFindRows
-                                                        ? x -> ordinalMap.inverse().getOrDefault(x, x)
-                                                        : x -> x;
+            indexWriter.getOutput().seek(indexFile.length());
+            SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()));
+            assert indexWriter.getOutput().position() == termsOffset : "termsOffset " + termsOffset + " != " + indexWriter.getOutput().position();
 
             // compute and write PQ
             long pqOffset = pqOutput.getFilePointer();
@@ -401,26 +408,19 @@ public class CassandraOnHeapGraph<T>
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
             long postingsPosition = new VectorPostingsWriter<T>(canFastFindRows, reverseOrdinalMapper)
-                                            .writePostings(postingsOutput.asSequentialWriter(),
-                                                           vectorValues, postingsMap, deletedOrdinals);
+                                    .writePostings(postingsOutput.asSequentialWriter(),
+                                                   vectorValues, postingsMap, deletedOrdinals);
             long postingsLength = postingsPosition - postingsOffset;
 
             // complete (internal clean up) and write the graph
             builder.cleanup();
-            long termsOffset = indexOutput.getFilePointer();
 
             var start = nanoTime();
-            var finalOrdinalMap = ordinalMap == null ? OnDiskGraphIndexWriter.sequentialRenumbering(builder.getGraph()) : ordinalMap;
-            try (var writer = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexOutput, finalOrdinalMap)
-                              .with(new InlineVectors(vectorValues.dimension()))
-                              .build())
-            {
-                Map<FeatureId, IntFunction<Feature.State>> suppliers = Collections.singletonMap(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
-                writer.write(new EnumMap<>(suppliers));
-                SAICodecUtils.writeFooter(indexOutput, writer.checksum());
-            }
+            Map<FeatureId, IntFunction<Feature.State>> suppliers = Collections.singletonMap(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
+            indexWriter.write(new EnumMap<>(suppliers));
+            SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
             logger.info("Writing graph took {}ms", (nanoTime() - start) / 1_000_000);
-            long termsLength = indexOutput.getFilePointer() - termsOffset;
+            long termsLength = indexWriter.getOutput().position() - termsOffset;
 
             // write remaining footers/checksums
             SAICodecUtils.writeFooter(pqOutput);
@@ -529,7 +529,7 @@ public class CassandraOnHeapGraph<T>
 
             containsUnitVectors = IntStream.range(0, vectorValues.size())
                                            .parallel()
-                                           .mapToObj(vectorValues::vectorValue)
+                                           .mapToObj(vectorValues::getVector)
                                            .allMatch(v -> Math.abs(VectorUtil.dotProduct(v, v) - 1.0f) < 0.01);
         }
 
