@@ -108,7 +108,7 @@ public class BtiTableReader extends SSTableReaderWithFilter
      */
     protected boolean filterFirst()
     {
-        return openReason == OpenReason.MOVED_START;
+        return openReason == OpenReason.MOVED_START || sstableMetadata.zeroCopyMetadata.exists();
     }
 
     /**
@@ -118,7 +118,7 @@ public class BtiTableReader extends SSTableReaderWithFilter
      */
     protected boolean filterLast()
     {
-        return openReason == OpenReason.EARLY && partitionIndex instanceof PartitionIndexEarly;
+        return openReason == OpenReason.EARLY && partitionIndex instanceof PartitionIndexEarly || sstableMetadata.zeroCopyMetadata.exists();
     }
 
     public long estimatedKeys()
