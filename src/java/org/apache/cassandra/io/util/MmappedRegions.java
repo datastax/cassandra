@@ -92,8 +92,13 @@ public class MmappedRegions extends SharedCloseableImpl
     }
 
     /**
-     * @param channel file to map. the MmappedRegions instance will hold shared copy of given channel.
-     * @param metadata
+     * Create memory mapped regions for the given compressed file.
+     *
+     * @param channel     file to map. The {@link MmappedRegions} instance will hold shared copy of given channel.
+     * @param metadata    compression metadata for the mapped file, cannot be null. A shared copy of the metadata is not
+     *                    created, so it needs to me managed by the caller.
+     * @param startOffset if the file represents a slice of the origial file, this is the offset of the slice in
+     *                    the original file (in uncompressed data), namely the value of {@link SliceDescriptor#sliceStart}.
      * @return new instance
      */
     public static MmappedRegions map(ChannelProxy channel, CompressionMetadata metadata, long startOffset)
@@ -155,7 +160,7 @@ public class MmappedRegions extends SharedCloseableImpl
     private void updateState(CompressionMetadata metadata, long startOffset)
     {
         long offset = 0;
-        long lastSegmentOffset = state.startOffset;
+        long lastSegmentOffset = state.onDiskOffset;
         long segmentSize = 0;
 
         while (offset < metadata.dataLength)
@@ -193,6 +198,11 @@ public class MmappedRegions extends SharedCloseableImpl
         return state.isEmpty();
     }
 
+    /**
+     * Get the region containing the given position
+     *
+     * @param position the position on disk (not in the uncompressed data) in the original file (not in the slice)
+     */
     public Region floor(long position)
     {
         assert !isCleanedUp() : "Attempted to use closed region";
@@ -260,16 +270,18 @@ public class MmappedRegions extends SharedCloseableImpl
         /** The index to the last region added */
         private int last;
 
-        private final long startOffset;
+        /** The position of the first region of the slice in the original file (if the file is compressed, the offset
+          * refers to position on disk, not the uncompressed data) */
+        private final long onDiskOffset;
 
-        private State(ChannelProxy channel, long startOffset)
+        private State(ChannelProxy channel, long onDiskOffset)
         {
             this.channel = channel.sharedCopy();
             this.buffers = new ByteBuffer[REGION_ALLOC_SIZE];
             this.offsets = new long[REGION_ALLOC_SIZE];
             this.length = 0;
             this.last = -1;
-            this.startOffset = startOffset;
+            this.onDiskOffset = onDiskOffset;
         }
 
         private State(State original)
@@ -279,7 +291,7 @@ public class MmappedRegions extends SharedCloseableImpl
             this.offsets = original.offsets;
             this.length = original.length;
             this.last = original.last;
-            this.startOffset = original.startOffset;
+            this.onDiskOffset = original.onDiskOffset;
         }
 
         private boolean isEmpty()
@@ -294,7 +306,7 @@ public class MmappedRegions extends SharedCloseableImpl
 
         private Region floor(long position)
         {
-            assert startOffset <= position && position <= length : String.format("%d > %d", position, length);
+            assert onDiskOffset <= position && position <= length : String.format("%d > %d", position, length);
 
             int idx = Arrays.binarySearch(offsets, 0, last + 1, position);
             assert idx != -1 : String.format("Bad position %d for regions %s, last %d in %s", position, Arrays.toString(offsets), last, channel);
@@ -306,12 +318,17 @@ public class MmappedRegions extends SharedCloseableImpl
 
         private long getPosition()
         {
-            return last < 0 ? startOffset : offsets[last] + buffers[last].capacity();
+            return last < 0 ? onDiskOffset : offsets[last] + buffers[last].capacity();
         }
 
+        /**
+         * Add a new region to the state
+         * @param pos the position on disk (not in the uncompressed data) in the original file (not the slice)
+         * @param size the size of the region
+         */
         private void add(long pos, long size)
         {
-            ByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, pos - startOffset, size);
+            ByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, pos - onDiskOffset, size);
 
             ++last;
 

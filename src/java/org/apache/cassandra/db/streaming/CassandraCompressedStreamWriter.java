@@ -48,12 +48,14 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
 
     private final CompressionInfo compressionInfo;
     private final long totalSize;
+    private final long onDiskOffset;
 
     public CassandraCompressedStreamWriter(SSTableReader sstable, CassandraStreamHeader header, StreamSession session)
     {
         super(sstable, header, session);
         this.compressionInfo = header.compressionInfo;
         this.totalSize = header.size();
+        this.onDiskOffset = sstable.getCompressionMetadata().chunkFor(sstable.getDataFileSliceDescriptor().sliceStart).offset;
     }
 
     @Override
@@ -85,7 +87,7 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
                 while (bytesTransferred < length)
                 {
                     int toTransfer = (int) Math.min(CHUNK_SIZE, length - bytesTransferred);
-                    long position = section.start + bytesTransferred - sstable.getCompressionMetadata().chunkFor(sstable.getDataFileSliceDescriptor().sliceStart).offset;
+                    long position = section.start + bytesTransferred - onDiskOffset;
 
                     out.writeToChannel(bufferSupplier -> {
                         ByteBuffer outBuffer = bufferSupplier.get(toTransfer);

@@ -36,6 +36,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     final CompressionMetadata metadata;
     final int maxCompressedLength;
     protected final long startOffset;
+    protected final long onDiskStartOffset;
 
     protected CompressedChunkReader(ChannelProxy channel, CompressionMetadata metadata, long startOffset)
     {
@@ -44,11 +45,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         this.maxCompressedLength = metadata.maxCompressedLength();
         this.startOffset = startOffset;
         assert Integer.bitCount(metadata.chunkLength()) == 1; //must be a power of two
-    }
-
-    protected long sliceChunkOffset(long originalChunkOffset)
-    {
-        return startOffset == 0 ? originalChunkOffset : originalChunkOffset - metadata.chunkFor(startOffset).offset;
+        this.onDiskStartOffset = startOffset == 0 ? 0 : metadata.chunkFor(startOffset).offset;
     }
 
     @VisibleForTesting
@@ -124,7 +121,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 int length = shouldCheckCrc ? chunk.length + Integer.BYTES // compressed length + checksum length
                                             : chunk.length;
 
-                long chunkOffset = sliceChunkOffset(chunk.offset);
+                long chunkOffset = chunk.offset - onDiskStartOffset;
                 if (chunk.length < maxCompressedLength)
                 {
                     ByteBuffer compressed = bufferHolder.getBuffer(length);
