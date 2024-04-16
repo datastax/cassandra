@@ -84,4 +84,10 @@ public class FileInputStreamPlus extends RebufferingInputStream
             }
         }
     }
+
+    @Override
+    public String toString()
+    {
+        return file.toString();
+    }
 }
