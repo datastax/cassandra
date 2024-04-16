@@ -274,7 +274,7 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
         try (VerifyController verifyController = VerifyController.create(this);
              KeyReader indexIterator = sstable.keyReader())
         {
-            if (indexIterator.dataPosition() != 0)
+            if (indexIterator.dataPosition() != sstable.getDataFileSliceDescriptor().dataStart)
                 markAndThrow(new RuntimeException("First row position from index != 0: " + indexIterator.dataPosition()));
 
             List<Range<Token>> ownedRanges = isOffline ? Collections.emptyList() : Range.normalize(tokenLookup.apply(sstable.getKeyspaceName()));

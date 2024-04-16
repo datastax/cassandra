@@ -40,14 +40,18 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     final CompressionMetadata metadata;
     final int maxCompressedLength;
     final Supplier<Double> crcCheckChanceSupplier;
+    protected final long startOffset;
+    protected final long onDiskStartOffset;
 
-    protected CompressedChunkReader(ChannelProxy channel, CompressionMetadata metadata, Supplier<Double> crcCheckChanceSupplier)
+    protected CompressedChunkReader(ChannelProxy channel, CompressionMetadata metadata, Supplier<Double> crcCheckChanceSupplier, long startOffset)
     {
-        super(channel, metadata.dataLength);
+        super(channel, metadata.dataLength + startOffset);
         this.metadata = metadata;
         this.maxCompressedLength = metadata.maxCompressedLength();
         this.crcCheckChanceSupplier = crcCheckChanceSupplier;
+        this.startOffset = startOffset;
         assert Integer.bitCount(metadata.chunkLength()) == 1; //must be a power of two
+        this.onDiskStartOffset = startOffset == 0 ? 0 : metadata.chunkFor(startOffset).offset;
     }
 
     protected CompressedChunkReader forScan()
@@ -70,12 +74,15 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     @Override
     public String toString()
     {
-        return String.format("CompressedChunkReader.%s(%s - %s, chunk length %d, data length %d)",
+        return String.format(startOffset > 0
+                             ? "CompressedChunkReader.%s(%s - %s, chunk length %d, data length %d, slice offset %s)"
+                             : "CompressedChunkReader.%s(%s - %s, chunk length %d, data length %d)",
                              getClass().getSimpleName(),
                              channel.filePath(),
                              metadata.compressor().getClass().getSimpleName(),
                              metadata.chunkLength(),
-                             metadata.dataLength);
+                             metadata.dataLength,
+                             startOffset);
     }
 
     @Override
@@ -117,7 +124,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         }
 
 
-        ByteBuffer read(CompressionMetadata.Chunk chunk, boolean shouldCheckCrc) throws CorruptBlockException;
+        ByteBuffer read(CompressionMetadata.Chunk chunk, long chunkOffset, boolean shouldCheckCrc) throws CorruptBlockException;
     }
 
     private static class RandomAccessCompressedReader implements CompressedReader
@@ -132,12 +139,12 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         }
 
         @Override
-        public ByteBuffer read(CompressionMetadata.Chunk chunk, boolean shouldCheckCrc) throws CorruptBlockException
+        public ByteBuffer read(CompressionMetadata.Chunk chunk, long chunkOffset, boolean shouldCheckCrc) throws CorruptBlockException
         {
             int length = shouldCheckCrc ? chunk.length + Integer.BYTES // compressed length + checksum length
                                         : chunk.length;
             ByteBuffer compressed = bufferHolder.getBuffer(length);
-            if (channel.read(compressed, chunk.offset) != length)
+            if (channel.read(compressed, chunkOffset) != length)
                 throw new CorruptBlockException(channel.filePath(), chunk);
             compressed.flip();
             compressed.limit(chunk.length);
@@ -168,7 +175,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         }
 
         @Override
-        public ByteBuffer read(CompressionMetadata.Chunk chunk, boolean shouldCheckCrc) throws CorruptBlockException
+        public ByteBuffer read(CompressionMetadata.Chunk chunk, long chunkOffset, boolean shouldCheckCrc) throws CorruptBlockException
         {
             int length = shouldCheckCrc ? chunk.length + Integer.BYTES // compressed length + checksum length
                                         : chunk.length;
@@ -177,7 +184,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
             int copied = 0;
             while (copied < length)
             {
-                readAheadBuffer.fill(chunk.offset + copied);
+                readAheadBuffer.fill(chunkOffset + copied);
                 int leftToRead = length - copied;
                 if (readAheadBuffer.remaining() >= leftToRead)
                     copied += readAheadBuffer.read(compressed, leftToRead);
@@ -231,7 +238,12 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 
         public Standard(ChannelProxy channel, CompressionMetadata metadata, Supplier<Double> crcCheckChanceSupplier)
         {
-            super(channel, metadata, crcCheckChanceSupplier);
+            this(channel, metadata, crcCheckChanceSupplier, 0);
+        }
+
+        public Standard(ChannelProxy channel, CompressionMetadata metadata, Supplier<Double> crcCheckChanceSupplier, long startOffset)
+        {
+            super(channel, metadata, crcCheckChanceSupplier, startOffset);
             reader = new RandomAccessCompressedReader(channel, metadata);
 
             int readAheadBufferSize = DatabaseDescriptor.getCompressedReadAheadBufferSize();
@@ -267,9 +279,10 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 boolean shouldCheckCrc = shouldCheckCrc();
 
                 CompressedReader readFrom = (scanReader != null && scanReader.allocated()) ? scanReader : reader;
+                long chunkOffset = chunk.offset - onDiskStartOffset;
                 if (chunk.length < maxCompressedLength)
                 {
-                    ByteBuffer compressed = readFrom.read(chunk, shouldCheckCrc);
+                    ByteBuffer compressed = readFrom.read(chunk, chunkOffset, shouldCheckCrc);
                     uncompressed.clear();
 
                     try
@@ -284,7 +297,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 else
                 {
                     uncompressed.position(0).limit(chunk.length);
-                    if (channel.read(uncompressed, chunk.offset) != chunk.length)
+                    if (channel.read(uncompressed, chunkOffset) != chunk.length)
                         throw new CorruptBlockException(channel.filePath(), chunk);
 
                     if (shouldCheckCrc)
@@ -294,7 +307,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 
                         ByteBuffer scratch = ByteBuffer.allocate(Integer.BYTES);
                         if (channel.read(scratch, chunk.offset + chunk.length) != Integer.BYTES
-                            || scratch.getInt(0) != checksum)
+                                || scratch.getInt(0) != checksum)
                             throw new CorruptBlockException(channel.filePath(), chunk);
                     }
                 }
@@ -331,7 +344,12 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 
         public Mmap(ChannelProxy channel, CompressionMetadata metadata, MmappedRegions regions, Supplier<Double> crcCheckChanceSupplier)
         {
-            super(channel, metadata, crcCheckChanceSupplier);
+            this(channel, metadata, regions, crcCheckChanceSupplier, 0);
+        }
+
+        public Mmap(ChannelProxy channel, CompressionMetadata metadata, MmappedRegions regions, Supplier<Double> crcCheckChanceSupplier, long startOffset)
+        {
+            super(channel, metadata, crcCheckChanceSupplier, startOffset);
             this.regions = regions;
         }
 
@@ -348,10 +366,10 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
 
                 MmappedRegions.Region region = regions.floor(chunk.offset);
                 long segmentOffset = region.offset();
-                int chunkOffset = Ints.checkedCast(chunk.offset - segmentOffset);
+                int chunkOffsetInSegment = Ints.checkedCast(chunk.offset - segmentOffset);
                 ByteBuffer compressedChunk = region.buffer();
 
-                compressedChunk.position(chunkOffset).limit(chunkOffset + chunk.length);
+                compressedChunk.position(chunkOffsetInSegment).limit(chunkOffsetInSegment + chunk.length);
 
                 uncompressed.clear();
 
@@ -365,7 +383,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                         if (compressedChunk.getInt() != checksum)
                             throw new CorruptBlockException(channel.filePath(), chunk);
 
-                        compressedChunk.position(chunkOffset).limit(chunkOffset + chunk.length);
+                        compressedChunk.position(chunkOffsetInSegment).limit(chunkOffsetInSegment + chunk.length);
                     }
 
                     if (chunk.length < maxCompressedLength)

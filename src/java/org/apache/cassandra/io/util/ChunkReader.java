@@ -34,7 +34,11 @@ public interface ChunkReader extends RebuffererFactory
      * Read the chunk at the given position, attempting to fill the capacity of the given buffer.
      * The filled buffer must be positioned at 0, with limit set at the size of the available data.
      * The source may have requirements for the positioning and/or size of the buffer (e.g. chunk-aligned and
-     * chunk-sized). These must be satisfied by the caller. 
+     * chunk-sized). These must be satisfied by the caller.
+     * <p/>
+     * If the reader is created for a partial file described by {@link SliceDescriptor}, the provided position refers
+     * to the original file, not the slice, that is, the caller can provide only the position from the range of the
+     * slice (i.e. {@link SliceDescriptor#sliceStart} (incl) ... {@link SliceDescriptor#sliceEnd} (excl)).
      */
     void readChunk(long position, ByteBuffer buffer);
 
