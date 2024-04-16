@@ -38,6 +38,7 @@ import org.apache.cassandra.io.sstable.format.bti.BtiFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.utils.FilterFactory;
@@ -71,7 +72,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
         checkNotNull(statsMetadata);
 
         try (PartitionIndex index = PartitionIndex.load(partitionIndexFileBuilder(), tableMetadataRef.getLocal().partitioner, false);
-             CompressionMetadata compressionMetadata = CompressionInfoComponent.maybeLoad(descriptor, components);
+             CompressionMetadata compressionMetadata = CompressionInfoComponent.maybeLoad(descriptor, components, statsMetadata.zeroCopyMetadata);
              FileHandle dFile = dataFileBuilder(statsMetadata).withCompressionMetadata(compressionMetadata)
                                                               .withCrcCheckChance(() -> tableMetadataRef.getLocal().params.crcCheckChance)
                                                               .complete();
@@ -134,7 +135,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
 
             if (builder.getComponents().contains(Components.PARTITION_INDEX))
             {
-                builder.setPartitionIndex(openPartitionIndex(!builder.getFilter().isInformative()));
+                builder.setPartitionIndex(openPartitionIndex(!builder.getFilter().isInformative(), statsComponent.statsMetadata().zeroCopyMetadata));
                 if (builder.getFirst() == null || builder.getLast() == null)
                 {
                     builder.setFirst(builder.getPartitionIndex().firstKey());
@@ -142,7 +143,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
                 }
             }
 
-            try (CompressionMetadata compressionMetadata = CompressionInfoComponent.maybeLoad(descriptor, components))
+            try (CompressionMetadata compressionMetadata = CompressionInfoComponent.maybeLoad(descriptor, components, statsComponent.statsMetadata().zeroCopyMetadata))
             {
                 builder.setDataFile(dataFileBuilder(builder.getStatsMetadata())
                                     .withCompressionMetadata(compressionMetadata)
@@ -183,11 +184,11 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
         return bf;
     }
 
-    private PartitionIndex openPartitionIndex(boolean preload) throws IOException
+    private PartitionIndex openPartitionIndex(boolean preload, ZeroCopyMetadata zeroCopyMetadata) throws IOException
     {
         try (FileHandle indexFile = partitionIndexFileBuilder().complete())
         {
-            return PartitionIndex.load(indexFile, tableMetadataRef.getLocal().partitioner, preload);
+            return PartitionIndex.load(indexFile, tableMetadataRef.getLocal().partitioner, preload, zeroCopyMetadata);
         }
         catch (IOException ex)
         {

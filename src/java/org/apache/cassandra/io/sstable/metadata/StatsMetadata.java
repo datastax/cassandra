@@ -42,11 +42,9 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.io.ISerializer;
-import org.apache.cassandra.io.sstable.UnsupportedSSTableException;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.serializers.AbstractTypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.EstimatedHistogram;
@@ -108,6 +106,8 @@ public class StatsMetadata extends MetadataComponent
     public final ByteBuffer lastKey;
     private final ImmutableMap<ByteBuffer, Integer> maxColumnValueLengths;
 
+    public final ZeroCopyMetadata zeroCopyMetadata;
+
     public StatsMetadata(EstimatedHistogram estimatedPartitionSize,
                          EstimatedHistogram estimatedCellPerPartitionCount,
                          IntervalSet<CommitLogPosition> commitLogIntervals,
@@ -131,9 +131,10 @@ public class StatsMetadata extends MetadataComponent
                          TimeUUID pendingRepair,
                          boolean isTransient,
                          boolean hasPartitionLevelDeletions,
-                         ByteBuffer firstKey, 
+                         ByteBuffer firstKey,
                          ByteBuffer lastKey,
-                         Map<ByteBuffer, Integer> maxColumnValueLengths)
+                         Map<ByteBuffer, Integer> maxColumnValueLengths,
+                         ZeroCopyMetadata zeroCopyMetadata)
     {
         this.estimatedPartitionSize = estimatedPartitionSize;
         this.estimatedCellPerPartitionCount = estimatedCellPerPartitionCount;
@@ -162,6 +163,7 @@ public class StatsMetadata extends MetadataComponent
         this.firstKey = firstKey;
         this.lastKey = lastKey;
         this.maxColumnValueLengths = ImmutableMap.copyOf(maxColumnValueLengths);
+        this.zeroCopyMetadata = zeroCopyMetadata;
     }
 
     public MetadataType getType()
@@ -218,9 +220,10 @@ public class StatsMetadata extends MetadataComponent
                                  pendingRepair,
                                  isTransient,
                                  hasPartitionLevelDeletions,
-                                 firstKey, 
-                                 lastKey, 
-                                 maxColumnValueLengths);
+                                 firstKey,
+                                 lastKey,
+                                 maxColumnValueLengths,
+                                 zeroCopyMetadata);
     }
 
     public StatsMetadata mutateRepairedMetadata(long newRepairedAt, TimeUUID newPendingRepair, boolean newIsTransient)
@@ -248,9 +251,10 @@ public class StatsMetadata extends MetadataComponent
                                  newPendingRepair,
                                  newIsTransient,
                                  hasPartitionLevelDeletions,
-                                 firstKey, 
-                                 lastKey, 
-                                 maxColumnValueLengths);
+                                 firstKey,
+                                 lastKey,
+                                 maxColumnValueLengths,
+                                 zeroCopyMetadata);
     }
 
     @Override
@@ -285,6 +289,7 @@ public class StatsMetadata extends MetadataComponent
                        .append(firstKey, that.firstKey)
                        .append(lastKey, that.lastKey)
                        .append(maxColumnValueLengths, that.maxColumnValueLengths)
+                       .append(zeroCopyMetadata, that.zeroCopyMetadata)
                        .build();
     }
 
@@ -316,6 +321,7 @@ public class StatsMetadata extends MetadataComponent
                        .append(firstKey)
                        .append(lastKey)
                        .append(maxColumnValueLengths)
+                       .append(zeroCopyMetadata)
                        .build();
     }
 
@@ -369,11 +375,12 @@ public class StatsMetadata extends MetadataComponent
                     size += TimeUUID.sizeInBytes();
             }
 
-            // we do not have zero copy metadata
+            // we do not have zero copy metadata, but we need to support loading such sstables
             if (version.hasZeroCopyMetadata())
             {
                 size += 1;
-                // TODO: STAR-1907
+                if (component.zeroCopyMetadata.exists())
+                    size += ZeroCopyMetadata.serializer.serializedSize(component.zeroCopyMetadata);
             }
 
             // we do not have node sync metadata
@@ -507,10 +514,18 @@ public class StatsMetadata extends MetadataComponent
                 }
             }
 
-            // we do not have zero copy metadata
+            // we do not produce such sstables, but we need to be able to rewrite the metadata
             if (version.hasZeroCopyMetadata())
             {
-                out.writeByte(0);
+                if (component.zeroCopyMetadata != null && component.zeroCopyMetadata.exists())
+                {
+                    out.writeByte(1);
+                    ZeroCopyMetadata.serializer.serialize(component.zeroCopyMetadata, out);
+                }
+                else
+                {
+                    out.writeByte(0);
+                }
             }
 
             // we do not have node sync metadata
@@ -678,13 +693,10 @@ public class StatsMetadata extends MetadataComponent
                 pendingRepair = TimeUUID.deserialize(in);
             }
 
+            ZeroCopyMetadata zeroCopyMetadata = ZeroCopyMetadata.EMPTY;
             if (version.hasZeroCopyMetadata() && in.readByte() != 0)
             {
-                throw new UnsupportedSSTableException(String.format("Found DSE zero copy metadata in %s. " +
-                                                                    "Files copied over using partial zero-copy " +
-                                                                    "streaming in DSE are not currently supported.", in),
-                                                      null,
-                                                      in instanceof FileDataInput ? ((FileDataInput) in).getFile() : null);
+                zeroCopyMetadata = ZeroCopyMetadata.serializer.deserialize(in);
             }
 
             if (version.hasIncrementalNodeSyncMetadata())
@@ -765,9 +777,10 @@ public class StatsMetadata extends MetadataComponent
                                      pendingRepair,
                                      isTransient,
                                      hasPartitionLevelDeletions,
-                                     firstKey, 
-                                     lastKey, 
-                                     maxColumnValueLengths);
+                                     firstKey,
+                                     lastKey,
+                                     maxColumnValueLengths,
+                                     zeroCopyMetadata);
         }
 
         private int countUntilNull(ByteBuffer[] bufferArray)
