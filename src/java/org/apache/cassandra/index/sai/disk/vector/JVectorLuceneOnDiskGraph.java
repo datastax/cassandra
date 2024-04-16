@@ -18,18 +18,22 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.function.IntConsumer;
 
 import org.slf4j.Logger;
 
+import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 
 /**
@@ -79,6 +83,47 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
             var file = indexFiles.getFile(component);
             // 7 is the length of the header written by SAICodecUtils
             return new SegmentMetadata.ComponentMetadata(-1, 7, file.onDiskLength - 7); // graph indexes ignore root
+        }
+    }
+
+    public static interface VectorSupplier extends AutoCloseable
+    {
+        /**
+         * Returns the score function for the given query vector.
+         */
+        ScoreFunction.ExactScoreFunction getScoreFunction(VectorFloat<?> queryVector, VectorSimilarityFunction similarityFunction);
+
+        /**
+         * Close the vectors view, logging any exceptions.
+         */
+        @Override
+        void close();
+    }
+
+    /**
+     * An ExactScoreFunction that closes the underlying {@link VectorSupplier} when closed.
+     */
+    public static class CloseableReranker implements ScoreFunction.ExactScoreFunction, Closeable
+    {
+        private final VectorSupplier vectorSupplier;
+        private final ExactScoreFunction scoreFunction;
+
+        public CloseableReranker(VectorSimilarityFunction similarityFunction, VectorFloat<?> queryVector, VectorSupplier supplier)
+        {
+            this.vectorSupplier = supplier;
+            this.scoreFunction = supplier.getScoreFunction(queryVector, similarityFunction);
+        }
+
+        @Override
+        public float similarityTo(int i)
+        {
+            return scoreFunction.similarityTo(i);
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(vectorSupplier);
         }
     }
 }
