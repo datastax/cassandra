@@ -63,6 +63,7 @@ extends SSTableReaderLoadingBuilder<R, B>
         dataFileBuilder.bufferSize(bufferSize);
         dataFileBuilder.withChunkCache(chunkCache);
         dataFileBuilder.mmapped(ioOptions.defaultDiskAccessMode);
+        dataFileBuilder.slice(statsMetadata.zeroCopyMetadata);
 
         return dataFileBuilder;
     }
