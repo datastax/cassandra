@@ -36,6 +36,7 @@ import io.github.jbellis.jvector.pq.BQVectors;
 import io.github.jbellis.jvector.pq.CompressedVectors;
 import io.github.jbellis.jvector.pq.PQVectors;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.util.ExplicitThreadLocal;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.concurrent.Stage;
@@ -72,6 +73,8 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private final CompressedVectors compressedVectors;
     private final boolean pqUnitVectors;
 
+    private final ExplicitThreadLocal<GraphSearcher> searchers;
+
     public CassandraDiskAnn(SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context) throws IOException
     {
         super(componentMetadatas, indexFiles);
@@ -107,6 +110,8 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
         SegmentMetadata.ComponentMetadata postingListsMetadata = getComponentMetadata(IndexComponent.POSTING_LISTS);
         ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
+
+        searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcher(graph));
     }
 
     private static int logBaseX(double val, double base) {
@@ -147,48 +152,37 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     {
         CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
 
-        // We cannot use try-with-resources here because AutoResumingNodeScoreIterator might need to resume the search,
-        // which relies on the graph view.
-        var view = getView();
-        try
+        var searcher = searchers.get();
+        var view = (GraphIndex.ScoringView) searcher.getView();
+        SearchScoreProvider ssp;
+        if (compressedVectors == null)
         {
-            SearchScoreProvider ssp;
-            if (compressedVectors == null)
-            {
-                ssp = new SearchScoreProvider(view.rerankerFor(queryVector, similarityFunction), null);
-            }
-            else
-            {
-                // unit vectors defined with dot product should switch to cosine similarity for compressed
-                // comparisons, since the compression does not maintain unit length
-                var sf = pqUnitVectors && similarityFunction == VectorSimilarityFunction.DOT_PRODUCT
-                         ? VectorSimilarityFunction.COSINE
-                         : similarityFunction;
-                var asf = compressedVectors.scoreFunctionFor(queryVector, sf);
-                var rr = view.rerankerFor(queryVector, sf);
-                ssp = new SearchScoreProvider(asf, rr);
-            }
-            var searcher = new GraphSearcher(view);
-            var result = searcher.search(ssp, topK, threshold, ordinalsMap.ignoringDeleted(acceptBits));
-            Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
-            // Threshold based searches are comprehensive and do not need to resume the search.
-            if (threshold > 0)
-            {
-                FileUtils.closeQuietly(view);
-                nodesVisitedConsumer.accept(result.getVisitedCount());
-                var nodeScores = CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
-                return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
-            }
-            else
-            {
-                var nodeScores = new AutoResumingNodeScoreIterator(searcher, result, nodesVisitedConsumer, topK, false, view);
-                return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
-            }
+            ssp = new SearchScoreProvider(view.rerankerFor(queryVector, similarityFunction), null);
         }
-        catch (RuntimeException e)
+        else
         {
-            FileUtils.closeQuietly(view);
-            throw e;
+            // unit vectors defined with dot product should switch to cosine similarity for compressed
+            // comparisons, since the compression does not maintain unit length
+            var sf = pqUnitVectors && similarityFunction == VectorSimilarityFunction.DOT_PRODUCT
+                     ? VectorSimilarityFunction.COSINE
+                     : similarityFunction;
+            var asf = compressedVectors.scoreFunctionFor(queryVector, sf);
+            var rr = view.rerankerFor(queryVector, sf);
+            ssp = new SearchScoreProvider(asf, rr);
+        }
+        var result = searcher.search(ssp, topK, threshold, ordinalsMap.ignoringDeleted(acceptBits));
+        Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
+        // Threshold based searches are comprehensive and do not need to resume the search.
+        if (threshold > 0)
+        {
+            nodesVisitedConsumer.accept(result.getVisitedCount());
+            var nodeScores = CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
+            return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
+        }
+        else
+        {
+            var nodeScores = new AutoResumingNodeScoreIterator(searcher, result, nodesVisitedConsumer, topK, false);
+            return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
         }
     }
 
@@ -202,6 +196,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     public void close() throws IOException
     {
         ordinalsMap.close();
+        searchers.close();
         graph.close();
         graphHandle.close();
     }

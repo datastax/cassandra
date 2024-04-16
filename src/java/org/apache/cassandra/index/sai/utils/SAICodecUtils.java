@@ -62,6 +62,12 @@ public class SAICodecUtils
         out.writeString(Version.LATEST.toString());
     }
 
+    public static int headerSize() {
+        // Lucene's string-writing code is complex, but this is what it works out to
+        // until version length exceeds 127 characters or we add non-ascii characters
+        return 7;
+    }
+
     public static void writeFooter(IndexOutput out) throws IOException
     {
         writeBEInt(out, FOOTER_MAGIC);
