@@ -187,9 +187,10 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
     }
 
-    public int getFileDescriptor()
+    public void trySkipCache(long offset, long length)
     {
-        return INativeLibrary.instance.getfd(channel);
+        int fd = INativeLibrary.instance.getfd(channel);
+        INativeLibrary.instance.trySkipCache(fd, offset, length, file.absolutePath());
     }
 
     @Override
