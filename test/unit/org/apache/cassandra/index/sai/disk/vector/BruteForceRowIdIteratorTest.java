@@ -47,7 +47,7 @@ public class BruteForceRowIdIteratorTest
 
         // Should work for an empty pq
         var view = new TestVectorSupplier();
-        CloseableReranker reranker = new CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
+        JVectorLuceneOnDiskGraph.CloseableReranker reranker = new JVectorLuceneOnDiskGraph.CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
         var iter = new BruteForceRowIdIterator(pq, reranker, limit, topK);
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
@@ -56,7 +56,7 @@ public class BruteForceRowIdIteratorTest
         assertTrue(view.isClosed);
     }
 
-    private static class TestVectorSupplier implements VectorSupplier
+    private static class TestVectorSupplier implements JVectorLuceneOnDiskGraph.VectorSupplier
     {
         private boolean isClosed = false;
 
