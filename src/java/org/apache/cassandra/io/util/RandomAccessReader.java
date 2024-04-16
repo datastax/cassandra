@@ -36,16 +36,17 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     private long markedPointer;
 
     final Rebufferer rebufferer;
-    private BufferHolder bufferHolder = Rebufferer.EMPTY;
+    private BufferHolder bufferHolder;
 
     /**
      * Only created through Builder
      *
      * @param rebufferer Rebufferer to use
      */
-    RandomAccessReader(Rebufferer rebufferer)
+    RandomAccessReader(Rebufferer rebufferer, BufferHolder bufferHolder)
     {
-        super(Rebufferer.EMPTY.buffer());
+        super(bufferHolder.buffer());
+        this.bufferHolder = bufferHolder;
         this.rebufferer = rebufferer;
     }
 
@@ -304,7 +305,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
     {
         RandomAccessReaderWithOwnChannel(Rebufferer rebufferer)
         {
-            super(rebufferer);
+            super(rebufferer, Rebufferer.EMPTY);
         }
 
         @Override

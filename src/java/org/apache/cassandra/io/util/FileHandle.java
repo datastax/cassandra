@@ -129,7 +129,8 @@ public class FileHandle extends SharedCloseableImpl
     }
 
     /**
-     * Create {@link RandomAccessReader} with configured method of reading content of the file.
+     * Create {@link RandomAccessReader} with configured method of reading content of the file. Positions the reader
+     * at the start of the file or the start of the data if the handle is created for a slice (see {@link SliceDescriptor}).
      *
      * @return RandomAccessReader for the file
      */
@@ -138,26 +139,31 @@ public class FileHandle extends SharedCloseableImpl
         return createReader(null);
     }
 
+    public RandomAccessReader createReader(RateLimiter limiter)
+    {
+        return createReader(limiter, sliceDescriptor.dataStart);
+    }
+
+    public RandomAccessReader createReader(long position)
+    {
+        return createReader(null, position);
+    }
+
     /**
      * Create {@link RandomAccessReader} with configured method of reading content of the file.
      * Reading from file will be rate limited by given {@link RateLimiter}.
      *
      * @param limiter RateLimiter to use for rate limiting read
+     * @param position Position in the file to start reading from
      * @return RandomAccessReader for the file
      */
-    public RandomAccessReader createReader(RateLimiter limiter)
+    public RandomAccessReader createReader(RateLimiter limiter, long position)
     {
-        RandomAccessReader reader = new RandomAccessReader(instantiateRebufferer(limiter));
-        if (sliceDescriptor.dataStart > sliceDescriptor.sliceStart)
-            reader.seek(sliceDescriptor.dataStart);
-        return reader;
-    }
-
-    public RandomAccessReader createReader(long position)
-    {
-        RandomAccessReader reader = createReader();
-        reader.seek(position);
-        return reader;
+        assert position >= 0 : "Position must be non-negative - file: " + channel.filePath() + ", position: " + position;
+        Rebufferer.BufferHolder bufferHolder = position > 0
+                                               ? Rebufferer.emptyBufferHolderAt(position)
+                                               : Rebufferer.EMPTY;
+        return new RandomAccessReader(instantiateRebufferer(limiter), bufferHolder);
     }
 
     /**
