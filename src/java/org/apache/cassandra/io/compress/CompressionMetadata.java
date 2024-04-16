@@ -58,7 +58,7 @@ import org.apache.cassandra.utils.concurrent.Transactional;
 /**
  * Holds metadata about compressed file
  */
-public class CompressionMetadata
+public class CompressionMetadata implements AutoCloseable
 {
     /**
      * DataLength can represent either the true length of the file
@@ -67,10 +67,12 @@ public class CompressionMetadata
      * If zero copy metadata is present, this is the uncompressed length of the partial data file.
      */
     public final long dataLength;
+
     /**
      * Length of the compressed file in bytes. This refers to the partial file length if zero copy metadata is present.
      */
     public final long compressedFileLength;
+
     /**
      * Offsets of consecutive chunks in the (compressed) data file. The length of this array is equal to the number of
      * chunks. Each item is of Long type, thus 8 bytes long. Note that even if we deal with a partial data file (zero
@@ -88,6 +90,10 @@ public class CompressionMetadata
      */
     private final int chunkLengthBits;
 
+    /**
+     * If we don't want to load the all offsets into memory, for example when we deal with a slice, this is the index of
+     * the first offset we loaded.
+     */
     private final int startChunkIndex;
 
     /**
@@ -125,7 +131,8 @@ public class CompressionMetadata
      * If zero copy metadata is present, the compression metadata represents information about chunks in the original
      * data file rather than the partial file it deals.
      */
-    private CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor)
+    @VisibleForTesting
+    public CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor)
     {
         this.indexFilePath = indexFilePath;
         long uncompressedOffset = sliceDescriptor.exists() ? sliceDescriptor.sliceStart : 0;

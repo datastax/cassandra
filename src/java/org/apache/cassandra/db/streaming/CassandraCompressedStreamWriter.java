@@ -87,6 +87,9 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
                 while (bytesTransferred < length)
                 {
                     int toTransfer = (int) Math.min(CHUNK_SIZE, length - bytesTransferred);
+                    // since we access the file directly (not through the rebufferer) we need to adjust the position
+                    // manually when dealing with a slice (see ZeroCopyMetadata); therefore we subtract the onDiskOffset
+                    // by which all the section positions are translated
                     long position = section.start + bytesTransferred - onDiskOffset;
 
                     out.writeToChannel(bufferSupplier -> {
