@@ -45,7 +45,6 @@ import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
-import org.apache.cassandra.index.sai.disk.vector.VectorSupplier;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
