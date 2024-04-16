@@ -98,6 +98,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.SliceDescriptor;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -568,6 +569,11 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     public Path getFile()
     {
         return descriptor.pathFor(Components.DATA);
+    }
+
+    public SliceDescriptor getDataFileSliceDescriptor()
+    {
+        return dfile.sliceDescriptor;
     }
 
     public void setupOnline()

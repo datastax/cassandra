@@ -21,6 +21,8 @@ import java.io.FileNotFoundException;
 import java.net.SocketException;
 import java.nio.file.FileSystemException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -89,17 +91,17 @@ public final class JVMStabilityInspector
         }
         JVMStabilityInspector.inspectThrowable(t);
     }
-    
+
     public static void setGlobalErrorHandler(Consumer<Throwable> errorHandler)
     {
         globalHandler = errorHandler;
     }
-    
+
     @VisibleForTesting
     public static Consumer<Throwable> getGlobalErrorHandler()
     {
         return globalHandler;
-    } 
+    }
 
     public static void setDiskErrorHandler(Consumer<Throwable> errorHandler)
     {

@@ -37,7 +37,7 @@ class PartitionIndexEarly extends PartitionIndex
     public PartitionIndexEarly(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last,
                                long cutoff, ByteBuffer tail)
     {
-        super(fh, trieRoot, keyCount, first, last);
+        super(fh, trieRoot, keyCount, first, last, null, null);
         this.cutoff = cutoff;
         this.tail = tail;
     }

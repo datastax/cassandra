@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.tries.SerializationNode;
 import org.apache.cassandra.io.tries.TrieNode;
 import org.apache.cassandra.io.tries.TrieSerializer;
@@ -73,24 +74,34 @@ public class PartitionIndex implements SharedCloseable
     private final DecoratedKey first;
     private final DecoratedKey last;
     private final long root;
+    /** Key to apply when a caller asks for a full index. Normally null, but set to first for zero-copied indexes. */
+    private final DecoratedKey filterFirst;
+    /** Key to apply when a caller asks for a full index. Normally null, but set to last for zero-copied indexes. */
+    private final DecoratedKey filterLast;
 
     public static final long NOT_FOUND = Long.MIN_VALUE;
     public static final int FOOTER_LENGTH = 3 * 8;
     private static final int FLAG_HAS_HASH_BYTE = 8;
 
-    @VisibleForTesting
     public PartitionIndex(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last)
+    {
+        this(fh, trieRoot, keyCount, first, last, null, null);
+    }
+
+    public PartitionIndex(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last, DecoratedKey filterFirst, DecoratedKey filterLast)
     {
         this.keyCount = keyCount;
         this.fh = fh.sharedCopy();
         this.first = first;
         this.last = last;
         this.root = trieRoot;
+        this.filterFirst = filterFirst;
+        this.filterLast = filterLast;
     }
 
     private PartitionIndex(PartitionIndex src)
     {
-        this(src.fh, src.root, src.keyCount, src.first, src.last);
+        this(src.fh, src.root, src.keyCount, src.first, src.last, src.filterFirst, src.filterLast);
     }
 
     static class Payload
@@ -171,9 +182,17 @@ public class PartitionIndex implements SharedCloseable
                                       IPartitioner partitioner,
                                       boolean preload) throws IOException
     {
+        return load(fhBuilder, partitioner, preload, null);
+    }
+
+    public static PartitionIndex load(FileHandle.Builder fhBuilder,
+                                      IPartitioner partitioner,
+                                      boolean preload,
+                                      ZeroCopyMetadata zeroCopyMetadata) throws IOException
+    {
         try (FileHandle fh = fhBuilder.complete())
         {
-            return load(fh, partitioner, preload);
+            return load(fh, partitioner, preload, zeroCopyMetadata);
         }
     }
 
@@ -185,7 +204,7 @@ public class PartitionIndex implements SharedCloseable
         }
     }
 
-    public static PartitionIndex load(FileHandle fh, IPartitioner partitioner, boolean preload) throws IOException
+    public static PartitionIndex load(FileHandle fh, IPartitioner partitioner, boolean preload, ZeroCopyMetadata zeroCopyMetadata) throws IOException
     {
         try (FileDataInput rdr = fh.createReader(fh.dataLength() - FOOTER_LENGTH))
         {
@@ -207,7 +226,26 @@ public class PartitionIndex implements SharedCloseable
                 logger.trace("Checksum {}", csum);      // Note: trace is required so that reads aren't optimized away.
             }
 
-            return new PartitionIndex(fh, root, keyCount, first, last);
+            DecoratedKey filterFirst = null;
+            DecoratedKey filterLast = null;
+
+            // Adjust keys estimate plus bounds if ZeroCopy, otherwise we would see un-owned data from the index:
+            if (zeroCopyMetadata != null && zeroCopyMetadata.exists() && partitioner != null)
+            {
+                DecoratedKey newFirst = partitioner.decorateKey(zeroCopyMetadata.firstKey());
+                DecoratedKey newLast = partitioner.decorateKey(zeroCopyMetadata.lastKey());
+                if (!newFirst.equals(first))
+                {
+                    filterFirst = first = newFirst;
+                }
+                if (!newLast.equals(last))
+                {
+                    filterLast = last = newLast;
+                }
+                keyCount = zeroCopyMetadata.estimatedKeys();
+            }
+
+            return new PartitionIndex(fh, root, keyCount, first, last, filterFirst, filterLast);
         }
     }
 
@@ -399,7 +437,7 @@ public class PartitionIndex implements SharedCloseable
          */
         public IndexPosIterator(PartitionIndex index)
         {
-            super(index.instantiateRebufferer(), index.root);
+            super(index.instantiateRebufferer(), index.root, index.filterFirst, index.filterLast, true);
         }
 
         IndexPosIterator(PartitionIndex index, PartitionPosition start, PartitionPosition end)

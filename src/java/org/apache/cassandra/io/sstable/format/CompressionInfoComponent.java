@@ -29,30 +29,37 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.SliceDescriptor;
 
 public class CompressionInfoComponent
 {
-    public static CompressionMetadata maybeLoad(Descriptor descriptor, Set<Component> components)
+    public static CompressionMetadata maybeLoad(Descriptor descriptor, Set<Component> components, SliceDescriptor sliceDescriptor)
     {
         if (components.contains(Components.COMPRESSION_INFO))
-            return load(descriptor);
+            return load(descriptor, sliceDescriptor);
 
         return null;
     }
 
-    public static CompressionMetadata loadIfExists(Descriptor descriptor)
+    public static CompressionMetadata loadIfExists(Descriptor descriptor, SliceDescriptor sliceDescriptor)
     {
         if (descriptor.fileFor(Components.COMPRESSION_INFO).exists())
-            return load(descriptor);
+            return load(descriptor, sliceDescriptor);
 
         return null;
     }
 
     public static CompressionMetadata load(Descriptor descriptor)
     {
+        return load(descriptor, SliceDescriptor.NONE);
+    }
+
+    public static CompressionMetadata load(Descriptor descriptor, SliceDescriptor sliceDescriptor)
+    {
         return CompressionMetadata.open(descriptor.fileFor(Components.COMPRESSION_INFO),
                                         descriptor.fileFor(Components.DATA).length(),
-                                        descriptor.version.hasMaxCompressedLength());
+                                        descriptor.version.hasMaxCompressedLength(),
+                                        sliceDescriptor);
     }
 
     /**
