@@ -100,9 +100,10 @@ public class MetadataCollector implements PartitionStatisticsCollector
                                  null,
                                  false,
                                  true,
-                                 ByteBufferUtil.EMPTY_BYTE_BUFFER, 
                                  ByteBufferUtil.EMPTY_BYTE_BUFFER,
-                                 Collections.emptyMap());
+                                 ByteBufferUtil.EMPTY_BYTE_BUFFER,
+                                 Collections.emptyMap(),
+                                 ZeroCopyMetadata.EMPTY);
     }
 
     protected EstimatedHistogram estimatedPartitionSize = defaultPartitionSizeHistogram();
@@ -391,9 +392,10 @@ public class MetadataCollector implements PartitionStatisticsCollector
                                                              pendingRepair,
                                                              isTransient,
                                                              hasPartitionLevelDeletions,
-                                                             firstKey, 
+                                                             firstKey,
                                                              lastKey,
-                                                             Collections.emptyMap()));
+                                                             Collections.emptyMap(),
+                                                             ZeroCopyMetadata.EMPTY));
         components.put(MetadataType.COMPACTION, new CompactionMetadata(cardinality));
         components.put(MetadataType.HEADER, header.toComponent());
         return components;
