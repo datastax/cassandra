@@ -55,17 +55,23 @@ import org.apache.cassandra.cql3.functions.types.TypeCodec;
 import org.apache.cassandra.cql3.functions.types.UDTValue;
 import org.apache.cassandra.cql3.functions.types.UserType;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
+import org.apache.cassandra.cql3.statements.schema.IndexTarget;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -1390,8 +1396,8 @@ public abstract class CQLSSTableWriterTest
                                                                  Murmur3Partitioner.instance,
                                                                  Schema.instance.getTableMetadata(keyspace, table).comparator);
 
-        assertTrue(indexDescriptor.isPerIndexBuildComplete(SAITester.createIndexContext("idx1", UTF8Type.instance)));
-        assertTrue(indexDescriptor.isPerIndexBuildComplete(SAITester.createIndexContext("idx2", UTF8Type.instance)));
+        assertTrue(indexDescriptor.isPerIndexBuildComplete(createIndexContext("idx1", UTF8Type.instance)));
+        assertTrue(indexDescriptor.isPerIndexBuildComplete(createIndexContext("idx2", UTF8Type.instance)));
 
         if (PathUtils.isDirectory(dataDir.toPath()))
             PathUtils.forEach(dataDir.toPath(), PathUtils::deleteRecursive);
@@ -1434,10 +1440,23 @@ public abstract class CQLSSTableWriterTest
                                                                  Murmur3Partitioner.instance,
                                                                  Schema.instance.getTableMetadata(keyspace, table).comparator);
 
-        assertFalse(indexDescriptor.isPerIndexBuildComplete(SAITester.createIndexContext("idx1", UTF8Type.instance)));
-        assertFalse(indexDescriptor.isPerIndexBuildComplete(SAITester.createIndexContext("idx2", UTF8Type.instance)));
+        
+        assertFalse(indexDescriptor.isPerIndexBuildComplete(createIndexContext("idx1", UTF8Type.instance)));
+        assertFalse(indexDescriptor.isPerIndexBuildComplete(createIndexContext("idx2", UTF8Type.instance)));
     }
 
+    public IndexContext createIndexContext(String name, AbstractType<?> validator)
+    {
+        return new IndexContext(keyspace,
+                                table,
+                                UTF8Type.instance,
+                                new ClusteringComparator(),
+                                ColumnMetadata.regularColumn("sai", "internal", name, validator),
+                                IndexTarget.Type.SIMPLE,
+                                IndexMetadata.fromSchemaMetadata(name, IndexMetadata.Kind.CUSTOM, null),
+                                MockSchema.newCFS(keyspace));
+    }
+    
     protected void loadSSTables(File dataDir, String ksName)
     {
         ColumnFamilyStore cfs = Keyspace.openWithoutSSTables(ksName).getColumnFamilyStore(table);
