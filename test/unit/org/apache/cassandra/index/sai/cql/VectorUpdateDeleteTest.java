@@ -857,6 +857,39 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
+    public void updatedPrimaryKeysRequireResumeSearch() throws Throwable
+    {
+        setMaxBruteForceRows(0);
+
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 2>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
+        disableCompaction(KEYSPACE);
+
+        // This test is fairly contrived, but it covers a bug we hit due to prematurely closed iterators.
+        // The general design for this test is to shadow the close vectors on a memtable/sstable index forcing the
+        // index to resume search. We do that by overwriting the first 50 vectors in the initial sstable.
+        for (int i = 0; i < 100; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, i));
+
+        // Add more rows to make sure we filter then sort
+        for (int i = 100; i < 1000; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'C', ?)", i, vector(1, i));
+
+        flush();
+
+        // Overwrite the most similar 50 rows
+        for (int i = 0; i < 50; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'B', ?)", i, vector(1, i));
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 1.0] LIMIT 1"),
+                       row(50));
+        });
+    }
+
+    @Test
     public void testBruteForceRangeQueryWithUpdatedVectors1536D() throws Throwable
     {
         testBruteForceRangeQueryWithUpdatedVectors(1536);

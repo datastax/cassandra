@@ -36,10 +36,9 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
-import org.apache.cassandra.inject.ActionBuilder;
-import org.apache.cassandra.inject.Injections;
-import org.apache.cassandra.inject.InvokePointBuilder;
+import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -54,20 +53,10 @@ public class VectorTester extends SAITester
         setMaxBruteForceRows(n);
     }
 
-    static void setMaxBruteForceRows(int n) throws Throwable
+    static void setMaxBruteForceRows(int n)
     {
-        var shouldUseBruteForce = InvokePointBuilder.newInvokePoint()
-                                                  .onClass("org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher$CostEstimate")
-                                                  .onMethod("shouldUseBruteForce")
-                                                  .atEntry();
-        var ab = ActionBuilder.newActionBuilder()
-                              .actions()
-                              .doAction("$this.this$0.globalBruteForceRows = " + n);
-        var changeBruteForceThreshold = Injections.newCustom("force_non_bruteforce_queries")
-                                                  .add(shouldUseBruteForce)
-                                                  .add(ab)
-                                                  .build();
-        Injections.inject(changeBruteForceThreshold);
+        V2VectorIndexSearcher.GLOBAL_BRUTE_FORCE_ROWS = n;
+        VectorMemtableIndex.GLOBAL_BRUTE_FORCE_ROWS = n;
     }
 
     public static double rawIndexedRecall(Collection<float[]> vectors, float[] query, List<float[]> result, int topK) throws IOException
