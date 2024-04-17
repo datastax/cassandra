@@ -36,7 +36,9 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
-import org.apache.cassandra.service.ClientWarn;
+
+import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,7 +66,6 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableRangeIterator;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
@@ -732,7 +733,7 @@ public class IndexContext
         {
             float[] value = TypeUtil.decomposeVector(getValidator(), getValueOf(key, row, FBUtilities.nowInSeconds()));
             if (value != null)
-                CassandraOnHeapGraph.validateIndexable(value, vectorSimilarityFunction);
+                VectorValidation.validateIndexable(value, vectorSimilarityFunction);
         }
     }
 
@@ -746,7 +747,7 @@ public class IndexContext
             if (expression.operator() == Operator.ANN && expression.column().equals(column))
             {
                 float[] value = TypeUtil.decomposeVector(getValidator(), expression.getIndexValue());
-                CassandraOnHeapGraph.validateIndexable(value, vectorSimilarityFunction);
+                VectorValidation.validateIndexable(value, vectorSimilarityFunction);
                 // There is only one ANN expression per query.
                 return;
             }

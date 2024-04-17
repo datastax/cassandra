@@ -36,7 +36,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.transport.ProtocolVersion;
 
 import static java.lang.String.format;
-import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.isEffectivelyZero;
+import static org.apache.cassandra.index.sai.disk.vector.VectorValidation.isEffectivelyZero;
 
 public abstract class VectorFcts
 {
