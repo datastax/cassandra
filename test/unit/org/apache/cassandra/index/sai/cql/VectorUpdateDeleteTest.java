@@ -868,18 +868,18 @@ public class VectorUpdateDeleteTest extends VectorTester
         disableCompaction(KEYSPACE);
 
         // This test is fairly contrived, but it covers a bug we hit due to prematurely closed iterators.
-        // The general design for this test is to shadow all the close vectors and none of the far vectors.
-        // Choose a row count that will essentially force us to re-query the index that still has more rows to search.
-        // Create 1000 rows without any vectors so that we can get positive SAI hits that will later be invalidated.
+        // The general design for this test is to shadow the close vectors on a memtable/sstable index forcing the
+        // index to resume search. We do that by overwriting the first 50 vectors in the initial sstable.
         for (int i = 0; i < 100; i++)
             execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, i));
 
+        // Add more rows to make sure we filter then sort
         for (int i = 100; i < 1000; i++)
             execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'C', ?)", i, vector(1, i));
 
         flush();
 
-        // Overwrite some of those rows
+        // Overwrite the most similar 50 rows
         for (int i = 0; i < 50; i++)
             execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'B', ?)", i, vector(1, i));
 
