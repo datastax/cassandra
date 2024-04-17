@@ -1661,7 +1661,7 @@ public class CustomIndexTest extends CQLTester
             }
 
             @Override
-            public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata)
+            public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount)
             {
                 Set<SSTableFlushObserver> observers = indexes.values()
                                                              .stream()
