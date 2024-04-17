@@ -857,6 +857,39 @@ public class VectorUpdateDeleteTest extends VectorTester
     }
 
     @Test
+    public void updatedPrimaryKeysRequireResumeSearch() throws Throwable
+    {
+        setMaxBruteForceRows(0);
+
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 2>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+        disableCompaction(KEYSPACE);
+
+        // This test is fairly contrived, but it covers a bug we hit due to prematurely closed iterators.
+        // The general design for this test is to shadow all the close vectors and none of the far vectors.
+        // Choose a row count that will essentially force us to re-query the index that still has more rows to search.
+        // Create 1000 rows without any vectors so that we can get positive SAI hits that will later be invalidated.
+        for (int i = 0; i < 100; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", i, vector(1, i));
+
+        for (int i = 100; i < 1000; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'C', ?)", i, vector(1, i));
+
+        flush();
+
+        // Overwrite some of those rows
+        for (int i = 0; i < 50; i++)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'B', ?)", i, vector(1, i));
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 1.0] LIMIT 1"),
+                       row(50));
+        });
+    }
+
+    @Test
     public void testBruteForceRangeQueryWithUpdatedVectors1536D() throws Throwable
     {
         testBruteForceRangeQueryWithUpdatedVectors(1536);
