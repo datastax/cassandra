@@ -120,16 +120,17 @@ public interface OnDiskFormat
      * {@code OperationType.FLUSH} indicating that we are about to flush a {@link TrieMemtableIndex}
      * or one of the other operation types indicating that we will be writing from an existing SSTable
      *
-     * @param index The {@link StorageAttachedIndex} holding the current index build status
+     * @param index           The {@link StorageAttachedIndex} holding the current index build status
      * @param indexDescriptor The {@link IndexDescriptor} for the SSTable
-     * @param tracker The {@link LifecycleNewTracker} for index build operation.
-     * @param rowMapping The {@link RowMapping} that is used to map rowID to {@code PrimaryKey} during the write
+     * @param tracker         The {@link LifecycleNewTracker} for index build operation.
+     * @param rowMapping      The {@link RowMapping} that is used to map rowID to {@code PrimaryKey} during the write
+     * @param keyCount
      * @return The {@link PerIndexWriter} that will write the per-index on-disk components
      */
     public PerIndexWriter newPerIndexWriter(StorageAttachedIndex index,
                                             IndexDescriptor indexDescriptor,
                                             LifecycleNewTracker tracker,
-                                            RowMapping rowMapping);
+                                            RowMapping rowMapping, long keyCount);
 
     /**
      * Validate all the per-SSTable on-disk components and throw if a component is not valid
