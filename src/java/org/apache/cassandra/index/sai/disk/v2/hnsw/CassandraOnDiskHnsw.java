@@ -39,12 +39,12 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
 import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
+import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
@@ -106,7 +106,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         if (threshold > 0)
             throw new InvalidRequestException("Geo queries are not supported for legacy SAI indexes -- drop the index and recreate it to enable these");
 
-        CassandraOnHeapGraph.validateIndexable(queryVector, similarityFunction);
+        VectorValidation.validateIndexable(queryVector, similarityFunction);
 
         NeighborQueue queue;
         try (var view = hnsw.getView(context))
