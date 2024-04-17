@@ -23,6 +23,7 @@ import org.junit.Before;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
@@ -39,6 +40,7 @@ public class CQLSSTableWriterClientTest extends CQLSSTableWriterTest
                                                 () -> {
                                                     Config config = new Config();
                                                     config.data_file_directories = new String[]{ dataDir.absolutePath() };
+                                                    config.default_compaction = new ParameterizedClass("LeveledCompactionStrategy");
                                                     return config;
                                                 });
         DatabaseDescriptor.setDataDirectories(new File[] { dataDir});
