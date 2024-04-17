@@ -22,11 +22,13 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.function.Supplier;
 import java.util.zip.CRC32C;
+import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.File;
@@ -50,6 +52,7 @@ public class IndexFileUtils
 
     public static final IndexFileUtils instance = new IndexFileUtils(DEFAULT_WRITER_OPTION);
     private static final Supplier<Checksum> CHECKSUM_FACTORY = CRC32C::new;
+    private static final Supplier<Checksum> LEGACY_CHECKSUM_FACTORY = CRC32::new;
     private static IndexFileUtils overrideInstance = null;
 
     private final SequentialWriterOption writerOption;
@@ -104,8 +107,10 @@ public class IndexFileUtils
         }
     }
 
-    public static ChecksumIndexInput getBufferedChecksumIndexInput(IndexInput indexInput)
+    public static ChecksumIndexInput getBufferedChecksumIndexInput(IndexInput indexInput, Version version)
     {
+        if (Version.AA.equals(version))
+            return new BufferedChecksumIndexInput(indexInput, LEGACY_CHECKSUM_FACTORY.get());
         return new BufferedChecksumIndexInput(indexInput, CHECKSUM_FACTORY.get());
     }
 
