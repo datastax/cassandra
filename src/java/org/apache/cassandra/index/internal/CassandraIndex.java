@@ -270,7 +270,7 @@ public abstract class CassandraIndex implements Index
 
     public long getEstimatedResultRows()
     {
-        return indexCfs.getMeanRowCount();
+        return indexCfs.getMeanRowsPerPartition();
     }
 
     public RowFilter getPostIndexQueryFilter(RowFilter filter)

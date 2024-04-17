@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.IntUnaryOperator;
 
+import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.utils.Pair;
@@ -43,8 +44,8 @@ public class VectorPostingsWriter<T>
     }
 
     public long writePostings(SequentialWriter writer,
-                              RamAwareVectorValues vectorValues,
-                              Map<VectorFloat<?>, VectorPostings<T>> postingsMap,
+                              RandomAccessVectorValues vectorValues,
+                              Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap,
                               Set<Integer> deletedOrdinals) throws IOException
     {
         writeDeletedOrdinals(writer, deletedOrdinals);
@@ -70,8 +71,8 @@ public class VectorPostingsWriter<T>
     }
 
     public void writeNodeOrdinalToRowIdMapping(SequentialWriter writer,
-                                               RamAwareVectorValues vectorValues,
-                                               Map<VectorFloat<?>, VectorPostings<T>> postingsMap) throws IOException
+                                               RandomAccessVectorValues vectorValues,
+                                               Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
     {
         long ordToRowOffset = writer.getOnDiskFilePointer();
 
@@ -105,8 +106,8 @@ public class VectorPostingsWriter<T>
     }
 
     public void writeRowIdToNodeOrdinalMapping(SequentialWriter writer,
-                                               RamAwareVectorValues vectorValues,
-                                               Map<VectorFloat<?>, VectorPostings<T>> postingsMap) throws IOException
+                                               RandomAccessVectorValues vectorValues,
+                                               Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
     {
         List<Pair<Integer, Integer>> pairs = new ArrayList<>();
 
