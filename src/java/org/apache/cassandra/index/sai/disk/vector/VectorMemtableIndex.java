@@ -71,6 +71,7 @@ import static java.lang.Math.pow;
 public class VectorMemtableIndex implements MemtableIndex
 {
     private final Logger logger = LoggerFactory.getLogger(VectorMemtableIndex.class);
+    public static int GLOBAL_BRUTE_FORCE_ROWS = Integer.MAX_VALUE; // not final so test can inject its own setting
 
     private final IndexContext indexContext;
     private final CassandraOnHeapGraph<PrimaryKey> graph;
@@ -320,7 +321,7 @@ public class VectorMemtableIndex implements MemtableIndex
         // larger dimension should increase this, because comparisons are more expensive
         // lower chunk cache hit ratio should decrease this, because loading rows is more expensive
         double memoryToDiskFactor = 0.25;
-        return (int) max(limit, memoryToDiskFactor * expectedComparisons);
+        return (int) min(max(limit, memoryToDiskFactor * expectedComparisons), GLOBAL_BRUTE_FORCE_ROWS);
     }
 
     /**
