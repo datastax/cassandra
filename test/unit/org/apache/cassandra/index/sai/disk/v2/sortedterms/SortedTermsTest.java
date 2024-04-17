@@ -352,7 +352,7 @@ public class SortedTermsTest extends SaiRandomizedTest
         try (IndexInput input = indexDescriptor.openPerSSTableInput(indexComponent))
         {
             if (checksum)
-                SAICodecUtils.validateChecksum(input);
+                SAICodecUtils.validateChecksum(input, indexDescriptor.version);
             else
                 SAICodecUtils.validate(input);
             return true;
