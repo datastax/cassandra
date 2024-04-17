@@ -75,12 +75,12 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         similarityFunction = context.getIndexWriterConfig().getSimilarityFunction();
 
         vectorsFile = indexFiles.vectors();
-        long vectorsSegmentOffset = getComponentMetadata(IndexComponent.VECTOR).offset;
+        long vectorsSegmentOffset = this.componentMetadatas.get(IndexComponent.VECTOR).offset;
 
-        SegmentMetadata.ComponentMetadata postingListsMetadata = getComponentMetadata(IndexComponent.POSTING_LISTS);
+        SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponent.POSTING_LISTS);
         ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
 
-        SegmentMetadata.ComponentMetadata termsMetadata = getComponentMetadata(IndexComponent.TERMS_DATA);
+        SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponent.TERMS_DATA);
         hnsw = new OnDiskHnswGraph(indexFiles.termsData(), termsMetadata.offset, termsMetadata.length, OFFSET_CACHE_MIN_BYTES);
         vectors = new OnDiskVectors(vectorsFile, vectorsSegmentOffset);
     }
