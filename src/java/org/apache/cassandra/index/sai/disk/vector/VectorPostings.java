@@ -25,19 +25,27 @@ import java.util.function.Function;
 import com.google.common.base.Preconditions;
 
 import io.github.jbellis.jvector.util.RamUsageEstimator;
+import net.openhft.chronicle.bytes.Bytes;
+import net.openhft.chronicle.hash.serialization.BytesReader;
+import net.openhft.chronicle.hash.serialization.BytesWriter;
 import org.agrona.collections.IntArrayList;
 
 public class VectorPostings<T>
 {
     // we expect that the overwhelmingly most common cardinality will be 1, so optimize for reads using COWAL
-    private final CopyOnWriteArrayList<T> postings;
-    private volatile int ordinal = -1;
+    final CopyOnWriteArrayList<T> postings;
+    volatile int ordinal = -1;
 
     private volatile IntArrayList rowIds; // initially null; gets filled in on flush by computeRowIds
 
     public VectorPostings(T firstKey)
     {
         postings = new CopyOnWriteArrayList<>(List.of(firstKey));
+    }
+
+    public VectorPostings(List<T> raw)
+    {
+        postings = new CopyOnWriteArrayList<>(raw);
     }
 
     /**
@@ -144,5 +152,67 @@ public class VectorPostings<T>
     {
         assert ordinal >= 0 : "ordinal not set";
         return ordinal;
+    }
+
+    public static class CompactionVectorPostings extends VectorPostings<Integer> {
+        public CompactionVectorPostings(int ordinal, List<Integer> raw)
+        {
+            super(raw);
+            this.ordinal = ordinal;
+        }
+
+        public CompactionVectorPostings(int ordinal, int firstKey)
+        {
+            super(firstKey);
+            this.ordinal = ordinal;
+        }
+
+        @Override
+        public void setOrdinal(int ordinal)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public IntArrayList getRowIds()
+        {
+            var L = new IntArrayList(size(), -1);
+            for (var i : postings)
+                L.addInt(i);
+            return L;
+        }
+    }
+
+    static class Marshaller implements BytesReader<CompactionVectorPostings>, BytesWriter<CompactionVectorPostings>
+    {
+        @Override
+        public void write(Bytes out, CompactionVectorPostings postings) {
+            out.writeInt(postings.ordinal);
+            out.writeInt(postings.size());
+            for (Integer posting : postings.getPostings()) {
+                out.writeInt(posting);
+            }
+        }
+
+        @Override
+        public CompactionVectorPostings read(Bytes in, CompactionVectorPostings using) {
+            int ordinal = in.readInt();
+            int size = in.readInt();
+            assert size >= 0 : size;
+            CompactionVectorPostings cvp;
+            if (size == 1) {
+                cvp = new CompactionVectorPostings(ordinal, in.readInt());
+            }
+            else
+            {
+                var postingsList = new IntArrayList(size, -1);
+                for (int i = 0; i < size; i++)
+                {
+                    postingsList.add(in.readInt());
+                }
+                cvp = new CompactionVectorPostings(ordinal, postingsList);
+            }
+            return cvp;
+        }
     }
 }

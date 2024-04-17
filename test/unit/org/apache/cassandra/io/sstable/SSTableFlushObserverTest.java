@@ -124,7 +124,7 @@ public class SSTableFlushObserverTest
                                                    cfm.name,
                                                    idGen.get());
             Index.Group indexGroup = mock(Index.Group.class);
-            when(indexGroup.getFlushObserver(any(), any(), any())).thenReturn(observer);
+            when(indexGroup.getFlushObserver(any(), any(), any(), any())).thenReturn(observer);
             SSTableWriter.Builder<?, ?> writerBuilder = descriptor.getFormat().getWriterFactory().builder(descriptor)
                                                                   .setKeyCount(10)
                                                                   .setTableMetadataRef(TableMetadataRef.forOfflineTools(cfm))
@@ -202,8 +202,8 @@ public class SSTableFlushObserverTest
             FlushObserver observer2 = new FlushObserver();
             Index.Group indexGroup1 = mock(Index.Group.class);
             Index.Group indexGroup2 = mock(Index.Group.class);
-            when(indexGroup1.getFlushObserver(any(), any(), any())).thenReturn(observer1);
-            when(indexGroup2.getFlushObserver(any(), any(), any())).thenReturn(observer2);
+            when(indexGroup1.getFlushObserver(any(), any(), any(), any())).thenReturn(observer1);
+            when(indexGroup2.getFlushObserver(any(), any(), any(), any())).thenReturn(observer2);
             observer2.failOnBegin = true;
 
             Descriptor descriptor = new Descriptor(sstableFormat.getLatestVersion(),
