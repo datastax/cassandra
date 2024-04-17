@@ -493,16 +493,28 @@ public class QueryController
     {
         List<CloseableIterator<ScoredPrimaryKey>> scoredPrimaryKeyIterators = new ArrayList<>();
         List<SSTableIndex> indexesToRelease = new ArrayList<>();
-        try (var iter = new OrderingFilterRangeIterator<>(source, ORDER_CHUNK_SIZE, queryContext, list -> this.getTopKRows(list, expression)))
+        OrderingFilterRangeIterator<IteratorsAndIndexes> iter = null;
+        try
         {
+            // We cannot close the source iterator eagerly because it produces partially loaded PrimaryKeys
+            // that might not be needed until a deeper search into the ordering index, which happens after
+            // we exit this block.
+            iter = new OrderingFilterRangeIterator<>(source, ORDER_CHUNK_SIZE, queryContext, list -> this.getTopKRows(list, expression));
             while (iter.hasNext())
             {
                 var next = iter.next();
                 scoredPrimaryKeyIterators.addAll(next.iterators);
                 indexesToRelease.addAll(next.referencedIndexes);
             }
+            return new MergeScoredPrimaryKeyIterator(scoredPrimaryKeyIterators, indexesToRelease, iter);
         }
-        return new MergeScoredPrimaryKeyIterator(scoredPrimaryKeyIterators, indexesToRelease);
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(iter);
+            FileUtils.closeQuietly(scoredPrimaryKeyIterators);
+            indexesToRelease.forEach(QueryController::releaseQuietly);
+            throw t;
+        }
     }
 
     private IteratorsAndIndexes getTopKRows(List<PrimaryKey> sourceKeys, RowFilter.Expression expression)
