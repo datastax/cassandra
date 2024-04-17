@@ -54,7 +54,6 @@ import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -71,7 +70,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
-    private final boolean pqUnitVectors;
+    final boolean pqUnitVectors;
 
     private final ExplicitThreadLocal<GraphSearcher> searchers;
 
@@ -81,13 +80,13 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
         similarityFunction = context.getIndexWriterConfig().getSimilarityFunction();
 
-        SegmentMetadata.ComponentMetadata termsMetadata = getComponentMetadata(IndexComponent.TERMS_DATA);
+        SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponent.TERMS_DATA);
         graphHandle = indexFiles.termsData();
         graph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
 
-        long pqSegmentOffset = getComponentMetadata(IndexComponent.PQ).offset;
-        try (FileHandle pqFile = indexFiles.pq();
-             RandomAccessReader reader = pqFile.createReader())
+        long pqSegmentOffset = this.componentMetadatas.get(IndexComponent.PQ).offset;
+        try (var pqFile = indexFiles.pq();
+             var reader = pqFile.createReader())
         {
             reader.seek(pqSegmentOffset);
             int version = 0;
@@ -108,7 +107,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
                 compressedVectors = null;
         }
 
-        SegmentMetadata.ComponentMetadata postingListsMetadata = getComponentMetadata(IndexComponent.POSTING_LISTS);
+        SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponent.POSTING_LISTS);
         ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
 
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcher(graph));

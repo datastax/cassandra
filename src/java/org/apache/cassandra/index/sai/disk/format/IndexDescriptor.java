@@ -261,9 +261,10 @@ public class IndexDescriptor
 
     public PerIndexWriter newPerIndexWriter(StorageAttachedIndex index,
                                             LifecycleNewTracker tracker,
-                                            RowMapping rowMapping)
+                                            RowMapping rowMapping,
+                                            long keyCount)
     {
-        return Version.LATEST.onDiskFormat().newPerIndexWriter(index, this, tracker, rowMapping);
+        return Version.LATEST.onDiskFormat().newPerIndexWriter(index, this, tracker, rowMapping, keyCount);
     }
 
     /**

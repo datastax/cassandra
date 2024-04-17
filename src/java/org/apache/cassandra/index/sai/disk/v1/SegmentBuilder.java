@@ -18,9 +18,10 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -32,6 +33,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.pq.ProductQuantization;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
@@ -44,6 +46,7 @@ import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -51,7 +54,6 @@ import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 
-import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.InvalidVectorBehavior.IGNORE;
 import static org.apache.cassandra.utils.FBUtilities.busyWaitWhile;
 
 /**
@@ -102,9 +104,14 @@ public abstract class SegmentBuilder
     private ByteBuffer minTerm;
     private ByteBuffer maxTerm;
 
-    private final AtomicInteger updatesInFlight = new AtomicInteger(0);
-    private final QuickSlidingWindowReservoir termSizeReservoir = new QuickSlidingWindowReservoir(100);
+    protected final AtomicInteger updatesInFlight = new AtomicInteger(0);
+    protected final QuickSlidingWindowReservoir termSizeReservoir = new QuickSlidingWindowReservoir(100);
     protected AtomicReference<Throwable> asyncThrowable = new AtomicReference<>();
+
+    public boolean requiresFlush()
+    {
+        return false;
+    }
 
     public static class KDTreeSegmentBuilder extends SegmentBuilder
     {
@@ -187,14 +194,21 @@ public abstract class SegmentBuilder
         }
     }
 
-    public static class VectorSegmentBuilder extends SegmentBuilder
+    public static class VectorOffHeapSegmentBuilder extends SegmentBuilder
     {
-        private final CassandraOnHeapGraph<Integer> graphIndex;
+        private final CompactionGraph graphIndex;
 
-        public VectorSegmentBuilder(long rowIdOffset, AbstractType<?> termComparator, NamedMemoryLimiter limiter, IndexWriterConfig indexWriterConfig)
+        public VectorOffHeapSegmentBuilder(IndexDescriptor descriptor, IndexContext context, long rowIdOffset, long keyCount, NamedMemoryLimiter limiter, ProductQuantization pq, boolean unitVectors)
         {
-            super(rowIdOffset, termComparator, limiter);
-            graphIndex = new CassandraOnHeapGraph<>(termComparator, indexWriterConfig, false);
+            super(rowIdOffset, context.getValidator(), limiter);
+            try
+            {
+                graphIndex = new CompactionGraph(descriptor, context, pq, unitVectors, keyCount);
+            }
+            catch (IOException e)
+            {
+                throw new UncheckedIOException(e);
+            }
             totalBytesAllocated = graphIndex.ramBytesUsed();
             totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
@@ -208,7 +222,141 @@ public abstract class SegmentBuilder
         @Override
         protected long addInternal(ByteBuffer term, int segmentRowId)
         {
-            return graphIndex.add(term, segmentRowId, IGNORE);
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        protected long addInternalAsync(ByteBuffer term, int segmentRowId)
+        {
+            // CompactionGraph splits adding a node into two parts:
+            // (1) maybeAddVector, which must be done serially because it writes to disk incrementally
+            // (2) addGraphNode, which may be done asynchronously
+            CompactionGraph.InsertionResult result;
+            try
+            {
+                result = graphIndex.maybeAddVector(term, segmentRowId);
+            }
+            catch (IOException e)
+            {
+                throw new UncheckedIOException(e);
+            }
+            if (result.vector == null)
+                return result.bytesUsed;
+
+            updatesInFlight.incrementAndGet();
+            ForkJoinPool.commonPool().submit(() -> {
+                try
+                {
+                    long bytesAdded = result.bytesUsed + graphIndex.addGraphNode(result);
+                    totalBytesAllocatedConcurrent.add(bytesAdded);
+                    termSizeReservoir.update(bytesAdded);
+                }
+                catch (Throwable th)
+                {
+                    asyncThrowable.compareAndExchange(null, th);
+                }
+                finally
+                {
+                    updatesInFlight.decrementAndGet();
+                }
+            });
+            // bytes allocated will be approximated immediately as the average of recently added terms,
+            // rather than waiting until the async update completes to get the exact value.  The latter could
+            // result in a dangerously large discrepancy between the amount of memory actually consumed
+            // and the amount the limiter knows about if the queue depth grows.
+            busyWaitWhile(() -> termSizeReservoir.size() == 0 && asyncThrowable.get() == null);
+            if (asyncThrowable.get() != null) {
+                throw new RuntimeException("Error adding term asynchronously", asyncThrowable.get());
+            }
+            return (long) termSizeReservoir.getMean();
+        }
+
+        @Override
+        protected SegmentMetadata.ComponentMetadataMap flushInternal(IndexDescriptor indexDescriptor, IndexContext indexContext) throws IOException
+        {
+            return graphIndex.flush(indexDescriptor, Set.of());
+        }
+
+        @Override
+        public boolean supportsAsyncAdd()
+        {
+            return true;
+        }
+
+        @Override
+        public boolean requiresFlush()
+        {
+            return graphIndex.requiresFlush();
+        }
+
+        @Override
+        long release(IndexContext indexContext)
+        {
+            try
+            {
+                graphIndex.close();
+            }
+            catch (IOException e)
+            {
+                throw new UncheckedIOException(e);
+            }
+            return super.release(indexContext);
+        }
+    }
+
+    public static class VectorOnHeapSegmentBuilder extends SegmentBuilder
+    {
+        private final CassandraOnHeapGraph<Integer> graphIndex;
+
+        public VectorOnHeapSegmentBuilder(IndexDescriptor descriptor, IndexContext context, long rowIdOffset, long keyCount, NamedMemoryLimiter limiter)
+        {
+            super(rowIdOffset, context.getValidator(), limiter);
+            graphIndex = new CassandraOnHeapGraph<>(context, false);
+            totalBytesAllocated = graphIndex.ramBytesUsed();
+            totalBytesAllocatedConcurrent.add(totalBytesAllocated);
+        }
+
+        @Override
+        public boolean isEmpty()
+        {
+            return graphIndex.isEmpty();
+        }
+
+        @Override
+        protected long addInternal(ByteBuffer term, int segmentRowId)
+        {
+            return graphIndex.add(term, segmentRowId);
+        }
+
+        @Override
+        protected long addInternalAsync(ByteBuffer term, int segmentRowId)
+        {
+            updatesInFlight.incrementAndGet();
+            ForkJoinPool.commonPool().submit(() -> {
+                try
+                {
+                    long bytesAdded = addInternal(term, segmentRowId);
+                    totalBytesAllocatedConcurrent.add(bytesAdded);
+                    termSizeReservoir.update(bytesAdded);
+                }
+                catch (Throwable th)
+                {
+                    asyncThrowable.compareAndExchange(null, th);
+                }
+                finally
+                {
+                    updatesInFlight.decrementAndGet();
+                }
+            });
+            // bytes allocated will be approximated immediately as the average of recently added terms,
+            // rather than waiting until the async update completes to get the exact value.  The latter could
+            // result in a dangerously large discrepancy between the amount of memory actually consumed
+            // and the amount the limiter knows about if the queue depth grows.
+            busyWaitWhile(() -> termSizeReservoir.size() == 0 && asyncThrowable.get() == null);
+            if (asyncThrowable.get() != null) {
+                throw new RuntimeException("Error adding term asynchronously", asyncThrowable.get());
+            }
+            return (long) termSizeReservoir.getMean();
         }
 
         @Override
@@ -218,7 +366,7 @@ public abstract class SegmentBuilder
             // VectorPostings, which will populate the rowIds field, but if we refactor the code, we could skip that.
             var deletedOrdinals = graphIndex.computeDeletedOrdinals(p -> p);
             assert deletedOrdinals.isEmpty() : "Deleted ordinals should be empty when built during compaction";
-            return graphIndex.writeData(indexDescriptor, indexContext, Collections.emptySet());
+            return graphIndex.flush(indexDescriptor, Set.of());
         }
 
         @Override
@@ -302,34 +450,9 @@ public abstract class SegmentBuilder
         return bytesAllocated;
     }
 
-    private long addInternalAsync(ByteBuffer term, int segmentRowId)
+    protected long addInternalAsync(ByteBuffer term, int segmentRowId)
     {
-        updatesInFlight.incrementAndGet();
-        ForkJoinPool.commonPool().submit(() -> {
-            try
-            {
-                long bytesAdded = addInternal(term, segmentRowId);
-                totalBytesAllocatedConcurrent.add(bytesAdded);
-                termSizeReservoir.update(bytesAdded);
-            }
-            catch (Throwable th)
-            {
-                asyncThrowable.compareAndExchange(null, th);
-            }
-            finally
-            {
-                updatesInFlight.decrementAndGet();
-            }
-        });
-        // bytes allocated will be approximated immediately as the average of recently added terms,
-        // rather than waiting until the async update completes to get the exact value.  The latter could
-        // result in a dangerously large discrepancy between the amount of memory actually consumed
-        // and the amount the limiter knows about if the queue depth grows.
-        busyWaitWhile(() -> termSizeReservoir.size() == 0 && asyncThrowable.get() == null);
-        if (asyncThrowable.get() != null) {
-            throw new RuntimeException("Error adding term asynchronously", asyncThrowable.get());
-        }
-        return (long) termSizeReservoir.getMean();
+        throw new UnsupportedOperationException();
     }
 
     public boolean supportsAsyncAdd() {
