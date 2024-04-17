@@ -77,10 +77,10 @@ import static java.lang.Math.min;
 public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrdering
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+    public static int GLOBAL_BRUTE_FORCE_ROWS = Integer.MAX_VALUE; // not final so test can inject its own setting
 
     private final JVectorLuceneOnDiskGraph graph;
     private final PrimaryKey.Factory keyFactory;
-    private int globalBruteForceRows; // not final so test can inject its own setting
     private final PairedSlidingWindowReservoir expectedActualNodesVisited = new PairedSlidingWindowReservoir(20);
     private final ThreadLocal<SparseFixedBitSet> cachedBitSets;
 
@@ -109,8 +109,6 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         this.graph = graph;
         this.keyFactory = PrimaryKey.factory(indexContext.comparator(), indexContext.indexFeatureSet());
         cachedBitSets = ThreadLocal.withInitial(() -> new SparseFixedBitSet(graph.size()));
-
-        globalBruteForceRows = Integer.MAX_VALUE;
     }
 
     @Override
@@ -400,7 +398,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             // brute force from sstable will also do a bunch of extra work (going through trie index to look up row).
             // VSTODO I'm not sure which one is more expensive (and it depends on things like sstable chunk cache hit ratio)
             // so I'm leaving it as a 1:1 ratio for now.
-            return nFilteredRows <= min(globalBruteForceRows, expectedNodesVisited);
+            return nFilteredRows <= min(GLOBAL_BRUTE_FORCE_ROWS, expectedNodesVisited);
         }
 
         public void updateStatistics(int actualNodesVisited)
