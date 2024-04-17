@@ -28,6 +28,7 @@ import java.util.zip.Checksum;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -50,6 +51,7 @@ public class IndexFileUtils
 
     public static final IndexFileUtils instance = new IndexFileUtils(DEFAULT_WRITER_OPTION);
     private static final Supplier<Checksum> CHECKSUM_FACTORY = CRC32C::new;
+    private static final Supplier<Checksum> LEGACY_CHECKSUM_FACTORY = CRC32::new;
     private static IndexFileUtils overrideInstance = null;
 
     private final SequentialWriterOption writerOption;
@@ -73,11 +75,11 @@ public class IndexFileUtils
         this.writerOption = writerOption;
     }
 
-    public IndexOutputWriter openOutput(File file)
+    public IndexOutputWriter openOutput(File file, Version version)
     {
         assert writerOption.finishOnClose() : "IndexOutputWriter relies on close() to sync with disk.";
 
-        return new IndexOutputWriter(new IncrementalChecksumSequentialWriter(file));
+        return new IndexOutputWriter(new IncrementalChecksumSequentialWriter(file, writerOption, version));
     }
 
     public IndexInput openInput(FileHandle handle)
@@ -104,11 +106,16 @@ public class IndexFileUtils
         }
     }
 
-    public static ChecksumIndexInput getBufferedChecksumIndexInput(IndexInput indexInput)
+    public static ChecksumIndexInput getBufferedChecksumIndexInput(IndexInput indexInput, Version version)
     {
-        return new BufferedChecksumIndexInput(indexInput, CHECKSUM_FACTORY.get());
+        return new BufferedChecksumIndexInput(indexInput, getChecksumFactory(version).get());
     }
 
+    public static Supplier<Checksum> getChecksumFactory(Version version)
+    {
+        // TODO Use the version to determine which checksum algorithm to use
+        return LEGACY_CHECKSUM_FACTORY;
+    }
 
     public interface ChecksumWriter
     {
@@ -121,13 +128,14 @@ public class IndexFileUtils
      * with {@link IndexOutputWriter}. This, in turn, is used in conjunction with {@link BufferedChecksumIndexInput}
      * to verify the checksum of the data read from the file, so they must share the same checksum algorithm.
      */
-    class IncrementalChecksumSequentialWriter extends SequentialWriter implements ChecksumWriter
+    static class IncrementalChecksumSequentialWriter extends SequentialWriter implements ChecksumWriter
     {
-        private final CRC32 checksum = new CRC32();
+        private final Checksum checksum;
 
-        IncrementalChecksumSequentialWriter(File file)
+        IncrementalChecksumSequentialWriter(File file, SequentialWriterOption writerOption, Version version)
         {
             super(file, writerOption);
+            this.checksum = getChecksumFactory(version).get();
         }
 
         @Override
