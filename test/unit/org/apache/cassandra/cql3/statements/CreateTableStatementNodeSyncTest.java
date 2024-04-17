@@ -56,6 +56,7 @@ public class CreateTableStatementNodeSyncTest extends CQLTester
     @BeforeClass
     public static void setup() throws Exception
     {
+        decorateCQLWithTestNames = false;
         SchemaLoader.createKeyspace("ks", KeyspaceParams.simple(1));
     }
 
