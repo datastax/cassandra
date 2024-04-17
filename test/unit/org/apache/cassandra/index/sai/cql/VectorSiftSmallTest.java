@@ -52,7 +52,7 @@ public class VectorSiftSmallTest extends VectorTester
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         waitForIndexQueryable();
 
-        insertVectors(baseVectors);
+        insertVectors(baseVectors, 0);
         double memoryRecall = testRecall(queryVectors, groundTruth);
         assertTrue("Memory recall is " + memoryRecall, memoryRecall > 0.975);
 
@@ -60,6 +60,36 @@ public class VectorSiftSmallTest extends VectorTester
         var diskRecall = testRecall(queryVectors, groundTruth);
         assertTrue("Disk recall is " + diskRecall, diskRecall > 0.975);
     }
+
+    @Test
+    public void testCompaction() throws Throwable
+    {
+        var siftName = "siftsmall";
+        var baseVectors = readFvecs(String.format("test/data/%s/%s_base.fvecs", siftName, siftName));
+        var queryVectors = readFvecs(String.format("test/data/%s/%s_query.fvecs", siftName, siftName));
+        var groundTruth = readIvecs(String.format("test/data/%s/%s_groundtruth.ivecs", siftName, siftName));
+
+        // Create table and index
+        createTable("CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        waitForIndexQueryable();
+
+        int segments = 5;
+        int vectorsPerSegment = baseVectors.size() / segments;
+        assert baseVectors.size() % vectorsPerSegment == 0; // simplifies split logic
+        for (int i = 0; i < segments; i++)
+        {
+            insertVectors(baseVectors.subList(i * vectorsPerSegment, (i + 1) * vectorsPerSegment), i * vectorsPerSegment);
+            flush();
+        }
+        double memoryRecall = testRecall(queryVectors, groundTruth);
+        assertTrue("Memory recall is " + memoryRecall, memoryRecall > 0.975);
+
+        compact();
+        var diskRecall = testRecall(queryVectors, groundTruth);
+        assertTrue("Disk recall is " + diskRecall, diskRecall > 0.975);
+    }
+
 
     public static ArrayList<float[]> readFvecs(String filePath) throws IOException
     {
@@ -138,13 +168,12 @@ public class VectorSiftSmallTest extends VectorTester
         return (double) topKfound.get() / (queryVectors.size() * topK);
     }
 
-    private void insertVectors(List<float[]> baseVectors)
+    private void insertVectors(List<float[]> vectors, int baseRowId)
     {
-        IntStream.range(0, baseVectors.size()).parallel().forEach(i -> {
-            float[] arrayVector = baseVectors.get(i);
-            String vectorAsString = Arrays.toString(arrayVector);
+        IntStream.range(0, vectors.size()).parallel().forEach(i -> {
+            float[] arrayVector = vectors.get(i);
             try {
-                execute("INSERT INTO %s " + String.format("(pk, val) VALUES (%d, %s)", i, vectorAsString));
+                execute("INSERT INTO %s (pk, val) VALUES (?, ?)", baseRowId + i, vector(arrayVector));
             } catch (Throwable throwable) {
                 throw new RuntimeException(throwable);
             }

@@ -120,8 +120,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     }
 
     public static SSTableWriter create(Descriptor descriptor,
-                                       Long keyCount,
-                                       Long repairedAt,
+                                       long keyCount,
+                                       long repairedAt,
                                        UUID pendingRepair,
                                        boolean isTransient,
                                        TableMetadataRef metadata,
@@ -131,7 +131,16 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                        LifecycleNewTracker lifecycleNewTracker)
     {
         Factory writerFactory = descriptor.getFormat().getWriterFactory();
-        return writerFactory.open(descriptor, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers(descriptor, indexGroups, lifecycleNewTracker, metadata.get()), lifecycleNewTracker,
+        return writerFactory.open(descriptor,
+                                  keyCount,
+                                  repairedAt,
+                                  pendingRepair,
+                                  isTransient,
+                                  metadata,
+                                  metadataCollector,
+                                  header,
+                                  observers(descriptor, indexGroups, lifecycleNewTracker, metadata.get(), keyCount),
+                                  lifecycleNewTracker,
                                   indexComponents(indexGroups));
     }
 
@@ -180,7 +189,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional
     private static Collection<SSTableFlushObserver> observers(Descriptor descriptor,
                                                               Collection<Index.Group> indexGroups,
                                                               LifecycleNewTracker tracker,
-                                                              TableMetadata metadata)
+                                                              TableMetadata metadata,
+                                                              long keyCount)
     {
         if (indexGroups == null)
             return Collections.emptyList();
@@ -188,7 +198,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         List<SSTableFlushObserver> observers = new ArrayList<>(indexGroups.size());
         for (Index.Group group : indexGroups)
         {
-            SSTableFlushObserver observer = group.getFlushObserver(descriptor, tracker, metadata);
+            SSTableFlushObserver observer = group.getFlushObserver(descriptor, tracker, metadata, keyCount);
             if (observer != null)
             {
                 observer.begin();

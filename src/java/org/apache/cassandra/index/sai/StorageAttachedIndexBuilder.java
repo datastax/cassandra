@@ -153,7 +153,8 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
             indexes.forEach(index -> indexDescriptor.deleteColumnIndex(index.getIndexContext()));
 
-            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, indexes, txn, perIndexComponentsOnly);
+            long keyCount = SSTableReader.getApproximateKeyCount(Set.of(sstable));
+            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, indexes, txn, keyCount, perIndexComponentsOnly);
 
             long previousKeyPosition = 0;
             indexWriter.begin();

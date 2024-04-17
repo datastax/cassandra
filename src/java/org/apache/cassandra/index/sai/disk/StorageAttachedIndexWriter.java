@@ -28,7 +28,6 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -64,14 +63,16 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
     public StorageAttachedIndexWriter(IndexDescriptor indexDescriptor,
                                       Collection<StorageAttachedIndex> indices,
-                                      LifecycleNewTracker lifecycleNewTracker) throws IOException
+                                      LifecycleNewTracker lifecycleNewTracker,
+                                      long keyCount) throws IOException
     {
-        this(indexDescriptor, indices, lifecycleNewTracker, false);
+        this(indexDescriptor, indices, lifecycleNewTracker, keyCount, false);
     }
 
     public StorageAttachedIndexWriter(IndexDescriptor indexDescriptor,
                                       Collection<StorageAttachedIndex> indices,
                                       LifecycleNewTracker lifecycleNewTracker,
+                                      long keyCount,
                                       boolean perIndexComponentsOnly) throws IOException
     {
         this.indexDescriptor = indexDescriptor;
@@ -80,7 +81,8 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         this.rowMapping = RowMapping.create(lifecycleNewTracker.opType());
         this.perIndexWriters = indices.stream().map(i -> indexDescriptor.newPerIndexWriter(i,
                                                                                            lifecycleNewTracker,
-                                                                                           rowMapping))
+                                                                                           rowMapping,
+                                                                                           keyCount))
                                       .filter(Objects::nonNull) // a null here means the column had no data to flush
                                       .collect(Collectors.toList());
 

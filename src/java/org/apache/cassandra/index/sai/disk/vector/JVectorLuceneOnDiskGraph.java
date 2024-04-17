@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -81,8 +82,7 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
             // take our best guess and assume there is a single segment
             // this will silently use the wrong data if it is actually a multi-segment file
             var file = indexFiles.getFile(component);
-            // 7 is the length of the header written by SAICodecUtils
-            return new SegmentMetadata.ComponentMetadata(-1, 7, file.onDiskLength - 7); // graph indexes ignore root
+            return new SegmentMetadata.ComponentMetadata(-1, SAICodecUtils.headerSize(), file.onDiskLength - 7); // graph indexes ignore root
         }
     }
 
