@@ -17,10 +17,8 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.zip.CRC32;
 
 import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
 import org.apache.cassandra.index.sai.disk.format.Version;

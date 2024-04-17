@@ -402,9 +402,6 @@ public enum CassandraRelevantProperties
     //This only applies if include all is false
     SYSTEM_VIEWS_INCLUDE_INDEXES("cassandra.system_view.include_indexes"),
 
-    // if true, allow BQ and writing optimized ordinal maps
-    VSEARCH_11_9_UPGRADES("cassandra.vsearch_11_9_upgrades", "true"),
-
     // Allow disabling deletions of corrupt index components for troubleshooting
     DELETE_CORRUPT_SAI_COMPONENTS("cassandra.sai.delete_corrupt_components", "true"),
 

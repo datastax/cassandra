@@ -30,7 +30,6 @@ import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.io.util.FileUtils;
@@ -68,23 +67,6 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
     public abstract CloseableIterator<ScoredRowId> search(VectorFloat<?> queryVector, int topK, float threshold, Bits bits, QueryContext context, IntConsumer nodesVisited);
 
     public abstract void close() throws IOException;
-
-    protected SegmentMetadata.ComponentMetadata getComponentMetadata(IndexComponent component)
-    {
-        try
-        {
-            return componentMetadatas.get(component);
-        }
-        catch (IllegalArgumentException e)
-        {
-            logger.warn("Component metadata is missing " + component + ", assuming single segment");
-            // take our best guess and assume there is a single segment
-            // this will silently use the wrong data if it is actually a multi-segment file
-            var file = indexFiles.getFile(component);
-            // 7 is the length of the header written by SAICodecUtils
-            return new SegmentMetadata.ComponentMetadata(-1, 7, file.onDiskLength - 7); // graph indexes ignore root
-        }
-    }
 
     public static interface VectorSupplier extends AutoCloseable
     {

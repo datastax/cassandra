@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.PriorityQueue;
 
 import com.google.common.base.MoreObjects;
@@ -82,7 +83,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
     public static int GLOBAL_BRUTE_FORCE_ROWS = Integer.MAX_VALUE; // not final so test can inject its own setting
 
-    private final JVectorLuceneOnDiskGraph graph;
+    protected final JVectorLuceneOnDiskGraph graph;
     private final PrimaryKey.Factory keyFactory;
     private final PairedSlidingWindowReservoir expectedActualNodesVisited = new PairedSlidingWindowReservoir(20);
     private final ThreadLocal<SparseBits> cachedBits;
@@ -619,5 +620,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     public void close() throws IOException
     {
         graph.close();
+    }
+
+    public Optional<Boolean> containsUnitVectors()
+    {
+        return Optional.empty();
     }
 }
