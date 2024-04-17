@@ -191,7 +191,7 @@ public class V1OnDiskFormat implements OnDiskFormat
                 try (IndexInput input = indexDescriptor.openPerSSTableInput(indexComponent))
                 {
                     if (checksum)
-                        SAICodecUtils.validateChecksum(input);
+                        SAICodecUtils.validateChecksum(input, indexDescriptor.version);
                     else
                         SAICodecUtils.validate(input);
                 }
@@ -221,7 +221,7 @@ public class V1OnDiskFormat implements OnDiskFormat
                 try (IndexInput input = indexDescriptor.openPerIndexInput(indexComponent, indexContext))
                 {
                     if (checksum)
-                        SAICodecUtils.validateChecksum(input);
+                        SAICodecUtils.validateChecksum(input, indexDescriptor.version);
                     else
                         SAICodecUtils.validate(input);
                 }

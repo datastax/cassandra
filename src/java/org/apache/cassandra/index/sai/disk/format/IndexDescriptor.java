@@ -339,7 +339,7 @@ public class IndexDescriptor
                          component,
                          file);
 
-        IndexOutputWriter writer = IndexFileUtils.instance().openOutput(file);
+        IndexOutputWriter writer = IndexFileUtils.instance().openOutput(file, version);
 
         if (append)
         {
@@ -365,7 +365,7 @@ public class IndexDescriptor
                          component,
                          file);
 
-        IndexOutputWriter writer = IndexFileUtils.instance().openOutput(file);
+        IndexOutputWriter writer = IndexFileUtils.instance().openOutput(file, version);
 
         if (append)
         {
