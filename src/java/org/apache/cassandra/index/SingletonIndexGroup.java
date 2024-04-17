@@ -107,7 +107,7 @@ public class SingletonIndexGroup implements Index.Group
     }
 
     @Override
-    public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata)
+    public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount)
     {
         Preconditions.checkNotNull(delegate);
         return delegate.getFlushObserver(descriptor, tracker);

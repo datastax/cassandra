@@ -62,14 +62,16 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
 
     public StorageAttachedIndexWriter(IndexDescriptor indexDescriptor,
                                       Collection<StorageAttachedIndex> indices,
-                                      LifecycleNewTracker lifecycleNewTracker) throws IOException
+                                      LifecycleNewTracker lifecycleNewTracker,
+                                      long keyCount) throws IOException
     {
-        this(indexDescriptor, indices, lifecycleNewTracker, false);
+        this(indexDescriptor, indices, lifecycleNewTracker, keyCount, false);
     }
 
     public StorageAttachedIndexWriter(IndexDescriptor indexDescriptor,
                                       Collection<StorageAttachedIndex> indices,
                                       LifecycleNewTracker lifecycleNewTracker,
+                                      long keyCount,
                                       boolean perIndexComponentsOnly) throws IOException
     {
         this.indexDescriptor = indexDescriptor;
@@ -78,7 +80,8 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         this.rowMapping = RowMapping.create(lifecycleNewTracker.opType());
         this.perIndexWriters = indices.stream().map(i -> indexDescriptor.newPerIndexWriter(i,
                                                                                            lifecycleNewTracker,
-                                                                                           rowMapping))
+                                                                                           rowMapping,
+                                                                                           keyCount))
                                       .filter(Objects::nonNull) // a null here means the column had no data to flush
                                       .collect(Collectors.toList());
 

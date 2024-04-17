@@ -30,12 +30,11 @@ import static io.github.jbellis.jvector.vector.VectorSimilarityFunction.COSINE;
 import static io.github.jbellis.jvector.vector.VectorSimilarityFunction.DOT_PRODUCT;
 import static java.lang.Math.max;
 import static java.lang.Math.pow;
-import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.BINARY_QUANTIZATION;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
 
 public enum VectorSourceModel
 {
-    ADA002((dimension) -> new VectorCompression(BINARY_QUANTIZATION, dimension / 8), 2.0),
+    ADA002((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 8), 1.5),
     OPENAI_V3_SMALL((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16), 1.5),
     OPENAI_V3_LARGE((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 16), 1.5),
     BERT((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension / 4), 1.0),
@@ -81,9 +80,6 @@ public enum VectorSourceModel
     private static VectorCompression genericCompression(int originalDimension)
     {
         // Model is unspecified / unknown, so we guess.
-        // Guessing heuristic is simple: 1536 dimensions is probably ada002, so use BQ.  Otherwise, use PQ.
-        if (originalDimension == 1536)
-            return new VectorCompression(BINARY_QUANTIZATION, originalDimension / 8);
         return new VectorCompression(PRODUCT_QUANTIZATION, defaultPQBytesFor(originalDimension));
     }
 
