@@ -45,6 +45,14 @@ public class Context
         this.tableId = tableId;
     }
 
+    /**
+     * Use to track sensors at the keyspace level.
+     */
+    public Context(String keyspace)
+    {
+        this(keyspace, null, null);
+    }
+
     public String getKeyspace()
     {
         return keyspace;
