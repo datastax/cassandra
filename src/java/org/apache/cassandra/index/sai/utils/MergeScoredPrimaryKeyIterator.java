@@ -40,8 +40,16 @@ public class MergeScoredPrimaryKeyIterator extends AbstractIterator<ScoredPrimar
     private final PriorityQueue<PeekingIterator<ScoredPrimaryKey>> pq;
     private final List<CloseableIterator<ScoredPrimaryKey>> iteratorsToBeClosed;
     private final Collection<SSTableIndex> indexesToBeClosed;
+    private final AutoCloseable onClose;
 
     public MergeScoredPrimaryKeyIterator(List<CloseableIterator<ScoredPrimaryKey>> iterators, Collection<SSTableIndex> referencedIndexes)
+    {
+        this(iterators, referencedIndexes, () -> {});
+    }
+
+    public MergeScoredPrimaryKeyIterator(List<CloseableIterator<ScoredPrimaryKey>> iterators,
+                                         Collection<SSTableIndex> referencedIndexes,
+                                         AutoCloseable onClose)
     {
         int size = !iterators.isEmpty() ? iterators.size() : 1;
         this.pq = new PriorityQueue<>(size, (o1, o2) -> Float.compare(o2.peek().score, o1.peek().score));
@@ -50,6 +58,7 @@ public class MergeScoredPrimaryKeyIterator extends AbstractIterator<ScoredPrimar
                 pq.add(Iterators.peekingIterator(iterator));
         iteratorsToBeClosed = iterators;
         indexesToBeClosed = referencedIndexes;
+        this.onClose = onClose;
     }
 
     @Override
@@ -76,5 +85,6 @@ public class MergeScoredPrimaryKeyIterator extends AbstractIterator<ScoredPrimar
             FileUtils.closeQuietly(iterator);
         for (SSTableIndex index : indexesToBeClosed)
             index.release();
+        FileUtils.closeQuietly(onClose);
     }
 }
