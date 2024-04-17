@@ -97,7 +97,7 @@ public class V2OnDiskFormat extends V1OnDiskFormat
             try (IndexInput input = indexDescriptor.openPerSSTableInput(indexComponent))
             {
                 if (checksum)
-                    SAICodecUtils.validateChecksum(input);
+                    SAICodecUtils.validateChecksum(input, indexDescriptor.version);
                 else
                     SAICodecUtils.validate(input);
             }
