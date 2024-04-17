@@ -176,7 +176,7 @@ public class CassandraOnHeapGraph<T>
         {
             try
             {
-                validateIndexable(vector, similarityFunction);
+                VectorValidation.validateIndexable(vector, similarityFunction);
             }
             catch (InvalidRequestException e)
             {
@@ -190,7 +190,7 @@ public class CassandraOnHeapGraph<T>
         else
         {
             assert behavior == InvalidVectorBehavior.FAIL;
-            validateIndexable(vector, similarityFunction);
+            VectorValidation.validateIndexable(vector, similarityFunction);
         }
 
         var bytesUsed = 0L;
@@ -243,53 +243,6 @@ public class CassandraOnHeapGraph<T>
         return bytesUsed;
     }
 
-    // copied out of a Lucene PR -- hopefully committed soon
-    public static final float MAX_FLOAT32_COMPONENT = 1E17f;
-    public static void checkInBounds(VectorFloat<?> v) {
-        for (int i = 0; i < v.length(); i++) {
-            if (!Float.isFinite(v.get(i))) {
-                throw new IllegalArgumentException("non-finite value at vector[" + i + "]=" + v.get(i));
-            }
-
-            if (Math.abs(v.get(i)) > MAX_FLOAT32_COMPONENT) {
-                throw new IllegalArgumentException("Out-of-bounds value at vector[" + i + "]=" + v.get(i));
-            }
-        }
-    }
-
-    public static void validateIndexable(float[] raw, VectorSimilarityFunction similarityFunction)
-    {
-        validateIndexable(vts.createFloatVector(raw), similarityFunction);
-    }
-
-    public static void validateIndexable(VectorFloat<?> vector, VectorSimilarityFunction similarityFunction)
-    {
-        try
-        {
-            checkInBounds(vector);
-        }
-        catch (IllegalArgumentException e)
-        {
-            throw new InvalidRequestException(e.getMessage());
-        }
-
-        if (similarityFunction == VectorSimilarityFunction.COSINE)
-        {
-            if (isEffectivelyZero(vector))
-                throw new InvalidRequestException("Zero and near-zero vectors cannot be indexed or queried with cosine similarity");
-        }
-    }
-
-    public static boolean isEffectivelyZero(VectorFloat<?> vector)
-    {
-        for (int i = 0; i < vector.length(); i++)
-        {
-            if (vector.get(i) < -1E-6 || vector.get(i) > 1E-6)
-                return false;
-        }
-        return true;
-    }
-
     public Collection<T> keysFromOrdinal(int node)
     {
         return postingsByOrdinal.get(node).getPostings();
@@ -330,7 +283,7 @@ public class CassandraOnHeapGraph<T>
      */
     public CloseableIterator<SearchResult.NodeScore> search(QueryContext context, VectorFloat<?> queryVector, int limit, float threshold, Bits toAccept)
     {
-        validateIndexable(queryVector, similarityFunction);
+        VectorValidation.validateIndexable(queryVector, similarityFunction);
 
         // search() errors out when an empty graph is passed to it
         if (vectorValues.size() == 0)
