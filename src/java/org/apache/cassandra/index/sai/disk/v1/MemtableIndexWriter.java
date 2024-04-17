@@ -208,7 +208,7 @@ public class MemtableIndexWriter implements PerIndexWriter
             return;
         }
 
-        SegmentMetadata.ComponentMetadataMap metadataMap = vectorIndex.writeData(indexDescriptor, indexContext, deletedOrdinals);
+        SegmentMetadata.ComponentMetadataMap metadataMap = vectorIndex.writeData(indexDescriptor, deletedOrdinals);
 
         completeIndexFlush(rowMapping.size(), startTime, stopwatch);
 
