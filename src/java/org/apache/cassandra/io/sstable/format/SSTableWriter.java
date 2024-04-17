@@ -125,7 +125,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
             this.observers = Collections.unmodifiableList(observers);
             for (Index.Group group : builder.getIndexGroups())
             {
-                SSTableFlushObserver observer = group.getFlushObserver(descriptor, lifecycleNewTracker, metadata.getLocal());
+                SSTableFlushObserver observer = group.getFlushObserver(descriptor, lifecycleNewTracker, metadata.getLocal(), keyCount);
                 if (observer != null)
                 {
                     observer.begin();

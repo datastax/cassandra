@@ -774,8 +774,6 @@ public enum CassandraRelevantProperties
     USE_RANDOM_ALLOCATION_IF_NOT_SUPPORTED("cassandra.token_allocation.use_random_if_not_supported"),
     /** Gossiper compute expiration timeout. Default value 3 days. */
     VERY_LONG_TIME_MS("cassandra.very_long_time_ms", "259200000"),
-    // if true, allow BQ and writing optimized ordinal maps
-    VSEARCH_11_9_UPGRADES("cassandra.vsearch_11_9_upgrades", "true"),
     /** Controls output format for Collection-type settings in system_views.settings table */
     VIRTUAL_TABLE_COMPLEX_SETTINGS_FORMAT_JSON("cassandra.virtual_table_complex_settings_format_json", "false"),
     WAIT_FOR_TRACING_EVENTS_TIMEOUT_SECS("cassandra.wait_for_tracing_events_timeout_secs", "0");
