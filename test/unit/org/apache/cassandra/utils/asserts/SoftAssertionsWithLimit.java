@@ -16,28 +16,27 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.db.marshal;
+package org.apache.cassandra.utils.asserts;
 
-import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import com.esri.core.geometry.ogc.OGCLineString;
-import org.apache.cassandra.db.marshal.geometry.GeometricType;
-import org.apache.cassandra.db.marshal.geometry.LineString;
+import org.assertj.core.api.SoftAssertions;
 
-public class LineStringType extends AbstractGeometricType<LineString>
+public class SoftAssertionsWithLimit extends SoftAssertions
 {
-    public static final LineStringType instance = new LineStringType();
+    private final AtomicInteger counter = new AtomicInteger();
+    private final int limit;
 
-    private static final ByteBuffer MASKED_VALUE = new LineString((OGCLineString) OGCLineString.fromText("LINESTRING EMPTY")).asWellKnownBinary();
-
-    public LineStringType()
+    public SoftAssertionsWithLimit(int limit)
     {
-        super(GeometricType.LINESTRING);
+        this.limit = limit;
     }
 
     @Override
-    public ByteBuffer getMaskedValue()
+    public void onAssertionErrorCollected(AssertionError assertionError)
     {
-        return MASKED_VALUE;
+        super.onAssertionErrorCollected(assertionError);
+        if (counter.incrementAndGet() >= limit)
+            assertAll();
     }
 }
