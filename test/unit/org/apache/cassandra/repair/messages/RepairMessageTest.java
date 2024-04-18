@@ -31,8 +31,10 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageDelivery;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.SharedContext;
 import org.apache.cassandra.utils.Backoff;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
 import org.assertj.core.api.Assertions;
@@ -47,7 +49,7 @@ import static org.apache.cassandra.test.asserts.ExtendedAssertions.assertThat;
 public class RepairMessageTest
 {
     private static final TimeUUID SESSION = new TimeUUID(0, 0);
-    private static final InetAddressAndPort ADDRESS = FBUtilities.getBroadcastAddressAndPort();
+    private static final InetAddressAndPort ADDRESS;
     private static final Answer REJECT_ALL = ignore -> {
         throw new UnsupportedOperationException();
     };
@@ -61,6 +63,8 @@ public class RepairMessageTest
     static
     {
         DatabaseDescriptor.clientInitialization();
+        ADDRESS = FBUtilities.getBroadcastAddressAndPort();
+        Nodes.peers().update(ADDRESS, peerInfo -> peerInfo.setReleaseVersion(new CassandraVersion("5.0")));
         RepairMetrics.init();
     }
 
