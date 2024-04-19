@@ -351,7 +351,9 @@ public class OutboundConnectionSettings
     public InetAddressAndPort from()
     {
         InetAddressAndPort from = this.from;
-        InetAddressAndPort preferredLocalAddress = DatabaseDescriptor.getEndpointSnitch().getPreferredAddress(connectTo());
+        InetAddressAndPort preferredLocalAddress = DatabaseDescriptor.getEndpointSnitch() != null
+                                                   ? DatabaseDescriptor.getEndpointSnitch().getPreferredAddress(connectTo())
+                                                   : null;
         if (!Objects.equals(preferredLocalAddress, from))
             from = preferredLocalAddress;
 
