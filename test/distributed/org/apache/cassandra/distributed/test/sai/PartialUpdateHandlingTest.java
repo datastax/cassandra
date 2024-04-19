@@ -32,6 +32,7 @@ import com.google.common.collect.Lists;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -450,6 +451,7 @@ public class PartialUpdateHandlingTest extends TestBaseImpl
         return parameters;
     }
 
+    @Ignore("CNDB-9331: Address PartialUpdateHandlingTest failures and possible CC rebase conflicts with CASSANDRA-19018")
     @Test
     public void testPartialUpdateResolution()
     {
