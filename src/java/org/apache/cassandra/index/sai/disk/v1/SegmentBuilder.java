@@ -325,7 +325,10 @@ public abstract class SegmentBuilder
         // rather than waiting until the async update completes to get the exact value.  The latter could
         // result in a dangerously large discrepancy between the amount of memory actually consumed
         // and the amount the limiter knows about if the queue depth grows.
-        busyWaitWhile(() -> termSizeReservoir.size() == 0);
+        busyWaitWhile(() -> termSizeReservoir.size() == 0 && asyncThrowable.get() == null);
+        if (asyncThrowable.get() != null) {
+            throw new RuntimeException("Error adding term asynchronously", asyncThrowable.get());
+        }
         return (long) termSizeReservoir.getMean();
     }
 
