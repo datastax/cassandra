@@ -210,6 +210,10 @@
       <artifactId>chronicle-threads</artifactId>
     </dependency>
     <dependency>
+      <groupId>net.openhft</groupId>
+      <artifactId>chronicle-map</artifactId>
+    </dependency>
+    <dependency>
       <!-- transitive to chronicle-core -->
       <groupId>net.openhft</groupId>
       <artifactId>posix</artifactId>
