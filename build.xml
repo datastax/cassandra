@@ -151,12 +151,16 @@
     <property name="bytebuddy.version" value="1.10.10"/>
     <property name="jflex.version" value="1.8.2"/>
 
-    <!-- https://mvnrepository.com/artifact/net.openhft/chronicle-bom/1.16.23 -->
-    <property name="chronicle-queue.version" value="5.20.123" />
-    <property name="chronicle-core.version" value="2.20.126" />
-    <property name="chronicle-bytes.version" value="2.20.111" />
-    <property name="chronicle-wire.version" value="2.20.117" />
-    <property name="chronicle-threads.version" value="2.20.111" />
+    <!-- https://mvnrepository.com/artifact/net.openhft/chronicle-bom/2.24ea87 -->
+    <!-- Chronicle is trying to monetize by only publishing stable releases to their subscription repo,
+         so here I've chosen the last ea release before they cut a stable one. As an alternative, we
+         could build our own from source. -->
+    <property name="chronicle-queue.version" value="5.24ea27" />
+    <property name="chronicle-core.version" value="2.24ea28" />
+    <property name="chronicle-bytes.version" value="2.24ea20" />
+    <property name="chronicle-wire.version" value="2.24ea27" />
+    <property name="chronicle-threads.version" value="2.24ea14" />
+    <property name="chronicle-map.version" value="3.24ea4" />
 
     <condition property="maven-ant-tasks.jar.exists">
       <available file="${build.dir}/maven-ant-tasks-${maven-ant-tasks.version}.jar" />
