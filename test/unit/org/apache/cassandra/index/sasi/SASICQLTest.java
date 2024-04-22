@@ -360,7 +360,7 @@ public class SASICQLTest extends CQLTester
         createIndex("CREATE CUSTOM INDEX ON %s (v) USING 'org.apache.cassandra.index.sasi.SASIIndex';");
 
         assertInvalidThrowMessage(Optional.of(ProtocolVersion.CURRENT),
-                                  StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE,
+                                  String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'v'),
                                   InvalidQueryException.class,
                                   "SELECT * FROM %s WHERE v IN (200, 250, 300)");
     }
