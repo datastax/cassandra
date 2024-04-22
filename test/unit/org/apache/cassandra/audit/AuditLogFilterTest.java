@@ -22,12 +22,22 @@ import java.util.HashSet;
 import java.util.Set;
 
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.apache.cassandra.audit.AuditLogFilter.isFiltered;
 
 public class AuditLogFilterTest
 {
+    @BeforeClass
+    public static void setup()
+    {
+        // CNDB-9099: DatabaseDescriptor must be initialized before using FBUtilities.getBroadcastAddressAndPort()
+        DatabaseDescriptor.clientInitialization();
+    }
+    
     @Test
     public void testInputWithSpaces()
     {
