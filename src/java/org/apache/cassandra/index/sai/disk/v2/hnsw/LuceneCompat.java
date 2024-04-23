@@ -28,9 +28,6 @@ public class LuceneCompat
         if (bits == null)
             return null;
 
-        if (bits instanceof org.apache.lucene.util.Bits)
-            return (org.apache.lucene.util.Bits) bits;
-
         return new org.apache.lucene.util.Bits()
         {
             @Override
@@ -38,11 +35,9 @@ public class LuceneCompat
             {
                 return bits.get(index);
             }
-
-            @Override
             public int length()
             {
-                return bits.length();
+                throw new UnsupportedOperationException();
             }
         };
     }

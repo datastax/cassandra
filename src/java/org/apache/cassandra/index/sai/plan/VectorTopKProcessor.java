@@ -38,6 +38,9 @@ import org.apache.commons.lang3.tuple.Triple;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.concurrent.ImmediateExecutor;
 import org.apache.cassandra.concurrent.LocalAwareExecutorPlus;
 import org.apache.cassandra.concurrent.SharedExecutorPool;
@@ -89,9 +92,11 @@ public class VectorTopKProcessor
 {
     protected static final Logger logger = LoggerFactory.getLogger(VectorTopKProcessor.class);
     private static final LocalAwareExecutorPlus PARALLEL_EXECUTOR = getExecutor();
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+
     private final ReadCommand command;
     private final IndexContext indexContext;
-    private final float[] queryVector;
+    private final VectorFloat<?> queryVector;
 
     private final int limit;
 
@@ -103,7 +108,7 @@ public class VectorTopKProcessor
         Preconditions.checkNotNull(annIndexAndExpression);
 
         this.indexContext = annIndexAndExpression.left;
-        this.queryVector = annIndexAndExpression.right;
+        this.queryVector = vts.createFloatVector(annIndexAndExpression.right);
         this.limit = command.limits().count();
     }
 
@@ -352,7 +357,7 @@ public class VectorTopKProcessor
         ByteBuffer value = indexContext.getValueOf(key, row, FBUtilities.nowInSeconds());
         if (value != null)
         {
-            float[] vector = TypeUtil.decomposeVector(indexContext, value);
+            var vector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, value));
             return indexContext.getIndexWriterConfig().getSimilarityFunction().compare(vector, queryVector);
         }
         return 0;
