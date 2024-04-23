@@ -22,8 +22,11 @@ import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Random;
 
+import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorUtil;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -35,9 +38,12 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.transport.ProtocolVersion;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.isEffectivelyZero;
 
 public class VectorFcts
 {
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+
     public static void addFunctionsTo(NativeFunctions functions)
     {
         functions.add(createSimilarityFunctionFactory("similarity_cosine", VectorSimilarityFunction.COSINE, false));
@@ -92,24 +98,13 @@ public class VectorFcts
                 if (arguments.containsNulls())
                     return null;
 
-                float[] v1 = arguments.get(0);
-                float[] v2 = arguments.get(1);
+                var v1 = vts.createFloatVector(type.getSerializer().deserializeFloatArray(arguments.get(0)));
+                var v2 = vts.createFloatVector(type.getSerializer().deserializeFloatArray(arguments.get(1)));
 
-                if (!supportsZeroVectors)
-                {
-                    if (isAllZero(v1) || isAllZero(v2))
-                        throw new InvalidRequestException("Function " + name + " doesn't support all-zero vectors.");
-                }
+                if (!supportsZeroVectors && (isEffectivelyZero(v1) || isEffectivelyZero(v2)))
+                    throw new InvalidRequestException("Function " + name + " doesn't support all-zero vectors.");
 
                 return FloatType.instance.decompose(f.compare(v1, v2));
-            }
-
-            private boolean isAllZero(float[] v)
-            {
-                for (float f : v)
-                    if (f != 0)
-                        return false;
-                return true;
             }
         };
     }
@@ -205,14 +200,13 @@ public class VectorFcts
                     ByteBuffer arg0 = arguments.get(0);
                     if (arg0 == null || !arg0.hasRemaining())
                         return null;
-                    float[] vector = vectorType.getSerializer().deserializeFloatArray(arg0);
+                    var vector = vts.createFloatVector(vectorType.getSerializer().deserializeFloatArray(arg0));
 
                     // normalize
-                    float[] normalized = vector.clone();
-                    VectorUtil.l2normalize(normalized);
+                    VectorUtil.l2normalize(vector);
 
                     // serialize the normalized vector
-                    return vectorType.getSerializer().serializeFloatArray(normalized);
+                    return vectorType.getSerializer().serializeFloatArray(((ArrayVectorFloat) vector).get());
                 }
             };
         }
