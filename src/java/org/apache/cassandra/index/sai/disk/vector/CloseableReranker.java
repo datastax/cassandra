@@ -20,30 +20,29 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.Closeable;
 
-import io.github.jbellis.jvector.graph.NodeSimilarity;
+import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.io.util.FileUtils;
 
 /**
  * A {@link NodeSimilarity.Reranker} that closes the underlying {@link VectorSupplier} when closed.
  */
-public class CloseableReranker implements NodeSimilarity.Reranker, Closeable
+public class CloseableReranker implements ScoreFunction.ExactScoreFunction, Closeable
 {
-    private final VectorSimilarityFunction similarityFunction;
-    private final float[] queryVector;
     private final VectorSupplier vectorSupplier;
+    private final ExactScoreFunction scoreFunction;
 
-    public CloseableReranker(VectorSimilarityFunction similarityFunction, float[] queryVector, VectorSupplier view)
+    public CloseableReranker(VectorSimilarityFunction similarityFunction, VectorFloat<?> queryVector, VectorSupplier supplier)
     {
-        this.similarityFunction = similarityFunction;
-        this.queryVector = queryVector;
-        this.vectorSupplier = view;
+        this.vectorSupplier = supplier;
+        this.scoreFunction = supplier.getScoreFunction(queryVector, similarityFunction);
     }
 
     @Override
     public float similarityTo(int i)
     {
-        return similarityFunction.compare(queryVector, vectorSupplier.getVectorForOrdinal(i));
+        return scoreFunction.similarityTo(i);
     }
 
     @Override
