@@ -18,14 +18,16 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
+import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
+
 public interface VectorSupplier extends AutoCloseable
 {
     /**
-     * Returns the vector for the given ordinal.
-     * @param ordinal a graph's ordinal
-     * @return the vector for the given ordinal
+     * Returns the score function for the given query vector.
      */
-    float[] getVectorForOrdinal(int ordinal);
+    ScoreFunction.ExactScoreFunction getScoreFunction(VectorFloat<?> queryVector, VectorSimilarityFunction similarityFunction);
 
     /**
      * Close the vectors view, logging any exceptions.

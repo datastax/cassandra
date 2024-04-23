@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.function.IntUnaryOperator;
 
 import org.agrona.collections.IntArrayList;
+import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.utils.Pair;
 
@@ -44,7 +45,7 @@ public class VectorPostingsWriter<T>
 
     public long writePostings(SequentialWriter writer,
                               RamAwareVectorValues vectorValues,
-                              Map<float[], VectorPostings<T>> postingsMap,
+                              Map<VectorFloat<?>, VectorPostings<T>> postingsMap,
                               Set<Integer> deletedOrdinals) throws IOException
     {
         writeDeletedOrdinals(writer, deletedOrdinals);
@@ -71,7 +72,7 @@ public class VectorPostingsWriter<T>
 
     public void writeNodeOrdinalToRowIdMapping(SequentialWriter writer,
                                                RamAwareVectorValues vectorValues,
-                                               Map<float[], VectorPostings<T>> postingsMap) throws IOException
+                                               Map<VectorFloat<?>, VectorPostings<T>> postingsMap) throws IOException
     {
         long ordToRowOffset = writer.getOnDiskFilePointer();
 
@@ -87,15 +88,15 @@ public class VectorPostingsWriter<T>
 
             int originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
 
-            IntArrayList rowIds = postingsMap.get(vectorValues.vectorValue(originalOrdinal)).getRowIds();
+            var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
             nextOffset += 4 + (rowIds.size() * 4L); // 4 bytes for size and 4 bytes for each integer in the list
         }
         assert writer.position() == offsetsStartAt : "writer.position()=" + writer.position() + " offsetsStartAt=" + offsetsStartAt;
 
         // Write postings lists
-        for (int i = 0; i < vectorValues.size(); i++) {
-            int originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
-            IntArrayList rowIds = postingsMap.get(vectorValues.vectorValue(originalOrdinal)).getRowIds();
+        for (var i = 0; i < vectorValues.size(); i++) {
+            var originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
+            var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
 
             writer.writeInt(rowIds.size());
             for (int r = 0; r < rowIds.size(); r++)
@@ -106,7 +107,7 @@ public class VectorPostingsWriter<T>
 
     public void writeRowIdToNodeOrdinalMapping(SequentialWriter writer,
                                                RamAwareVectorValues vectorValues,
-                                               Map<float[], VectorPostings<T>> postingsMap) throws IOException
+                                               Map<VectorFloat<?>, VectorPostings<T>> postingsMap) throws IOException
     {
         List<Pair<Integer, Integer>> pairs = new ArrayList<>();
 
