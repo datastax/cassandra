@@ -18,15 +18,19 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
+import java.io.OutputStream;
 
+import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
 import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.DataInput;
+import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.store.OutputStreamDataOutput;
 
 import static org.apache.lucene.codecs.CodecUtil.CODEC_MAGIC;
 import static org.apache.lucene.codecs.CodecUtil.FOOTER_MAGIC;
@@ -40,7 +44,19 @@ public class SAICodecUtils
 {
     public static final String FOOTER_POINTER = "footerPointer";
 
-    public static void writeHeader(IndexOutput out) throws IOException
+    public static DataOutput toLuceneOutput(java.io.DataOutput out) {
+        var os = new OutputStream()
+        {
+            @Override
+            public void write(int b) throws IOException
+            {
+                out.write(b);
+            }
+        };
+        return new OutputStreamDataOutput(os);
+    }
+
+    public static void writeHeader(DataOutput out) throws IOException
     {
         writeBEInt(out, CODEC_MAGIC);
         out.writeString(Version.LATEST.toString());
@@ -51,6 +67,14 @@ public class SAICodecUtils
         writeBEInt(out, FOOTER_MAGIC);
         writeBEInt(out, 0);
         writeChecksum(out);
+    }
+
+    public static void writeFooter(BufferedRandomAccessWriter braw, long checksum) throws IOException
+    {
+        var out = toLuceneOutput(braw);
+        writeBEInt(out, FOOTER_MAGIC);
+        writeBEInt(out, 0);
+        writeBELong(out, checksum);
     }
 
     public static Version checkHeader(DataInput in) throws IOException

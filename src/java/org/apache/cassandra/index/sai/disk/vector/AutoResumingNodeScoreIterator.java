@@ -36,7 +36,7 @@ import org.apache.cassandra.utils.AbstractIterator;
  */
 public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult.NodeScore>
 {
-    private final GraphSearcher<float[]> searcher;
+    private final GraphSearcher searcher;
     private final int topK;
     private final boolean inMemory;
     private final AutoCloseable onClose;
@@ -55,7 +55,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
      * @param inMemory whether the graph is in memory or on disk (used for trace logging)
      * @param onClose an {@link AutoCloseable} object to close when this iterator is closed
      */
-    public AutoResumingNodeScoreIterator(GraphSearcher<float[]> searcher,
+    public AutoResumingNodeScoreIterator(GraphSearcher searcher,
                                          SearchResult result,
                                          IntConsumer nodesVisitedConsumer,
                                          int topK,
