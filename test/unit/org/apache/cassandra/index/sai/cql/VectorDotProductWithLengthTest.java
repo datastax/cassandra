@@ -50,7 +50,8 @@ public class VectorDotProductWithLengthTest extends VectorTester
                 var vList = row.getVector("v", FloatType.instance, 2);
                 return new float[] { vList.get(0), vList.get(1)};
             }).collect(Collectors.toList());
-            assert computeRecall(vectors, q, ann, VectorSimilarityFunction.DOT_PRODUCT) > 0.9;
+            var recall = computeRecall(vectors, q, ann, VectorSimilarityFunction.DOT_PRODUCT);
+            assert recall > 0.9 : recall;
         }
     }
 

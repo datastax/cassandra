@@ -45,6 +45,9 @@ import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
@@ -106,7 +109,6 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.FutureCombiner;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
-import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VALIDATE_TERMS_AT_COORDINATOR;
 import static org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig.MAX_TOP_K;
@@ -116,6 +118,7 @@ public class StorageAttachedIndex implements Index
     public static final String NAME = "sai";
 
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     private static final boolean VALIDATE_TERMS_AT_COORDINATOR = SAI_VALIDATE_TERMS_AT_COORDINATOR.getBoolean();
 
@@ -650,14 +653,14 @@ public class StorageAttachedIndex implements Index
         SingleColumnRestriction.AnnRestriction annRestriction = (SingleColumnRestriction.AnnRestriction) restriction;
         VectorSimilarityFunction similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
 
-        float[] targetVector = TypeUtil.decomposeVector(indexContext, annRestriction.value(options).duplicate());
+        var targetVector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, annRestriction.value(options).duplicate()));
 
         List<List<ByteBuffer>> buffRows = cqlRows.rows;
         // Decorate-sort-undecorate to optimize sorting of vectors by their similarity scores
         List<Pair<List<ByteBuffer>, Double>> listPairsVectorsScores = buffRows.stream()
                                                                               .map(row -> {
                                                                                   ByteBuffer vectorBuffer = row.get(columnIndex);
-                                                                                  float[] vector = TypeUtil.decomposeVector(indexContext, vectorBuffer.duplicate());
+                                                                                  var vector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, vectorBuffer.duplicate()));
                                                                                   Double score = (double) similarityFunction.compare(vector, targetVector);
                                                                                   return Pair.create(row, score);
                                                                               })
