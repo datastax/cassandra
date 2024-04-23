@@ -80,11 +80,11 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
         similarityFunction = context.getIndexWriterConfig().getSimilarityFunction();
 
-        SegmentMetadata.ComponentMetadata termsMetadata = getComponentMetadata(IndexComponent.TERMS_DATA);
+        SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponent.TERMS_DATA);
         graphHandle = indexFiles.termsData();
         graph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
 
-        long pqSegmentOffset = getComponentMetadata(IndexComponent.PQ).offset;
+        long pqSegmentOffset = this.componentMetadatas.get(IndexComponent.PQ).offset;
         try (var pqFile = indexFiles.pq();
              var reader = pqFile.createReader())
         {
@@ -107,7 +107,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
                 compressedVectors = null;
         }
 
-        SegmentMetadata.ComponentMetadata postingListsMetadata = getComponentMetadata(IndexComponent.POSTING_LISTS);
+        SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponent.POSTING_LISTS);
         ordinalsMap = new OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
 
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcher(graph));
