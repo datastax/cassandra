@@ -337,7 +337,7 @@ public class CassandraOnHeapGraph<T>
         var searcher = new GraphSearcher(graph.getView());
         var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
         var topK = sourceModel.topKFor(limit, null);
-        var result = searcher.search(ssf, topK, bits);
+        var result = searcher.search(ssf, topK, threshold, bits);
         Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         context.addAnnNodesVisited(result.getVisitedCount());
         // Threshold based searches do not support resuming the search.
