@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -30,8 +29,10 @@ import org.junit.Before;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.util.Bits;
-import io.github.jbellis.jvector.vector.VectorEncoding;
+import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -44,6 +45,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 public class VectorTester extends SAITester
 {
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+
     @Before
     public void setup() throws Throwable
     {
@@ -59,36 +62,36 @@ public class VectorTester extends SAITester
         VectorMemtableIndex.GLOBAL_BRUTE_FORCE_ROWS = n;
     }
 
-    public static double rawIndexedRecall(Collection<float[]> vectors, float[] query, List<float[]> result, int topK) throws IOException
+    public static double rawIndexedRecall(Collection<float[]> rawVectors, float[] rawQuery, List<float[]> result, int topK)
     {
-        ConcurrentVectorValues vectorValues = new ConcurrentVectorValues(query.length);
+        ConcurrentVectorValues vectorValues = new ConcurrentVectorValues(rawQuery.length);
+        var q = vts.createFloatVector(rawQuery);
         int ordinal = 0;
 
-        var graphBuilder = new GraphIndexBuilder<>(vectorValues,
-                                                   VectorEncoding.FLOAT32,
-                                                   VectorSimilarityFunction.COSINE,
-                                                   16,
-                                                   100,
-                                                   1.2f,
-                                                   1.4f);
+        var graphBuilder = new GraphIndexBuilder(vectorValues,
+                                                 VectorSimilarityFunction.COSINE,
+                                                 16,
+                                                 100,
+                                                 1.2f,
+                                                 1.4f);
 
-        for (float[] vector : vectors)
+        for (float[] raw : rawVectors)
         {
-            vectorValues.add(ordinal, vector);
-            graphBuilder.addGraphNode(ordinal++, vectorValues);
+            var v = vts.createFloatVector(raw);
+            vectorValues.add(ordinal, v);
+            graphBuilder.addGraphNode(ordinal++, v);
         }
 
-        var results = GraphSearcher.search(query,
+        var results = GraphSearcher.search(q,
                                            topK,
                                            vectorValues,
-                                           VectorEncoding.FLOAT32,
                                            VectorSimilarityFunction.COSINE,
                                            graphBuilder.getGraph(),
                                            Bits.ALL);
 
-        List<float[]> nearestNeighbors = new ArrayList<>();
+        var nearestNeighbors = new ArrayList<float[]>();
         for (var ns : results.getNodes())
-            nearestNeighbors.add(vectorValues.vectorValue(ns.node));
+            nearestNeighbors.add(((ArrayVectorFloat) vectorValues.getVector(ns.node)).get());
 
         return recallMatch(nearestNeighbors, result, topK);
     }
@@ -135,7 +138,8 @@ public class VectorTester extends SAITester
     public static double computeRecall(List<float[]> vectors, float[] query, List<float[]> result, VectorSimilarityFunction vsf)
     {
         List<float[]> sortedVectors = new ArrayList<>(vectors);
-        sortedVectors.sort((a, b) -> Double.compare(vsf.compare(b, query), vsf.compare(a, query)));
+        sortedVectors.sort((a, b) -> Double.compare(vsf.compare(vts.createFloatVector(b), vts.createFloatVector(query)),
+                                                    vsf.compare(vts.createFloatVector(a), vts.createFloatVector(query))));
 
         assertThat(sortedVectors).containsAll(result);
 

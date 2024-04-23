@@ -20,9 +20,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 
-public interface RamAwareVectorValues extends RandomAccessVectorValues<float[]>
+public interface RamAwareVectorValues extends RandomAccessVectorValues
 {
-    float[] vectorValue(int i);
-
     long ramBytesUsed();
 }
