@@ -32,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.util.BitSet;
+import io.github.jbellis.jvector.util.SparseBits;
 import org.apache.cassandra.index.sai.disk.v2.hnsw.DiskBinarySearch;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
@@ -323,7 +324,7 @@ public class OnDiskOrdinalsMap
         }
 
         @Override
-        public BitSet buildOrdinalBitSet(int startRowId, int endRowId, Supplier<BitSet> unused) throws IOException
+        public BitSet buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> unused) throws IOException
         {
             int start = Math.max(startRowId, 0);
             int end = Math.min(endRowId + 1, size);
@@ -357,10 +358,10 @@ public class OnDiskOrdinalsMap
         }
 
         @Override
-        public BitSet buildOrdinalBitSet(int startRowId, int endRowId, Supplier<BitSet> supplier) throws IOException
+        public Bits buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> bitsSupplier) throws IOException
         {
             // Get an empty bitset
-            return supplier.get();
+            return bitsSupplier.get();
         }
 
         @Override
@@ -488,9 +489,9 @@ public class OnDiskOrdinalsMap
         }
 
         @Override
-        public BitSet buildOrdinalBitSet(int startRowId, int endRowId, Supplier<BitSet> bitsetSupplier) throws IOException
+        public Bits buildOrdinalBits(int startRowId, int endRowId, Supplier<SparseBits> bitsSupplier) throws IOException
         {
-            BitSet bits = bitsetSupplier.get();
+            var bits = bitsSupplier.get();
             this.forEachOrdinalInRange(startRowId, endRowId, (segmentRowId, ordinal) -> {
                 bits.set(ordinal);
             });
