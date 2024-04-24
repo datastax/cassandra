@@ -121,7 +121,8 @@ public class CassandraOnHeapGraph<T>
     public CassandraOnHeapGraph(AbstractType<?> termComparator, IndexWriterConfig indexConfig, boolean forSearching)
     {
         serializer = (VectorType.VectorSerializer)termComparator.getSerializer();
-        vectorValues = new ConcurrentVectorValues(((VectorType<?>) termComparator).dimension);
+        var dimension = ((VectorType<?>) termComparator).dimension;
+        vectorValues = new ConcurrentVectorValues(dimension);
         similarityFunction = indexConfig.getSimilarityFunction();
         sourceModel = indexConfig.getSourceModel();
         // We need to be able to inexpensively distinguish different vectors, with a slower path
@@ -139,7 +140,7 @@ public class CassandraOnHeapGraph<T>
                                         indexConfig.getMaximumNodeConnections(),
                                         indexConfig.getConstructionBeamWidth(),
                                         1.2f,
-                                        1.2f);
+                                        dimension > 3 ? 1.2f : 2.0f);
         searchers = ThreadLocal.withInitial(() -> new GraphSearcher(builder.getGraph()));
     }
 
