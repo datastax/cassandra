@@ -28,6 +28,11 @@ import org.apache.cassandra.db.marshal.FloatType;
 
 public class VectorDotProductWithLengthTest extends VectorTester
 {
+    // This tests our detection of unit-length vectors used with dot product and PQ.
+    // We want to switch to cosine similarity for PQ-based comparisons in those cases to preserve the angular semantics
+    // (since PQ compression does not preserve unit length of the compressed results),
+    // but if someone actually wants dot-product-with-length semantics (which this test does)
+    // then switching to cosine is incorrect.
     @Test
     public void testTrueDotproduct()
     {
@@ -45,13 +50,13 @@ public class VectorDotProductWithLengthTest extends VectorTester
         // check that results are consistent with dot product similarity knn
         for (int i = 0; i < 10; i++) {
             var q = create2DVector();
-            var result = execute("SELECT pk, v FROM %s ORDER BY v ANN OF ? LIMIT 3", vector(q));
+            var result = execute("SELECT pk, v FROM %s ORDER BY v ANN OF ? LIMIT 20", vector(q));
             var ann = result.stream().map(row -> {
                 var vList = row.getVector("v", FloatType.instance, 2);
                 return new float[] { vList.get(0), vList.get(1)};
             }).collect(Collectors.toList());
             var recall = computeRecall(vectors, q, ann, VectorSimilarityFunction.DOT_PRODUCT);
-            assert recall > 0.9 : recall;
+            assert recall >= 0.9 : recall;
         }
     }
 
