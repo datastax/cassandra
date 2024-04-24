@@ -25,7 +25,6 @@ import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorUtil;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
-import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -34,7 +33,6 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.NumberType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.transport.ProtocolVersion;
 
 import static java.lang.String.format;
@@ -42,8 +40,6 @@ import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.is
 
 public abstract class VectorFcts
 {
-    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
-
     public static void addFunctionsTo(NativeFunctions functions)
     {
         functions.add(similarity_function("similarity_cosine", VectorSimilarityFunction.COSINE, false));
@@ -82,6 +78,7 @@ public abstract class VectorFcts
                                                            VectorSimilarityFunction f,
                                                            boolean supportsZeroVectors)
     {
+        var vts = VectorizationProvider.getInstance().getVectorTypeSupport();
         return new NativeScalarFunction(name, FloatType.instance, type, type)
         {
             @Override
@@ -181,6 +178,7 @@ public abstract class VectorFcts
                                                        List<AbstractType<?>> argTypes,
                                                        AbstractType<?> receiverType)
         {
+            var vts = VectorizationProvider.getInstance().getVectorTypeSupport();
             VectorType<Float> vectorType = (VectorType<Float>) argTypes.get(0);
 
             return new NativeScalarFunction(name.name, vectorType, vectorType)
