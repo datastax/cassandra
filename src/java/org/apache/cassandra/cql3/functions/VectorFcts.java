@@ -26,7 +26,6 @@ import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorUtil;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
-import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -42,8 +41,6 @@ import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.is
 
 public class VectorFcts
 {
-    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
-
     public static void addFunctionsTo(NativeFunctions functions)
     {
         functions.add(createSimilarityFunctionFactory("similarity_cosine", VectorSimilarityFunction.COSINE, false));
@@ -82,6 +79,7 @@ public class VectorFcts
                                                            VectorSimilarityFunction f,
                                                            boolean supportsZeroVectors)
     {
+        var vts = VectorizationProvider.getInstance().getVectorTypeSupport();
         return new NativeScalarFunction(name, FloatType.instance, type, type)
         {
             @Override
@@ -189,6 +187,7 @@ public class VectorFcts
                                                        List<AbstractType<?>> argTypes,
                                                        AbstractType<?> receiverType)
         {
+            var vts = VectorizationProvider.getInstance().getVectorTypeSupport();
             VectorType<Float> vectorType = (VectorType<Float>) argTypes.get(0);
 
             return new NativeScalarFunction(name.name, vectorType, vectorType)
