@@ -53,6 +53,7 @@ import net.openhft.chronicle.hash.serialization.BytesReader;
 import net.openhft.chronicle.hash.serialization.BytesWriter;
 import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -80,6 +81,7 @@ public class CompactionGraph implements Closeable, Accountable
     private final IndexDescriptor descriptor;
     private final IndexContext context;
     private final boolean unitVectors;
+    private final int entriesAllocated;
     private boolean postingsOneToOne;
     private int nextOrdinal = 0;
     private final VectorSourceModel sourceModel;
@@ -96,8 +98,18 @@ public class CompactionGraph implements Closeable, Accountable
         var termComparator = context.getValidator();
         int dimension = ((VectorType<?>) termComparator).dimension;
 
-        // FIXME keyCount is partitions, we need to push rows in here instead
-        int estimatedSize = keyCount > 10_000_000 ? 10_000_000 : (int) keyCount;
+        // We need to tell Chronicle Map (CM) how many entries to expect.  it's critical not to undercount,
+        // or CM will crash.  However, we don't want to just pass in a max entries count of 2B, since it eagerly
+        // allocated segments for that many entries, which takes about 25s.
+        //
+        // If our estimate turns out to be too small, it's not the end of the world, we'll flush this segment
+        // and start another to avoid crashing CM.  But we'd rather not do this because the whole goal of
+        // CompactionGraph is to write one segment only.
+        var dd = descriptor.descriptor;
+        var rowsPerKey = Keyspace.open(dd.ksname).getColumnFamilyStore(dd.cfname).getMeanRowsPerPartition();
+        long estimatedRows = (long) (1.1 * keyCount * rowsPerKey); // 10% fudge factor
+        int maxRowsInGraph = Integer.MAX_VALUE - 100_000; // leave room for a few more async additions until we flush
+        entriesAllocated = estimatedRows > maxRowsInGraph ? maxRowsInGraph : (int) estimatedRows;
 
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
         similarityFunction = indexConfig.getSimilarityFunction();
@@ -107,7 +119,7 @@ public class CompactionGraph implements Closeable, Accountable
                                          .averageValueSize(VectorPostings.emptyBytesUsed() + RamUsageEstimator.NUM_BYTES_OBJECT_REF + 2 * Integer.BYTES)
                                          .keyMarshaller(new VectorFloatMarshaller())
                                          .valueMarshaller(new VectorPostings.Marshaller())
-                                         .entries(estimatedSize)
+                                         .entries(entriesAllocated)
                                          .createPersistedTo(File.createTempFile("postingsMap", null));
         postingsOneToOne = true;
         this.compressor = compressor;
@@ -130,7 +142,7 @@ public class CompactionGraph implements Closeable, Accountable
         writer.getOutput().seek(indexFile.length());
         SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()));
         inlineVectors = new InlineVectorValues(dimension, writer);
-        pqVectorsList = new ArrayList<>(estimatedSize);
+        pqVectorsList = new ArrayList<>(entriesAllocated);
         pqVectors = new PQVectors(compressor, pqVectorsList);
         // VSTODO add LVQ
         builder.setBuildScoreProvider(BuildScoreProvider.pqBuildScoreProvider(similarityFunction, inlineVectors, pqVectors));
@@ -276,6 +288,11 @@ public class CompactionGraph implements Closeable, Accountable
     private long exactRamBytesUsed()
     {
         return ObjectSizes.measureDeep(this);
+    }
+
+    public boolean requiresFlush()
+    {
+        return nextOrdinal >= entriesAllocated;
     }
 
     private static class VectorFloatMarshaller implements BytesReader<VectorFloat<?>>, BytesWriter<VectorFloat<?>> {

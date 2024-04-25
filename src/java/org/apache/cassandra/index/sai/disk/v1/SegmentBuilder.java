@@ -108,6 +108,11 @@ public abstract class SegmentBuilder
     protected final QuickSlidingWindowReservoir termSizeReservoir = new QuickSlidingWindowReservoir(100);
     protected AtomicReference<Throwable> asyncThrowable = new AtomicReference<>();
 
+    public boolean requiresFlush()
+    {
+        return false;
+    }
+
     public static class KDTreeSegmentBuilder extends SegmentBuilder
     {
         protected final byte[] buffer;
@@ -276,6 +281,12 @@ public abstract class SegmentBuilder
         public boolean supportsAsyncAdd()
         {
             return true;
+        }
+
+        @Override
+        public boolean requiresFlush()
+        {
+            return graphIndex.requiresFlush();
         }
     }
 

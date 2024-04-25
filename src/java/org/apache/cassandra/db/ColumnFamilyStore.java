@@ -3050,7 +3050,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return count > 0 ? sum * 1.0 / count : 0;
     }
 
-    public int getMeanRowCount()
+    public int getMeanRowsPerPartition()
     {
         long totalRows = 0;
         long totalPartitions = 0;
