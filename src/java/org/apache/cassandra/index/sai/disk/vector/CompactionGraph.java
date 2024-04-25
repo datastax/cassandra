@@ -79,6 +79,7 @@ public class CompactionGraph implements Closeable, Accountable
     private final ArrayList<ByteSequence<?>> pqVectorsList;
     private final IndexDescriptor descriptor;
     private final IndexContext context;
+    private final boolean unitVectors;
     private boolean postingsOneToOne;
     private int nextOrdinal = 0;
     private final VectorSourceModel sourceModel;
@@ -86,10 +87,11 @@ public class CompactionGraph implements Closeable, Accountable
     private final OnDiskGraphIndexWriter writer;
     private final long termsOffset;
 
-    public CompactionGraph(IndexDescriptor descriptor, IndexContext context, ProductQuantization compressor, long keyCount) throws IOException
+    public CompactionGraph(IndexDescriptor descriptor, IndexContext context, ProductQuantization compressor, boolean unitVectors, long keyCount) throws IOException
     {
         this.descriptor = descriptor;
         this.context = context;
+        this.unitVectors = unitVectors;
         var indexConfig = context.getIndexWriterConfig();
         var termComparator = context.getValidator();
         int dimension = ((VectorType<?>) termComparator).dimension;
@@ -238,8 +240,7 @@ public class CompactionGraph implements Closeable, Accountable
 
             // write PQ
             long pqOffset = pqOutput.getFilePointer();
-            // FIXME derive actual unitVectors values
-            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), true, VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
+            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
             pqVectors.write(pqOutput.asSequentialWriter());
             long pqLength = pqOutput.getFilePointer() - pqOffset;
 

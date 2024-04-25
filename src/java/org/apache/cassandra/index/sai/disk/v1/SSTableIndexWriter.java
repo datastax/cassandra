@@ -328,12 +328,12 @@ public class SSTableIndexWriter implements PerIndexWriter
         {
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
-            var cv = CassandraOnHeapGraph.getCompressedVectorsIfPresent(indexContext, cv1 -> cv1 instanceof PQVectors);
-            if (cv == null) {
+            var cvi = CassandraOnHeapGraph.getCompressedVectorsIfPresent(indexContext, cv1 -> cv1 instanceof PQVectors);
+            if (cvi == null || cvi.unitVectors.isEmpty()) {
                 builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(indexDescriptor, indexContext, rowIdOffset, keyCount, limiter);
             } else {
-                var pq = ((PQVectors) cv).getProductQuantization();
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(indexDescriptor, indexContext, rowIdOffset, keyCount, limiter, pq);
+                var pq = ((PQVectors) cvi.cv).getProductQuantization();
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(indexDescriptor, indexContext, rowIdOffset, keyCount, limiter, pq, cvi.unitVectors.get());
             }
         }
         else if (indexContext.isLiteral())

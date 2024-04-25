@@ -193,12 +193,12 @@ public abstract class SegmentBuilder
     {
         private final CompactionGraph graphIndex;
 
-        public VectorOffHeapSegmentBuilder(IndexDescriptor descriptor, IndexContext context, long rowIdOffset, long keyCount, NamedMemoryLimiter limiter, ProductQuantization pq)
+        public VectorOffHeapSegmentBuilder(IndexDescriptor descriptor, IndexContext context, long rowIdOffset, long keyCount, NamedMemoryLimiter limiter, ProductQuantization pq, boolean unitVectors)
         {
             super(rowIdOffset, context.getValidator(), limiter);
             try
             {
-                graphIndex = new CompactionGraph(descriptor, context, pq, keyCount);
+                graphIndex = new CompactionGraph(descriptor, context, pq, unitVectors, keyCount);
             }
             catch (IOException e)
             {

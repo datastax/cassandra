@@ -29,6 +29,7 @@ import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -398,14 +399,19 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return metadataMap;
     }
 
-    public static CompressedVectors getCompressedVectorsIfPresent(IndexContext indexContext, Function<CompressedVectors, Boolean> matcher)
+    /**
+     * Return the best previous CompressedVectors for this column that matches the `matcher` predicate.
+     * "Best" means the most recent one that hits the row count target of {@link ProductQuantization#MAX_PQ_TRAINING_SET_SIZE},
+     * or the one with the most rows if none are larger than that.
+     */
+    public static CompressedVectorInfo getCompressedVectorsIfPresent(IndexContext indexContext, Function<CompressedVectors, Boolean> matcher)
     {
         // Retrieve the first compressed vectors for a segment with at least MAX_PQ_TRAINING_SET_SIZE rows
         // or the one with the most rows if none are larger than MAX_PQ_TRAINING_SET_SIZE
         var indexes = new ArrayList<>(indexContext.getView().getIndexes());
         indexes.sort(Comparator.comparing(SSTableIndex::getSSTable, CompactionSSTable.maxTimestampDescending));
 
-        CompressedVectors compressedVectors = null;
+        CompressedVectorInfo cvi = null;
         long maxRows = 0;
         for (SSTableIndex index : indexes)
         {
@@ -415,20 +421,21 @@ public class CassandraOnHeapGraph<T> implements Accountable
                     continue;
 
                 var searcher = segment.getIndexSearcher();
-                assert searcher instanceof V2VectorIndexSearcher;
-                var cv = ((V2VectorIndexSearcher) searcher).getCompressedVectors();
+                var v2Searcher = (V2VectorIndexSearcher) searcher;
+                var cv = v2Searcher.getCompressedVectors();
                 if (matcher.apply(cv))
                 {
                     // We can exit now because we won't find a better candidate
+                    var candidate = new CompressedVectorInfo(cv, v2Searcher.containsUnitVectors());
                     if (segment.metadata.numRows >= ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
-                        return cv;
+                        return candidate;
 
-                    compressedVectors = cv;
+                    cvi = candidate;
                     maxRows = segment.metadata.numRows;
                 }
             }
         }
-        return compressedVectors;
+        return cvi;
     }
 
     private BiMap <Integer, Integer> buildOrdinalMap()
@@ -476,7 +483,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // build encoder (expensive for PQ, cheaper for BQ)
             if (preferredCompression.type == CompressionType.PRODUCT_QUANTIZATION)
             {
-                var previousCV = getCompressedVectorsIfPresent(indexContext, preferredCompression::matches);
+                var cvi = getCompressedVectorsIfPresent(indexContext, preferredCompression::matches);
+                var previousCV = cvi == null ? null : cvi.cv;
                 compressor = computeOrRefineFrom(previousCV, preferredCompression);
             }
             else
@@ -583,5 +591,18 @@ public class CassandraOnHeapGraph<T> implements Accountable
     {
         IGNORE,
         FAIL
+    }
+
+    public static class CompressedVectorInfo
+    {
+        public final CompressedVectors cv;
+        /** an empty Optional indicates that the index was written with an older version that did not record this information */
+        public final Optional<Boolean> unitVectors;
+
+        public CompressedVectorInfo(CompressedVectors cv, Optional<Boolean> unitVectors)
+        {
+            this.cv = cv;
+            this.unitVectors = unitVectors;
+        }
     }
 }

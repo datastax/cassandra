@@ -70,7 +70,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
-    private final boolean pqUnitVectors;
+    final boolean pqUnitVectors;
 
     private final ExplicitThreadLocal<GraphSearcher> searchers;
 
