@@ -155,14 +155,22 @@ public class VectorPostings<T>
     }
 
     public static class CompactionVectorPostings extends VectorPostings<Integer> {
-        public CompactionVectorPostings(List<Integer> raw)
+        public CompactionVectorPostings(int ordinal, List<Integer> raw)
         {
             super(raw);
+            this.ordinal = ordinal;
         }
 
-        public CompactionVectorPostings(int firstKey)
+        public CompactionVectorPostings(int ordinal, int firstKey)
         {
             super(firstKey);
+            this.ordinal = ordinal;
+        }
+
+        @Override
+        public void setOrdinal(int ordinal)
+        {
+            throw new UnsupportedOperationException();
         }
 
         @Override
@@ -193,7 +201,7 @@ public class VectorPostings<T>
             assert size >= 0 : size;
             CompactionVectorPostings cvp;
             if (size == 1) {
-                cvp = new CompactionVectorPostings(in.readInt());
+                cvp = new CompactionVectorPostings(ordinal, in.readInt());
             }
             else
             {
@@ -202,9 +210,8 @@ public class VectorPostings<T>
                 {
                     postingsList.add(in.readInt());
                 }
-                cvp = new CompactionVectorPostings(postingsList);
+                cvp = new CompactionVectorPostings(ordinal, postingsList);
             }
-            cvp.setOrdinal(ordinal);
             return cvp;
         }
     }

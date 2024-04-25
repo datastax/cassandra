@@ -84,7 +84,6 @@ public class CompactionGraph implements Closeable, Accountable
     private final int entriesAllocated;
     private boolean postingsOneToOne;
     private int nextOrdinal = 0;
-    private final VectorSourceModel sourceModel;
     private final ProductQuantization compressor;
     private final OnDiskGraphIndexWriter writer;
     private final long termsOffset;
@@ -113,7 +112,7 @@ public class CompactionGraph implements Closeable, Accountable
 
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
         similarityFunction = indexConfig.getSimilarityFunction();
-        sourceModel = indexConfig.getSourceModel();
+        VectorSourceModel sourceModel = indexConfig.getSourceModel();
         postingsMap = ChronicleMapBuilder.of((Class<VectorFloat<?>>) (Class) VectorFloat.class, (Class<CompactionVectorPostings>) (Class) CompactionVectorPostings.class)
                                          .averageKeySize(dimension * Float.BYTES)
                                          .averageValueSize(VectorPostings.emptyBytesUsed() + RamUsageEstimator.NUM_BYTES_OBJECT_REF + 2 * Integer.BYTES)
@@ -192,14 +191,13 @@ public class CompactionGraph implements Closeable, Accountable
         var postings = postingsMap.get(vector);
         if (postings == null)
         {
-            postings = new CompactionVectorPostings(key);
-            if (postingsMap.putIfAbsent(vector, postings) == null)
+            if (!postingsMap.containsKey(vector))
             {
                 // add a new entry
                 // this all runs on the same compaction thread, so we don't need to worry about concurrency
-                var ordinal = nextOrdinal++;
-                postings.setOrdinal(ordinal);
-                postingsMap.put(vector, postings); // VSTODO is there a better way to inform CM that the value changed?
+                int ordinal = nextOrdinal++;
+                postings = new CompactionVectorPostings(ordinal, key);
+                postingsMap.put(vector, postings);
                 writer.writeInline(ordinal, Feature.singleState(FeatureId.INLINE_VECTORS, new InlineVectors.State(vector)));
                 var encoded = (ArrayByteSequence) compressor.encode(vector);
                 pqVectorsList.add(encoded);
