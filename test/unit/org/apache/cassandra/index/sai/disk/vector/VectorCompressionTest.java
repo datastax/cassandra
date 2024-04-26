@@ -41,14 +41,14 @@ public class VectorCompressionTest extends VectorTester
     public void testAda002() throws IOException
     {
         // ADA002 is always 1536
-        testOne(VectorSourceModel.ADA002, 1536, new VectorCompression(BINARY_QUANTIZATION, 1536 / 8));
+        testOne(VectorSourceModel.ADA002, 1536, VectorSourceModel.ADA002.compressionProvider.apply(1536));
     }
 
     @Test
     public void testGecko() throws IOException
     {
         // GECKO is always 768
-        testOne(VectorSourceModel.GECKO, 768, new VectorCompression(PRODUCT_QUANTIZATION, 768 / 8));
+        testOne(VectorSourceModel.GECKO, 768, VectorSourceModel.GECKO.compressionProvider.apply(768));
     }
 
     @Test
@@ -58,7 +58,7 @@ public class VectorCompressionTest extends VectorTester
         for (int i = 1; i < 3; i++)
         {
             int D = 3072 / i;
-            testOne(VectorSourceModel.OPENAI_V3_LARGE, D, new VectorCompression(PRODUCT_QUANTIZATION, D / 16));
+            testOne(VectorSourceModel.OPENAI_V3_LARGE, D, VectorSourceModel.OPENAI_V3_LARGE.compressionProvider.apply(D));
         }
     }
 
@@ -69,7 +69,7 @@ public class VectorCompressionTest extends VectorTester
         for (int i = 1; i < 3; i++)
         {
             int D = 1536 / i;
-            testOne(VectorSourceModel.OPENAI_V3_SMALL, D, new VectorCompression(PRODUCT_QUANTIZATION, D / 16));
+            testOne(VectorSourceModel.OPENAI_V3_SMALL, D, VectorSourceModel.OPENAI_V3_SMALL.compressionProvider.apply(D));
         }
     }
 
@@ -77,9 +77,9 @@ public class VectorCompressionTest extends VectorTester
     public void testBert() throws IOException
     {
         // BERT is more of a family than a specific model
-        for (int i : List.of(128, 256, 512, 1024))
+        for (int dimension : List.of(128, 256, 512, 1024))
         {
-            testOne(VectorSourceModel.BERT, i, new VectorCompression(PRODUCT_QUANTIZATION, i / 4));
+            testOne(VectorSourceModel.BERT, dimension, VectorSourceModel.BERT.compressionProvider.apply(dimension));
         }
     }
 
@@ -88,34 +88,30 @@ public class VectorCompressionTest extends VectorTester
     {
         // NV_QA_4 is anecdotally 1024 based on reviewing https://build.nvidia.com/nvidia/embed-qa-4. Couldn't
         // find supporting documentation for this number, though.
-        testOne(VectorSourceModel.NV_QA_4, 1024, new VectorCompression(PRODUCT_QUANTIZATION, 1024 / 8));
+        testOne(VectorSourceModel.NV_QA_4, 1024, VectorSourceModel.NV_QA_4.compressionProvider.apply(1024));
     }
 
     @Test
     public void testOther() throws IOException
     {
-        // Glove
-        testOne(VectorSourceModel.OTHER, 25, new VectorCompression(PRODUCT_QUANTIZATION, 25));
-        testOne(VectorSourceModel.OTHER, 50, new VectorCompression(PRODUCT_QUANTIZATION, 32));
-        testOne(VectorSourceModel.OTHER, 100, new VectorCompression(PRODUCT_QUANTIZATION, 50));
-        testOne(VectorSourceModel.OTHER, 200, new VectorCompression(PRODUCT_QUANTIZATION, 100));
-        // Ada002
-        testOne(VectorSourceModel.OTHER, 1536, new VectorCompression(BINARY_QUANTIZATION, 1536 / 8));
-        // Something unknown and large
-        testOne(VectorSourceModel.OTHER, 2000, new VectorCompression(PRODUCT_QUANTIZATION, 2000 / 8));
+        // 25..200 -> Glove dimensions
+        // 1536 -> Ada002
+        // 2000 -> something unknown and large
+        for (int dimension : List.of(25, 50, 100, 200, 1536, 2000))
+            testOne(VectorSourceModel.OTHER, dimension, VectorSourceModel.OTHER.compressionProvider.apply(dimension));
     }
 
     @Test
     public void testFewRows() throws IOException
     {
-        testOne(1, VectorSourceModel.OTHER, 200, new VectorCompression(NONE, 200 * 8));
-        // BQ still works with tiny dataset
-        testOne(1, VectorSourceModel.ADA002, 1536, new VectorCompression(BINARY_QUANTIZATION, 1536 / 8));
+        // with fewer than MIN_PQ_ROWS we expect to observe no compression no matter
+        // what the source model would prefer
+        testOne(1, VectorSourceModel.OTHER, 200, new VectorCompression(NONE, 200 * Float.BYTES));
     }
 
     private void testOne(VectorSourceModel model, int originalDimension, VectorCompression expectedCompression) throws IOException
     {
-        testOne(1024, model, originalDimension, expectedCompression);
+        testOne(CassandraOnHeapGraph.MIN_PQ_ROWS, model, originalDimension, expectedCompression);
     }
 
     private void testOne(int rows, VectorSourceModel model, int originalDimension, VectorCompression expectedCompression) throws IOException
