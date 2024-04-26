@@ -98,6 +98,9 @@ import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 public class CassandraOnHeapGraph<T> implements Accountable
 {
+    /** minimum number of rows to perform PQ codebook generation */
+    public static final int MIN_PQ_ROWS = 1024;
+
     private static final Logger logger = LoggerFactory.getLogger(CassandraOnHeapGraph.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
@@ -539,14 +542,14 @@ public class CassandraOnHeapGraph<T> implements Accountable
         VectorCompressor<?> compressor;
         if (previousCV == null)
         {
-            if (vectorValues.size() < 1024)
+            if (vectorValues.size() < MIN_PQ_ROWS)
                 compressor = null;
             else
                 compressor = ProductQuantization.compute(vectorValues, preferredCompression.compressToBytes, 256, false);
         }
         else
         {
-            if (vectorValues.size() < 1024)
+            if (vectorValues.size() < MIN_PQ_ROWS)
                 compressor = previousCV.getCompressor();
             else
                 compressor = ((ProductQuantization) previousCV.getCompressor()).refine(vectorValues);
