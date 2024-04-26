@@ -124,7 +124,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
         var indexConfig = context.getIndexWriterConfig();
         var termComparator = context.getValidator();
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
-        vectorValues = new ConcurrentVectorValues(((VectorType<?>) termComparator).dimension);
+        var dimension = ((VectorType<?>) termComparator).dimension;
+        vectorValues = new ConcurrentVectorValues(dimension);
         similarityFunction = indexConfig.getSimilarityFunction();
         sourceModel = indexConfig.getSourceModel();
         // We need to be able to inexpensively distinguish different vectors, with a slower path
