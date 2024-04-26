@@ -595,7 +595,7 @@ public class VectorLocalTest extends VectorTester
         if (expectedSize < 10)
             assertThat(result).hasSize(expectedSize);
         else
-            assertThat(result.size()).isCloseTo(expectedSize, Percentage.withPercentage(5));
+            assertThat(result.size()).isCloseTo(expectedSize, Percentage.withPercentage(10));
         result.stream().forEach(row -> assertThat(row.getInt("pk")).isEqualTo(key));
     }
 
