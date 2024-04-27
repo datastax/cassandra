@@ -83,11 +83,11 @@ public class VectorSiftSmallTest extends VectorTester
             flush();
         }
         double memoryRecall = testRecall(queryVectors, groundTruth);
-        assertTrue("Memory recall is " + memoryRecall, memoryRecall > 0.975);
+        assertTrue("Pre-compaction recall is " + memoryRecall, memoryRecall > 0.975);
 
         compact();
         var diskRecall = testRecall(queryVectors, groundTruth);
-        assertTrue("Disk recall is " + diskRecall, diskRecall > 0.975);
+        assertTrue("Post-compaction recall is " + diskRecall, diskRecall > 0.975);
     }
 
 
