@@ -189,8 +189,7 @@ public class StatementRestrictions
      */
     public StatementRestrictions addExternalRestrictions(Iterable<ExternalRestriction> restrictions)
     {
-        IndexRestrictions.Builder newIndexRestrictions = IndexRestrictions.builder()
-                                                                          .add(filterRestrictions);
+        IndexRestrictions.Builder newIndexRestrictions = IndexRestrictions.builder().add(filterRestrictions);
 
         for (ExternalRestriction restriction : restrictions)
             newIndexRestrictions.add(restriction);
@@ -277,7 +276,7 @@ public class StatementRestrictions
     /**
      * Build a <code>StatementRestrictions</code> from a <code>WhereClause</code> for a given
      * <code>StatementType</code>, <code>TableMetadata</code> and <code>VariableSpecifications</code>
-     *
+     * </p>
      * The validation rules for whether the <code>StatementRestrictions</code> are valid depend on a
      * number of considerations, including whether indexes are being used and whether filtering is being
      * used.
@@ -325,7 +324,6 @@ public class StatementRestrictions
             if (allowUseOfSecondaryIndices && type.allowUseOfSecondaryIndices())
                 indexRegistry = IndexRegistry.obtain(table);
 
-
             WhereClause.AndElement root = whereClause.root().conjunctiveForm();
             return doBuild(root, indexRegistry, 0);
         }
@@ -358,42 +356,58 @@ public class StatementRestrictions
              *     in CQL so far)
              *   - CONTAINS and CONTAINS_KEY cannot be used with UPDATE or DELETE
              */
-            for (Relation relation : element.relations()) {
+            for (Relation relation : element.relations())
+            {
                 if ((relation.isContains() || relation.isContainsKey() || relation.isNotContains() || relation.isNotContainsKey())
-                        && (type.isUpdate() || type.isDelete())) {
+                        && (type.isUpdate() || type.isDelete()))
+                {
                     throw invalidRequest("Cannot use %s with %s", type, relation.operator());
                 }
 
-                if (relation.operator() == Operator.IS_NOT) {
+                if (relation.operator() == Operator.IS_NOT)
+                {
                     if (!forView)
                         throw invalidRequest("Unsupported restriction: %s", relation);
 
                     notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames).getColumnDefs());
-                } else {
+                }
+                else
+                {
                     Restriction restriction = relation.toRestriction(table, boundNames);
 
-                    if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry))) {
-                        if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty()) {
+                    if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry)))
+                    {
+                        if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
+                        {
                             throw invalidRequest("LIKE restriction is only supported on properly indexed columns. %s is not valid.", relation.toString());
-                        } else {
+                        }
+                        else
+                        {
                             throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, restriction.getFirstColumn());
                         }
                     }
-                    if (relation.operator() == Operator.ANALYZER_MATCHES) {
-                        if (!type.allowUseOfSecondaryIndices()) {
+                    if (relation.operator() == Operator.ANALYZER_MATCHES)
+                    {
+                        if (!type.allowUseOfSecondaryIndices())
+                        {
                             throw invalidRequest("Invalid query. %s does not support use of secondary indices, but %s restriction requires a secondary index.", type.name(), relation.toString());
                         }
-                        if (!restriction.hasSupportingIndex(indexRegistry)) {
-                            if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty()) {
+                        if (!restriction.hasSupportingIndex(indexRegistry))
+                        {
+                            if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
+                            {
                                 throw invalidRequest(": restriction is only supported on properly indexed columns. %s is not valid.", relation.toString());
-                            } else {
+                            }
+                            else
+                            {
                                 throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, restriction.getFirstColumn());
                             }
                         }
                     }
 
                     ColumnMetadata def = restriction.getFirstColumn();
-                    if (def.isPartitionKey()) {
+                    if (def.isPartitionKey())
+                    {
                         // All partition key restrictions must be a part of the top-level AND operation.
                         // The read path filtering logic is currently unable to filter rows based on
                         // partition key restriction that is a part of a complex expression involving disjunctions.
@@ -408,9 +422,12 @@ public class StatementRestrictions
                     // we can't treat it as a real clustering column,
                     // but instead we treat it as a regular column and use
                     // index (if we have one) or use row filtering on it; hence we require nestingLevel == 0 check here
-                    else if (def.isClusteringColumn() && nestingLevel == 0) {
+                    else if (def.isClusteringColumn() && nestingLevel == 0)
+                    {
                         clusteringColumnsRestrictionSet.addRestriction(restriction);
-                    } else {
+                    }
+                    else
+                    {
                         nonPrimaryKeyRestrictionSet.addRestriction((SingleRestriction) restriction, element.isDisjunction());
                     }
                 }
@@ -725,7 +742,7 @@ public class StatementRestrictions
             if (!table.indexes.has(expression.targetIndex.getName()))
                 throw IndexRestrictions.indexNotFound(expression.targetIndex, table);
 
-            Index index = indexRegistry.getIndex(table.indexes.get(expression.targetIndex.getName()).get());
+            Index index = indexRegistry.getIndex(table.indexes.get(expression.targetIndex.getName()).orElseThrow());
             if (!index.getIndexMetadata().isCustom())
                 throw IndexRestrictions.nonCustomIndexInExpression(expression.targetIndex);
 
@@ -794,7 +811,7 @@ public class StatementRestrictions
         }
     }
 
-    public void throwsRequiresIndexSupportingDisjunctionError(TableMetadata table)
+    public void throwsRequiresIndexSupportingDisjunctionError()
     {
         throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_DISJUNCTION);
     }

@@ -1476,7 +1476,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         {
             if (restrictions.usesSecondaryIndexing())
                 if (restrictions.needsDisjunctionSupport(table))
-                    restrictions.throwsRequiresIndexSupportingDisjunctionError(table);
+                    restrictions.throwsRequiresIndexSupportingDisjunctionError();
         }
 
         /** If ALLOW FILTERING was not specified, this verifies that it is not needed */
