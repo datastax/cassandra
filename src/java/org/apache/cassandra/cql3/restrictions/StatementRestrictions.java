@@ -429,8 +429,8 @@ public class StatementRestrictions
             boolean usesSecondaryIndexing = false;
             boolean isKeyRange = false;
 
-            boolean hasQueriableClusteringColumnIndex = false;
-            boolean hasQueriableIndex = false;
+            boolean hasQueryableClusteringColumnIndex = false;
+            boolean hasQueryableIndex = false;
 
             IndexRestrictions.Builder filterRestrictionsBuilder = IndexRestrictions.builder();
 
@@ -444,9 +444,9 @@ public class StatementRestrictions
                     filterRestrictionsBuilder.add(customExpression);
                 }
 
-                hasQueriableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry);
-                hasQueriableIndex = element.containsCustomExpressions()
-                                    || hasQueriableClusteringColumnIndex
+                hasQueryableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry);
+                hasQueryableIndex = element.containsCustomExpressions()
+                                    || hasQueryableClusteringColumnIndex
                                     || partitionKeyRestrictions.hasSupportingIndex(indexRegistry)
                                     || nonPrimaryKeyRestrictions.hasSupportingIndex(indexRegistry);
             }
@@ -475,23 +475,23 @@ public class StatementRestrictions
                 if (partitionKeyRestrictions.isEmpty() && partitionKeyRestrictions.hasUnrestrictedPartitionKeyComponents(table))
                 {
                     isKeyRange = true;
-                    usesSecondaryIndexing = hasQueriableIndex;
+                    usesSecondaryIndexing = hasQueryableIndex;
                 }
 
-                // If there is a queriable index, no special condition is required on the other restrictions.
+                // If there is a queryable index, no special condition is required on the other restrictions.
                 // But we still need to know 2 things:
-                // - If we don't have a queriable index, is the query ok
-                // - Is it queriable without 2ndary index, which is always more efficient
+                // - If we don't have a queryable index, is the query ok
+                // - Is it queryable without 2ndary index, which is always more efficient
                 // If a component of the partition key is restricted by a relation, all preceding
                 // components must have a EQ. Only the last partition key component can be in IN relation.
                 // If partition key restrictions exist and this is a disjunction then we may need filtering
                 if (partitionKeyRestrictions.needFiltering(table) || (!partitionKeyRestrictions.isEmpty() && element.isDisjunction()))
                 {
-                    if (!allowFiltering && !forView && !hasQueriableIndex)
+                    if (!allowFiltering && !forView && !hasQueryableIndex)
                         throw new InvalidRequestException(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
 
                     isKeyRange = true;
-                    usesSecondaryIndexing = hasQueriableIndex;
+                    usesSecondaryIndexing = hasQueryableIndex;
                 }
             }
 
@@ -530,12 +530,12 @@ public class StatementRestrictions
             }
             else
             {
-                checkFalse(clusteringColumnsRestrictions.hasContains() && !hasQueriableIndex && !allowFiltering,
+                checkFalse(clusteringColumnsRestrictions.hasContains() && !hasQueryableIndex && !allowFiltering,
                            "Clustering columns can only be restricted with CONTAINS with a secondary index or filtering");
 
                 if (!clusteringColumnsRestrictions.isEmpty() && clusteringColumnsRestrictions.needFiltering())
                 {
-                    if (hasQueriableIndex || forView)
+                    if (hasQueryableIndex || forView)
                     {
                         usesSecondaryIndexing = true;
                     }
@@ -561,7 +561,7 @@ public class StatementRestrictions
             }
 
             // Covers indexes on the first clustering column (among others).
-            if (isKeyRange && hasQueriableClusteringColumnIndex)
+            if (isKeyRange && hasQueryableClusteringColumnIndex)
                 usesSecondaryIndexing = true;
 
             // Because an ANN queries limit the result set based within the SAI, clustering column restrictions
@@ -586,7 +586,7 @@ public class StatementRestrictions
                     throw invalidRequest("Non PRIMARY KEY columns found in where clause: %s ",
                                          Joiner.on(", ").join(nonPrimaryKeyColumns));
                 }
-                if (hasQueriableIndex)
+                if (hasQueryableIndex)
                     usesSecondaryIndexing = true;
                 else
                 {
