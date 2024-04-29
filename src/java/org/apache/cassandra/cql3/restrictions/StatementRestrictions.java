@@ -680,51 +680,6 @@ public class StatementRestrictions
             }
         }
 
-        private Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, Iterable<Restriction> restrictions)
-        {
-            IndexRegistry indexRegistry = IndexRegistry.obtain(table);
-            if (indexRegistry.listIndexes().isEmpty())
-                return Collections.emptySet();
-
-            ImmutableSet.Builder<ColumnMetadata> builder = ImmutableSet.builder();
-
-            for (Restriction restriction : restrictions)
-            {
-                if (!restriction.hasSupportingIndex(indexRegistry))
-                {
-                    for (Index index : indexRegistry.listIndexes())
-                    {
-                        // If a column restriction has an index which was not picked up by hasSupportingIndex, it means it's an unsupported restriction
-                        for (ColumnMetadata column : restriction.getColumnDefs())
-                        {
-                            if (index.dependsOn(column))
-                                builder.add(column);
-                        }
-                    }
-                }
-            }
-
-            return builder.build();
-        }
-
-        private void throwRequiresAllowFilteringError(TableMetadata table, Iterable<Restriction> columnRestrictions)
-        {
-            Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table, columnRestrictions);
-            if (unsupported.isEmpty())
-            {
-                throw invalidRequest(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
-            }
-            else
-            {
-                // If there's an index on these columns but the restriction is not supported on this index, throw a more specific error message
-                if (unsupported.size() == 1)
-                    throw invalidRequest(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, unsupported.iterator().next()));
-                else
-                    throw invalidRequest(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_MULTI, unsupported));
-            }
-        }
-
-
         private CustomIndexExpression prepareCustomIndexExpression(List<CustomIndexExpression> expressions,
                                                                    VariableSpecifications boundNames,
                                                                    IndexRegistry indexRegistry)
@@ -796,7 +751,13 @@ public class StatementRestrictions
     {
         if (hasAnnRestriction())
             throw invalidRequest(StatementRestrictions.ANN_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
-        Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table);
+
+        throwRequiresAllowFilteringError(table, allColumnRestrictions(clusteringColumnsRestrictions, nonPrimaryKeyRestrictions));
+    }
+
+    private static void throwRequiresAllowFilteringError(TableMetadata table, Iterable<Restriction> columnRestrictions)
+    {
+        Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table, columnRestrictions);
         if (unsupported.isEmpty())
         {
             throw invalidRequest(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
@@ -1239,17 +1200,12 @@ public class StatementRestrictions
         return false;
     }
 
-    private Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table)
-    {
-        return getColumnsWithUnsupportedIndexRestrictions(table, allColumnRestrictions(clusteringColumnsRestrictions, nonPrimaryKeyRestrictions));
-    }
-
     private static Iterable<Restriction> allColumnRestrictions(ClusteringColumnRestrictions clusteringColumnsRestrictions, RestrictionSet nonPrimaryKeyRestrictions)
     {
         return Iterables.concat(clusteringColumnsRestrictions.restrictions(), nonPrimaryKeyRestrictions.restrictions());
     }
 
-    private Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, Iterable<Restriction> restrictions)
+    private static Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, Iterable<Restriction> restrictions)
     {
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
         if (indexRegistry.listIndexes().isEmpty())
