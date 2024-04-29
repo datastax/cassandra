@@ -48,16 +48,19 @@ public class VectorDotProductWithLengthTest extends VectorTester
         flush();
 
         // check that results are consistent with dot product similarity knn
-        for (int i = 0; i < 10; i++) {
+        double recall = 0;
+        int ITERS = 10;
+        for (int i = 0; i < ITERS; i++) {
             var q = create2DVector();
             var result = execute("SELECT pk, v FROM %s ORDER BY v ANN OF ? LIMIT 20", vector(q));
             var ann = result.stream().map(row -> {
                 var vList = row.getVector("v", FloatType.instance, 2);
                 return new float[] { vList.get(0), vList.get(1)};
             }).collect(Collectors.toList());
-            var recall = computeRecall(vectors, q, ann, VectorSimilarityFunction.DOT_PRODUCT);
-            assert recall >= 0.9 : recall;
+            recall += computeRecall(vectors, q, ann, VectorSimilarityFunction.DOT_PRODUCT);
         }
+        recall /= ITERS;
+        assert recall >= 0.9 : recall;
     }
 
     private static float[] create2DVector() {

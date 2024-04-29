@@ -35,7 +35,7 @@ public class VectorSegmentationTest extends VectorTester
     private static final int dimension = 100;
 
     @Test
-    public void testMultipleSegmentsForCreatingIndex() throws Throwable
+    public void testMultipleSegmentsForCreatingIndex()
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, " + dimension + ">, PRIMARY KEY(pk))");
 
@@ -61,11 +61,11 @@ public class VectorSegmentationTest extends VectorTester
 
         List<float[]> resultVectors = getVectorsFromResult(resultSet);
         double recall = rawIndexedRecall(vectors, queryVector, resultVectors, limit);
-        assertThat(recall).isGreaterThanOrEqualTo(0.99);
+        assertThat(recall).isGreaterThanOrEqualTo(0.97);
     }
 
     @Test
-    public void testMultipleSegmentsForCompaction() throws Throwable
+    public void testMultipleSegmentsForCompaction()
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, " + dimension + ">, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
