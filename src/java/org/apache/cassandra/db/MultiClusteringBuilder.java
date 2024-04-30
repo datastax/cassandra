@@ -403,6 +403,9 @@ public class MultiClusteringBuilder
     {
         built = true;
 
+        if (clusterings.size() == 1 && clusterings.get(0) == ClusteringElements.ROOT)
+            return BTreeSet.of(comparator, Clustering.EMPTY);
+
         ClusteringBuilder builder = ClusteringBuilder.create(comparator);
         BTreeSet.Builder<Clustering<?>> set = BTreeSet.builder(builder.comparator());
         for (ClusteringElements element: clusterings)
