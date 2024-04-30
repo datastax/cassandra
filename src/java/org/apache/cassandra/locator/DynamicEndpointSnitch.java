@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 import com.codahale.metrics.ExponentiallyDecayingReservoir;
 
 import com.codahale.metrics.Snapshot;
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.gms.ApplicationState;
@@ -270,7 +271,8 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements Lat
         sample.update(unit.toMillis(latency));
     }
 
-    private void updateScores() // this is expensive
+    @VisibleForTesting
+    public void updateScores() // this is expensive
     {
         if (!DynamicSnitchSeverityProvider.instance.isReady())
             return;
