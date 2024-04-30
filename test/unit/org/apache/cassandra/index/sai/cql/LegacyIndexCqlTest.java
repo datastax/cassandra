@@ -29,7 +29,6 @@ import org.apache.cassandra.io.util.File;
 
 import static org.junit.Assert.assertEquals;
 
-@Ignore // FIXME broken due to little-endian upgrade to Lucene 9.5
 public class LegacyIndexCqlTest extends SAITester
 {
     @Test
