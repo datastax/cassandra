@@ -19,16 +19,14 @@
 package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.lucene.store.ByteBuffersDataInput;
-import org.apache.lucene.store.ByteBuffersDataOutput;
-import org.apache.lucene.store.ByteBuffersIndexInput;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.lucene.store.ByteBuffersIndexOutput;
 import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.IndexInput;
-import org.apache.lucene.store.IndexOutput;
 
 /***
  * A wrapper around {@link ByteBuffersIndexOutput} that adds several methods that interact
@@ -42,7 +40,7 @@ public class LegacyResettableByteBuffersIndexOutput extends IndexOutput
 
     public LegacyResettableByteBuffersIndexOutput(int expectedSize, String name)
     {
-        super("", name);
+        super("", name, ByteOrder.BIG_ENDIAN);
         delegate = new LegacyByteBuffersDataOutput(expectedSize);
         bbio = new LegacyByteBuffersIndexOutput(delegate, "", name + "-bb");
     }

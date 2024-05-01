@@ -23,6 +23,7 @@ import java.nio.ByteOrder;
 import org.apache.cassandra.index.sai.utils.SeekingRandomAccessInput;
 import org.apache.lucene.backward_codecs.packed.LegacyDirectReader;
 import org.apache.lucene.backward_codecs.packed.LegacyDirectWriter;
+import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.util.LongValues;
 import org.apache.lucene.util.packed.DirectReader;
 import org.apache.lucene.util.packed.DirectWriter;
@@ -38,6 +39,14 @@ public class LuceneCompat
             return DirectReader.getInstance(slice, bitsPerValue, offset);
         // Lucene 7.5 and earlier used big-endian formatting
         return LegacyDirectReader.getInstance(slice, bitsPerValue, offset);
+    }
+
+    public static DirectWriterAdaptor directWriterGetInstance(DataOutput out, ByteOrder order, long numValues, int bitsPerValue)
+    {
+        if (order == ByteOrder.LITTLE_ENDIAN)
+            return new ModernDirectWriterAdaptor(out, numValues, bitsPerValue);
+        // Lucene 7.5 and earlier used big-endian formatting
+        return new LegacyDirectWriterAdaptor(out, numValues, bitsPerValue);
     }
 
     public static int directWriterUnsignedBitsRequired(ByteOrder order, long maxValue)

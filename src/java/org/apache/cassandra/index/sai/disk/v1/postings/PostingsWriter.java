@@ -31,16 +31,16 @@ import org.agrona.collections.IntArrayList;
 import org.agrona.collections.LongArrayList;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
+import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdaptor;
 import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.lucene.backward_codecs.packed.LegacyDirectWriter;
 import org.apache.lucene.store.DataOutput;
-import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.util.packed.DirectWriter;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.lang.Math.max;
@@ -273,14 +273,14 @@ public class PostingsWriter implements Closeable
 
     private void writePostingsBlock(long maxValue, int blockSize) throws IOException
     {
-        final int bitsPerValue = maxValue == 0 ? 0 : LegacyDirectWriter.unsignedBitsRequired(maxValue);
+        final int bitsPerValue = maxValue == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(dataOutput.order(), maxValue);
 
         assert bitsPerValue < Byte.MAX_VALUE;
 
         dataOutput.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
         {
-            final LegacyDirectWriter writer = LegacyDirectWriter.getInstance(dataOutput, blockSize, bitsPerValue);
+            final DirectWriterAdaptor writer = LuceneCompat.directWriterGetInstance(dataOutput, dataOutput.order(), blockSize, bitsPerValue);
             for (int i = 0; i < blockSize; ++i)
             {
                 writer.add(deltaBuffer[i]);
@@ -294,11 +294,11 @@ public class PostingsWriter implements Closeable
         final long maxValue = values.getLong(values.size() - 1);
 
         assert values.size() > 0;
-        final int bitsPerValue = maxValue == 0 ? 0 : LegacyDirectWriter.unsignedBitsRequired(maxValue);
+        final int bitsPerValue = maxValue == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(output.order(), maxValue);
         output.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
         {
-            final LegacyDirectWriter writer = LegacyDirectWriter.getInstance(output, values.size(), bitsPerValue);
+            final DirectWriterAdaptor writer = LuceneCompat.directWriterGetInstance(output, output.order(), values.size(), bitsPerValue);
             for (int i = 0; i < values.size(); ++i)
             {
                 writer.add(values.getLong(i));
@@ -312,11 +312,11 @@ public class PostingsWriter implements Closeable
         final int maxValue = values.getInt(values.size() - 1);
 
         assert values.size() > 0;
-        final int bitsPerValue = maxValue == 0 ? 0 : LegacyDirectWriter.unsignedBitsRequired(maxValue);
+        final int bitsPerValue = maxValue == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(output.order(), maxValue);
         output.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
         {
-            final LegacyDirectWriter writer = LegacyDirectWriter.getInstance(output, values.size(), bitsPerValue);
+            final DirectWriterAdaptor writer = LuceneCompat.directWriterGetInstance(output, output.order(), values.size(), bitsPerValue);
             for (int i = 0; i < values.size(); ++i)
             {
                 writer.add(values.getInt(i));

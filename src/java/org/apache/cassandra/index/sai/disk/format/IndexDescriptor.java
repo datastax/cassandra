@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.nio.ByteOrder;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
@@ -439,9 +440,8 @@ public class IndexDescriptor
      */
     private ChecksumIndexInput checksumIndexInput(IndexContext context, IndexInput indexInput)
     {
-        if (getVersion(context) == Version.AA)
+        if (getVersion(context) == Version.AA) // TODO: handle case where IndexInput ordering is already correct
         {
-            System.out.println("Getting checksummed index input " + indexInput);
             return new EndiannessReverserChecksumIndexInput(indexInput);
         }
         else
@@ -462,7 +462,7 @@ public class IndexDescriptor
                          component,
                          file);
 
-        IndexOutputWriter writer = IndexFileUtils.instance.openOutput(file, append);
+        IndexOutputWriter writer = IndexFileUtils.instance.openOutput(file, ByteOrder.BIG_ENDIAN, append); // TODO: pick write endianness
 
         registerPerSSTableComponent(component);
 
@@ -483,7 +483,7 @@ public class IndexDescriptor
                          component,
                          file);
 
-        IndexOutputWriter writer = IndexFileUtils.instance.openOutput(file, append);
+        IndexOutputWriter writer = IndexFileUtils.instance.openOutput(file, ByteOrder.BIG_ENDIAN, append); // TODO: pick write endianness
 
         registerPerSSTableComponent(component);
 

@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.disk.io;
 
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.Collection;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
@@ -74,7 +75,7 @@ public class BKDTempFilesDirectory extends Directory
                                                                                               name +
                                                                                               ".db"));
 
-        return IndexFileUtils.instance.openOutput(file, false);
+        return IndexFileUtils.instance.openOutput(file, ByteOrder.BIG_ENDIAN, false); // TODO: pick write endianness
     }
 
     @Override

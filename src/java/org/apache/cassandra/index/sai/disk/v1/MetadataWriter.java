@@ -24,9 +24,9 @@ import java.util.Map;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.BytesRef;
 
 @NotThreadSafe

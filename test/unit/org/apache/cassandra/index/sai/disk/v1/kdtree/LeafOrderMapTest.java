@@ -42,14 +42,14 @@ public class LeafOrderMapTest extends SaiRandomizedTest
         }
         shuffle(array);
 
-        var out = new LegacyResettableByteBuffersIndexOutput(array.length, "");
+        var out = new ResettableByteBuffersIndexOutput(array.length, "");
 
-        LeafOrderMap.write(array, array.length, array.length - 1, out);
+        LeafOrderMap.write(array, array.length, array.length - 1, out, ByteOrder.LITTLE_ENDIAN);
 
         var input = out.toIndexInput();
 
-        final byte bits = (byte) LegacyDirectWriter.unsignedBitsRequired(array.length - 1);
-        LongValues reader = LuceneCompat.directReaderGetInstance(new SeekingRandomAccessInput(input, ByteOrder.BIG_ENDIAN), bits, 0);
+        final byte bits = (byte) LuceneCompat.directWriterUnsignedBitsRequired(ByteOrder.LITTLE_ENDIAN, array.length - 1);
+        LongValues reader = LuceneCompat.directReaderGetInstance(new SeekingRandomAccessInput(input, ByteOrder.LITTLE_ENDIAN), bits, 0);
 
         for (int x=0; x < array.length; x++)
         {

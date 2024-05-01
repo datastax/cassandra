@@ -18,15 +18,16 @@ package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
 
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.DataInput;
-import org.apache.lucene.store.IndexOutput;
 
 /**
  * An {@link IndexOutput} writing to a {@link LegacyByteBuffersDataOutput}.
@@ -48,7 +49,7 @@ public final class LegacyByteBuffersIndexOutput extends IndexOutput
     public LegacyByteBuffersIndexOutput(LegacyByteBuffersDataOutput delegate, String resourceDescription, String name,
                                   Checksum checksum,
                                   Consumer<LegacyByteBuffersDataOutput> onClose) {
-        super(resourceDescription, name);
+        super(resourceDescription, name, ByteOrder.BIG_ENDIAN);
         this.delegate = delegate;
         this.checksum = checksum;
         this.onClose = onClose;

@@ -18,11 +18,12 @@ package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.ByteOrder;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.lucene.store.AlreadyClosedException;
-import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.RandomAccessInput;
 
 /**
@@ -33,7 +34,7 @@ public final class LegacyByteBuffersIndexInput extends IndexInput implements Ran
     private LegacyByteBuffersDataInput in;
 
     public LegacyByteBuffersIndexInput(LegacyByteBuffersDataInput in, String resourceDescription) {
-        super(resourceDescription);
+        super(resourceDescription, ByteOrder.BIG_ENDIAN);
         this.in = in;
     }
 

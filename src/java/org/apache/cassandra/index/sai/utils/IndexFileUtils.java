@@ -63,12 +63,12 @@ public class IndexFileUtils
     protected IndexFileUtils()
     {}
 
-    public IndexOutputWriter openOutput(File file, boolean append) throws IOException
+    public IndexOutputWriter openOutput(File file, ByteOrder order, boolean append) throws IOException
     {
         assert writerOption.finishOnClose() : "IndexOutputWriter relies on close() to sync with disk.";
 
         var checksumWriter = new IncrementalChecksumSequentialWriter(file);
-        IndexOutputWriter indexOutputWriter = new IndexOutputWriter(checksumWriter);
+        IndexOutputWriter indexOutputWriter = new IndexOutputWriter(checksumWriter, order);
         if (append)
         {
             // Got to recalculate checksum for the file opened for append, otherwise final checksum will be wrong.

@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -27,8 +28,8 @@ import java.util.function.IntFunction;
 
 import com.google.common.base.MoreObjects;
 
-import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.compress.ICompressor;
@@ -36,7 +37,6 @@ import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointValues;
 import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointsReaderUtils;
 import org.apache.lucene.store.ByteBuffersDataOutput;
 import org.apache.lucene.store.DataOutput;
-import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
@@ -262,9 +262,9 @@ public class BKDWriter implements Closeable
     }
 
     // reused when writing leaf blocks
-    private final ByteBuffersDataOutput scratchOut = new ByteBuffersDataOutput(32 * 1024);
+    private final ByteBuffersDataOutput scratchOut = new ByteBuffersDataOutput(32 * 1024); // TODO: Choose between ENDIANNESS
 
-    private final ByteBuffersDataOutput scratchOut2 = new ByteBuffersDataOutput(2 * 1024);
+    private final ByteBuffersDataOutput scratchOut2 = new ByteBuffersDataOutput(2 * 1024); // TODO: Choose between ENDIANNESS
 
     interface OneDimensionBKDWriterCallback
     {
@@ -467,7 +467,7 @@ public class BKDWriter implements Closeable
                 orderIndex[valueOrderIndex] = x;
             }
 
-            LeafOrderMap.write(orderIndex, leafCount, maxPointsInLeafNode - 1, scratchOut2);
+            LeafOrderMap.write(orderIndex, leafCount, maxPointsInLeafNode - 1, scratchOut2, ByteOrder.BIG_ENDIAN); // TODO: Choose between endianness
 
             int scratchSize = Math.toIntExact(scratchOut2.size());
             out.writeVInt(scratchSize);
