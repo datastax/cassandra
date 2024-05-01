@@ -38,6 +38,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdaptor;
 import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
+import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.lucene.backward_codecs.packed.LegacyDirectWriter;
 import org.apache.lucene.store.DataOutput;
@@ -102,7 +103,7 @@ public class PostingsWriter implements Closeable
     private final long[] deltaBuffer;
     private final LongArrayList blockOffsets = new LongArrayList();
     private final LongArrayList blockMaxIDs = new LongArrayList();
-    private final LegacyResettableByteBuffersIndexOutput inMemoryOutput = new LegacyResettableByteBuffersIndexOutput(1024, "blockOffsets");
+    private final ResettableByteBuffersIndexOutput inMemoryOutput;
 
     private final long startOffset;
 
@@ -135,6 +136,7 @@ public class PostingsWriter implements Closeable
         this.dataOutput = dataOutput;
         startOffset = dataOutput.getFilePointer();
         deltaBuffer = new long[blockSize];
+        inMemoryOutput = LuceneCompat.getResettableByteBuffersIndexOutput(1024, "blockOffsets", dataOutput.order());
         SAICodecUtils.writeHeader(dataOutput);
     }
 

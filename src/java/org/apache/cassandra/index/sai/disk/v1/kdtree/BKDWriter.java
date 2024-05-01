@@ -31,6 +31,7 @@ import com.google.common.base.MoreObjects;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.compress.ICompressor;
@@ -627,7 +628,7 @@ public class BKDWriter implements Closeable
         }
 
         // Reused while packing the index
-        var writeBuffer = new LegacyResettableByteBuffersIndexOutput(1024, "");
+        var writeBuffer = LuceneCompat.getResettableByteBuffersIndexOutput(1024, "", order);
 
         // This is the "file" we append the byte[] to:
         List<byte[]> blocks = new ArrayList<>();
@@ -841,7 +842,7 @@ public class BKDWriter implements Closeable
 
         if (compressor != null)
         {
-            var ramOut = new LegacyResettableByteBuffersIndexOutput(1024, "");
+            var ramOut = LuceneCompat.getResettableByteBuffersIndexOutput(1024, "", order);
             ramOut.writeBytes(minPackedValue, 0, packedBytesLength);
             ramOut.writeBytes(maxPackedValue, 0, packedBytesLength);
 

@@ -163,6 +163,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
             return rowId;
         return -rowId - 1;
     }
+
     @Override
     public long floor(PrimaryKey key)
     {

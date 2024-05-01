@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import java.nio.ByteOrder;
 
+import org.apache.cassandra.index.sai.disk.ModernResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SeekingRandomAccessInput;
 import org.apache.lucene.backward_codecs.packed.LegacyDirectReader;
 import org.apache.lucene.backward_codecs.packed.LegacyDirectWriter;
@@ -55,5 +56,13 @@ public class LuceneCompat
             return DirectWriter.unsignedBitsRequired(maxValue);
         // Lucene 7.5 and earlier used big-endian formatting
         return LegacyDirectWriter.unsignedBitsRequired(maxValue);
+    }
+
+    public static ResettableByteBuffersIndexOutput getResettableByteBuffersIndexOutput(int expectedSize, String name, ByteOrder order)
+    {
+        if (order == ByteOrder.LITTLE_ENDIAN)
+            return new ModernResettableByteBuffersIndexOutput(expectedSize, name);
+        // Lucene 7.5 and earlier used big-endian formatting
+        return new LegacyResettableByteBuffersIndexOutput(expectedSize, name);
     }
 }
