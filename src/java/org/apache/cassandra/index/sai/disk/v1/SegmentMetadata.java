@@ -152,7 +152,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     @SuppressWarnings("resource")
     public static void write(MetadataWriter writer, List<SegmentMetadata> segments) throws IOException
     {
-        try (IndexOutput output = writer.builder(NAME, ByteOrder.BIG_ENDIAN)) //TODO: Use right endianness
+        try (IndexOutput output = writer.builder(NAME))
         {
             output.writeVInt(segments.size());
 

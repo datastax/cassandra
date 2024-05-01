@@ -462,7 +462,7 @@ public class IndexDescriptor
                          component,
                          file);
 
-        IndexOutputWriter writer = IndexFileUtils.instance.openOutput(file, ByteOrder.BIG_ENDIAN, append); // TODO: pick write endianness
+        IndexOutputWriter writer = IndexFileUtils.instance.openOutput(file, getVersion().onDiskFormat().byteOrderFor(component, null), append);
 
         registerPerSSTableComponent(component);
 
@@ -483,7 +483,7 @@ public class IndexDescriptor
                          component,
                          file);
 
-        IndexOutputWriter writer = IndexFileUtils.instance.openOutput(file, ByteOrder.BIG_ENDIAN, append); // TODO: pick write endianness
+        IndexOutputWriter writer = IndexFileUtils.instance.openOutput(file, getVersion().onDiskFormat().byteOrderFor(component, context), append);
 
         registerPerSSTableComponent(component);
 

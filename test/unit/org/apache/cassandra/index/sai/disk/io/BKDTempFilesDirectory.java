@@ -75,7 +75,7 @@ public class BKDTempFilesDirectory extends Directory
                                                                                               name +
                                                                                               ".db"));
 
-        return IndexFileUtils.instance.openOutput(file, ByteOrder.BIG_ENDIAN, false); // TODO: pick write endianness
+        return IndexFileUtils.instance.openOutput(file, ByteOrder.BIG_ENDIAN, false); // TODO: DELETE THIS WHOLE CLASS INSTEAD OF FIX ENDIANNESS?
     }
 
     @Override

@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -87,6 +88,8 @@ public class NumericIndexWriter implements Closeable
                       "[$s] numRows must be non-negative value, but got %s",
                       config.getIndexName(), numRows);
 
+        var order = ByteOrder.BIG_ENDIAN;
+
         this.indexDescriptor = indexDescriptor;
         this.indexContext = indexContext;
         this.bytesPerDim = bytesPerDim;
@@ -97,7 +100,9 @@ public class NumericIndexWriter implements Closeable
                                     maxPointsInLeafNode,
                                     BKDWriter.DEFAULT_MAX_MB_SORT_IN_HEAP,
                                     numRows,
-                                    true, null);
+                                    true, null,
+                                    indexDescriptor.getVersion(indexContext).onDiskFormat().byteOrderFor(IndexComponent.KD_TREE, indexContext)
+                                    );
     }
 
     @Override

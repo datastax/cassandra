@@ -78,7 +78,7 @@ public class NumericValuesWriter implements Closeable
     @Override
     public void close() throws IOException
     {
-        try (IndexOutput o = metadataWriter.builder(componentName, ByteOrder.BIG_ENDIAN)) // TODO: Use right endianness
+        try (IndexOutput o = metadataWriter.builder(componentName))
         {
             final long fp = writer.finish();
             SAICodecUtils.writeFooter(output);

@@ -125,18 +125,20 @@ public class BKDWriter implements Closeable
     private final long maxDoc;
 
     private final ICompressor compressor;
+    private final ByteOrder order;
 
     public BKDWriter(long maxDoc, int numDims, int bytesPerDim,
             int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount, boolean singleValuePerDoc,
-            ICompressor compressor) throws IOException
+            ICompressor compressor, ByteOrder order) throws IOException
     {
         this(maxDoc, numDims, bytesPerDim, maxPointsInLeafNode, maxMBSortInHeap, totalPointCount, singleValuePerDoc,
-             totalPointCount > Integer.MAX_VALUE, compressor);
+             totalPointCount > Integer.MAX_VALUE, compressor, order);
     }
 
     protected BKDWriter(long maxDoc, int numDims, int bytesPerDim,
                         int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount,
-                        boolean singleValuePerDoc, boolean longOrds, ICompressor compressor) throws IOException
+                        boolean singleValuePerDoc, boolean longOrds, ICompressor compressor,
+                        ByteOrder order) throws IOException
     {
         verifyParams(numDims, maxPointsInLeafNode, maxMBSortInHeap, totalPointCount);
         // We use tracking dir to deal with removing files on exception, so each place that
@@ -147,6 +149,7 @@ public class BKDWriter implements Closeable
         this.totalPointCount = totalPointCount;
         this.maxDoc = maxDoc;
         this.compressor = compressor;
+        this.order = order;
         docsSeen = new LongBitSet(maxDoc);
         packedBytesLength = numDims * bytesPerDim;
 
@@ -468,7 +471,7 @@ public class BKDWriter implements Closeable
                 orderIndex[valueOrderIndex] = x;
             }
 
-            LeafOrderMap.write(orderIndex, leafCount, maxPointsInLeafNode - 1, scratchOut2, ByteOrder.BIG_ENDIAN); // TODO: Choose between endianness
+            LeafOrderMap.write(orderIndex, leafCount, maxPointsInLeafNode - 1, scratchOut2, order); // TODO: Choose between endianness
 
             int scratchSize = Math.toIntExact(scratchOut2.size());
             out.writeVInt(scratchSize);

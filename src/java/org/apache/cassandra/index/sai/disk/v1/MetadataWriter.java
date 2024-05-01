@@ -42,9 +42,9 @@ public class MetadataWriter implements Closeable
         this.output = output;
     }
 
-    public IndexOutput builder(String name, ByteOrder order)
+    public IndexOutput builder(String name)
     {
-        if (order == ByteOrder.BIG_ENDIAN) {
+        if (output.order() == ByteOrder.BIG_ENDIAN) {
             return new LegacyResettableByteBuffersIndexOutput(1024, name) {
                 @Override
                 public void close()

@@ -181,7 +181,7 @@ public class SortedTermsWriter implements Closeable
     @Override
     public void close() throws IOException
     {
-        try (IndexOutput output = metadataWriter.builder(componentName, ByteOrder.BIG_ENDIAN)) // TODO: Use right endianness
+        try (IndexOutput output = metadataWriter.builder(componentName))
         {
             final long trieFP = this.trieWriter.complete();
             SAICodecUtils.writeFooter(trieOutput);

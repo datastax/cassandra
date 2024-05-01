@@ -75,9 +75,9 @@ public class MetadataTest extends SaiRandomizedTest
                 String name = UUID.randomUUID().toString();
 
                 data.put(name, bytes);
-                try (IndexOutput builder = writer.builder(name, ByteOrder.BIG_ENDIAN))
+                try (IndexOutput builder = writer.builder(name))
                 {
-                    builder.writeBytes(bytes, 0, bytes.length); // TODO: Use right endianness
+                    builder.writeBytes(bytes, 0, bytes.length);
                 }
             }
         }
@@ -175,7 +175,7 @@ public class MetadataTest extends SaiRandomizedTest
         {
             byte[] bytes = nextBytes(11, 1024);
 
-            try (IndexOutput builder = writer.builder("name", ByteOrder.BIG_ENDIAN)) // TODO: Use right endianness
+            try (IndexOutput builder = writer.builder("name"))
             {
                 builder.writeBytes(bytes, 0, bytes.length);
             }
