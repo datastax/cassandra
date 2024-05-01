@@ -39,7 +39,6 @@ import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.ExplicitThreadLocal;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
-import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
@@ -58,6 +57,8 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 
+import static java.lang.Math.min;
+
 public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraDiskAnn.class.getName());
@@ -66,7 +67,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
-    private volatile GraphIndex graph;
+    private volatile CachingGraphIndex graph;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
@@ -82,7 +83,8 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
         SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponent.TERMS_DATA);
         graphHandle = indexFiles.termsData();
-        graph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
+        var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
+        graph = cachingGraphFor(rawGraph);
 
         long pqSegmentOffset = this.componentMetadatas.get(IndexComponent.PQ).offset;
         try (var pqFile = indexFiles.pq();
@@ -113,6 +115,21 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcher(graph));
     }
 
+    private CachingGraphIndex cachingGraphFor(OnDiskGraphIndex rawGraph)
+    {
+        // cache edges around the entry point
+        // we can easily hold 1% of the edges in memory for typical index sizes, but
+        // there is a lot of redundancy in the nodes we observe in practice around the entry point
+        // (only 10%-20% are unique), so use 5% as our target.
+        //
+        // 32**3 = 32k, which would be 4MB if all the nodes are unique, so 3 levels deep is a safe upper bound
+        int distance = min(logBaseX(0.05d * rawGraph.size(), rawGraph.maxDegree()), 3);
+        var result = new CachingGraphIndex(rawGraph, distance);
+        logger.debug("Cached {}@{} to distance {} in {}B",
+                     this, graphHandle.path(), distance, result.ramBytesUsed());
+        return result;
+    }
+
     private static int logBaseX(double val, double base) {
         if (base <= 1.0d || val <= 1.0d)
             return 0;
@@ -122,7 +139,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     @Override
     public long ramBytesUsed()
     {
-        return graph instanceof CachingGraphIndex ? ((CachingGraphIndex) graph).ramBytesUsed() : Long.BYTES * 4;
+        return graph instanceof CachingGraphIndex ? graph.ramBytesUsed() : Long.BYTES * 4;
     }
 
     @Override
@@ -209,27 +226,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     @Override
     public VectorSupplier getVectorSupplier()
     {
-        return new ANNVectorSupplier(getView());
-    }
-
-    private GraphIndex.ScoringView getView()
-    {
-        // asynchronously cache the most-accessed parts of the graph
-        if (!(graph instanceof CachingGraphIndex))
-        {
-            Stage.IO.executor().execute(() -> {
-                synchronized (this)
-                {
-                    if (graph instanceof CachingGraphIndex)
-                        return;
-                    // target 1% of the vectors with a max distance of 3
-                    int distance = Math.min(logBaseX(0.01d * graph.size(), graph.maxDegree()), 3);
-                    logger.debug("Caching {}@{} to distance {}", this, graphHandle.path(), distance);
-                    graph = new CachingGraphIndex((OnDiskGraphIndex) graph, distance);
-                }
-            });
-        }
-        return (GraphIndex.ScoringView) graph.getView();
+        return new ANNVectorSupplier(graph.getView());
     }
 
     private static class ANNVectorSupplier implements VectorSupplier
