@@ -22,9 +22,11 @@ import java.nio.ByteOrder;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.SeekingRandomAccessInput;
+import org.apache.lucene.backward_codecs.packed.LegacyDirectWriter;
 import org.apache.lucene.util.LongValues;
 import org.apache.lucene.util.packed.DirectWriter;
 
@@ -40,20 +42,20 @@ public class LeafOrderMapTest extends SaiRandomizedTest
         }
         shuffle(array);
 
-        var out = new ResettableByteBuffersIndexOutput(1024, "");
+        var out = new LegacyResettableByteBuffersIndexOutput(array.length, "");
 
         LeafOrderMap.write(array, array.length, array.length - 1, out);
 
         var input = out.toIndexInput();
 
-        final byte bits = (byte) DirectWriter.unsignedBitsRequired(array.length - 1);
-        LongValues reader = LuceneCompat.directReaderGetInstance(new SeekingRandomAccessInput(input, ByteOrder.LITTLE_ENDIAN), bits, 0);
+        final byte bits = (byte) LegacyDirectWriter.unsignedBitsRequired(array.length - 1);
+        LongValues reader = LuceneCompat.directReaderGetInstance(new SeekingRandomAccessInput(input, ByteOrder.BIG_ENDIAN), bits, 0);
 
         for (int x=0; x < array.length; x++)
         {
             int value = LeafOrderMap.getValue(x, reader);
 
-            assertEquals(array[x], value);
+            assertEquals("disagreed at " + x, array[x], value);
         }
     }
 }

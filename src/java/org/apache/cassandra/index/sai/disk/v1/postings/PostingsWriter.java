@@ -35,7 +35,9 @@ import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
+import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.lucene.backward_codecs.packed.LegacyDirectWriter;
 import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.packed.DirectWriter;
@@ -100,7 +102,7 @@ public class PostingsWriter implements Closeable
     private final long[] deltaBuffer;
     private final LongArrayList blockOffsets = new LongArrayList();
     private final LongArrayList blockMaxIDs = new LongArrayList();
-    private final ResettableByteBuffersIndexOutput inMemoryOutput = new ResettableByteBuffersIndexOutput(1024, "blockOffsets");
+    private final LegacyResettableByteBuffersIndexOutput inMemoryOutput = new LegacyResettableByteBuffersIndexOutput(1024, "blockOffsets");
 
     private final long startOffset;
 
@@ -271,14 +273,14 @@ public class PostingsWriter implements Closeable
 
     private void writePostingsBlock(long maxValue, int blockSize) throws IOException
     {
-        final int bitsPerValue = maxValue == 0 ? 0 : DirectWriter.unsignedBitsRequired(maxValue);
+        final int bitsPerValue = maxValue == 0 ? 0 : LegacyDirectWriter.unsignedBitsRequired(maxValue);
 
         assert bitsPerValue < Byte.MAX_VALUE;
 
         dataOutput.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
         {
-            final DirectWriter writer = DirectWriter.getInstance(dataOutput, blockSize, bitsPerValue);
+            final LegacyDirectWriter writer = LegacyDirectWriter.getInstance(dataOutput, blockSize, bitsPerValue);
             for (int i = 0; i < blockSize; ++i)
             {
                 writer.add(deltaBuffer[i]);
@@ -292,11 +294,11 @@ public class PostingsWriter implements Closeable
         final long maxValue = values.getLong(values.size() - 1);
 
         assert values.size() > 0;
-        final int bitsPerValue = maxValue == 0 ? 0 : DirectWriter.unsignedBitsRequired(maxValue);
+        final int bitsPerValue = maxValue == 0 ? 0 : LegacyDirectWriter.unsignedBitsRequired(maxValue);
         output.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
         {
-            final DirectWriter writer = DirectWriter.getInstance(output, values.size(), bitsPerValue);
+            final LegacyDirectWriter writer = LegacyDirectWriter.getInstance(output, values.size(), bitsPerValue);
             for (int i = 0; i < values.size(); ++i)
             {
                 writer.add(values.getLong(i));
@@ -310,11 +312,11 @@ public class PostingsWriter implements Closeable
         final int maxValue = values.getInt(values.size() - 1);
 
         assert values.size() > 0;
-        final int bitsPerValue = maxValue == 0 ? 0 : DirectWriter.unsignedBitsRequired(maxValue);
+        final int bitsPerValue = maxValue == 0 ? 0 : LegacyDirectWriter.unsignedBitsRequired(maxValue);
         output.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
         {
-            final DirectWriter writer = DirectWriter.getInstance(output, values.size(), bitsPerValue);
+            final LegacyDirectWriter writer = LegacyDirectWriter.getInstance(output, values.size(), bitsPerValue);
             for (int i = 0; i < values.size(); ++i)
             {
                 writer.add(values.getInt(i));

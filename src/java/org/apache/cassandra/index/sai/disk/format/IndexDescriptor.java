@@ -440,7 +440,10 @@ public class IndexDescriptor
     private ChecksumIndexInput checksumIndexInput(IndexContext context, IndexInput indexInput)
     {
         if (getVersion(context) == Version.AA)
+        {
+            System.out.println("Getting checksummed index input " + indexInput);
             return new EndiannessReverserChecksumIndexInput(indexInput);
+        }
         else
             return new BufferedChecksumIndexInput(indexInput);
     }

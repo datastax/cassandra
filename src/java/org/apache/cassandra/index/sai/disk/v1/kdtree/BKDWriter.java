@@ -29,6 +29,7 @@ import com.google.common.base.MoreObjects;
 
 import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
+import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointValues;
@@ -622,7 +623,7 @@ public class BKDWriter implements Closeable
         }
 
         // Reused while packing the index
-        var writeBuffer = new ResettableByteBuffersIndexOutput(1024, "");
+        var writeBuffer = new LegacyResettableByteBuffersIndexOutput(1024, "");
 
         // This is the "file" we append the byte[] to:
         List<byte[]> blocks = new ArrayList<>();
@@ -644,7 +645,7 @@ public class BKDWriter implements Closeable
     }
 
     /** Appends the current contents of writeBuffer as another block on the growing in-memory file */
-    private int appendBlock(ResettableByteBuffersIndexOutput writeBuffer, List<byte[]> blocks) throws IOException
+    private int appendBlock(LegacyResettableByteBuffersIndexOutput writeBuffer, List<byte[]> blocks) throws IOException
     {
         int pos = writeBuffer.intSize();
         blocks.add(writeBuffer.toArrayCopy());
@@ -656,7 +657,7 @@ public class BKDWriter implements Closeable
      * lastSplitValues is per-dimension split value previously seen; we use this to prefix-code the split byte[] on each
      * inner node
      */
-    private int recursePackIndex(ResettableByteBuffersIndexOutput writeBuffer, long[] leafBlockFPs, byte[] splitPackedValues, long minBlockFP, List<byte[]> blocks,
+    private int recursePackIndex(LegacyResettableByteBuffersIndexOutput writeBuffer, long[] leafBlockFPs, byte[] splitPackedValues, long minBlockFP, List<byte[]> blocks,
                                  int nodeID, byte[] lastSplitValues, boolean[] negativeDeltas, boolean isLeft) throws IOException
     {
         if (nodeID >= leafBlockFPs.length)
@@ -836,7 +837,7 @@ public class BKDWriter implements Closeable
 
         if (compressor != null)
         {
-            var ramOut = new ResettableByteBuffersIndexOutput(1024, "");
+            var ramOut = new LegacyResettableByteBuffersIndexOutput(1024, "");
             ramOut.writeBytes(minPackedValue, 0, packedBytesLength);
             ramOut.writeBytes(maxPackedValue, 0, packedBytesLength);
 

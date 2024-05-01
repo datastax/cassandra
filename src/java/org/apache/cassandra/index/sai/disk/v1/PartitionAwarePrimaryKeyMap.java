@@ -158,9 +158,11 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public long ceiling(PrimaryKey key)
     {
-        throw new UnsupportedOperationException();
+        var rowId = exactRowIdOrInvertedCeiling(key);
+        if (rowId >= 0)
+            return rowId;
+        return -rowId - 1;
     }
-
     @Override
     public long floor(PrimaryKey key)
     {

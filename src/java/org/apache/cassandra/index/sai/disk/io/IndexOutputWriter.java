@@ -71,6 +71,34 @@ public class IndexOutputWriter extends IndexOutput
     }
 
     @Override
+    public void writeInt(int v) throws IOException
+    {
+        writeByte((byte)(v >>> 24));
+        writeByte((byte)(v >>> 16));
+        writeByte((byte)(v >>>  8));
+        writeByte((byte) v);    }
+
+    @Override
+    public void writeShort(short v) throws IOException
+    {
+        writeByte((byte)(v >>  8));
+        writeByte((byte) v);
+    }
+
+    @Override
+    public void writeLong(long v) throws IOException
+    {
+        writeByte((byte)(v >>> 56));
+        writeByte((byte)(v >>> 48));
+        writeByte((byte)(v >>> 40));
+        writeByte((byte)(v >>> 32));
+        writeByte((byte)(v >>> 24));
+        writeByte((byte)(v >>> 16));
+        writeByte((byte)(v >>>  8));
+        writeByte((byte) v);
+    }
+
+    @Override
     public void writeByte(byte b) throws IOException
     {
         out.writeByte(b);

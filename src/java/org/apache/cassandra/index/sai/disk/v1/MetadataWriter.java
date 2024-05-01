@@ -24,6 +24,7 @@ import java.util.Map;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.BytesRef;
@@ -44,7 +45,7 @@ public class MetadataWriter implements Closeable
         return new Builder(name);
     }
 
-    public class Builder extends ResettableByteBuffersIndexOutput
+    public class Builder extends LegacyResettableByteBuffersIndexOutput
     {
         private Builder(String name)
         {
