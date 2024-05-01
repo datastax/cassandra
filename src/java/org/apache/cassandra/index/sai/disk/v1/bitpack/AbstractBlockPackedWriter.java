@@ -23,6 +23,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdaptor;
 import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
+import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.lucene.util.packed.DirectWriter;
 
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.checkBlockSize;
@@ -43,7 +44,7 @@ public abstract class AbstractBlockPackedWriter
     protected int off;
     protected boolean finished;
     
-    final LegacyResettableByteBuffersIndexOutput blockMetaWriter;
+    final ResettableByteBuffersIndexOutput blockMetaWriter;
 
     AbstractBlockPackedWriter(IndexOutput out, int blockSize)
     {

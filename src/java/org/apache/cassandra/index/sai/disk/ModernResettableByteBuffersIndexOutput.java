@@ -19,30 +19,32 @@
 package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.lucene.store.ByteBuffersDataInput;
 import org.apache.lucene.store.ByteBuffersDataOutput;
 import org.apache.lucene.store.ByteBuffersIndexInput;
 import org.apache.lucene.store.ByteBuffersIndexOutput;
 import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.IndexInput;
-import org.apache.lucene.store.IndexOutput;
 
 /***
  * A wrapper around {@link ByteBuffersIndexOutput} that adds several methods that interact
  * with the underlying delegate.
  */
-public class ResettableByteBuffersIndexOutput extends IndexOutput
+public class ModernResettableByteBuffersIndexOutput extends ResettableByteBuffersIndexOutput
 {
 
     private final ByteBuffersIndexOutput bbio;
     private final ByteBuffersDataOutput delegate;
 
-    public ResettableByteBuffersIndexOutput(int expectedSize, String name)
+    public ModernResettableByteBuffersIndexOutput(int expectedSize, String name)
     {
-        super("", name);
+        super("", name, ByteOrder.LITTLE_ENDIAN);
         delegate = new ByteBuffersDataOutput(expectedSize);
         bbio = new ByteBuffersIndexOutput(delegate, "", name + "-bb");
     }

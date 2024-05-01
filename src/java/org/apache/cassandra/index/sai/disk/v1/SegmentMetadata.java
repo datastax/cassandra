@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -151,7 +152,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     @SuppressWarnings("resource")
     public static void write(MetadataWriter writer, List<SegmentMetadata> segments) throws IOException
     {
-        try (IndexOutput output = writer.builder(NAME))
+        try (IndexOutput output = writer.builder(NAME, ByteOrder.BIG_ENDIAN)) //TODO: Use right endianness
         {
             output.writeVInt(segments.size());
 

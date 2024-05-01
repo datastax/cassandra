@@ -32,7 +32,7 @@ import org.apache.lucene.store.IndexInput;
  * A wrapper around {@link ByteBuffersIndexOutput} that adds several methods that interact
  * with the underlying delegate.
  */
-public class LegacyResettableByteBuffersIndexOutput extends IndexOutput
+public class LegacyResettableByteBuffersIndexOutput extends ResettableByteBuffersIndexOutput
 {
 
     private final LegacyByteBuffersIndexOutput bbio;

@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v2.sortedterms;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteOrder;
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -180,7 +181,7 @@ public class SortedTermsWriter implements Closeable
     @Override
     public void close() throws IOException
     {
-        try (IndexOutput output = metadataWriter.builder(componentName))
+        try (IndexOutput output = metadataWriter.builder(componentName, ByteOrder.BIG_ENDIAN)) // TODO: Use right endianness
         {
             final long trieFP = this.trieWriter.complete();
             SAICodecUtils.writeFooter(trieOutput);

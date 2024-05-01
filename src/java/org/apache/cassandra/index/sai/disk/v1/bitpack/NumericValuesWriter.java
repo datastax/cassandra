@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.v1.bitpack;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteOrder;
 
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -77,7 +78,7 @@ public class NumericValuesWriter implements Closeable
     @Override
     public void close() throws IOException
     {
-        try (IndexOutput o = metadataWriter.builder(componentName))
+        try (IndexOutput o = metadataWriter.builder(componentName, ByteOrder.BIG_ENDIAN)) // TODO: Use right endianness
         {
             final long fp = writer.finish();
             SAICodecUtils.writeFooter(output);
