@@ -472,7 +472,7 @@ public class BKDWriter implements Closeable
                 orderIndex[valueOrderIndex] = x;
             }
 
-            LeafOrderMap.write(orderIndex, leafCount, maxPointsInLeafNode - 1, scratchOut2, order); // TODO: Choose between endianness
+            LeafOrderMap.write(orderIndex, leafCount, maxPointsInLeafNode - 1, scratchOut2, order);
 
             int scratchSize = Math.toIntExact(scratchOut2.size());
             out.writeVInt(scratchSize);

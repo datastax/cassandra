@@ -349,8 +349,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
         long termsOffset = SAICodecUtils.headerSize();
         if (indexFile.exists())
             termsOffset += indexFile.length();
-        try (var pqOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.PQ, context), ByteOrder.BIG_ENDIAN, true);
-             var postingsOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.POSTING_LISTS, context), ByteOrder.BIG_ENDIAN, true);
+        var pqOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.PQ, context);
+        var postingsOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.POSTING_LISTS, context);
+        try (var pqOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.PQ, context), pqOrder, true);
+             var postingsOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.POSTING_LISTS, context), postingsOrder, true);
              var indexWriter = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
                                .withMap(finalOrdinalMap)
                                .with(new InlineVectors(vectorValues.dimension()))
