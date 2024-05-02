@@ -78,7 +78,7 @@ public class ReverseValueIteratorLeakTest extends AbstractTrieTestBase
 
         try
         {
-            new ReverseValueIterator<>(trackingSource, root, source("aaa"), throwingEnd, false);
+            new ReverseValueIterator<>(trackingSource, root, source("aaa"), throwingEnd, ValueIterator.LeftBoundTreatment.GREATER, version);
             fail("Constructor should have thrown");
         }
         catch (RuntimeException e)
