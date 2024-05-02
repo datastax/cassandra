@@ -323,21 +323,14 @@ public class WalkerTest extends AbstractTrieTestBase
         while (true)
         {
             long pos = supplier.getAsLong();
+            if (pos == -1)
+                break;
 
             if (byteComparableSupplier != null)
             {
-                if (byteComparableSupplier.get() == null)
-                {
-                    assertEquals(-1, pos);
-                }
-                else
-                {
-                    String value = decodeSource(byteComparableSupplier.get());
-                    assertEquals(memoryTrieEntryMap.get(value), (Integer) mapper.applyAsInt(pos));
-                }
+                String value = decodeSource(byteComparableSupplier.get());
+                assertEquals(memoryTrieEntryMap.get(value), (Integer) mapper.applyAsInt(pos));
             }
-            if (pos == -1)
-                break;
             list.add(mapper.applyAsInt(pos));
         }
         assertArrayEquals(testCase + ": " + list + " != " + Arrays.toString(expected), expected, list.toIntArray());

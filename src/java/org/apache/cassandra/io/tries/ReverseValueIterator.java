@@ -42,7 +42,7 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
     private long next;
     private static final long NOT_PREPARED = -2;
     private boolean reportingPrefixes;
-    private boolean popOnAdvance = false;
+    private boolean popOnAdvance = true;
 
     static class IterationPosition
     {
@@ -145,7 +145,8 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         // Advancing now gives us first match.
         childIndex = -1 - childIndex;
         stack = new IterationPosition(position, childIndex, limitByte, prev);
-        next = advanceNode();
+        next = NOT_PREPARED;
+        popOnAdvance = false;
     }
 
     private void initializeNoRightBound(long root, int limitByte, boolean admitPrefix)
@@ -156,6 +157,7 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
             next = root;
         else
             next = NOT_PREPARED;
+        popOnAdvance = false;
         reportingPrefixes = admitPrefix;
     }
 
@@ -195,10 +197,13 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         long child;
         int transitionByte;
 
-        if (popOnAdvance)
+        if (collector != null)
         {
-            popOnAdvance = false;
-            collector.pop();
+            // We need to pop the last character unless we have not yet advanced to an entry.
+            if (popOnAdvance)
+                collector.pop();
+            else
+                popOnAdvance = true;
         }
 
         go(stack.node);
@@ -234,14 +239,10 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
                     // Note that on the exact match of the limit, stackTop.limit would be END_OF_STREAM.
                     // This comparison rejects the exact match; if we wanted to include it, we could test < 0 instead.
                     if (stackTop.limit == NOT_AT_LIMIT)
-                    {
-                        popOnAdvance = collector != null;
                         return stackTop.node;
-                    }
                     else if (reportingPrefixes)
                     {
                         reportingPrefixes = false; // if we are at limit position only report one prefix, the closest
-                        popOnAdvance = collector != null;
                         return stackTop.node;
                     }
                     // else skip this payload
