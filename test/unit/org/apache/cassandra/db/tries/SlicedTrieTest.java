@@ -307,7 +307,7 @@ public class SlicedTrieTest
                 singleLevelCursor(Direction direction)
                 {
                     this.direction = direction;
-                    current = direction.start(-1, childs);
+                    current = direction.select(-1, childs);
                 }
 
                 @Override
@@ -326,9 +326,9 @@ public class SlicedTrieTest
                 @Override
                 public int depth()
                 {
-                    if (current == direction.start(-1, childs))
+                    if (current == direction.select(-1, childs))
                         return 0;
-                    if (direction.lt(current, direction.end(-1, childs)))
+                    if (direction.inLoop(current, 0, childs - 1))
                         return 1;
                     return -1;
                 }

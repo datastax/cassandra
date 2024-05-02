@@ -173,7 +173,7 @@ public abstract class MemtableTrieTestBase
             this.children = spec;
             this.content = content;
             this.parent = parent;
-            this.curChild = direction.start(-1, spec.length);
+            this.curChild = direction.select(-1, spec.length);
         }
     }
 
@@ -193,7 +193,7 @@ public abstract class MemtableTrieTestBase
         public int advance()
         {
             SpecStackEntry current = stack;
-            while (current != null && direction.le(direction.end(-1, current.children.length), current.curChild += direction.increase))
+            while (current != null && !direction.inLoop(current.curChild += direction.increase, 0, current.children.length - 1))
             {
                 current = current.parent;
                 --depth;

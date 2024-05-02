@@ -24,40 +24,35 @@ package org.apache.cassandra.db.tries;
  * {@code for (int i = l; i <= r; ++i) ...}
  * <p>
  * To loop over them in the specified direction dir, the loop above would change to<br/>
- * {@code for (int i = dir.start(l, r); dir.le(i, dir.end(l, r)); i += dir.increase) ...}
+ * {@code for (int i = dir.select(l, r); dir.inLoop(i, l, r); i += dir.increase) ...}
  */
 public enum Direction
 {
     FORWARD(1)
     {
-        public int start(int left, int right)
+        public boolean inLoop(int index, int left, int right)
         {
-            return left;
+            return index <= right;
         }
 
-        public int end(int left, int right)
+        public boolean lt(int a, int b)
         {
-            return right;
+            return a < b;
         }
 
-        public boolean lt(int left, int right)
+        public boolean le(int a, int b)
         {
-            return left < right;
+            return a <= b;
         }
 
-        public boolean le(int left, int right)
+        public int min(int a, int b)
         {
-            return left <= right;
+            return Math.min(a, b);
         }
 
-        public int min(int left, int right)
+        public int max(int a, int b)
         {
-            return Math.min(left, right);
-        }
-
-        public int max(int left, int right)
-        {
-            return Math.max(left, right);
+            return Math.max(a, b);
         }
 
         public <T> T select(T forward, T reverse)
@@ -82,34 +77,29 @@ public enum Direction
     },
     REVERSE(-1)
     {
-        public int start(int left, int right)
+        public boolean inLoop(int index, int left, int right)
         {
-            return right;
+            return index >= left;
         }
 
-        public int end(int left, int right)
+        public boolean lt(int a, int b)
         {
-            return left;
+            return a > b;
         }
 
-        public boolean lt(int left, int right)
+        public boolean le(int a, int b)
         {
-            return left > right;
+            return a >= b;
         }
 
-        public boolean le(int left, int right)
+        public int min(int a, int b)
         {
-            return left >= right;
+            return Math.max(a, b);
         }
 
-        public int min(int left, int right)
+        public int max(int a, int b)
         {
-            return Math.max(left, right);
-        }
-
-        public int max(int left, int right)
-        {
-            return Math.min(left, right);
+            return Math.min(a, b);
         }
 
         public <T> T select(T forward, T reverse)
@@ -141,10 +131,6 @@ public enum Direction
         this.increase = increase;
     }
 
-    /** Returns the value to start iteration with, i.e. the bound corresponding to l for the forward direction */
-    public abstract int start(int l, int r);
-    /** Returns the value to end iteration with, i.e. the bound corresponding to r for the forward direction */
-    public abstract int end(int l, int r);
     /** Returns the result of the operation corresponding to a<b for the forward direction */
     public abstract boolean lt(int a, int b);
     /** Returns the result of the operation corresponding to a<=b for the forward direction */
@@ -163,6 +149,16 @@ public enum Direction
      * Use the first argument in forward direction and the second in reverse, i.e. isForward() ? forward : reverse.
      */
     public abstract int select(int forward, int reverse);
+
+    /**
+     * Helper to perform loops over possible values in the given direction. Returns whether the given index is still
+     * within bounds when iterating.
+     * <p>
+     * {@code for} loops implemented as<br/>
+     *   {@code for (int i = dir.select(l, r); dir.inLoop(i, l, r); i += dir.increase) ...}<br/>
+     * will iterate over all values between l and r inclusive in the specified direction.
+     */
+    public abstract boolean inLoop(int index, int left, int right);
 
     public abstract boolean isForward();
 
