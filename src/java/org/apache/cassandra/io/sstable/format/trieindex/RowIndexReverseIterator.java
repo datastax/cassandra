@@ -21,6 +21,7 @@ import java.io.PrintStream;
 
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.tries.ReverseValueIterator;
+import org.apache.cassandra.io.tries.ValueIterator;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -33,7 +34,7 @@ class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterat
 
     public RowIndexReverseIterator(FileHandle file, long root, ByteComparable start, ByteComparable end)
     {
-        super(file.instantiateRebufferer(), root, start, end, true);
+        super(file.instantiateRebufferer(), root, start, end, ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES);
     }
 
     public RowIndexReverseIterator(FileHandle file, TrieIndexEntry entry, ByteComparable end)

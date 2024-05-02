@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.io.tries;
 
-import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.io.util.Rebufferer;
@@ -29,37 +28,15 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * <p>
  * The main utility of this class is the {@link #nextPayloadedNode()} method, which lists all nodes that contain a
  * payload within the requested bounds. The treatment of the bounds is non-standard (see
- * {@link #ReverseValueIterator(Rebufferer, long, ByteComparable, ByteComparable, boolean)}), necessary to properly walk
- * tries of prefixes and separators.
+ * {@link #ReverseValueIterator(Rebufferer, long, ByteComparable, ByteComparable, LeftBoundTreatment)}), necessary to
+ * properly walk tries of prefixes and separators.
  */
 @NotThreadSafe
-public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete>> extends Walker<Concrete>
+public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete>> extends BaseValueIterator<Concrete>
 {
     static final int NOT_AT_LIMIT = Integer.MIN_VALUE;
-    private final ByteSource limit;
-    private final TransitionBytesCollector collector;
-    private IterationPosition stack;
-    private long next;
-    private static final long NOT_PREPARED = -2;
-    private boolean reportingPrefixes;
+    private LeftBoundTreatment reportingPrefixes;
     private boolean popOnAdvance = true;
-
-    static class IterationPosition
-    {
-        final long node;
-        final int limit;
-        final IterationPosition prev;
-        int childIndex;
-
-        public IterationPosition(long node, int childIndex, int limit, IterationPosition prev)
-        {
-            super();
-            this.node = node;
-            this.childIndex = childIndex;
-            this.limit = limit;
-            this.prev = prev;
-        }
-    }
 
     protected ReverseValueIterator(Rebufferer source, long root)
     {
@@ -68,13 +45,11 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
 
     protected ReverseValueIterator(Rebufferer source, long root, boolean collecting)
     {
-        super(source, root);
-        limit = null;
-        collector = collecting ? new TransitionBytesCollector() : null;
-        initializeNoRightBound(root, NOT_AT_LIMIT, false);
+        super(source, root, null, collecting);
+        initializeNoRightBound(root, NOT_AT_LIMIT, LeftBoundTreatment.GREATER);
     }
 
-    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, boolean admitPrefix)
+    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix)
     {
         this(source, root, start, end, admitPrefix, false);
     }
@@ -90,11 +65,9 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
      * </ul>
      * This behaviour is shared with the forward counterpart {@link ValueIterator}.
      */
-    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, boolean admitPrefix, boolean collecting)
+    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting)
     {
-        super(source, root);
-        limit = start != null ? start.asComparableBytes(BYTE_COMPARABLE_VERSION) : null;
-        collector = collecting ? new TransitionBytesCollector() : null;
+        super(source, root, start != null ? start.asComparableBytes(BYTE_COMPARABLE_VERSION) : null, collecting);
 
         if (end != null)
             initializeWithRightBound(root, end.asComparableBytes(BYTE_COMPARABLE_VERSION), admitPrefix, limit != null);
@@ -102,16 +75,7 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
             initializeNoRightBound(root, limit != null ? limit.next() : NOT_AT_LIMIT, admitPrefix);
     }
 
-    protected <VALUE> VALUE nextValue(Supplier<VALUE> supplier)
-    {
-        long node = nextPayloadedNode();
-        if (node == NONE)
-            return null;
-        go(node);
-        return supplier.get();
-    }
-
-    void initializeWithRightBound(long root, ByteSource endStream, boolean admitPrefix, boolean hasLimit)
+    void initializeWithRightBound(long root, ByteSource endStream, LeftBoundTreatment admitPrefix, boolean hasLimit)
     {
         IterationPosition prev = null;
         boolean atLimit = hasLimit;
@@ -149,7 +113,7 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         popOnAdvance = false;
     }
 
-    private void initializeNoRightBound(long root, int limitByte, boolean admitPrefix)
+    private void initializeNoRightBound(long root, int limitByte, LeftBoundTreatment admitPrefix)
     {
         go(root);
         stack = new IterationPosition(root, -1 - search(256), limitByte, null);
@@ -161,35 +125,7 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         reportingPrefixes = admitPrefix;
     }
 
-    protected ByteComparable collectedKey()
-    {
-        assert collector != null : "Cannot get a collected value from a non-collecting iterator";
-        return collector.toByteComparable();
-    }
-
-    /**
-     * Returns the position of the next node with payload contained in the iterated span.
-     */
-    protected long nextPayloadedNode()
-    {
-        if (next != NOT_PREPARED)
-        {
-            long toReturn = next;
-            next = NOT_PREPARED;
-            return toReturn;
-        }
-        else
-            return advanceNode();
-    }
-
-    protected boolean hasNext()
-    {
-        if (next == NOT_PREPARED)
-            next = advanceNode();
-        return next != NONE;
-    }
-
-    long advanceNode()
+    protected long advanceNode()
     {
         if (stack == null)
             return -1;
@@ -219,7 +155,7 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
                 if (beyondLimit)
                 {
                     assert stack.limit >= 0;    // we are at a limit position (not in a node that's completely within the span)
-                    reportingPrefixes = false;  // there exists a smaller child than limit, no longer should report prefixes
+                    reportingPrefixes = null;  // there exists a smaller child than limit, no longer should report prefixes
                 }
             }
             else
@@ -238,11 +174,11 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
                     // If we are fully inside the covered space, report.
                     // Note that on the exact match of the limit, stackTop.limit would be END_OF_STREAM.
                     // This comparison rejects the exact match; if we wanted to include it, we could test < 0 instead.
-                    if (stackTop.limit == NOT_AT_LIMIT)
+                    if (stackTop.limit == NOT_AT_LIMIT || stackTop.limit == ByteSource.END_OF_STREAM && reportingPrefixes == LeftBoundTreatment.ADMIT_EXACT)
                         return stackTop.node;
-                    else if (reportingPrefixes)
+                    else if (reportingPrefixes == LeftBoundTreatment.ADMIT_PREFIXES)
                     {
-                        reportingPrefixes = false; // if we are at limit position only report one prefix, the closest
+                        reportingPrefixes = null; // if we are at limit position only report one prefix, the closest
                         return stackTop.node;
                     }
                     // else skip this payload

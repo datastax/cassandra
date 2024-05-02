@@ -266,13 +266,10 @@ public class WalkerTest extends AbstractTrieTestBase
             }
         }
 
-        if (admitPrefix != ValueIterator.LeftBoundTreatment.ADMIT_EXACT)
-        {
-            ReverseValueIterator<?> rit = new ReverseValueIterator<>(source, rootPos, source(from), source(to), admitPrefix == ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES, true);
-            reverse(expected);
-            checkReturns(from + "<--" + to, rit::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), rit::collectedKey, expected);
-            reverse(expected);  // return array in its original form if reused
-        }
+        ReverseValueIterator<?> rit = new ReverseValueIterator<>(source, rootPos, source(from), source(to), admitPrefix, true);
+        reverse(expected);
+        checkReturns(from + "<--" + to, rit::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), rit::collectedKey, expected);
+        reverse(expected);  // return array in its original form if reused
     }
 
 
