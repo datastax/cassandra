@@ -24,6 +24,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.SSTableContext;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.schema.TableMetadata;
@@ -69,7 +70,8 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     {
         KeyFilter filter;
         TableMetadata metadata = ctx.sstable().metadata();
-        if (metadata.hasStaticColumns())
+        // on AA, we only have partitions in the PrimaryKeyMap, so we don't want to use KEYS_WITH_CLUSTERING
+        if (metadata.hasStaticColumns() && ctx.indexDescriptor().getVersion() != Version.AA)
             filter = KeyFilter.KEYS_WITH_CLUSTERING;
         else // the table doesn't consist anything we want to filter out, so let's use the cheap option
             filter = KeyFilter.ALL;
