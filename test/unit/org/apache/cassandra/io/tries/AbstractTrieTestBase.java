@@ -38,6 +38,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.PageAware;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 @RunWith(Parameterized.class)
 abstract public class AbstractTrieTestBase
@@ -124,6 +125,18 @@ abstract public class AbstractTrieTestBase
             buf.put((byte) s.charAt(i));
         buf.rewind();
         return ByteComparable.fixedLength(buf);
+    }
+
+    protected String decodeSource(ByteComparable source)
+    {
+        if (source == null)
+            return null;
+        StringBuilder sb = new StringBuilder();
+        ByteComparable.Version version = ByteComparable.Version.OSS50;
+        ByteSource stream = source.asComparableBytes(version);
+        for (int b = stream.next(); b != ByteSource.END_OF_STREAM; b = stream.next())
+            sb.append((char) b);
+        return sb.toString();
     }
 
     protected String toBase(long v)
