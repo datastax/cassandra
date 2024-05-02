@@ -88,8 +88,6 @@ public class NumericIndexWriter implements Closeable
                       "[$s] numRows must be non-negative value, but got %s",
                       config.getIndexName(), numRows);
 
-        var order = ByteOrder.BIG_ENDIAN;
-
         this.indexDescriptor = indexDescriptor;
         this.indexContext = indexContext;
         this.bytesPerDim = bytesPerDim;

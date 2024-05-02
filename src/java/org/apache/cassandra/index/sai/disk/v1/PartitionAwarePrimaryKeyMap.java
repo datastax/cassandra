@@ -161,7 +161,10 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         var rowId = exactRowIdOrInvertedCeiling(key);
         if (rowId >= 0)
             return rowId;
-        return -rowId - 1;
+        if (rowId == Long.MIN_VALUE)
+            return -1;
+        else
+            return -rowId - 1;
     }
 
     @Override
