@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.io.tries;
 
-import java.util.function.LongSupplier;
-import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.io.util.Rebufferer;
@@ -34,44 +32,8 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * properly walk tries of prefixes and separators.
  */
 @NotThreadSafe
-public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Walker<CONCRETE>
+public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends BaseValueIterator<CONCRETE>
 {
-    private final ByteSource limit;
-    private final TransitionBytesCollector collector;
-    protected IterationPosition stack;
-    private long next;
-
-    private static final long NOT_PREPARED = -2;
-
-    protected enum LeftBoundTreatment
-    {
-        ADMIT_PREFIXES,
-        ADMIT_EXACT,
-        GREATER
-    }
-
-    protected static class IterationPosition
-    {
-        final long node;
-        final int limit;
-        final IterationPosition prev;
-        int childIndex;
-
-        IterationPosition(long node, int childIndex, int limit, IterationPosition prev)
-        {
-            super();
-            this.node = node;
-            this.childIndex = childIndex;
-            this.limit = limit;
-            this.prev = prev;
-        }
-
-        @Override
-        public String toString()
-        {
-            return String.format("[Node %d, child %d, limit %d]", node, childIndex, limit);
-        }
-    }
 
     protected ValueIterator(Rebufferer source, long root)
     {
@@ -80,9 +42,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
 
     protected ValueIterator(Rebufferer source, long root, boolean collecting)
     {
-        super(source, root);
-        limit = null;
-        collector = collecting ? new TransitionBytesCollector() : null;
+        super(source, root, null, true);
         initializeNoLeftBound(root, 256);
     }
 
@@ -105,9 +65,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
      */
     protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting)
     {
-        super(source, root);
-        limit = end != null ? end.asComparableBytes(BYTE_COMPARABLE_VERSION) : null;
-        collector = collecting ? new TransitionBytesCollector() : null;
+        super(source, root, end != null ? end.asComparableBytes(BYTE_COMPARABLE_VERSION) : null, collecting);
 
         if (start != null)
             initializeWithLeftBound(root, start.asComparableBytes(BYTE_COMPARABLE_VERSION), admitPrefix, limit != null);
@@ -145,54 +103,6 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
             super.close();
             throw t;
         }
-    }
-
-    /**
-     * Returns the payload node position.
-     *
-     * This method must be async-read-safe, see {@link #advanceNode()}.
-     */
-    protected long nextPayloadedNode()
-    {
-        if (next != NOT_PREPARED)
-        {
-            long toReturn = next;
-            next = NOT_PREPARED;
-            return toReturn;
-        }
-        else
-            return advanceNode();
-    }
-
-    protected boolean hasNext()
-    {
-        if (next == NOT_PREPARED)
-            next = advanceNode();
-        return next != NONE;
-    }
-
-    protected <VALUE> VALUE nextValue(Supplier<VALUE> supplier)
-    {
-        long node = nextPayloadedNode();
-        if (node == NONE)
-            return null;
-        go(node);
-        return supplier.get();
-    }
-
-    protected long nextValueAsLong(LongSupplier supplier, long valueIfNone)
-    {
-        long node = nextPayloadedNode();
-        if (node == NONE)
-            return valueIfNone;
-        go(node);
-        return supplier.getAsLong();
-    }
-
-    protected ByteComparable collectedKey()
-    {
-        assert collector != null : "Cannot get a collected value from a non-collecting iterator";
-        return collector.toByteComparable();
     }
 
     /**

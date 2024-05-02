@@ -266,13 +266,10 @@ public class WalkerTest extends AbstractTrieTestBase
             }
         }
 
-        if (admitPrefix != ValueIterator.LeftBoundTreatment.ADMIT_EXACT)
-        {
-            ReverseValueIterator<?> rit = new ReverseValueIterator<>(source, rootPos, source(from), source(to), admitPrefix == ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES, true);
-            reverse(expected);
-            checkReturns(from + "<--" + to, rit::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), rit::collectedKey, expected);
-            reverse(expected);  // return array in its original form if reused
-        }
+        ReverseValueIterator<?> rit = new ReverseValueIterator<>(source, rootPos, source(from), source(to), admitPrefix, true);
+        reverse(expected);
+        checkReturns(from + "<--" + to, rit::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), rit::collectedKey, expected);
+        reverse(expected);  // return array in its original form if reused
     }
 
 
@@ -323,21 +320,14 @@ public class WalkerTest extends AbstractTrieTestBase
         while (true)
         {
             long pos = supplier.getAsLong();
+            if (pos == -1)
+                break;
 
             if (byteComparableSupplier != null)
             {
-                if (byteComparableSupplier.get() == null)
-                {
-                    assertEquals(-1, pos);
-                }
-                else
-                {
-                    String value = decodeSource(byteComparableSupplier.get());
-                    assertEquals(memoryTrieEntryMap.get(value), (Integer) mapper.applyAsInt(pos));
-                }
+                String value = decodeSource(byteComparableSupplier.get());
+                assertEquals(memoryTrieEntryMap.get(value), (Integer) mapper.applyAsInt(pos));
             }
-            if (pos == -1)
-                break;
             list.add(mapper.applyAsInt(pos));
         }
         assertArrayEquals(testCase + ": " + list + " != " + Arrays.toString(expected), expected, list.toIntArray());

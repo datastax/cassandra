@@ -411,7 +411,7 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
 
         public ByteComparable toByteComparable()
         {
-            if (pos <= 0)
+            if (pos < 0)
                 return null;
             byte[] value = new byte[pos];
             System.arraycopy(bytes, 0, value, 0, pos);
