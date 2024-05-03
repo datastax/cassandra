@@ -26,7 +26,10 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
 import org.assertj.core.api.Assertions;
+
+import static org.apache.cassandra.index.sai.disk.vector.VectorValidation.MAX_FLOAT32_COMPONENT;
 
 public class VectorFctsTest extends CQLTester
 {
@@ -97,6 +100,12 @@ public class VectorFctsTest extends CQLTester
         assertInvalidThrowMessage("Max value must be greater than min value",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, 1, -1))");
+        assertInvalidThrowMessage("Max value must be less than or equal to 99999998430674944.000000",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, 0, " + Float.MAX_VALUE + "))");
+        assertInvalidThrowMessage("Min value must be greater than or equal to -99999998430674944.000000",
+                                  InvalidRequestException.class,
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, " + -Float.MAX_VALUE + ", 0))");
 
         // correct function with wrong receiver type
         assertInvalidThrowMessage("Type error: cannot assign result of function system.random_float_vector " +
@@ -112,7 +121,7 @@ public class VectorFctsTest extends CQLTester
             assertSelectRandomVectorFunction(dimension, -1.5f, 1.5f);
             assertSelectRandomVectorFunction(dimension, 0.999999f, 1);
             assertSelectRandomVectorFunction(dimension, 0, 0.000001f);
-            assertSelectRandomVectorFunction(dimension, Float.MIN_VALUE, Float.MAX_VALUE);
+            assertSelectRandomVectorFunction(dimension, -MAX_FLOAT32_COMPONENT, MAX_FLOAT32_COMPONENT);
         }
     }
 

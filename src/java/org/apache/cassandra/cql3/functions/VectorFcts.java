@@ -33,9 +33,11 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.NumberType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
 import org.apache.cassandra.transport.ProtocolVersion;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.index.sai.disk.vector.VectorValidation.MAX_FLOAT32_COMPONENT;
 import static org.apache.cassandra.index.sai.disk.vector.VectorValidation.isEffectivelyZero;
 
 public abstract class VectorFcts
@@ -137,6 +139,9 @@ public abstract class VectorFcts
                         throw new InvalidRequestException(format("Min argument of function %s must not be null",
                                                                  RandomFloatVectorFunctionFactory.this));
                     float min = minType.compose(arg1).floatValue();
+                    if (min < -MAX_FLOAT32_COMPONENT)
+                        throw new InvalidRequestException(format("Min value must be greater than or equal to %f",
+                                                                 -MAX_FLOAT32_COMPONENT));
 
                     // get the max argument
                     ByteBuffer arg2 = args.get(2);
@@ -144,6 +149,9 @@ public abstract class VectorFcts
                         throw new InvalidRequestException(format("Max argument of function %s must not be null",
                                                                  RandomFloatVectorFunctionFactory.this));
                     float max = maxType.compose(arg2).floatValue();
+                    if (max > MAX_FLOAT32_COMPONENT)
+                        throw new InvalidRequestException(format("Max value must be less than or equal to %f",
+                                                                 MAX_FLOAT32_COMPONENT));
                     if (max <= min)
                         throw new InvalidRequestException("Max value must be greater than min value");
 
