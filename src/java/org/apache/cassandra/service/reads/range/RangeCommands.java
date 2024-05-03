@@ -71,6 +71,7 @@ public class RangeCommands
                                                      long queryStartNanoTime,
                                                      QueryInfoTracker.ReadTracker readTracker)
     {
+        //logger.debug("## inside rangeCommandIterator of RangeCommands.java");
         Tracing.trace("Computing ranges to query");
 
         Keyspace keyspace = Keyspace.open(command.metadata().keyspace);

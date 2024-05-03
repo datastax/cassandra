@@ -72,6 +72,7 @@ public class BlockingReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.Fo
     @Override
     public void maybeSendAdditionalWrites()
     {
+        logger.debug("## inside maybeSendAdditionalWrites of BlockingReadRepair.java");
         for (BlockingPartitionRepair repair: repairs)
         {
             repair.maybeSendAdditionalWrites(cfs.additionalWriteLatencyNanos, TimeUnit.NANOSECONDS);
@@ -81,15 +82,18 @@ public class BlockingReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.Fo
     @Override
     public void awaitWrites()
     {
+        logger.debug("## inside awaitWrites of BlockingReadRepair.java waiting for {} ns", DatabaseDescriptor.getReadRpcTimeout(NANOSECONDS) + queryStartNanoTime);
         BlockingPartitionRepair timedOut = null;
         for (BlockingPartitionRepair repair : repairs)
         {
             if (!repair.awaitRepairsUntil(DatabaseDescriptor.getReadRpcTimeout(NANOSECONDS) + queryStartNanoTime, NANOSECONDS))
             {
+                logger.debug("## Timed out");
                 timedOut = repair;
                 break;
             }
         }
+        logger.debug("## await repairs done with timedOut = {}", timedOut);
         if (timedOut != null)
         {
             // We got all responses, but timed out while repairing;
@@ -99,7 +103,7 @@ public class BlockingReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.Fo
             if (Tracing.isTracing())
                 Tracing.trace("Timed out while read-repairing after receiving all {} data and digest responses", blockFor);
             else
-                logger.debug("Timeout while read-repairing after receiving all {} data and digest responses", blockFor);
+                logger.debug("## Timeout while read-repairing after receiving all {} data and digest responses", blockFor);
 
             throw new ReadTimeoutException(replicaPlan().consistencyLevel(), received, blockFor, true);
         }

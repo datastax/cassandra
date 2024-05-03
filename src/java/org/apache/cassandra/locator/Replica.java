@@ -18,8 +18,8 @@
 
 package org.apache.cassandra.locator;
 
-import java.util.Objects;
-import java.util.Set;
+import java.time.Instant;
+import java.util.*;
 
 import com.google.common.base.Preconditions;
 
@@ -46,6 +46,7 @@ import org.apache.cassandra.utils.FBUtilities;
 public final class Replica implements Comparable<Replica>
 {
     private final Range<Token> range;
+    public Map<Range<Token>, Instant> justAddedRanges = new HashMap<>();
     private final InetAddressAndPort endpoint;
     private final boolean full;
 

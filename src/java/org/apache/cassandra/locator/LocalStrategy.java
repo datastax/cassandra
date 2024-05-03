@@ -22,13 +22,18 @@ import java.util.Collection;
 import java.util.Map;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.dht.RingPosition;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.utils.FBUtilities;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class LocalStrategy extends AbstractReplicationStrategy
 {
+    private static final Logger logger = LoggerFactory.getLogger(LocalStrategy.class);
     private static final ReplicationFactor RF = ReplicationFactor.fullOnly(1);
     private final EndpointsForRange replicas;
 
@@ -57,6 +62,7 @@ public class LocalStrategy extends AbstractReplicationStrategy
 
     public EndpointsForRange calculateNaturalReplicas(Token token, TokenMetadata metadata)
     {
+        logger.debug("## inside calculateNaturalReplicas of LocalStrategy");
         return replicas;
     }
 

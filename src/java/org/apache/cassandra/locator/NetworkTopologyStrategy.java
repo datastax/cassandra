@@ -123,6 +123,7 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
             // If there aren't enough racks in this DC to fill the RF, we'll still use at least one node from each rack,
             // and the difference is to be filled by the first encountered nodes.
             acceptableRackRepeats = snitch.acceptsNodesFromSameRack(rf.allReplicas, rackCount) ? rf.allReplicas - rackCount : 0;
+            //logger.debug("## acceptsNodesFromSameRack: {} acceptableRackRepeats: {}", snitch.acceptsNodesFromSameRack(rf.allReplicas, rackCount), acceptableRackRepeats);
 
             // if we have fewer replicas than rf calls for, reduce transients accordingly
             int reduceTransients = rf.allReplicas - this.rfLeft;
@@ -176,6 +177,7 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
     @Override
     public EndpointsForRange calculateNaturalReplicas(Token searchToken, TokenMetadata tokenMetadata)
     {
+        //logger.debug("## inside calculateNaturalReplicas of NetworkTopologyStrategy");
         ArrayList<Token> sortedTokens = tokenMetadata.sortedTokens();
         // handle the case of an empty ring and return an empty EndpointsForRange
         if (sortedTokens.isEmpty())
@@ -205,6 +207,7 @@ public class NetworkTopologyStrategy extends AbstractReplicationStrategy
             String dc = en.getKey();
             ReplicationFactor rf = en.getValue();
             int nodeCount = sizeOrZero(allEndpoints.get(dc));
+            //logger.debug("## dc: {}, rf: {}, nodeCount: {}, rf.allReplicas: {}, seenRacks: {}", dc, rf, nodeCount, rf.allReplicas, seenRacks);
 
             if (rf.allReplicas <= 0 || nodeCount <= 0)
                 continue;

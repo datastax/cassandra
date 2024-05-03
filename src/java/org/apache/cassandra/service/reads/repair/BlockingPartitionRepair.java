@@ -32,6 +32,9 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.AbstractFuture;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
@@ -57,6 +60,7 @@ import static org.apache.cassandra.net.Verb.*;
 public class BlockingPartitionRepair
         extends AbstractFuture<Object> implements RequestCallback<Object>
 {
+    private static final Logger logger = LoggerFactory.getLogger(BlockingPartitionRepair.class);
     private final DecoratedKey key;
     private final ReplicaPlan.ForTokenWrite writePlan;
     private final Map<Replica, Mutation> pendingRepairs;
@@ -205,6 +209,8 @@ public class BlockingPartitionRepair
         if (awaitRepairsUntil(timeout + timeoutUnit.convert(mutationsSentTime, TimeUnit.NANOSECONDS), timeoutUnit))
             return;
 
+        logger.debug("## Not timed out");
+
         EndpointsForToken newCandidates = writePlan.liveUncontacted();
         if (newCandidates.isEmpty())
             return;
@@ -221,6 +227,7 @@ public class BlockingPartitionRepair
 
         for (Replica replica : newCandidates)
         {
+            logger.debug("## Trying to send read mutation to replica {}", replica.endpoint());
             int versionIdx = msgVersionIdx(MessagingService.instance().versions.get(replica.endpoint()));
 
             Mutation mutation = versionedMutations[versionIdx];
@@ -233,11 +240,13 @@ public class BlockingPartitionRepair
 
             if (mutation == null)
             {
+                logger.debug("## mutation too large to send");
                 // the mutation is too large to send.
                 ReadRepairDiagnostics.speculatedWriteOversized(this, replica.endpoint());
                 continue;
             }
 
+            logger.debug("## Sending speculative read-repair-mutation to {}", replica);
             Tracing.trace("Sending speculative read-repair-mutation to {}", replica);
             sendRR(Message.out(READ_REPAIR_REQ, mutation), replica.endpoint());
             ReadRepairDiagnostics.speculatedWrite(this, replica.endpoint(), mutation);

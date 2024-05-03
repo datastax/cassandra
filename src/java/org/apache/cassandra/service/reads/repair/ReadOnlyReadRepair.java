@@ -30,6 +30,9 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Only performs the collection of data responses and reconciliation of them, doesn't send repair mutations
  * to replicas. This preserves write atomicity, but doesn't provide monotonic quorum reads
@@ -37,6 +40,7 @@ import org.apache.cassandra.metrics.ReadRepairMetrics;
 public class ReadOnlyReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>>
         extends AbstractReadRepair<E, P>
 {
+    private static final Logger logger = LoggerFactory.getLogger(ReadOnlyReadRepair.class);
     ReadOnlyReadRepair(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime)
     {
         super(command, replicaPlan, queryStartNanoTime);
@@ -57,7 +61,7 @@ public class ReadOnlyReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.Fo
     @Override
     public void maybeSendAdditionalWrites()
     {
-
+        logger.debug("## inside maybeSendAdditionalWrites of ReadOnlyReadRepair.java");
     }
 
     @Override
@@ -69,6 +73,6 @@ public class ReadOnlyReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.Fo
     @Override
     public void awaitWrites()
     {
-
+        logger.debug("## inside awaitWrites of ReadOnlyReadRepair.java");
     }
 }

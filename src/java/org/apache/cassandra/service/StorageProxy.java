@@ -1969,6 +1969,7 @@ public class StorageProxy implements StorageProxyMBean
                                                    QueryInfoTracker.ReadTracker readTracker)
     throws InvalidRequestException, UnavailableException, ReadFailureException, ReadTimeoutException
     {
+        logger.debug("## inside readWithPaxos of StorageProxy");
         assert queryState != null;
         if (group.queries.size() > 1)
             throw new InvalidRequestException("SERIAL/LOCAL_SERIAL consistency may only be requested for one partition at a time");
@@ -2074,6 +2075,7 @@ public class StorageProxy implements StorageProxyMBean
                                                  QueryInfoTracker.ReadTracker readTracker)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
+        logger.debug("## inside readRegular of StorageProxy");
         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(group.metadata().keyspace);
         long start = System.nanoTime();
         try
@@ -2130,6 +2132,8 @@ public class StorageProxy implements StorageProxyMBean
         if (repairs.isEmpty())
             return concatenated;
 
+        logger.debug("## {} repairs starting to happen", repairs.size());
+
         return new PartitionIterator()
         {
             public void close()
@@ -2176,6 +2180,7 @@ public class StorageProxy implements StorageProxyMBean
         // for type of speculation we'll use in this read
         for (int i=0; i<cmdCount; i++)
         {
+            logger.debug("## starting fetchRow of command {}", commands.get(i).toString());
             reads[i] = AbstractReadExecutor.getReadExecutor(commands.get(i), consistencyLevel, queryStartNanoTime, readTracker);
         }
 
@@ -2190,6 +2195,7 @@ public class StorageProxy implements StorageProxyMBean
         // set of replicas we sent messages to, speculatively send an additional messages to an un-contacted replica
         for (int i=0; i<cmdCount; i++)
         {
+            logger.debug("## inside fetchRows of StorageProxy - maybeTryAdditionalReplicas for cmdCount: {}", cmdCount);
             reads[i].maybeTryAdditionalReplicas();
         }
 
@@ -2197,6 +2203,7 @@ public class StorageProxy implements StorageProxyMBean
         // repair process by sending full data reads to all replicas we received responses from.
         for (int i=0; i<cmdCount; i++)
         {
+            logger.debug("## inside fetchRows of StorageProxy - awaitResponses for cmdCount: {}", cmdCount);
             reads[i].awaitResponses();
         }
 
@@ -2204,12 +2211,14 @@ public class StorageProxy implements StorageProxyMBean
         // an additional request to any remaining replicas we haven't contacted (if there are any)
         for (int i=0; i<cmdCount; i++)
         {
+            logger.debug("## inside fetchRows of StorageProxy - maybeSendAdditionalDataRequests for cmdCount: {}", cmdCount);
             reads[i].maybeSendAdditionalDataRequests();
         }
 
         // read repair - block on full data responses
         for (int i=0; i<cmdCount; i++)
         {
+            logger.debug("## inside fetchRows of StorageProxy - awaitReadRepair for cmdCount: {}", cmdCount);
             reads[i].awaitReadRepair();
         }
 

@@ -265,6 +265,7 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
 
     public PartitionIterator execute(ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestExecutionException
     {
+        //logger.debug("## inside PartitionRangeReadCommand.execute()");
         return StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime, queryState.getClientState());
     }
 

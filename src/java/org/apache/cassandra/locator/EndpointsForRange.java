@@ -24,6 +24,11 @@ import org.apache.cassandra.dht.Token;
 
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static com.google.common.collect.Iterables.all;
 
@@ -34,6 +39,7 @@ import static com.google.common.collect.Iterables.all;
  */
 public class EndpointsForRange extends Endpoints<EndpointsForRange>
 {
+    private static final Logger logger = LoggerFactory.getLogger(EndpointsForRange.class);
     private final Range<Token> range;
     private EndpointsForRange(Range<Token> range, ReplicaList list, ReplicaMap<InetAddressAndPort> byEndpoint)
     {
@@ -74,6 +80,25 @@ public class EndpointsForRange extends Endpoints<EndpointsForRange>
         if (this.byEndpoint != null && list.isSubList(newList))
             byEndpoint = this.byEndpoint.forSubList(newList);
         return new EndpointsForRange(range, newList, byEndpoint);
+    }
+
+    @Override
+    EndpointsForRange snapshotWithReordering(ReplicaList newList)
+    {
+        ReplicaMap<InetAddressAndPort> byEndpoint = endpointMap(newList);
+        logger.debug("## byEndpoint map: {} of size: {} and map is {}", byEndpoint.getMap(), byEndpoint.size(), byEndpoint.getMap() == null ? "null" : "not null");
+        EndpointsForRange snapshot = new EndpointsForRange(range, newList, byEndpoint);
+        snapshot.byEndpoint();
+        logger.debug("## snapshotWithReordering range: {}, list: {}, map: {}", snapshot.range(), snapshot.list.contents, snapshot.byEndpoint);
+        return snapshot;
+    }
+
+    public static boolean hasSameOrder(EndpointsForRange e1, EndpointsForRange e2)
+    {
+        List<InetAddressAndPort> e1Ordered = e1.endpointList();
+        List<InetAddressAndPort> e2Ordered = e2.endpointList();
+
+        return e1Ordered.equals(e2Ordered);
     }
 
     public static class Builder extends EndpointsForRange implements ReplicaCollection.Builder<EndpointsForRange>

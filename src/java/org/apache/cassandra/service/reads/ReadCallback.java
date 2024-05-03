@@ -134,6 +134,9 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
             logger.debug("{}; received {} of {} responses{}", failed ? "Failed" : "Timed out", received, blockFor, gotData);
         }
 
+        String gotData = received > 0 ? (resolver.isDataPresent() ? " (including data)" : " (only digests)") : "";
+        logger.debug("## now {}; received {} of {} responses{}", failed ? "Failed" : "Timed out", received, blockFor, gotData);
+
         // Same as for writes, see AbstractWriteResponseHandler
         throw failed
             ? new ReadFailureException(replicaPlan().consistencyLevel(), received, blockFor, resolver.isDataPresent(), failureReasonByEndpoint)

@@ -334,14 +334,18 @@ public class CompactionTask extends AbstractCompactionTask
                 if (!controller.realm.isCompactionActive())
                     throw new CompactionInterruptedException(op.getProgress(), op.trigger());
 
+                logger.debug("## compaction not interrupted");
+
                 estimatedKeys = writer.estimatedKeys();
 
                 execute0();
 
                 // point of no return
                 newSStables = writer.finish();
+                logger.debug("## point of no return done");
 
                 completed = true;
+                logger.debug("## finished execute of compaction task");
             }
             catch (Throwable t)
             {

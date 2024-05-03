@@ -88,6 +88,7 @@ abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
 
     public PartitionIterator fetchPage(PageSize pageSize, ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime)
     {
+        //logger.debug("## inside fetchPage of AbstractQueryPager");
         assert currentPagerTransformation == null;
 
         if (isExhausted())

@@ -437,6 +437,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
             public PartitionIterator fetchPage(PageSize pageSize, long queryStartNanoTime)
             {
+                //logger.debug("## inside fetchPage of Pager.NormalPager with page size {} {}", pageSize.getSize(), pageSize.getUnit());
                 return pager.fetchPage(pageSize, consistency, queryState, queryStartNanoTime);
             }
         }
@@ -453,6 +454,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
             public PartitionIterator fetchPage(PageSize pageSize, long queryStartNanoTime)
             {
+                //logger.debug("## inside fetchPage of Pager.InternalPager");
                 return pager.fetchPageInternal(pageSize, executionController);
             }
         }
@@ -466,6 +468,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        int userLimit,
                                        long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
+        //logger.debug("## inside execute of SelectStatement.java");
         if (aggregationSpec != null)
         {
             if (!restrictions.hasPartitionKeyRestrictions())
@@ -520,11 +523,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
     public ResultMessage.Rows executeLocally(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
     {
+        //logger.debug("## inside executeLocally of SelectStatement.java");
         return executeInternal(state, options, options.getNowInSeconds(state), System.nanoTime());
     }
 
     public ResultMessage.Rows executeInternal(QueryState state, QueryOptions options, int nowInSec, long queryStartNanoTime) throws RequestExecutionException, RequestValidationException
     {
+        //logger.debug("## inside executeInternal of SelectStatement.java");
         int userLimit = getLimit(options);
         int userPerPartitionLimit = getPerPartitionLimit(options);
         PageSize pageSize = options.getPageSize();

@@ -39,6 +39,9 @@ import java.util.function.Supplier;
 import java.util.stream.Collector;
 import java.util.stream.Stream;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * A collection like class for Replica objects. Since the Replica class contains inetaddress, range, and
  * transient replication status, basic contains and remove methods can be ambiguous. Replicas forces you
@@ -46,6 +49,8 @@ import java.util.stream.Stream;
  */
 public abstract class AbstractReplicaCollection<C extends AbstractReplicaCollection<C>> implements ReplicaCollection<C>
 {
+    private static final Logger logger = LoggerFactory.getLogger(AbstractReplicaCollection.class);
+
     protected static final ReplicaList EMPTY_LIST = new ReplicaList(); // since immutable, can safely return this to avoid megamorphic callsites
 
     public static <C extends ReplicaCollection<C>, B extends Builder<C>> Collector<Replica, B, C> collector(Set<Collector.Characteristics> characteristics, Supplier<B> supplier)
@@ -245,6 +250,11 @@ public abstract class AbstractReplicaCollection<C extends AbstractReplicaCollect
         private Set<K> keySet;
         private Set<Entry<K, Replica>> entrySet;
 
+        public ObjectIntHashMap<K> getMap()
+        {
+            return map;
+        }
+
         abstract class AbstractImmutableSet<T> extends AbstractSet<T>
         {
             @Override
@@ -380,6 +390,7 @@ public abstract class AbstractReplicaCollection<C extends AbstractReplicaCollect
 
     // return a new "sub-collection" with some sub-selection of the contents of this collection
     abstract C snapshot(ReplicaList newList);
+    abstract C snapshotWithReordering(ReplicaList newList);
     // return this object, if it is an immutable snapshot, otherwise returns a copy with these properties
     public abstract C snapshot();
 

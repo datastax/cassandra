@@ -82,10 +82,12 @@ public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
 
     public PartitionIterator getData()
     {
+        logger.debug("## inside getData of DigestResolver.java");
         Collection<Message<ReadResponse>> responses = this.responses.snapshot();
 
         if (!hasTransientResponse(responses))
         {
+            logger.debug("## no transient response");
             UnfilteredPartitionIterator unfilteredPartitionIterator = dataResponse.payload.makeIterator(command);
             if (!QueryInfoTracker.ReadTracker.NOOP.equals(readTracker) && !QueryInfoTracker.LWTWriteTracker.NOOP.equals(readTracker))
             {
@@ -96,6 +98,7 @@ public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
         }
         else
         {
+            logger.debug("## transient response");
             // This path can be triggered only if we've got responses from full replicas and they match, but
             // transient replica response still contains data, which needs to be reconciled.
             DataResolver<E, P> dataResolver

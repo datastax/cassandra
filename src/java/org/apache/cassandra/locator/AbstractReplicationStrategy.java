@@ -110,6 +110,8 @@ public abstract class AbstractReplicationStrategy
             replicas.put(tm.getRingVersion(), keyToken, endpoints);
         }
 
+        logger.debug("## Endpoints are: {}", endpoints.endpoints());
+
         return endpoints;
     }
 

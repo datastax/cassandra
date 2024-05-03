@@ -4583,6 +4583,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     @Deprecated
     public List<InetAddress> getNaturalEndpoints(String keyspaceName, String cf, String key)
     {
+        logger.debug("inside getNaturalEndpoints(String keyspaceName, String cf, String key)");
         EndpointsForToken replicas = getNaturalReplicasForToken(keyspaceName, cf, key);
         List<InetAddress> inetList = new ArrayList<>(replicas.size());
         replicas.forEach(r -> inetList.add(r.endpoint().address));
@@ -4591,6 +4592,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public List<String> getNaturalEndpointsWithPort(String keyspaceName, String cf, String key)
     {
+        logger.debug("inside getNaturalEndpointsWithPort(String keyspaceName, String cf, String key)");
         return Replicas.stringify(getNaturalReplicasForToken(keyspaceName, cf, key), true);
     }
 
@@ -4611,6 +4613,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public EndpointsForToken getNaturalReplicasForToken(String keyspaceName, String cf, String key)
     {
+        logger.debug("inside getNaturalReplicasForToken(String keyspaceName, String cf, String key)");
         KeyspaceMetadata ksMetaData = Schema.instance.getKeyspaceMetadata(keyspaceName);
         if (ksMetaData == null)
             throw new IllegalArgumentException("Unknown keyspace '" + keyspaceName + "'");
@@ -4624,8 +4627,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public EndpointsForToken getNaturalReplicasForToken(String keyspaceName, ByteBuffer key)
     {
+        logger.debug("inside getNaturalReplicasForToken(String keyspaceName, ByteBuffer key)");
         Token token = getTokenMetadata().partitioner.getToken(key);
-        return Keyspace.open(keyspaceName).getReplicationStrategy().getNaturalReplicasForToken(token);
+        EndpointsForToken result = Keyspace.open(keyspaceName).getReplicationStrategy().getNaturalReplicasForToken(token);
+        logger.debug("Got endpoints: {}", result.byEndpoint());
+        return  result;
     }
 
     public void setLoggingLevel(String classQualifier, String rawLevel) throws Exception

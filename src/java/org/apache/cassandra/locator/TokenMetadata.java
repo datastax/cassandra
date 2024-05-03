@@ -18,6 +18,7 @@
 package org.apache.cassandra.locator;
 
 import java.nio.ByteBuffer;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -878,7 +879,7 @@ public class TokenMetadata
             }
 
             pendingRanges.put(keyspaceName, calculatePendingRanges(strategy, metadata, bootstrapTokensClone,
-                                                                   leavingEndpointsClone, movingEndpointsClone));
+                                                                   leavingEndpointsClone, movingEndpointsClone, keyspaceName));
             if (logger.isDebugEnabled())
                 logger.debug("Starting pending range calculation for {}", keyspaceName);
 
@@ -888,7 +889,45 @@ public class TokenMetadata
                 logger.debug("Pending range calculation for {} completed (took: {}ms)", keyspaceName, took);
             if (logger.isTraceEnabled())
                 logger.trace("Calculated pending ranges for {}:\n{}", keyspaceName, (pendingRanges.isEmpty() ? "<empty>" : printPendingRanges()));
+
+            if(keyspaceName.contains("foo"))
+                logger.debug("## print Pending Ranges For Keyspace {} as {}", keyspaceName, printPendingRangesForKeyspace(keyspaceName));
         }
+    }
+
+    private static void updateJustAddedRangesForKeyspace(PendingRangeMaps newPendingRanges, String keyspaceName)
+    {
+        if(!keyspaceName.contains("foo"))
+            return;
+
+        Keyspace keyspace = Keyspace.open(keyspaceName);
+
+        // we track the ranges that were just added to - during reads replica with newly added ranges will have lower priority
+        for (Map.Entry<Range<Token>, EndpointsForRange.Builder> entry : newPendingRanges)
+        {
+            Range<Token> range = entry.getKey();
+            EndpointsForRange.Builder replicas = entry.getValue();
+            for (Replica replica : replicas)
+            {
+                Pair<Range<Token>, InetAddressAndPort> key = Pair.create(range, replica.endpoint());
+                keyspace.justAddedPendingRanges.put(Instant.now(), key);
+
+                logger.debug("## adding {} to {}", range, replica.endpoint());
+            }
+        }
+
+        printJustAddedRangesForKeyspace(keyspace);
+    }
+
+    private static void printJustAddedRangesForKeyspace(Keyspace keyspace)
+    {
+        logger.debug("## keyspace {} contains justAddedPendingRanges of size {}", keyspace.getName(), keyspace.justAddedPendingRanges.size());
+        StringBuilder sb = new StringBuilder();
+        for(Map.Entry<Instant, Pair<Range<Token>, InetAddressAndPort>> entry : keyspace.justAddedPendingRanges.entrySet())
+        {
+            sb.append("########### Replica: ").append(entry.getValue().right).append(" has ").append(entry.getValue().left).append(" just added range: ");
+        }
+        logger.debug("## printJustAddedRanges: {}", sb.toString());
     }
 
     /**
@@ -898,7 +937,8 @@ public class TokenMetadata
                                                            TokenMetadata metadata,
                                                            BiMultiValMap<Token, InetAddressAndPort> bootstrapTokens,
                                                            Set<InetAddressAndPort> leavingEndpoints,
-                                                           Set<Pair<Token, InetAddressAndPort>> movingEndpoints)
+                                                           Set<Pair<Token, InetAddressAndPort>> movingEndpoints,
+                                                           String keyspaceName)
     {
         PendingRangeMaps newPendingRanges = new PendingRangeMaps();
 
@@ -918,6 +958,7 @@ public class TokenMetadata
         {
             EndpointsForRange currentReplicas = strategy.calculateNaturalReplicas(range.right, metadata);
             EndpointsForRange newReplicas = strategy.calculateNaturalReplicas(range.right, allLeftMetadata);
+            logger.debug("### currentReplicas: {}, newReplicas: {}", currentReplicas, newReplicas);
             for (Replica newReplica : newReplicas)
             {
                 if (currentReplicas.endpoints().contains(newReplica.endpoint()))
@@ -929,6 +970,8 @@ public class TokenMetadata
                     newPendingRanges.addPendingRange(range, pendingReplica);
             }
         }
+
+        //updateJustAddedRanges(newPendingRanges, keyspaceName);
 
         // At this stage newPendingRanges has been updated according to leave operations. We can
         // now continue the calculation by checking bootstrapping nodes.
@@ -1004,6 +1047,8 @@ public class TokenMetadata
 
             allLeftMetadata.removeEndpoint(endpoint);
         }
+
+        updateJustAddedRangesForKeyspace(newPendingRanges, keyspaceName);
 
         return newPendingRanges;
     }
@@ -1170,6 +1215,7 @@ public class TokenMetadata
 
     public static Token firstToken(final ArrayList<Token> ring, Token start)
     {
+        //logger.debug("## ring has {} elements", ring.size());
         return ring.get(firstTokenIndex(ring, start, false));
     }
 
@@ -1303,6 +1349,19 @@ public class TokenMetadata
         {
             sb.append(pendingRangeMaps.printPendingRanges());
         }
+
+        return sb.toString();
+    }
+
+    public String printPendingRangesForKeyspace(String keyspaceName)
+    {
+        PendingRangeMaps pendingRangeMaps = this.pendingRanges.get(keyspaceName);
+        if (pendingRangeMaps == null || !keyspaceName.contains("foo"))
+            return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("## Pending ranges for keyspace: ").append(keyspaceName).append(" ");
+        sb.append(pendingRangeMaps.printPendingRanges());
 
         return sb.toString();
     }

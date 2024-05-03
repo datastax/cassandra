@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.service.reads.repair;
 
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import com.codahale.metrics.Meter;
@@ -39,15 +40,21 @@ import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.reads.AbstractReadExecutor;
 import org.apache.cassandra.service.reads.DataResolver;
 import org.apache.cassandra.service.reads.DigestResolver;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.tracing.Tracing;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>> implements ReadRepair<E, P>
 {
+    private static final Logger logger = LoggerFactory.getLogger(AbstractReadExecutor.class);
+
     protected final ReadCommand command;
     protected final long queryStartNanoTime;
     protected final ReplicaPlan.Shared<E, P> replicaPlan;
@@ -110,6 +117,11 @@ public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends Repli
             Tracing.trace("Enqueuing {} data read to {}", type, to);
         }
 
+        String type;
+        if (speculative) type = to.isFull() ? "speculative full" : "speculative transient";
+        else type = to.isFull() ? "full" : "transient";
+        logger.debug("## Enqueuing {} data read to {}", type, to);
+
         Message<ReadCommand> message = command.createMessage(trackRepairedStatus && to.isFull());
         MessagingService.instance().sendWithCallback(message, to.endpoint(), readCallback);
     }
@@ -139,6 +151,8 @@ public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends Repli
         digestRepair = new DigestRepair<>(resolver, readCallback, resultConsumer);
 
         // if enabled, request additional info about repaired data from any full replicas
+        logger.debug("## checking with the following replicas {} to repair for command {} for key {}", replicaPlan().contacts(), command.toCQLString(), ((SinglePartitionReadCommand) command).partitionKey());
+
         for (Replica replica : replicaPlan().contacts())
         {
             sendReadCommand(replica, readCallback, false, trackRepairedStatus);
@@ -152,6 +166,8 @@ public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends Repli
         DigestRepair<E, P> repair = digestRepair;
         if (repair == null)
             return;
+
+        logger.debug("## repair not null for key {}", ((SinglePartitionReadCommand) command).partitionKey());
 
         repair.readCallback.awaitResults();
         repair.resultConsumer.accept(digestRepair.dataResolver.resolve());
@@ -168,18 +184,23 @@ public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends Repli
 
     public void maybeSendAdditionalReads()
     {
+        logger.debug("## inside maybeSendAdditionalReads for key {}", ((SinglePartitionReadCommand) command).partitionKey());
         Preconditions.checkState(command instanceof SinglePartitionReadCommand,
                                  "maybeSendAdditionalReads can only be called for SinglePartitionReadCommand");
         DigestRepair<E, P> repair = digestRepair;
+        logger.debug("## inside maybeSendAdditionalReads: repair {} for key {}", repair == null? "null" : "not null",  ((SinglePartitionReadCommand) command).partitionKey());
         if (repair == null)
             return;
 
         if (shouldSpeculate() && !repair.readCallback.awaitFrom(System.nanoTime(), cfs.sampleReadLatencyNanos, NANOSECONDS))
         {
+            logger.debug("## inside if of shouldSpeculate for key {}", ((SinglePartitionReadCommand) command).partitionKey());
             Replica uncontacted = replicaPlan().firstUncontactedCandidate(replica -> true);
             if (uncontacted == null)
                 return;
 
+            logger.debug("## replica already has contacts {} for key {}", replicaPlan().contacts(), ((SinglePartitionReadCommand) command).partitionKey());
+            logger.debug("## replica contacted: {} for key {}", uncontacted.endpoint(), ((SinglePartitionReadCommand) command).partitionKey());
             replicaPlan.addToContacts(uncontacted);
             sendReadCommand(uncontacted, repair.readCallback, true, false);
             ReadRepairMetrics.speculatedRead.mark();

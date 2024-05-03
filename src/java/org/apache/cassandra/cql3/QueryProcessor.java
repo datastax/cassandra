@@ -485,6 +485,7 @@ public class QueryProcessor implements QueryHandler
 
     public static UntypedResultSet executeInternal(String query, Object... values)
     {
+        logger.debug("## inside executeInternal of QueryProcessor");
         Prepared prepared = prepareInternal(query);
         ResultMessage result = prepared.statement.executeLocally(internalQueryState(), makeInternalOptions(prepared.statement, values));
         if (result instanceof ResultMessage.Rows)
@@ -593,6 +594,7 @@ public class QueryProcessor implements QueryHandler
                                           ClientState clientState,
                                           Map<String, ByteBuffer> customPayload) throws RequestValidationException
     {
+        logger.debug("## inside prepare of Queryprocessor");
         return prepare(query, clientState);
     }
 
@@ -640,6 +642,7 @@ public class QueryProcessor implements QueryHandler
      */
     public ResultMessage.Prepared prepare(String queryString, ClientState clientState)
     {
+        logger.debug("## inside prepare of QueryProcessor");
         boolean useNewPreparedStatementBehaviour = useNewPreparedStatementBehaviour();
         MD5Digest hashWithoutKeyspace = computeId(queryString, null);
         MD5Digest hashWithKeyspace = computeId(queryString, clientState.getRawKeyspace());
@@ -680,6 +683,7 @@ public class QueryProcessor implements QueryHandler
 
         if (prepared.fullyQualified)
         {
+            logger.debug("## inside if: fullyQualified prepared statement");
             ResultMessage.Prepared qualifiedWithoutKeyspace = storePreparedStatement(queryString, null, prepared);
             ResultMessage.Prepared qualifiedWithKeyspace = null;
             if (clientState.getRawKeyspace() != null)
@@ -692,6 +696,7 @@ public class QueryProcessor implements QueryHandler
         }
         else
         {
+            logger.debug("## inside else: not fullyQualified prepared statement");
             clientState.warnAboutUseWithPreparedStatements(hashWithKeyspace, clientState.getRawKeyspace());
 
             ResultMessage.Prepared nonQualifiedWithKeyspace = storePreparedStatement(queryString, clientState.getRawKeyspace(), prepared);
@@ -737,6 +742,7 @@ public class QueryProcessor implements QueryHandler
     public static ResultMessage.Prepared storePreparedStatement(String queryString, String keyspace, Prepared prepared)
     throws InvalidRequestException
     {
+        logger.debug("## inside storePreparedStatement of QueryProcessor");
         // Concatenate the current keyspace so we don't mix prepared statements between keyspace (#5352).
         // (if the keyspace is null, queryString has to have a fully-qualified keyspace so it's fine.
         long statementSize = ObjectSizes.measureDeep(prepared.statement);

@@ -189,6 +189,7 @@ public abstract class AbstractReadExecutor
     public void executeAsync()
     {
         EndpointsForToken selected = replicaPlan().contacts();
+        logger.debug("## selected replicas: {}", selected);
         EndpointsForToken fullDataRequests = selected.filter(Replica::isFull, initialDataRequestCount);
         makeFullDataRequests(fullDataRequests);
         makeTransientDataRequests(selected.filterLazily(Replica::isTransient));
@@ -203,6 +204,7 @@ public abstract class AbstractReadExecutor
                                                        long queryStartNanoTime,
                                                        QueryInfoTracker.ReadTracker readTracker) throws UnavailableException
     {
+        logger.debug("inside getReadExecutor of AbstractReadExecutor");
         Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().id);
         SpeculativeRetryPolicy retry = cfs.metadata().params.speculativeRetry;
@@ -417,10 +419,12 @@ public abstract class AbstractReadExecutor
         // return immediately, or begin a read repair
         if (digestResolver.responsesMatch())
         {
+            logger.debug("## digest response match");
             setResult(digestResolver.getData());
         }
         else
         {
+            logger.debug("## digest response do not match for key {}", getKey());
             Tracing.trace("Digest mismatch: Mismatch for key {}", getKey());
             readRepair.startRepair(digestResolver, this::setResult);
         }

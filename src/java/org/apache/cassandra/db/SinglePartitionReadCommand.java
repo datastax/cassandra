@@ -384,6 +384,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
     public PartitionIterator execute(ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestExecutionException
     {
+        //logger.debug("## inside execute of SinglePartitionReadCommand");
         if (clusteringIndexFilter.isEmpty(metadata().comparator))
             return EmptyIterators.partition();
 
@@ -1170,6 +1171,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
         public PartitionIterator execute(ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestExecutionException
         {
+            //logger.debug("## inside execute of SinglePartitionReadCommand.Group");
             return StorageProxy.read(this, consistency, queryState, queryStartNanoTime);
         }
     }

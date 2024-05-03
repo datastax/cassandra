@@ -18,12 +18,8 @@
 
 package org.apache.cassandra.locator;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
+import java.time.Instant;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -38,6 +34,8 @@ import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -132,6 +130,8 @@ public class ReplicaPlans
             case LOCAL_QUORUM:
             {
                 Replicas.ReplicaCount localLive = countInOurDc(allLive);
+                //logger.debug("## localLive: {}", localLive.allReplicas());
+                //logger.debug("## blockFor: {}, blockForFullReplicas: {}", blockFor, blockForFullReplicas);
                 if (!localLive.hasAtleast(blockFor, blockForFullReplicas))
                 {
                     if (logger.isTraceEnabled())
@@ -556,6 +556,117 @@ public class ReplicaPlans
         });
     }
 
+    private static String getJustAddedRangesForReplica(Keyspace keyspace, InetAddressAndPort replica)
+    {
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<Instant, Pair<Range<Token>, InetAddressAndPort>> entry : keyspace.justAddedPendingRanges.entrySet())
+        {
+            if (replica == entry.getValue().right)
+            {
+                sb.append("########### ").append(replica).append(" has range ").append(entry.getValue().left).append(" added at ").append(entry.getValue());
+            }
+        }
+        return sb.toString();
+    }
+
+    private static boolean hasJustAddedRanges(Keyspace keyspace, InetAddressAndPort replica, Range<Token> range)
+    {
+        for (Map.Entry<Instant, Pair<Range<Token>, InetAddressAndPort>> entry : keyspace.justAddedPendingRanges.entrySet())
+        {
+            if(replica == entry.getValue().right && range.intersects(entry.getValue().left))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Set<InetAddressAndPort> replicasThatGotJustAddedRanges(Keyspace keyspace, Range<Token> range)
+    {
+        Set<InetAddressAndPort> replicas = new HashSet<>();
+        for(Map.Entry<Instant, Pair<Range<Token>, InetAddressAndPort>> entry : keyspace.justAddedPendingRanges.entrySet())
+        {
+            if(range.intersects(entry.getValue().left))
+            {
+                replicas.add(entry.getValue().right);
+            }
+        }
+        return replicas;
+    }
+
+    private static void contactingIncorrectReplica(Keyspace keyspace, AbstractBounds<PartitionPosition> range, Set<InetAddressAndPort> contacts)
+    {
+        TokenMetadata tokenMetadata = keyspace.getReplicationStrategy().getTokenMetadata();
+
+        ArrayList<Token> sortedTokens = tokenMetadata.sortedTokens();
+        Token searchToken = range.right.getToken();
+        Token replicaEnd = TokenMetadata.firstToken(sortedTokens, searchToken);
+        Token replicaStart = tokenMetadata.getPredecessor(replicaEnd);
+        Range<Token> replicatedRange = new Range<>(replicaStart, replicaEnd);
+
+        Set<InetAddressAndPort> replicasJustAssignedThisRange = replicasThatGotJustAddedRanges(keyspace, replicatedRange);
+
+        contacts.forEach(contact -> {
+            if (replicasJustAssignedThisRange.contains(contact)) {
+                logger.debug("## contacting incorrect replica {} as it belongs to {}", contact, replicasJustAssignedThisRange);
+            }
+            else {
+                logger.debug("## contacting correct replica {}", contact);
+            }
+        });
+    }
+
+    private static <E extends Endpoints<E>> E rearrangeCandidatesForRangeRead(AbstractReplicationStrategy replicationStrategy, ConsistencyLevel consistencyLevel, AbstractBounds<PartitionPosition> range, boolean alwaysSpeculate, E candidates, Keyspace keyspace)
+    {
+        if(candidates.size() <= 1)
+            return candidates;
+
+        TokenMetadata tokenMetadata = keyspace.getReplicationStrategy().getTokenMetadata();
+
+        ArrayList<Token> sortedTokens = tokenMetadata.sortedTokens();
+        if (sortedTokens.isEmpty())
+            return candidates;
+        Token searchToken = range.right.getToken();
+
+        Token replicaEnd = TokenMetadata.firstToken(sortedTokens, searchToken);
+        Token replicaStart = tokenMetadata.getPredecessor(replicaEnd);
+        Range<Token> replicatedRange = new Range<>(replicaStart, replicaEnd);
+
+        int position = -1;
+
+        Set<InetAddressAndPort> replicasWithThisRange = replicasThatGotJustAddedRanges(keyspace, replicatedRange);
+        //logger.debug("## replicas with range {} just added are {}", replicatedRange, replicasWithThisRange);
+
+        for (Replica replica : candidates)
+        {
+            position++;
+
+            for (Map.Entry<Instant, Pair<Range<Token>, InetAddressAndPort>> entry : keyspace.justAddedPendingRanges.entrySet())
+            {
+                if (replica.endpoint() == entry.getValue().right)
+                {
+                    if (replicatedRange.intersects(entry.getValue().left) || entry.getValue().left.contains(replicatedRange) || replicatedRange.contains(entry.getValue().left))
+                    {
+                        //logger.debug("## Found intersection of range {} with {} for replica {}: at position {}", replicatedRange, entry.getValue().left, replica.endpoint(), position);
+
+                        // See if the entry value is more than 60 seconds old
+                        if (Instant.now().getEpochSecond() - entry.getKey().getEpochSecond() < 200)
+                        {
+                            //logger.debug("## replica {} will be relocated as {} got the just added ranges}", replica.endpoint(), replicasWithThisRange);
+                            return Endpoints.append(candidates.without(Set.of(replica.endpoint())), replica);
+                        }
+                    }
+//                    else
+//                    {
+//                        logger.debug("## replica at position {} with range {} does not intersect with {} because of {}", position, replicatedRange, entry.getValue().left, getJustAddedRangesForReplica(keyspace, replica.endpoint()));
+//                    }
+                }
+            }
+        }
+
+        return candidates;
+    }
+
     private static <E extends Endpoints<E>> E contactForRead(AbstractReplicationStrategy replicationStrategy, ConsistencyLevel consistencyLevel, boolean alwaysSpeculate, E candidates)
     {
         /*
@@ -568,10 +679,16 @@ public class ReplicaPlans
          * TODO: this is still very inconistently managed between {LOCAL,EACH}_QUORUM and other consistency levels - should address this in a follow-up
          */
         if (consistencyLevel == EACH_QUORUM && replicationStrategy instanceof NetworkTopologyStrategy)
+        {
+            logger.debug("## contactForRead: EACH_QUORUM for read");
             return contactForEachQuorumRead((NetworkTopologyStrategy) replicationStrategy, candidates);
+        }
 
         int count = consistencyLevel.blockFor(replicationStrategy) + (alwaysSpeculate ? 1 : 0);
-        return candidates.subList(0, Math.min(count, candidates.size()));
+        {
+            logger.debug("## contactForRead: count: {}", count);
+            return candidates.subList(0, Math.min(count, candidates.size()));
+        }
     }
 
 
@@ -611,9 +728,13 @@ public class ReplicaPlans
         EndpointsForToken contacts = contactForRead(replicationStrategy, consistencyLevel, retry.equals(AlwaysSpeculativeRetryPolicy.INSTANCE), candidates)
                                      .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
 
+        logger.debug("## forRead: candidates for read: {} size: {}", candidates.endpoints(), candidates.size());
+        logger.debug("## forRead: contacts for read: {} size: {}", contacts.endpoints(), contacts.size());
+
         assureSufficientLiveReplicasForRead(replicationStrategy, consistencyLevel, contacts);
         return new ReplicaPlan.ForTokenRead(keyspace, replicationStrategy, consistencyLevel, candidates, contacts);
     }
+
 
     /**
      * Construct a plan for reading the provided range at the provided consistency level.  This translates to a collection of
@@ -624,14 +745,26 @@ public class ReplicaPlans
      */
     public static ReplicaPlan.ForRangeRead forRangeRead(Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel consistencyLevel, AbstractBounds<PartitionPosition> range, int vnodeCount)
     {
+        //logger.debug("## inside forRangeRead of ReplicaPlans");
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
         IEndpointSnitch endpointSnitch = DatabaseDescriptor.getEndpointSnitch();
         EndpointsForRange candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forRangeReadLiveSorted(replicationStrategy, range).natural())
                                        .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
+        logger.debug("## candidates for read: {} size: {}", candidates.endpoints(), candidates.size());
+
+        EndpointsForRange rearrangedCandidates = rearrangeCandidatesForRangeRead(replicationStrategy, consistencyLevel, range, false, candidates, keyspace);
+
+        if(!EndpointsForRange.hasSameOrder(candidates, rearrangedCandidates))
+            logger.debug("## candidates {} rearranged to {} with size: {}", candidates.endpoints(), rearrangedCandidates.endpoints(), rearrangedCandidates.size());
+
         EndpointsForRange contacts = contactForRead(replicationStrategy, consistencyLevel, false, candidates)
                                      .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
+        logger.debug("## contacts for read: {} size: {}", contacts.endpoints(), contacts.size());
 
         assureSufficientLiveReplicasForRead(replicationStrategy, consistencyLevel, contacts);
+
+        if(candidates.size() > 1)
+            contactingIncorrectReplica(keyspace, range, contacts.endpoints());
         return new ReplicaPlan.ForRangeRead(keyspace, replicationStrategy, consistencyLevel, range, candidates, contacts, vnodeCount);
     }
 

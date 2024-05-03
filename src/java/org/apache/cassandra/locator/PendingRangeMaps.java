@@ -196,8 +196,8 @@ public class PendingRangeMaps implements Iterable<Map.Entry<Range<Token>, Endpoi
 
             for (Replica replica : entry.getValue())
             {
-                sb.append(replica).append(':').append(range);
-                sb.append(LINE_SEPARATOR.getString());
+                sb.append(replica).append(':').append(range).append(" ###################");
+                //sb.append(LINE_SEPARATOR.getString());
             }
         }
 

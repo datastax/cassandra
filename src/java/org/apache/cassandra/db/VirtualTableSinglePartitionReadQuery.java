@@ -35,12 +35,15 @@ import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.QueryState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A read query that selects a (part of a) single partition of a virtual table.
  */
 public class VirtualTableSinglePartitionReadQuery extends VirtualTableReadQuery implements SinglePartitionReadQuery
 {
+    protected static final Logger logger = LoggerFactory.getLogger(VirtualTableSinglePartitionReadQuery.class);
     private final DecoratedKey partitionKey;
     private final ClusteringIndexFilter clusteringIndexFilter;
 
@@ -183,6 +186,7 @@ public class VirtualTableSinglePartitionReadQuery extends VirtualTableReadQuery 
 
         public PartitionIterator execute(ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestExecutionException
         {
+            //logger.debug("## inside VirtualTableSinglePartitionReadQuery.Group.execute()");
             if (queries.size() == 1)
                 return queries.get(0).execute(consistency, queryState, queryStartNanoTime);
 

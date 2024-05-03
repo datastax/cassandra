@@ -38,11 +38,16 @@ import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.Pair;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Options for a query.
  */
 public abstract class QueryOptions
 {
+    private static final Logger logger = LoggerFactory.getLogger(QueryOptions.class);
+
     public static final QueryOptions DEFAULT = new DefaultQueryOptions(ConsistencyLevel.ONE,
                                                                        Collections.emptyList(),
                                                                        false,
@@ -78,6 +83,7 @@ public abstract class QueryOptions
                                       ProtocolVersion version,
                                       String keyspace)
     {
+        logger.debug("inside first create of QueryOptions");
         return create(consistency, values, skipMetadata, pageSize, pagingState, serialConsistency, version, keyspace, Long.MIN_VALUE, Integer.MIN_VALUE);
     }
 
@@ -92,6 +98,7 @@ public abstract class QueryOptions
                                       long timestamp,
                                       int nowInSeconds)
     {
+        logger.debug("inside second create of QueryOptions");
         return new DefaultQueryOptions(consistency,
                                        values,
                                        skipMetadata,
@@ -406,6 +413,7 @@ public abstract class QueryOptions
                                 String keyspace,
                                 int nowInSeconds)
         {
+            //logger.debug("## inside SpecificOptions constructor");
             this.pageSize = pageSize;
             this.state = state;
             this.serialConsistency = serialConsistency;
