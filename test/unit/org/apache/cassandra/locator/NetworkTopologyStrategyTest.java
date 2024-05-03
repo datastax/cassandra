@@ -140,6 +140,77 @@ public class NetworkTopologyStrategyTest
     }
 
     @Test
+    public void testDoNotAcceptNodesFromSameRack() throws IOException, ConfigurationException
+    {
+        int dc = 0;
+        int dcRacks = 3;
+        int endpointsPerRack = 2;
+
+        Map<String, String> configOptions = new HashMap<>();
+        configOptions.put(String.valueOf(dc), "3");
+
+        IEndpointSnitch snitch = new RackInferringSnitch()
+        {
+            @Override
+            public boolean acceptsNodesFromSameRack(int rf, int rackCount)
+            {
+                return false;
+            }
+        };
+        DatabaseDescriptor.setEndpointSnitch(snitch);
+
+        TokenMetadata metadata = new TokenMetadata();
+        Multimap<InetAddressAndPort, Token> tokens = HashMultimap.create();
+
+        for (int rack = 0; rack < dcRacks; ++rack)
+        {
+            for (int ep = 0; ep < endpointsPerRack; ++ep)
+            {
+                byte[] ipBytes = new byte[]{10, (byte)0, (byte)rack, (byte)ep};
+                InetAddressAndPort address = InetAddressAndPort.getByAddress(ipBytes);
+                StringToken token = new StringToken(String.format("%02x%02x%02x", ep, rack, dc));
+                logger.debug("adding node {} at {}", address, token);
+                tokens.put(address, token);
+            }
+        }
+        metadata.updateNormalTokens(tokens);
+
+        NetworkTopologyStrategy strategy = new NetworkTopologyStrategy(KEYSPACE, metadata, snitch, configOptions);
+        Assert.assertEquals(3, strategy.getReplicationFactor(String.valueOf(dc)).allReplicas);
+
+        EndpointsForToken endpoints = strategy.getNaturalReplicasForToken(new StringToken("123"));
+        Assert.assertEquals(3, endpoints.size());
+        Assert.assertNotEquals(snitch.getRack(endpoints.get(0).endpoint()), snitch.getRack(endpoints.get(1).endpoint()));
+        Assert.assertNotEquals(snitch.getRack(endpoints.get(0).endpoint()), snitch.getRack(endpoints.get(2).endpoint()));
+        Assert.assertNotEquals(snitch.getRack(endpoints.get(1).endpoint()), snitch.getRack(endpoints.get(2).endpoint()));
+
+        // now rack 3 goes down
+        InetAddressAndPort ep1Rack3 = InetAddressAndPort.getByAddress(new byte[]{ 10, 0, 2, 0});
+        InetAddressAndPort ep2Rack3 = InetAddressAndPort.getByAddress(new byte[]{ 10, 0, 2, 1});
+        metadata.addLeavingEndpoint(ep1Rack3);
+        metadata.addLeavingEndpoint(ep2Rack3);
+        metadata.removeEndpoint(ep1Rack3);
+        metadata.removeEndpoint(ep2Rack3);
+
+        // get endpoint again for the same token and check that only two replicas are returned
+        endpoints = strategy.getNaturalReplicasForToken(new StringToken("123"));
+        Assert.assertEquals(2, endpoints.size());
+        Assert.assertNotEquals(snitch.getRack(endpoints.get(0).endpoint()), snitch.getRack(endpoints.get(1).endpoint()));
+
+        // now rack 2 also goes down
+        InetAddressAndPort ep1Rack2 = InetAddressAndPort.getByAddress(new byte[]{ 10, 0, 1, 0});
+        InetAddressAndPort ep2Rack2 = InetAddressAndPort.getByAddress(new byte[]{ 10, 0, 1, 1});
+        metadata.addLeavingEndpoint(ep1Rack2);
+        metadata.addLeavingEndpoint(ep2Rack2);
+        metadata.removeEndpoint(ep1Rack2);
+        metadata.removeEndpoint(ep2Rack2);
+
+        // get endpoint again for the same token and check that only onw replica is returned
+        endpoints = strategy.getNaturalReplicasForToken(new StringToken("123"));
+        Assert.assertEquals(1, endpoints.size());
+    }
+
+    @Test
     public void testDoNotAcceptNodesFromSameRackIfQuorumExists() throws IOException, ConfigurationException
     {
         IEndpointSnitch snitch = new RackInferringSnitch()
