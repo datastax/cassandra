@@ -19,7 +19,6 @@ package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -27,9 +26,8 @@ import java.util.Map;
 
 import com.google.common.base.MoreObjects;
 
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -52,8 +50,7 @@ public class NumericIndexWriter implements Closeable
 {
     public static final int MAX_POINTS_IN_LEAF_NODE = BKDWriter.DEFAULT_MAX_POINTS_IN_LEAF_NODE;
     private final BKDWriter writer;
-    private final IndexDescriptor indexDescriptor;
-    private final IndexContext indexContext;
+    private final IndexComponents.ForWrite components;
     private final int bytesPerDim;
 
     private final IndexWriterConfig config;
@@ -62,18 +59,16 @@ public class NumericIndexWriter implements Closeable
      * @param maxSegmentRowId maximum possible segment row ID, used to create `maxDoc` for kd-tree
      * @param numRows must be greater than number of added rowIds, only used for validation.
      */
-    public NumericIndexWriter(IndexDescriptor indexDescriptor,
-                              IndexContext indexContext,
+    public NumericIndexWriter(IndexComponents.ForWrite components,
                               int bytesPerDim,
                               long maxSegmentRowId,
                               long numRows,
                               IndexWriterConfig config) throws IOException
     {
-        this(indexDescriptor, indexContext, MAX_POINTS_IN_LEAF_NODE, bytesPerDim, maxSegmentRowId, numRows, config);
+        this(components, MAX_POINTS_IN_LEAF_NODE, bytesPerDim, maxSegmentRowId, numRows, config);
     }
 
-    public NumericIndexWriter(IndexDescriptor indexDescriptor,
-                              IndexContext indexContext,
+    public NumericIndexWriter(IndexComponents.ForWrite components,
                               int maxPointsInLeafNode,
                               int bytesPerDim,
                               long maxSegmentRowId,
@@ -88,8 +83,7 @@ public class NumericIndexWriter implements Closeable
                       "[$s] numRows must be non-negative value, but got %s",
                       config.getIndexName(), numRows);
 
-        this.indexDescriptor = indexDescriptor;
-        this.indexContext = indexContext;
+        this.components = components;
         this.bytesPerDim = bytesPerDim;
         this.config = config;
         this.writer = new BKDWriter(maxSegmentRowId + 1,
@@ -99,8 +93,7 @@ public class NumericIndexWriter implements Closeable
                                     BKDWriter.DEFAULT_MAX_MB_SORT_IN_HEAP,
                                     numRows,
                                     true, null,
-                                    indexDescriptor.getVersion(indexContext).onDiskFormat().byteOrderFor(IndexComponent.KD_TREE, indexContext)
-                                    );
+                                    components.addOrGet(IndexComponentType.KD_TREE).byteOrder());
     }
 
     @Override
@@ -154,7 +147,7 @@ public class NumericIndexWriter implements Closeable
 
         final LeafCallback leafCallback = new LeafCallback();
 
-        try (IndexOutput bkdOutput = indexDescriptor.openPerIndexOutput(IndexComponent.KD_TREE, indexContext, true))
+        try (IndexOutput bkdOutput = this.components.addOrGet(IndexComponentType.KD_TREE).openOutput(true))
         {
             // The SSTable kd-tree component file is opened in append mode, so our offset is the current file pointer.
             final long bkdOffset = bkdOutput.getFilePointer();
@@ -175,15 +168,15 @@ public class NumericIndexWriter implements Closeable
             attributes.put("bytes_per_dim", Long.toString(writer.bytesPerDim));
             attributes.put("num_dims", Long.toString(writer.numDims));
 
-            components.put(IndexComponent.KD_TREE, bkdPosition, bkdOffset, bkdLength, attributes);
+            components.put(IndexComponentType.KD_TREE, bkdPosition, bkdOffset, bkdLength, attributes);
         }
 
-        try (TraversingBKDReader reader = new TraversingBKDReader(indexDescriptor.createFlushTimePerIndexFileHandle(IndexComponent.KD_TREE, indexContext), bkdPosition);
-             IndexOutput postingsOutput = indexDescriptor.openPerIndexOutput(IndexComponent.KD_TREE_POSTING_LISTS, indexContext, true))
+        try (TraversingBKDReader reader = new TraversingBKDReader(this.components.get(IndexComponentType.KD_TREE).createFlushTimeFileHandle(), bkdPosition);
+             IndexOutput postingsOutput = this.components.addOrGet(IndexComponentType.KD_TREE_POSTING_LISTS).openOutput(true))
         {
             final long postingsOffset = postingsOutput.getFilePointer();
 
-            final OneDimBKDPostingsWriter postingsWriter = new OneDimBKDPostingsWriter(leafCallback.postings, config, indexContext);
+            final OneDimBKDPostingsWriter postingsWriter = new OneDimBKDPostingsWriter(leafCallback.postings, config, this.components::logMessage);
             reader.traverse(postingsWriter);
 
             // The kd-tree postings writer already writes its own header & footer.
@@ -194,7 +187,7 @@ public class NumericIndexWriter implements Closeable
             attributes.put("num_non_leaf_postings", Integer.toString(postingsWriter.numNonLeafPostings));
 
             long postingsLength = postingsOutput.getFilePointer() - postingsOffset;
-            components.put(IndexComponent.KD_TREE_POSTING_LISTS, postingsPosition, postingsOffset, postingsLength, attributes);
+            components.put(IndexComponentType.KD_TREE_POSTING_LISTS, postingsPosition, postingsOffset, postingsLength, attributes);
         }
 
         return components;

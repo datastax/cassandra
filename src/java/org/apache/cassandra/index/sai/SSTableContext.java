@@ -60,12 +60,11 @@ public class SSTableContext extends SharedCloseableImpl
     }
 
     @SuppressWarnings("resource")
-    public static SSTableContext create(SSTableReader sstable)
+    public static SSTableContext create(SSTableReader sstable, IndexDescriptor indexDescriptor)
     {
         Ref<? extends SSTableReader> sstableRef = null;
         PrimaryKeyMap.Factory primaryKeyMapFactory = null;
 
-        IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
         try
         {
             sstableRef = sstable.tryRef();

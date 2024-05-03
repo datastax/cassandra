@@ -105,7 +105,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         isInternalKeyspace = SchemaConstants.isInternalKeyspace(metadata.keyspace);
     }
 
-    private static Set<Component> indexComponents(Collection<Index.Group> indexGroups)
+    private static Set<Component> indexComponents(Descriptor descriptor, TableMetadata metadata, Collection<Index.Group> indexGroups)
     {
         if (indexGroups == null)
             return Collections.emptySet();
@@ -113,7 +113,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         Set<Component> components = new HashSet<>();
         for (Index.Group group : indexGroups)
         {
-            components.addAll(group.getComponents());
+            components.addAll(group.componentsForNewBuid(descriptor, metadata));
         }
 
         return components;
@@ -131,6 +131,12 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                        LifecycleNewTracker lifecycleNewTracker)
     {
         Factory writerFactory = descriptor.getFormat().getWriterFactory();
+        // For SAI, it is important that this list of components is computed before any of the new components are
+        // actually created: otherwise, said computation would see the components and consider them part of some
+        // previous aborted build, and would anticipate the wrong "generation". And some SAI components are created
+        // by the `observers(...)` call below, as the SAI flush observer is created, so effectively this
+        // `indexComponents(...)` call need to be before the `observers(...)` one.
+        Set<Component> components = indexComponents(descriptor, metadata.get(), indexGroups);
         return writerFactory.open(descriptor,
                                   keyCount,
                                   repairedAt,
@@ -141,7 +147,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                   header,
                                   observers(descriptor, indexGroups, lifecycleNewTracker, metadata.get(), keyCount),
                                   lifecycleNewTracker,
-                                  indexComponents(indexGroups));
+                                  components);
     }
 
     public static SSTableWriter create(Descriptor descriptor,

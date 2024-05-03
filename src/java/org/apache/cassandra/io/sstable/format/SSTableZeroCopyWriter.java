@@ -127,6 +127,7 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
         for (SequentialWriter writer : componentWriters.values())
             writer.finish();
 
+        SSTable.appendTOC(descriptor, components);
         return finished();
     }
 

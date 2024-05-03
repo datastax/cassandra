@@ -64,7 +64,7 @@ public class SSTableIndex
     private final SearchableIndex searchableIndex;
 
     private final AtomicInteger references = new AtomicInteger(1);
-    private final AtomicBoolean obsolete = new AtomicBoolean(false);
+    private final AtomicBoolean indexWasDropped = new AtomicBoolean(false);
 
     public SSTableIndex(SSTableContext sstableContext, IndexContext indexContext)
     {
@@ -109,7 +109,7 @@ public class SSTableIndex
      */
     public long sizeOfPerColumnComponents()
     {
-        return sstableContext.indexDescriptor.sizeOnDiskOfPerIndexComponents(indexContext);
+        return sstableContext.indexDescriptor.perIndexComponents(indexContext).liveSizeOnDiskInBytes();
     }
 
     /**
@@ -117,7 +117,7 @@ public class SSTableIndex
      */
     public long sizeOfPerSSTableComponents()
     {
-        return sstableContext.indexDescriptor.sizeOnDiskOfPerSSTableComponents();
+        return sstableContext.indexDescriptor.perSSTableComponents().liveSizeOnDiskInBytes();
     }
 
     /**
@@ -245,18 +245,20 @@ public class SSTableIndex
 
             /*
              * When SSTable is removed, storage-attached index components will be automatically removed by LogTransaction.
-             * We only remove index components explicitly in case of index corruption or index rebuild.
+             * We only remove index components explicitly in case of index corruption or index rebuild if immutable
+             * components are not in use.
              */
-            if (obsolete.get())
-            {
-                sstableContext.indexDescriptor.deleteColumnIndex(indexContext);
-            }
+            if (indexWasDropped.get())
+                sstableContext.indexDescriptor.perIndexComponents(indexContext).forWrite().forceDeleteAllComponents();
         }
     }
 
-    public void markObsolete()
+    /**
+     * Indicates that this index has been dropped by the user, and so the underlying files can be safely removed.
+     */
+    public void markIndexDropped()
     {
-        obsolete.getAndSet(true);
+        indexWasDropped.getAndSet(true);
         release();
     }
 

@@ -413,6 +413,9 @@ public enum CassandraRelevantProperties
 
     // Allow disabling deletions of corrupt index components for troubleshooting
     DELETE_CORRUPT_SAI_COMPONENTS("cassandra.sai.delete_corrupt_components", "true"),
+    // Allow restoring legacy behavior of deleting sai components before a rebuild (which implies a rebuild cannot be
+    // done without first stopping reads on that index)
+    IMMUTABLE_SAI_COMPONENTS("cassandra.sai.immutable_components", "false"),
 
     // Enables parallel index read.
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),

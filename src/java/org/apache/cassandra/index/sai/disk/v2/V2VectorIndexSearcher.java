@@ -47,7 +47,6 @@ import org.apache.cassandra.index.sai.disk.IndexSearcherContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -95,13 +94,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     public V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                                  PerIndexFiles perIndexFiles,
                                  SegmentMetadata segmentMetadata,
-                                 IndexDescriptor indexDescriptor,
                                  IndexContext indexContext) throws IOException
     {
         this(primaryKeyMapFactory,
              perIndexFiles,
              segmentMetadata,
-             indexDescriptor,
              indexContext,
              new CassandraOnDiskHnsw(segmentMetadata.componentMetadatas, perIndexFiles, indexContext));
     }
@@ -109,11 +106,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     protected V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                                     PerIndexFiles perIndexFiles,
                                     SegmentMetadata segmentMetadata,
-                                    IndexDescriptor indexDescriptor,
                                     IndexContext indexContext,
                                     JVectorLuceneOnDiskGraph graph)
     {
-        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
+        super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexContext);
         this.graph = graph;
         this.keyFactory = PrimaryKey.factory(indexContext.comparator(), indexContext.indexFeatureSet());
         cachedBits = ThreadLocal.withInitial(SparseBits::new);

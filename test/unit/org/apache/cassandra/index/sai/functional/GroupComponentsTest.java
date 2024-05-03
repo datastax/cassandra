@@ -18,13 +18,10 @@
 
 package org.apache.cassandra.index.sai.functional;
 
-import java.util.Collection;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -55,7 +52,7 @@ public class GroupComponentsTest extends SAITester
         StorageAttachedIndex index = (StorageAttachedIndex) group.getIndexes().iterator().next();
         SSTableReader sstable = Iterables.getOnlyElement(cfs.getLiveSSTables());
 
-        Set<Component> components = group.getLiveComponents(sstable, getIndexesFromGroup(group));
+        Set<Component> components = group.activeComponents(sstable);
         assertEquals(Version.latest().onDiskFormat().perSSTableComponents().size() + 1, components.size());
 
         // index files are released but not removed
@@ -80,7 +77,7 @@ public class GroupComponentsTest extends SAITester
 
         assertEquals(1, sstables.size());
 
-        Set<Component> components = group.getLiveComponents(sstables.iterator().next(), getIndexesFromGroup(group));
+        Set<Component> components = group.activeComponents(sstables.iterator().next());
 
         assertEquals(Version.latest().onDiskFormat().perSSTableComponents().size() + 1, components.size());
     }
@@ -100,15 +97,10 @@ public class GroupComponentsTest extends SAITester
 
         assertEquals(1, sstables.size());
 
-        Set<Component> components = group.getLiveComponents(sstables.iterator().next(), getIndexesFromGroup(group));
+        Set<Component> components = group.activeComponents(sstables.iterator().next());
 
         assertEquals(Version.latest().onDiskFormat().perSSTableComponents().size() +
                      Version.latest().onDiskFormat().perIndexComponents(indexContext).size(),
                      components.size());
-    }
-
-    private Collection<StorageAttachedIndex> getIndexesFromGroup(StorageAttachedIndexGroup group)
-    {
-        return group.getIndexes().stream().map(index -> (StorageAttachedIndex)index).collect(Collectors.toList());
     }
 }

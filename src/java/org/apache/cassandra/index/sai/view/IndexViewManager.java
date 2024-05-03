@@ -123,7 +123,7 @@ public class IndexViewManager
         return indexes.right;
     }
 
-    public void drop(Collection<SSTableReader> sstablesToRebuild)
+    public void prepareSSTablesForRebuild(Collection<SSTableReader> sstablesToRebuild)
     {
         View currentView = view.get();
 
@@ -134,7 +134,7 @@ public class IndexViewManager
             if (!toRemove.contains(sstable))
                 continue;
 
-            index.markObsolete();
+            index.release();
         }
 
         update(toRemove, Collections.emptyList(), false);
@@ -144,16 +144,17 @@ public class IndexViewManager
      * Called when index is dropped. Mark all {@link SSTableIndex} as released and per-column index files
      * will be removed when in-flight queries completed and {@code obsolete} is true.
      *
-     * @param obsolete true if index files should be deleted after invalidate; false otherwise.
+     * @param indexWasDropped true if the index is invalidated because it was dropped; false if the index is simply
+     *                        being unloaded.
      */
-    public void invalidate(boolean obsolete)
+    public void invalidate(boolean indexWasDropped)
     {
         View previousView = view.getAndSet(new View(context, Collections.emptyList()));
 
         for (SSTableIndex index : previousView)
         {
-            if (obsolete)
-                index.markObsolete();
+            if (indexWasDropped)
+                index.markIndexDropped();
             else
                 index.release();
         }

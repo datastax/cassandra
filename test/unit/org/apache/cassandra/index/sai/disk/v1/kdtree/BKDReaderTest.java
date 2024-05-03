@@ -18,10 +18,7 @@
 package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.Before;
@@ -32,16 +29,15 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.MergeOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.lucene.index.PointValues.Relation;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
@@ -52,7 +48,6 @@ import static org.apache.lucene.index.PointValues.Relation.CELL_CROSSES_QUERY;
 import static org.apache.lucene.index.PointValues.Relation.CELL_INSIDE_QUERY;
 import static org.apache.lucene.index.PointValues.Relation.CELL_OUTSIDE_QUERY;
 import static org.hamcrest.Matchers.greaterThan;
-import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 
 public class BKDReaderTest extends SaiRandomizedTest
@@ -357,8 +352,8 @@ public class BKDReaderTest extends SaiRandomizedTest
 
     private BKDReader finishAndOpenReaderOneDim(int maxPointsPerLeaf, BKDTreeRamBuffer buffer) throws IOException
     {
-        final NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                 indexContext,
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        final NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                  maxPointsPerLeaf,
                                                                  Integer.BYTES,
                                                                  Math.toIntExact(buffer.numRows()),
@@ -366,13 +361,13 @@ public class BKDReaderTest extends SaiRandomizedTest
                                                                  new IndexWriterConfig("test", 2, 8));
 
         final SegmentMetadata.ComponentMetadataMap metadata = writer.writeAll(buffer.asPointValues());
-        final long bkdPosition = metadata.get(IndexComponent.KD_TREE).root;
+        final long bkdPosition = metadata.get(IndexComponentType.KD_TREE).root;
         assertThat(bkdPosition, is(greaterThan(0L)));
-        final long postingsPosition = metadata.get(IndexComponent.KD_TREE_POSTING_LISTS).root;
+        final long postingsPosition = metadata.get(IndexComponentType.KD_TREE_POSTING_LISTS).root;
         assertThat(postingsPosition, is(greaterThan(0L)));
 
-        FileHandle kdtreeHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext);
-        FileHandle kdtreePostingsHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext);
+        FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle();
+        FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle();
         return new BKDReader(indexContext,
                              kdtreeHandle,
                              bkdPosition,
@@ -382,8 +377,8 @@ public class BKDReaderTest extends SaiRandomizedTest
 
     private BKDReader finishAndOpenReaderOneDim(int maxPointsPerLeaf, MutableOneDimPointValues values, int numRows) throws IOException
     {
-        final NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
-                                                                 indexContext,
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        final NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                  maxPointsPerLeaf,
                                                                  Integer.BYTES,
                                                                  Math.toIntExact(numRows),
@@ -391,13 +386,13 @@ public class BKDReaderTest extends SaiRandomizedTest
                                                                  new IndexWriterConfig("test", 2, 8));
 
         final SegmentMetadata.ComponentMetadataMap metadata = writer.writeAll(values);
-        final long bkdPosition = metadata.get(IndexComponent.KD_TREE).root;
+        final long bkdPosition = metadata.get(IndexComponentType.KD_TREE).root;
         assertThat(bkdPosition, is(greaterThan(0L)));
-        final long postingsPosition = metadata.get(IndexComponent.KD_TREE_POSTING_LISTS).root;
+        final long postingsPosition = metadata.get(IndexComponentType.KD_TREE_POSTING_LISTS).root;
         assertThat(postingsPosition, is(greaterThan(0L)));
 
-        FileHandle kdtreeHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE, indexContext);
-        FileHandle kdtreePostingsHandle = indexDescriptor.createPerIndexFileHandle(IndexComponent.KD_TREE_POSTING_LISTS, indexContext);
+        FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle();
+        FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle();
         return new BKDReader(indexContext,
                              kdtreeHandle,
                              bkdPosition,

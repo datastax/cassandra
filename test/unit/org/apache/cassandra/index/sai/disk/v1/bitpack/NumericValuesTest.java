@@ -22,6 +22,8 @@ import java.util.function.LongFunction;
 
 import org.junit.Test;
 
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
@@ -62,11 +64,14 @@ public class NumericValuesTest extends SaiRandomizedTest
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
         writeTokens(monotonic, indexDescriptor, new long[length], prev -> 1000L);
 
-        final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
+        IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
+        final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES)));
+        IndexComponent.ForRead tokens = components.get(IndexComponentType.TOKEN_VALUES);
 
-        try (FileHandle fileHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
+        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(tokens));
+
+        try (FileHandle fileHandle = tokens.createFileHandle();
              LongArray reader = monotonic ? new MonotonicBlockPackedReader(fileHandle, tokensMeta).open()
                                           : new BlockPackedReader(fileHandle, tokensMeta).open())
         {
@@ -90,10 +95,12 @@ public class NumericValuesTest extends SaiRandomizedTest
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
         writeTokens(false, indexDescriptor, array, prev -> prev + nextInt(2, 100));
 
-        final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES)));
+        IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
+        final MetadataSource source = MetadataSource.loadMetadata(components);
+        IndexComponent.ForRead tokens = components.get(IndexComponentType.TOKEN_VALUES);
+        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(tokens));
 
-        try (FileHandle fileHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
+        try (FileHandle fileHandle = tokens.createFileHandle();
              LongArray reader = new BlockPackedReader(fileHandle, tokensMeta).open())
         {
             assertEquals(array.length, reader.length());
@@ -107,7 +114,7 @@ public class NumericValuesTest extends SaiRandomizedTest
         }
 
         // non-exact match
-        try (FileHandle fileHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
+        try (FileHandle fileHandle = tokens.createFileHandle();
              LongArray reader = new BlockPackedReader(fileHandle, tokensMeta).open())
         {
             assertEquals(array.length, reader.length());
@@ -126,10 +133,12 @@ public class NumericValuesTest extends SaiRandomizedTest
         int length = 64_000;
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
         writeTokens(false, indexDescriptor, new long[length], prev -> 1000L);
-        final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES)));
+        IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
+        final MetadataSource source = MetadataSource.loadMetadata(components);
+        IndexComponent.ForRead tokens = components.get(IndexComponentType.TOKEN_VALUES);
+        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(tokens));
 
-        try (FileHandle fileHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
+        try (FileHandle fileHandle = tokens.createFileHandle();
              LongArray reader = new BlockPackedReader(fileHandle, tokensMeta).open())
         {
             for (int x = 0; x < length; x++)
@@ -147,10 +156,12 @@ public class NumericValuesTest extends SaiRandomizedTest
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
         writeTokens(monotonic, indexDescriptor, array, prev -> monotonic ? prev + nextInt(100) : nextInt(100));
 
-        final MetadataSource source = MetadataSource.loadGroupMetadata(indexDescriptor);
-        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(indexDescriptor.componentFileName(IndexComponent.TOKEN_VALUES)));
+        IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
+        final MetadataSource source = MetadataSource.loadMetadata(components);
+        IndexComponent.ForRead tokens = components.get(IndexComponentType.TOKEN_VALUES);
+        NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(tokens));
 
-        try (FileHandle fileHandle = indexDescriptor.createPerSSTableFileHandle(IndexComponent.TOKEN_VALUES);
+        try (FileHandle fileHandle = tokens.createFileHandle();
              LongArray reader = (monotonic ? new MonotonicBlockPackedReader(fileHandle, tokensMeta)
                                            : new BlockPackedReader(fileHandle, tokensMeta)).open())
         {
@@ -168,9 +179,9 @@ public class NumericValuesTest extends SaiRandomizedTest
         final int blockSize = 1 << nextInt(8, 15);
 
         long current = 0;
-        try (MetadataWriter metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META));
-             final NumericValuesWriter numericWriter = new NumericValuesWriter(indexDescriptor,
-                                                                               IndexComponent.TOKEN_VALUES,
+        IndexComponents.ForWrite components = indexDescriptor.newPerSSTableComponentsForWrite();
+        try (MetadataWriter metadataWriter = new MetadataWriter(components);
+             final NumericValuesWriter numericWriter = new NumericValuesWriter(components.addOrGet(IndexComponentType.TOKEN_VALUES),
                                                                                metadataWriter,
                                                                                monotonic,
                                                                                blockSize))
@@ -184,5 +195,6 @@ public class NumericValuesTest extends SaiRandomizedTest
                 array[x] = current;
             }
         }
+        components.markComplete();
     }
 }

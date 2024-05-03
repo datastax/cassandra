@@ -28,9 +28,7 @@ import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
@@ -154,31 +152,16 @@ public interface StorageProvider
     FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component, ZeroCopyMetadata zeroCopyMetadata);
 
     /**
-     * Creates a new {@link FileHandle.Builder} for the given SAI component (for index with per-sstable files).
+     * Creates a new {@link FileHandle.Builder} for the given SAI component.
      * <p>
      * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
      * will have been set if appropriate.
      *
-     * @param descriptor descriptor for the index file whose handler is built.
      * @param component index component for which to build the handler.
      * @return a new {@link FileHandle.Builder} for the provided SAI component with access mode and chunk cache
      *   configured as appropriate.
      */
-    FileHandle.Builder fileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component);
-
-    /**
-     * Creates a new {@link FileHandle.Builder} for the given SAI component and context (for index with per-index files).
-     * <p>
-     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
-     * will have been set if appropriate.
-     *
-     * @param descriptor descriptor for the index file whose handler is built.
-     * @param component index component for which to build the handler.
-     * @param context index context for which to build the handler.
-     * @return a new {@link FileHandle.Builder} for the provided SAI component with access mode and chunk cache
-     *   configured as appropriate.
-     */
-    FileHandle.Builder fileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component, IndexContext context);
+    FileHandle.Builder fileHandleBuilderFor(IndexComponent.ForRead component);
 
     /**
      * Creates a new {@link FileHandle.Builder} for the given SAI component and context (for index with per-index files),
@@ -186,15 +169,13 @@ public interface StorageProvider
      * component to complete the writing of another related component.
      * <p>
      * Other the fact that this method will be called a different time, it's requirements are the same than for
-     * {@link #fileHandleBuilderFor(IndexDescriptor, IndexComponent, IndexContext)}.
+     * {@link #fileHandleBuilderFor(IndexComponent.ForRead)}.
      *
-     * @param descriptor descriptor for the index file whose handler is built.
      * @param component index component for which to build the handler.
-     * @param context index context for which to build the handler.
      * @return a new {@link FileHandle.Builder} for the provided SAI component with access mode and chunk cache
      *   configured as appropriate.
      */
-    FileHandle.Builder flushTimeFileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component, IndexContext context);
+    FileHandle.Builder flushTimeFileHandleBuilderFor(IndexComponent.ForRead component);
 
     class DefaultProvider implements StorageProvider
     {
@@ -271,36 +252,23 @@ public interface StorageProvider
 
         @Override
         @SuppressWarnings("resource")
-        public FileHandle.Builder fileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component)
+        public FileHandle.Builder fileHandleBuilderFor(IndexComponent.ForRead component)
         {
-            File file = descriptor.fileFor(component);
+            File file = component.file();
             if (logger.isTraceEnabled())
             {
-                logger.trace(descriptor.logMessage("Opening {} file handle for {} ({})"),
+                logger.trace(component.parent().logMessage("Opening {} file handle for {} ({})"),
                              file, FBUtilities.prettyPrintMemory(file.length()));
             }
             return new FileHandle.Builder(file).mmapped(true);
         }
 
         @Override
-        @SuppressWarnings("resource")
-        public FileHandle.Builder fileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component, IndexContext context)
-        {
-            File file = descriptor.fileFor(component, context);
-            if (logger.isTraceEnabled())
-            {
-                logger.trace(descriptor.logMessage("Opening {} file handle for {} ({})"),
-                             file, FBUtilities.prettyPrintMemory(file.length()));
-            }
-            return new FileHandle.Builder(file).mmapped(true);
-        }
-
-        @Override
-        public FileHandle.Builder flushTimeFileHandleBuilderFor(IndexDescriptor descriptor, IndexComponent component, IndexContext context)
+        public FileHandle.Builder flushTimeFileHandleBuilderFor(IndexComponent.ForRead component)
         {
             // By default, no difference between accesses "at flush time" and "at query time", but subclasses may need
             // to differenciate both.
-            return fileHandleBuilderFor(descriptor, component, context);
+            return fileHandleBuilderFor(component);
         }
     }
 }

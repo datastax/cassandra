@@ -127,7 +127,7 @@ public class ActionBuilder
 
         public ConditionsBuilder not()
         {
-            if (!(elements.getLast() instanceof LogicOp))
+            if (!elements.isEmpty() && !(elements.getLast() instanceof LogicOp))
             {
                 elements.add(LogicOp.AND);
             }

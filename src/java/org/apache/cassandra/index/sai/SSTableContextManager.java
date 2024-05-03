@@ -20,7 +20,7 @@ package org.apache.cassandra.index.sai;
 import java.lang.invoke.MethodHandles;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.annotation.concurrent.ThreadSafe;
@@ -29,9 +29,9 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.utils.Pair;
 
 /**
  * Manage per-sstable {@link SSTableContext} for {@link StorageAttachedIndexGroup}
@@ -41,7 +41,19 @@ public class SSTableContextManager
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
+    // Even though `SSTableContext` happens to point to its corresponding `IndexDescriptor` for convenience, we track
+    // the latter separately because we need to track descriptors before it is safe to build a context (we create
+    // a descriptor as soon as we start indexing a sstable to start tracking the added components, but can only create
+    // its context when the per-sstable components are complete).
+    private final ConcurrentHashMap<SSTableReader, IndexDescriptor> sstableDescriptors = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<SSTableReader, SSTableContext> sstableContexts = new ConcurrentHashMap<>();
+
+    private final Tracker tracker;
+
+    SSTableContextManager(Tracker tracker)
+    {
+        this.tracker = tracker;
+    }
 
     /**
      * Initialize {@link SSTableContext}s if they are not already initialized.
@@ -50,16 +62,18 @@ public class SSTableContextManager
      * @param added SSTables being added
      * @param validate if true, header and footer will be validated.
      *
-     * @return a set of contexts for SSTables with valid per-SSTable components, and a set of
-     * SSTables with invalid or missing components
+     * @return if all the added (and still "live" at the time of this call) sstable with complete index build have
+     * valid per-sstable components, then an optional with the context for all those sstables. Otherwise, if any sstable
+     * has invalid/missing components, then an empty optional is returned (and all invalid sstable will have had their
+     * context removed, after a call to onInvalid).
      */
     @SuppressWarnings("resource")
-    public Pair<Set<SSTableContext>, Set<SSTableReader>> update(Collection<SSTableReader> removed, Iterable<SSTableReader> added, boolean validate)
+    public Optional<Set<SSTableContext>> update(Collection<SSTableReader> removed, Iterable<SSTableReader> added, boolean validate)
     {
         release(removed);
 
         Set<SSTableContext> contexts = new HashSet<>();
-        Set<SSTableReader> invalid = new HashSet<>();
+        boolean hasInvalid = false;
 
         for (SSTableReader sstable : added)
         {
@@ -68,42 +82,52 @@ public class SSTableContextManager
                 continue;
             }
 
-            IndexDescriptor indexDescriptor = IndexDescriptor.createFrom(sstable);
-
-            if (!indexDescriptor.isPerSSTableBuildComplete())
+            IndexDescriptor indexDescriptor = getOrCreateIndexDescriptor(sstable);
+            if (!indexDescriptor.perSSTableComponents().isComplete())
             {
-                // Don't even try to validate or add the context if the completion marker is missing.
+                // This usually means no index has been built for that sstable yet (the alternative would be that we
+                // lost the completion marker somehow, but that case is currently not considered). Not point in running
+                // validation (it would fail), and we also don't want to add it to the returned contexts, since it's
+                // not ready yet. We know a future call of this method will be triggered for that sstable once the
+                // index finishes building.
                 continue;
             }
 
             try
             {
                 // Only validate on restart or newly refreshed SSTable. Newly built files are unlikely to be corrupted.
-                if (validate && !sstableContexts.containsKey(sstable) && !indexDescriptor.validatePerSSTableComponents())
+                if (validate && !sstableContexts.containsKey(sstable) && !indexDescriptor.perSSTableComponents().validateComponents(sstable, tracker, false))
                 {
-                    logger.warn(indexDescriptor.logMessage("Invalid per-SSTable component for SSTable {}"), sstable.descriptor);
-                    invalid.add(sstable);
-                    removeInvalidSSTableContext(sstable);
+                    // Note that the validation already log details on the problem if it fails, so no reason to log further
+                    hasInvalid = true;
                     continue;
                 }
                 // ConcurrentHashMap#computeIfAbsent guarantees atomicity, so {@link SSTableContext#create(SSTableReader)}}
                 // is called at most once per key.
-                contexts.add(sstableContexts.computeIfAbsent(sstable, SSTableContext::create));
+                contexts.add(sstableContexts.computeIfAbsent(sstable, __ -> SSTableContext.create(sstable, indexDescriptor)));
             }
             catch (Throwable t)
             {
-                logger.warn(indexDescriptor.logMessage("Failed to update per-SSTable components for SSTable {}"), sstable.descriptor, t);
-                invalid.add(sstable);
-                removeInvalidSSTableContext(sstable);
+                logger.warn(indexDescriptor.logMessage("Unexpected error updating per-SSTable components for SSTable {}"), sstable.descriptor, t);
+                // We haven't been able to correctly set the context, so the index shouldn't be used, and we invalidate
+                // the components to ensure that's the case.
+                indexDescriptor.perSSTableComponents().invalidate(sstable, tracker);
+                hasInvalid = true;
+                remove(sstable);
             }
         }
 
-        return Pair.create(contexts, invalid);
+        return hasInvalid ? Optional.empty() : Optional.of(contexts);
     }
 
-    public void release(Collection<SSTableReader> toRelease)
+    private void release(Collection<SSTableReader> toRelease)
     {
-        toRelease.stream().map(sstableContexts::remove).filter(Objects::nonNull).forEach(SSTableContext::close);
+        toRelease.forEach(this::remove);
+    }
+
+    Collection<SSTableContext> allContexts()
+    {
+        return sstableContexts.values();
     }
 
     /**
@@ -120,13 +144,8 @@ public class SSTableContextManager
     long diskUsage()
     {
         return sstableContexts.values().stream()
-                              .mapToLong(ssTableContext -> ssTableContext.indexDescriptor.sizeOnDiskOfPerSSTableComponents())
+                              .mapToLong(ssTableContext -> ssTableContext.indexDescriptor.perSSTableComponents().liveSizeOnDiskInBytes())
                               .sum();
-    }
-
-    Set<SSTableReader> sstables()
-    {
-        return sstableContexts.keySet();
     }
 
     @VisibleForTesting
@@ -144,20 +163,25 @@ public class SSTableContextManager
     @VisibleForTesting
     public void clear()
     {
+        sstableDescriptors.clear();
         sstableContexts.values().forEach(SSTableContext::close);
         sstableContexts.clear();
     }
 
     @SuppressWarnings("resource")
-    private void removeInvalidSSTableContext(SSTableReader sstable)
+    private void remove(SSTableReader sstable)
     {
-        SSTableContext invalidContext = sstableContexts.remove(sstable);
-        if (invalidContext != null)
-            invalidContext.close();
+        sstableDescriptors.remove(sstable);
+        SSTableContext context = sstableContexts.remove(sstable);
+        if (context != null)
+            context.close();
     }
 
-    public SSTableContext getContext(SSTableReader sstable)
+    IndexDescriptor getOrCreateIndexDescriptor(SSTableReader sstable)
     {
-        return sstableContexts.get(sstable);
+        // If we have a SSTableReader, it means the sstable exists, and so if we don't have a descriptor for it,
+        // then create one now. Since the sstable exists, it also means that we will get notified if/when it
+        // is removed (in `update`), so we shouldn't "leak" descriptors.
+        return sstableDescriptors.computeIfAbsent(sstable, IndexDescriptor::create);
     }
 }

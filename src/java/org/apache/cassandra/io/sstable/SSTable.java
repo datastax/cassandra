@@ -347,7 +347,7 @@ public abstract class SSTable
      * @param skipMissing, skip adding the component to the returned set if the corresponding file is missing.
      * @return set of components found in the TOC
      */
-    protected static Set<Component> readTOC(Descriptor descriptor, boolean skipMissing) throws IOException
+    public static Set<Component> readTOC(Descriptor descriptor, boolean skipMissing) throws IOException
     {
         File tocFile = descriptor.fileFor(Component.TOC);
         List<String> componentNames = Files.readAllLines(tocFile.toPath());

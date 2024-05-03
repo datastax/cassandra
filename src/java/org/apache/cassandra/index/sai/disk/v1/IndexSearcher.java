@@ -46,19 +46,16 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
     protected final PrimaryKeyMap.Factory primaryKeyMapFactory;
     final PerIndexFiles indexFiles;
     protected final SegmentMetadata metadata;
-    final IndexDescriptor indexDescriptor;
     protected final IndexContext indexContext;
 
     protected IndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                             PerIndexFiles perIndexFiles,
                             SegmentMetadata segmentMetadata,
-                            IndexDescriptor indexDescriptor,
                             IndexContext indexContext)
     {
         this.primaryKeyMapFactory = primaryKeyMapFactory;
         this.indexFiles = perIndexFiles;
         this.metadata = segmentMetadata;
-        this.indexDescriptor = indexDescriptor;
         this.indexContext = indexContext;
     }
 

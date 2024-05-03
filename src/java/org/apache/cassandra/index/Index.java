@@ -495,16 +495,6 @@ public interface Index
      */
     public void validate(PartitionUpdate update) throws InvalidRequestException;
 
-    /**
-     * Returns the SSTable-attached {@link Component}s created by this index.
-     *
-     * @return the SSTable components created by this index
-     */
-    default Set<Component> getComponents()
-    {
-        return Collections.emptySet();
-    }
-
     /*
      * Update processing
      */
@@ -844,11 +834,32 @@ public interface Index
         default void unload() { }
 
         /**
-         * Returns the SSTable-attached {@link Component}s created by this index group.
+         * Return the set of sstable-attached components created by a new build of the indexes in this group on the
+         * provided sstable
          *
-         * @return the SSTable components created by this group
+         * @param descriptor a sstable descriptor. Please note that the corresponding sstable may or may not exist on disk
+         *                   when this is called. It will exist if this is called as part of index rebuilds, but will not
+         *                   for an initial build (by flush or compaction). In the later cases, the descriptor is that of
+         *                   the sstable we are about to write, but no files for that descriptor may exist on disk.
+         * @param metadata metadata of the table {@code descriptor} is a sstable of.
+         * @return the set of sstable-attached components created by a new build of the indexes in this group for the
+         * provided sstable. Here, "new" is meant in the sense that if the index already exists for the sstable, meaning
+         * that there is existing components, then this method will return the components corresponding to a rebuild.
          */
-        Set<Component> getComponents();
+        Set<Component> componentsForNewBuid(Descriptor descriptor, TableMetadata metadata);
+
+        /**
+         * Return the set of sstable-attached components belonging to the group that are currently "active" for the
+         * provided sstable.
+         * <p>
+         * The "active" components are the components that are currently in use, meaning that if a given component
+         * of the sstable exists with multiple versions or generation on disk, only the most recent version/generation
+         * is the active one.
+         *
+         * @param sstable the sstable to get components for.
+         * @return the set of the sstable-attached components of the provided sstable for this group.
+         */
+        Set<Component> activeComponents(SSTableReader sstable);
 
         /**
          * @return true if this index group is capable of supporting multiple contains restrictions, false otherwise
