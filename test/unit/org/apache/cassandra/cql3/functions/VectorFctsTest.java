@@ -26,10 +26,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
 import org.assertj.core.api.Assertions;
-
-import static org.apache.cassandra.index.sai.disk.vector.VectorValidation.MAX_FLOAT32_COMPONENT;
 
 public class VectorFctsTest extends CQLTester
 {
