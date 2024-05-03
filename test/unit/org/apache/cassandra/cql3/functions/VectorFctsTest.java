@@ -100,12 +100,12 @@ public class VectorFctsTest extends CQLTester
         assertInvalidThrowMessage("Max value must be greater than min value",
                                   InvalidRequestException.class,
                                   "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, 1, -1))");
-        assertInvalidThrowMessage("Max value must be less than or equal to 99999998430674944.000000",
+        assertInvalidThrowMessage("Max value must be finite",
                                   InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, 0, " + Float.MAX_VALUE + "))");
-        assertInvalidThrowMessage("Min value must be greater than or equal to -99999998430674944.000000",
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, 0, " + Float.NaN + "))");
+        assertInvalidThrowMessage("Min value must be finite",
                                   InvalidRequestException.class,
-                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, " + -Float.MAX_VALUE + ", 0))");
+                                  "INSERT INTO %s (pk, value) VALUES (0, random_float_vector(2, " + Float.NEGATIVE_INFINITY + ", 0))");
 
         // correct function with wrong receiver type
         assertInvalidThrowMessage("Type error: cannot assign result of function system.random_float_vector " +
@@ -121,7 +121,7 @@ public class VectorFctsTest extends CQLTester
             assertSelectRandomVectorFunction(dimension, -1.5f, 1.5f);
             assertSelectRandomVectorFunction(dimension, 0.999999f, 1);
             assertSelectRandomVectorFunction(dimension, 0, 0.000001f);
-            assertSelectRandomVectorFunction(dimension, -MAX_FLOAT32_COMPONENT, MAX_FLOAT32_COMPONENT);
+            assertSelectRandomVectorFunction(dimension, -Float.MAX_VALUE, Float.MAX_VALUE);
         }
     }
 

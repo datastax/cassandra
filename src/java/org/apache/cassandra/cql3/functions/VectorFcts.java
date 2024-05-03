@@ -139,9 +139,8 @@ public abstract class VectorFcts
                         throw new InvalidRequestException(format("Min argument of function %s must not be null",
                                                                  RandomFloatVectorFunctionFactory.this));
                     float min = minType.compose(arg1).floatValue();
-                    if (min < -MAX_FLOAT32_COMPONENT)
-                        throw new InvalidRequestException(format("Min value must be greater than or equal to %f",
-                                                                 -MAX_FLOAT32_COMPONENT));
+                    if (!Float.isFinite(min))
+                        throw new InvalidRequestException("Min value must be finite");
 
                     // get the max argument
                     ByteBuffer arg2 = args.get(2);
@@ -149,9 +148,8 @@ public abstract class VectorFcts
                         throw new InvalidRequestException(format("Max argument of function %s must not be null",
                                                                  RandomFloatVectorFunctionFactory.this));
                     float max = maxType.compose(arg2).floatValue();
-                    if (max > MAX_FLOAT32_COMPONENT)
-                        throw new InvalidRequestException(format("Max value must be less than or equal to %f",
-                                                                 MAX_FLOAT32_COMPONENT));
+                    if (!Float.isFinite(max))
+                        throw new InvalidRequestException("Max value must be finite");
                     if (max <= min)
                         throw new InvalidRequestException("Max value must be greater than min value");
 
@@ -159,7 +157,10 @@ public abstract class VectorFcts
                     float[] vector = new float[dimension];
                     for (int i = 0; i < dimension; i++)
                     {
-                        vector[i] = min + random.nextFloat() * (max - min);
+                        // promote to double to avoid overflow with large (absolute value) min and/or max
+                        double dmin = min;
+                        double dmax = max;
+                        vector[i] = (float) (dmin + random.nextDouble() * (dmax - dmin));
                     }
 
                     return type.getSerializer().serializeFloatArray(vector);
