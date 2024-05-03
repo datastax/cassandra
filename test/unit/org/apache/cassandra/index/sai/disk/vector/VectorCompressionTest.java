@@ -26,12 +26,8 @@ import org.junit.Test;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.cql.VectorTester;
 import org.apache.cassandra.index.sai.disk.v3.V3VectorIndexSearcher;
-import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
-import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 
-import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.BINARY_QUANTIZATION;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.NONE;
-import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -150,7 +146,7 @@ public class VectorCompressionTest extends VectorTester
             if (cv != null)
             {
                 assertEquals((int) (100 * VectorSourceModel.tapered2x(100) * model.overqueryProvider.apply(cv)),
-                             model.topKFor(100, cv));
+                             model.rerankKFor(100, cv));
             }
         }
     }

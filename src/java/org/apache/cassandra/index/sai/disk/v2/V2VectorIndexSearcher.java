@@ -157,7 +157,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (exp.getOp() != Expression.Op.ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + exp));
 
-        int topK = indexContext.getIndexWriterConfig().getSourceModel().topKFor(limit, graph.getCompressedVectors());
+        int topK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompressedVectors());
         var queryVector = vts.createFloatVector(exp.lower.value.vector);
 
         var result = searchInternal(keyRange, context, queryVector, limit, topK, 0);
@@ -476,7 +476,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (keysInRange.isEmpty())
             return CloseableIterator.emptyIterator();
 
-        int topK = indexContext.getIndexWriterConfig().getSourceModel().topKFor(limit, graph.getCompressedVectors());
+        int topK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompressedVectors());
         // Convert PKs to segment row ids and then to ordinals, skipping any that don't exist in this segment
         var bitsAndRows = flatmapPrimaryKeysToBitsAndRows(keysInRange);
         var bits = bitsAndRows.left;

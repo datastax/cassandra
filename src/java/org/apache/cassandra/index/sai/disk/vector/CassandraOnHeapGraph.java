@@ -300,7 +300,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
         var searcher = searchers.get();
         var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
-        var topK = sourceModel.topKFor(limit, null);
+        var topK = sourceModel.rerankKFor(limit, null);
         var result = searcher.search(ssf, topK, threshold, bits);
         Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         context.addAnnNodesVisited(result.getVisitedCount());
