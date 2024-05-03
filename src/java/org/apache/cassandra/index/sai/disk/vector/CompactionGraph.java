@@ -70,6 +70,8 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ObjectSizes;
 
+import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
+
 public class CompactionGraph implements Closeable, Accountable
 {
     private static final Logger logger = LoggerFactory.getLogger(CompactionGraph.class);
@@ -143,6 +145,7 @@ public class CompactionGraph implements Closeable, Accountable
         termsOffset = (indexFile.exists() ? indexFile.length() : 0)
                       + SAICodecUtils.headerSize();
         writer = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
+                 .withVersion(JVECTOR_2_VERSION) // VSTODO old version until we add LVQ
                  .withStartOffset(termsOffset)
                  .with(new InlineVectors(dimension))
                  .withMapper(new OnDiskGraphIndexWriter.IdentityMapper())
@@ -253,7 +256,7 @@ public class CompactionGraph implements Closeable, Accountable
             // write PQ
             long pqOffset = pqOutput.getFilePointer();
             CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
-            pqVectors.write(pqOutput.asSequentialWriter());
+            pqVectors.write(pqOutput.asSequentialWriter(), JVECTOR_2_VERSION); // VSTODO old version until we add LVQ
             long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             // write postings

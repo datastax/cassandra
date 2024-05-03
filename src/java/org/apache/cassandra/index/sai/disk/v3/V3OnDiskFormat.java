@@ -23,6 +23,7 @@ import java.lang.invoke.MethodHandles;
 import java.util.EnumSet;
 import java.util.Set;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,6 +43,11 @@ public class V3OnDiskFormat extends V2OnDiskFormat
 {
     public static final boolean REDUCE_TOPK_ACROSS_SSTABLES = Boolean.parseBoolean(System.getProperty("cassandra.sai.reduce_topk_across_sstables", "true"));
     public static final boolean ENABLE_RERANK_FLOOR = Boolean.parseBoolean(System.getProperty("cassandra.sai.rerank_floor", "true"));
+
+    public static volatile boolean WRITE_JVECTOR3_FORMAT = Boolean.parseBoolean(System.getProperty("cassandra.sai.write_jv3_format", "false"));
+    public static final boolean ENABLE_LTM_CONSTRUCTION = Boolean.parseBoolean(System.getProperty("cassandra.sai.ltm_construction", "true"));
+
+    public static final int JVECTOR_2_VERSION = 2;
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -92,5 +98,11 @@ public class V3OnDiskFormat extends V2OnDiskFormat
         if (indexContext.isVector())
             return VECTOR_COMPONENTS_V3;
         return super.perIndexComponents(indexContext);
+    }
+
+    @VisibleForTesting
+    public static void enableJVector3Format()
+    {
+        WRITE_JVECTOR3_FORMAT = true;
     }
 }

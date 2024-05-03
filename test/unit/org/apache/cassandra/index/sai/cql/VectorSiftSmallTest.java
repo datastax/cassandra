@@ -31,21 +31,23 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
-import org.junit.FixMethodOrder;
 import org.junit.Test;
-import org.junit.runners.MethodSorters;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 
-import static org.apache.cassandra.db.compaction.CompactionManager.getDefaultGcBefore;
 import static org.junit.Assert.assertTrue;
 
 public class VectorSiftSmallTest extends VectorTester
 {
     private static final String DATASET = "siftsmall"; // change to "sift" for larger dataset. requires manual download
+
+    @Override
+    public void setup() throws Throwable
+    {
+        super.setup();
+        V3OnDiskFormat.enableJVector3Format(); // we are testing recall and this is required for higher-accuracy pq
+    }
 
     @Test
     public void testSiftSmall() throws Throwable
