@@ -85,6 +85,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 
+import static java.lang.Math.max;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE;
 
 public class QueryController implements Plan.Executor
@@ -527,14 +528,22 @@ public class QueryController implements Plan.Executor
     private List<CloseableIterator<ScoredPrimaryKey>> orderSstables(QueryViewBuilder.QueryView queryView, List<PrimaryKey> sourceKeys)
     {
         List<CloseableIterator<ScoredPrimaryKey>> results = new ArrayList<>();
-        for (var e : queryView.view.values())
+        long totalRows = queryView.view.keySet().stream().mapToLong(sstable -> sstable.getTotalRows()).sum();
+        queryView.view.forEach((sstable, expressions) ->
         {
+            // We expect the number of top results found in each sstable to be proportional to its number of rows
+            // we don't pad this number more because resuming a search if we guess too low is very very inexpensive.
+            //
+            // Note that this is only used for calls to `orderBy`, i.e., vanilla ANN with no other predicates;
+            // `orderResultsBy` does not know how to auto-resume.
+            int sstableLimit = max(1, (int) (limit * ((double) sstable.getTotalRows() / totalRows)));
+
             QueryViewBuilder.IndexExpression annIndexExpression = null;
             try
             {
-                assert e.size() == 1 : "only one index is expected in ANN expression, found " + e.size() + " in " + e;
-                annIndexExpression = e.get(0);
-                var iterators = sourceKeys.isEmpty() ? annIndexExpression.index.orderBy(annIndexExpression.expression, mergeRange, queryContext, limit)
+                assert expressions.size() == 1 : "only one index is expected in ANN expression, found " + expressions.size() + " in " + expressions;
+                annIndexExpression = expressions.get(0);
+                var iterators = sourceKeys.isEmpty() ? annIndexExpression.index.orderBy(annIndexExpression.expression, mergeRange, queryContext, sstableLimit)
                                                      : annIndexExpression.index.orderResultsBy(queryContext, sourceKeys, annIndexExpression.expression, limit);
                 results.addAll(iterators);
             }
@@ -549,7 +558,7 @@ public class QueryController implements Plan.Executor
                 }
                 throw Throwables.cleaned(ex);
             }
-        }
+        });
         return results;
     }
 

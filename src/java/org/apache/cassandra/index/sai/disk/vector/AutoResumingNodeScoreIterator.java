@@ -35,6 +35,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
 {
     private final GraphSearcher searcher;
     private final int topK;
+    private final int rerankK;
     private final boolean inMemory;
     private final IntConsumer nodesVisitedConsumer;
     private Iterator<SearchResult.NodeScore> nodeScores;
@@ -54,6 +55,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
                                          SearchResult result,
                                          IntConsumer nodesVisitedConsumer,
                                          int topK,
+                                         int rerankK,
                                          boolean inMemory)
     {
         this.searcher = searcher;
@@ -61,6 +63,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         this.cumulativeNodesVisited = result.getVisitedCount();
         this.nodesVisitedConsumer = nodesVisitedConsumer;
         this.topK = topK;
+        this.rerankK = rerankK;
         this.inMemory = inMemory;
     }
 
@@ -70,7 +73,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         if (nodeScores.hasNext())
             return nodeScores.next();
 
-        var nextResult = searcher.resume(topK);
+        var nextResult = searcher.resume(topK, rerankK);
         maybeLogTrace(nextResult);
         cumulativeNodesVisited += nextResult.getVisitedCount();
         // If the next result is empty, we are done searching.

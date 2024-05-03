@@ -157,10 +157,10 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (exp.getOp() != Expression.Op.ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + exp));
 
-        int topK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompressedVectors());
+        int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompressedVectors());
         var queryVector = vts.createFloatVector(exp.lower.value.vector);
 
-        var result = searchInternal(keyRange, context, queryVector, limit, topK, 0);
+        var result = searchInternal(keyRange, context, queryVector, limit, rerankK, 0);
         return toScoreOrderedIterator(result, context);
     }
 
@@ -171,7 +171,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
      * @param context the query context
      * @param queryVector the query vector
      * @param limit the limit for the query
-     * @param topK the amplified limit for the query to get more accurate results
+     * @param rerankK the amplified limit for the query to get more accurate results
      * @param threshold the threshold for the query. When the threshold is greater than 0 and brute force logic is used,
      *                  the results will be filtered by the threshold.
      */
@@ -179,14 +179,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                                           QueryContext context,
                                                           VectorFloat<?> queryVector,
                                                           int limit,
-                                                          int topK,
+                                                          int rerankK,
                                                           float threshold) throws IOException
     {
         try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
         {
             // not restricted
             if (RangeUtil.coversFullRing(keyRange))
-                return graph.search(queryVector, topK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
+                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
 
             PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
 
@@ -202,16 +202,16 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
             // if it covers entire segment, skip bit set
             if (minSSTableRowId <= metadata.minSSTableRowId && maxSSTableRowId >= metadata.maxSSTableRowId)
-                return graph.search(queryVector, topK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
+                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
 
             minSSTableRowId = Math.max(minSSTableRowId, metadata.minSSTableRowId);
             maxSSTableRowId = min(maxSSTableRowId, metadata.maxSSTableRowId);
 
             // Upper-bound cost based on maximum possible rows included
             int nRows = Math.toIntExact(maxSSTableRowId - minSSTableRowId + 1);
-            var initialCostEstimate = estimateCost(topK, nRows);
+            var initialCostEstimate = estimateCost(rerankK, nRows);
             Tracing.logAndTrace(logger, "Search range covers {} rows; expected nodes visited is {} for sstable index with {} nodes, LIMIT {}",
-                                nRows, initialCostEstimate.expectedNodesVisited, graph.size(), topK);
+                                nRows, initialCostEstimate.expectedNodesVisited, graph.size(), rerankK);
             // if we have a small number of results then let TopK processor do exact NN computation
             if (initialCostEstimate.shouldUseBruteForce())
             {
@@ -224,7 +224,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                 if (threshold > 0)
                     return filterByBruteForce(queryVector, segmentRowIds, threshold);
                 else
-                    return orderByBruteForce(queryVector, segmentRowIds, limit, topK);
+                    return orderByBruteForce(queryVector, segmentRowIds, limit, rerankK);
             }
 
             // create a bitset of ordinals corresponding to the rows in the given key range
@@ -243,12 +243,12 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
             int cardinality = bits instanceof SparseBits ? ((SparseBits) bits).cardinality() : ((BitSet) bits).cardinality();
             // We can make a more accurate cost estimate now
-            var betterCostEstimate = estimateCost(topK, cardinality);
+            var betterCostEstimate = estimateCost(rerankK, cardinality);
 
             if (cardinality == 0)
                 return CloseableIterator.emptyIterator();
 
-            return graph.search(queryVector, topK, threshold, bits, context, visited -> {
+            return graph.search(queryVector, limit, rerankK, threshold, bits, context, visited -> {
                 betterCostEstimate.updateStatistics(visited);
                 context.addAnnNodesVisited(visited);
             });
@@ -476,13 +476,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (keysInRange.isEmpty())
             return CloseableIterator.emptyIterator();
 
-        int topK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompressedVectors());
+        int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompressedVectors());
         // Convert PKs to segment row ids and then to ordinals, skipping any that don't exist in this segment
         var bitsAndRows = flatmapPrimaryKeysToBitsAndRows(keysInRange);
         var bits = bitsAndRows.left;
         var rowIds = bitsAndRows.right;
         var numRows = rowIds.size();
-        final CostEstimate cost = estimateCost(topK, numRows);
+        final CostEstimate cost = estimateCost(rerankK, numRows);
         Tracing.logAndTrace(logger, "{} rows relevant to current sstable out of {} in range; expected nodes visited is {} for index with {} nodes, LIMIT {}",
                             numRows, keysInRange.size(), cost.expectedNodesVisited, graph.size(), limit);
         if (numRows == 0)
@@ -492,11 +492,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         {
             // brute force using the in-memory compressed vectors to cut down the number of results returned
             var queryVector = vts.createFloatVector(exp.lower.value.vector);
-            return toScoreOrderedIterator(this.orderByBruteForce(queryVector, rowIds, limit, topK), context);
+            return toScoreOrderedIterator(this.orderByBruteForce(queryVector, rowIds, limit, rerankK), context);
         }
         // else ask the index to perform a search limited to the bits we created
         var queryVector = vts.createFloatVector(exp.lower.value.vector);
-        var results = graph.search(queryVector, topK, 0, bits, context, cost::updateStatistics);
+        var results = graph.search(queryVector, limit, rerankK, 0, bits, context, cost::updateStatistics);
         return toScoreOrderedIterator(results, context);
     }
 
