@@ -223,11 +223,11 @@ public class RangeIntersectionIterator extends RangeIterator
             if (statistics.isDisjoint())
             {
                 // release posting lists
-                FileUtils.closeQuietly(ranges);
+                FileUtils.closeQuietly(rangeIterators);
                 return RangeIterator.empty();
             }
 
-            if (ranges.size() == 1)
+            if (rangeCount() == 1)
                 return rangeIterators.get(0);
 
             return new RangeIntersectionIterator(statistics, rangeIterators);
