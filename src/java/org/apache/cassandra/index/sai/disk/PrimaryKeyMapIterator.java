@@ -70,8 +70,8 @@ public final class PrimaryKeyMapIterator extends RangeIterator
     {
         KeyFilter filter;
         TableMetadata metadata = ctx.sstable().metadata();
-        // on AA, we only have partitions in the PrimaryKeyMap, so we don't want to use KEYS_WITH_CLUSTERING
-        if (metadata.hasStaticColumns() && ctx.indexDescriptor().getVersion() != Version.AA)
+        // if not row-aware, we don't have clustering
+        if (ctx.indexDescriptor().getVersion().onDiskFormat().indexFeatureSet().isRowAware() && metadata.hasStaticColumns())
             filter = KeyFilter.KEYS_WITH_CLUSTERING;
         else // the table doesn't consist anything we want to filter out, so let's use the cheap option
             filter = KeyFilter.ALL;
