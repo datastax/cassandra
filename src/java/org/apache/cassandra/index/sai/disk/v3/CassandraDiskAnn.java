@@ -188,7 +188,8 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             var rr = view.rerankerFor(queryVector, sf);
             ssp = new SearchScoreProvider(asf, rr);
         }
-        var result = searcher.search(ssp, topK, rerankK, threshold, 0.0f, ordinalsMap.ignoringDeleted(acceptBits));
+        var result = searcher.search(ssp, topK, rerankK, threshold, context.getAnnRerankFloor(), ordinalsMap.ignoringDeleted(acceptBits));
+        context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         // Threshold based searches are comprehensive and do not need to resume the search.
         if (threshold > 0)
