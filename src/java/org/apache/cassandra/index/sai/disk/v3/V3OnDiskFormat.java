@@ -40,6 +40,9 @@ import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
  */
 public class V3OnDiskFormat extends V2OnDiskFormat
 {
+    public static final boolean REDUCE_TOPK_ACROSS_SSTABLES = Boolean.parseBoolean(System.getProperty("cassandra.sai.reduce_topk_across_sstables", "true"));
+    public static final boolean ENABLE_RERANK_FLOOR = Boolean.parseBoolean(System.getProperty("cassandra.sai.rerank_floor", "true"));
+
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     public static final V3OnDiskFormat instance = new V3OnDiskFormat();

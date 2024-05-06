@@ -65,6 +65,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.OrderingFilterRangeIterator;
@@ -536,7 +537,9 @@ public class QueryController implements Plan.Executor
             //
             // Note that this is only used for calls to `orderBy`, i.e., vanilla ANN with no other predicates;
             // `orderResultsBy` does not know how to auto-resume.
-            int sstableLimit = max(1, (int) (limit * ((double) sstable.getTotalRows() / totalRows)));
+            int sstableLimit = V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES
+                               ? max(1, (int) (limit * ((double) sstable.getTotalRows() / totalRows)))
+                               : limit;
 
             QueryViewBuilder.IndexExpression annIndexExpression = null;
             try
