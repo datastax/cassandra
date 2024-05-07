@@ -55,8 +55,8 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
     private void addSensorsToResponse(Message.Builder<NoPayload> response)
     {
         // Add write bytes sensors to the response
-        Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteByteRequestParam;
-        Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteByteTableParam;
+        Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
+        Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteBytesTableParam;
         Collection<Sensor> sensors = RequestTracker.instance.get().getSensors(Type.WRITE_BYTES);
         addSensorsToResponse(sensors, requestParam, tableParam, response);
 

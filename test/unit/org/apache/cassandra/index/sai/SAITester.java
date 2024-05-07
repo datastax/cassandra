@@ -44,6 +44,7 @@ import javax.management.ObjectName;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
+import com.google.common.collect.Table;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Rule;
@@ -85,6 +86,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
@@ -212,7 +214,7 @@ public class SAITester extends CQLTester
     {
         return new IndexContext(cfs.getKeyspaceName(),
                                 cfs.getTableName(),
-                                "uuid",
+                                cfs.metadata().id,
                                 UTF8Type.instance,
                                 new ClusteringComparator(),
                                 ColumnMetadata.regularColumn("sai", "internal", name, validator),
@@ -225,7 +227,7 @@ public class SAITester extends CQLTester
     {
         return new IndexContext("test_ks",
                                 "test_cf",
-                                "uuid",
+                                TableId.generate(),
                                 UTF8Type.instance,
                                 new ClusteringComparator(),
                                 ColumnMetadata.regularColumn("sai", "internal", name, validator),
@@ -238,7 +240,7 @@ public class SAITester extends CQLTester
     {
         return new IndexContext("test_ks",
                                 "test_cf",
-                                "uuid",
+                                TableId.generate(),
                                 UTF8Type.instance,
                                 new ClusteringComparator(),
                                 ColumnMetadata.regularColumn("sai", "internal", columnName, validator),

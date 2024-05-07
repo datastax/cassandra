@@ -71,6 +71,7 @@ import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -100,7 +101,7 @@ public class IndexContext
 
     private final String keyspace;
     private final String table;
-    private final String tableId;
+    private final TableId tableId;
     private final ColumnMetadata column;
     private final IndexTarget.Type indexType;;
     private final AbstractType<?> validator;
@@ -123,7 +124,7 @@ public class IndexContext
 
     public IndexContext(@Nonnull String keyspace,
                         @Nonnull String table,
-                        @Nonnull String tableId,
+                        @Nonnull TableId tableId,
                         @Nonnull AbstractType<?> partitionKeyType,
                         @Nonnull ClusteringComparator clusteringComparator,
                         @Nonnull ColumnMetadata column,
@@ -204,7 +205,7 @@ public class IndexContext
         return table;
     }
 
-    public String getTableId()
+    public TableId getTableId()
     {
         return tableId;
     }

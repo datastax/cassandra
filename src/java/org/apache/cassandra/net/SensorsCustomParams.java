@@ -80,12 +80,12 @@ public final class SensorsCustomParams
         return buffer.array();
     }
 
-    public static String encodeTableInWriteByteRequestParam(String tableName)
+    public static String encodeTableInWriteBytesRequestParam(String tableName)
     {
         return String.format(WRITE_BYTES_REQUEST_TEMPLATE, tableName);
     }
 
-    public static String encodeTableInWriteByteTableParam(String tableName)
+    public static String encodeTableInWriteBytesTableParam(String tableName)
     {
         return String.format(WRITE_BYTES_TABLE_TEMPLATE, tableName);
     }

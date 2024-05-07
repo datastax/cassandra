@@ -83,9 +83,9 @@ public class SensorsReadTest
 
         // build secondary indexes
         Indexes.Builder secondaryIndexes = Indexes.builder();
-        secondaryIndexes.add(IndexMetadata.fromIndexTargets(Collections.singletonList(
-                                                            new IndexTarget(
-                                                            new ColumnIdentifier("val", true), IndexTarget.Type.VALUES)), CF_STANDARD_SECONDARY_INDEX + "_val",
+        IndexTarget indexTarget = new IndexTarget(new ColumnIdentifier("val", true), IndexTarget.Type.VALUES);
+        secondaryIndexes.add(IndexMetadata.fromIndexTargets(Collections.singletonList(indexTarget),
+                                                            CF_STANDARD_SECONDARY_INDEX + "_val",
                                                             IndexMetadata.Kind.COMPOSITES,
                                                             Collections.emptyMap()));
 
@@ -385,7 +385,7 @@ public class SensorsReadTest
         ReadCommand readCommand = Util.cmd(store)
                                       .fromKeyIncl("0").toKeyIncl("10")
                                       .columns("val")
-                                      .filterOn("val", Operator.EQ, 1L) // only EQ is supported by CassnadraIndex
+                                      .filterOn("val", Operator.EQ, 1L) // only EQ is supported by CassandraIndex
                                       .build();
 
         handleReadCommand(readCommand);

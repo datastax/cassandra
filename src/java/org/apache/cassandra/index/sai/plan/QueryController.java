@@ -144,7 +144,7 @@ public class QueryController
 
         return new IndexContext(cfs.metadata().keyspace,
                                 cfs.metadata().name,
-                                cfs.metadata().id.toString(),
+                                cfs.metadata().id,
                                 cfs.metadata().partitionKeyType,
                                 cfs.metadata().comparator,
                                 expression.column(),

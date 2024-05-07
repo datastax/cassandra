@@ -75,9 +75,9 @@ public class SensorsIndexWriteTest
 
         // build secondary indexes
         Indexes.Builder secondaryIndexes = Indexes.builder();
-        secondaryIndexes.add(IndexMetadata.fromIndexTargets(Collections.singletonList(
-                                                            new IndexTarget(
-                                                            new ColumnIdentifier("val", true), IndexTarget.Type.VALUES)), CF_STANDARD_SECONDARY_INDEX + "_val",
+        IndexTarget indexTarget = new IndexTarget(new ColumnIdentifier("val", true), IndexTarget.Type.VALUES);
+        secondaryIndexes.add(IndexMetadata.fromIndexTargets(Collections.singletonList(indexTarget),
+                                                            CF_STANDARD_SECONDARY_INDEX + "_val",
                                                             IndexMetadata.Kind.COMPOSITES,
                                                             Collections.emptyMap()));
 
@@ -147,7 +147,9 @@ public class SensorsIndexWriteTest
 
         // check global registry is synchronized for Standard table
         assertThat(standardRegistrySensor.getValue()).isEqualTo(standardSensor.getValue());
-        assertWriteResponseSensors(standardSensor.getValue(), standardRegistrySensor.getValue(), CF_STANDARD);
+        String writeRequestParam = String.format(SensorsCustomParams.WRITE_BYTES_REQUEST_TEMPLATE, CF_STANDARD);
+        String writeTableParam = String.format(SensorsCustomParams.WRITE_BYTES_TABLE_TEMPLATE, CF_STANDARD);
+        assertResponseSensors(standardSensor.getValue(), standardRegistrySensor.getValue(), writeRequestParam, writeTableParam);
 
         Mutation saiMutation = new RowUpdateBuilder(saiStore.metadata(), 0, partitionKey)
                                .add("val", "hi there")
@@ -162,7 +164,9 @@ public class SensorsIndexWriteTest
 
         // check global registry is synchronized for SAI table
         assertThat(saiRegistrySensor.getValue()).isEqualTo(saiSensor.getValue());
-        assertIndexResponseSensors(saiSensor.getValue(), saiRegistrySensor.getValue(), CF_STANDARD_SAI);
+        String requestParam = String.format(SensorsCustomParams.INDEX_WRITE_BYTES_REQUEST_TEMPLATE, CF_STANDARD_SAI);
+        String tableParam = String.format(SensorsCustomParams.INDEX_WRITE_BYTES_TABLE_TEMPLATE, CF_STANDARD_SAI);
+        assertResponseSensors(saiSensor.getValue(), saiRegistrySensor.getValue(), requestParam, tableParam);
     }
 
     @Test
@@ -187,7 +191,9 @@ public class SensorsIndexWriteTest
 
         // check global registry is synchronized for Standard table
         assertThat(standardRegistrySensor.getValue()).isEqualTo(standardSensor.getValue());
-        assertWriteResponseSensors(standardSensor.getValue(), standardRegistrySensor.getValue(), CF_STANDARD);
+        String writeRequestParam = String.format(SensorsCustomParams.WRITE_BYTES_REQUEST_TEMPLATE, CF_STANDARD);
+        String writeTableParam = String.format(SensorsCustomParams.WRITE_BYTES_TABLE_TEMPLATE, CF_STANDARD);
+        assertResponseSensors(standardSensor.getValue(), standardRegistrySensor.getValue(), writeRequestParam, writeTableParam);
 
         Mutation secondaryIndexMutation = new RowUpdateBuilder(secondaryIndexStore.metadata(), 0, partitionKey)
                                           .add("val", "hi there")
@@ -197,12 +203,14 @@ public class SensorsIndexWriteTest
         Sensor secondaryIndexSensor = SensorsTestUtil.getThreadLocalRequestSensor(secondaryIndexContext, Type.INDEX_WRITE_BYTES);
         // Writing the same amount of data to an indexed column should generate at least the same number of bytes (the SecondaryIndex write bytes >= the vanilla write bytes)
         assertThat(secondaryIndexSensor.getValue()).isGreaterThanOrEqualTo(standardSensor.getValue());
-        Sensor secondartyIndexRegistrySensor = SensorsTestUtil.getRegistrySensor(secondaryIndexContext, Type.INDEX_WRITE_BYTES);
-        assertThat(secondartyIndexRegistrySensor).isEqualTo(secondaryIndexSensor);
+        Sensor secondaryIndexRegistrySensor = SensorsTestUtil.getRegistrySensor(secondaryIndexContext, Type.INDEX_WRITE_BYTES);
+        assertThat(secondaryIndexRegistrySensor).isEqualTo(secondaryIndexSensor);
 
         // check global registry is synchronized for Secondary Index table
-        assertThat(secondartyIndexRegistrySensor.getValue()).isEqualTo(secondaryIndexSensor.getValue());
-        assertIndexResponseSensors(secondaryIndexSensor.getValue(), secondartyIndexRegistrySensor.getValue(), CF_STANDARD_SECONDARY_INDEX);
+        assertThat(secondaryIndexRegistrySensor.getValue()).isEqualTo(secondaryIndexSensor.getValue());
+        String indexRequestParam = String.format(SensorsCustomParams.INDEX_WRITE_BYTES_REQUEST_TEMPLATE, CF_STANDARD_SECONDARY_INDEX);
+        String indexTableParam = String.format(SensorsCustomParams.INDEX_WRITE_BYTES_TABLE_TEMPLATE, CF_STANDARD_SECONDARY_INDEX);
+        assertResponseSensors(secondaryIndexSensor.getValue(), secondaryIndexRegistrySensor.getValue(), indexRequestParam, indexTableParam);
     }
 
     private static void handleMutation(Mutation mutation)
@@ -210,34 +218,16 @@ public class SensorsIndexWriteTest
         MutationVerbHandler.instance.doVerb(Message.builder(Verb.MUTATION_REQ, mutation).build());
     }
 
-    private void assertWriteResponseSensors(double requestValue, double registryValue, String table)
+    private void assertResponseSensors(double requestValue, double registryValue, String requestParam, String tableParam)
     {
-        String expectedRequestParam = String.format(SensorsCustomParams.WRITE_BYTES_REQUEST_TEMPLATE, table);
-        String expectedTableParam = String.format(SensorsCustomParams.WRITE_BYTES_TABLE_TEMPLATE, table);
-
         // verify against the last message to enable testing of multiple mutations in a for loop
         Message message = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
-        assertResponseSensors(message, requestValue, registryValue, expectedRequestParam, expectedTableParam);
+        assertResponseSensors(message, requestValue, registryValue, requestParam, tableParam);
 
         // make sure messages with sensor values can be deserialized on the receiving node
         DataOutputBuffer out = SensorsTestUtil.serialize(message);
         Message deserializedMessage = SensorsTestUtil.deserialize(out, message.from());
-        assertResponseSensors(deserializedMessage, requestValue, registryValue, expectedRequestParam, expectedTableParam);
-    }
-
-    private void assertIndexResponseSensors(double requestValue, double registryValue, String table)
-    {
-        String expectedRequestParam = String.format(SensorsCustomParams.INDEX_WRITE_BYTES_REQUEST_TEMPLATE, table);
-        String expectedTableParam = String.format(SensorsCustomParams.INDEX_WRITE_BYTES_TABLE_TEMPLATE, table);
-
-        // verify against the last message to enable testing of multiple mutations in a for loop
-        Message message = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
-        assertResponseSensors(message, requestValue, registryValue, expectedRequestParam, expectedTableParam);
-
-        // make sure messages with sensor values can be deserialized on the receiving node
-        DataOutputBuffer out = SensorsTestUtil.serialize(message);
-        Message deserializedMessage = SensorsTestUtil.deserialize(out, message.from());
-        assertResponseSensors(deserializedMessage, requestValue, registryValue, expectedRequestParam, expectedTableParam);
+        assertResponseSensors(deserializedMessage, requestValue, registryValue, requestParam, tableParam);
     }
 
     private void assertResponseSensors(Message message, double requestValue, double registryValue, String expectedRequestParam, String expectedTableParam)

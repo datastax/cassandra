@@ -40,7 +40,7 @@ public class SensorsCustomParamsTest
     {
         String table = "t1";
         String expectedParam = String.format("WRITE_BYTES_REQUEST.%s", "t1");
-        String actualParam = SensorsCustomParams.encodeTableInWriteByteRequestParam(table);
+        String actualParam = SensorsCustomParams.encodeTableInWriteBytesRequestParam(table);
         assertEquals(expectedParam, actualParam);
     }
 
@@ -49,7 +49,7 @@ public class SensorsCustomParamsTest
     {
         String table = "t1";
         String expectedParam = String.format("WRITE_BYTES_TABLE.%s", "t1");
-        String actualParam = SensorsCustomParams.encodeTableInWriteByteTableParam(table);
+        String actualParam = SensorsCustomParams.encodeTableInWriteBytesTableParam(table);
         assertEquals(expectedParam, actualParam);
     }
 
@@ -57,7 +57,7 @@ public class SensorsCustomParamsTest
     public void testEncodeTableInIndexWriteBytesRequestParam()
     {
         String table = "t1";
-        String expectedParam = String.format("INDEX_WRITE_BYTES_REQUEST.%s", "t1");
+        String expectedParam = String.format("INDEX_WRITE_BYTES_REQUEST.%s", table);
         String actualParam = SensorsCustomParams.encodeTableInIndexWriteBytesRequestParam(table);
         assertEquals(expectedParam, actualParam);
     }

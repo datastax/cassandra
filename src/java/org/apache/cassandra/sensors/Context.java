@@ -97,6 +97,6 @@ public class Context
 
     public static Context from(IndexContext indexContext)
     {
-        return new Context(indexContext.getKeyspace(), indexContext.getTable(), indexContext.getTableId());
+        return new Context(indexContext.getKeyspace(), indexContext.getTable(), indexContext.getTableId().toString());
     }
 }

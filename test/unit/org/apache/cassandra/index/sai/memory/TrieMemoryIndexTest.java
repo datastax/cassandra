@@ -184,7 +184,7 @@ public class TrieMemoryIndexTest
         Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(table, indexMetadata);
         IndexContext indexContext = new IndexContext(table.keyspace,
                                                      table.name,
-                                                     table.id.toString(),
+                                                     table.id,
                                                      table.partitionKeyType,
                                                      table.comparator,
                                                      target.left,

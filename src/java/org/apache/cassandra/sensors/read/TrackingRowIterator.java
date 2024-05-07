@@ -28,20 +28,18 @@ import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.Type;
 
 /**
- * Increment {@link Sensor}s for a given {@link Context } and {@link Type} by the data size of each iterated row and sync the sensor values
+ * Increment {@link Type#READ_BYTES} {@link Sensor}s for a given {@link Context } by the data size of each iterated row and sync the sensor values
  * when the iterator is closed.
  */
 public class TrackingRowIterator extends Transformation<UnfilteredRowIterator>
 {
     private final RequestTracker requestTracker;
     private final Context context;
-    private final Type type;
 
-    public TrackingRowIterator(Context context, Type type)
+    public TrackingRowIterator(Context context)
     {
         this.requestTracker = RequestTracker.instance;
         this.context = context;
-        this.type = type;
     }
 
     @Override
@@ -62,7 +60,7 @@ public class TrackingRowIterator extends Transformation<UnfilteredRowIterator>
     {
         RequestSensors sensors = requestTracker.get();
         if (sensors != null && row.isRow())
-            sensors.incrementSensor(context, type, row.dataSize());
+            sensors.incrementSensor(context, Type.READ_BYTES, row.dataSize());
 
         return row;
     }
