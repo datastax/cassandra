@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 
@@ -119,6 +120,12 @@ public class RangeConcatIterator extends RangeIterator
         public int rangeCount()
         {
             return rangeIterators.size();
+        }
+
+        @Override
+        public Collection<RangeIterator> ranges()
+        {
+            return rangeIterators;
         }
 
         @Override
