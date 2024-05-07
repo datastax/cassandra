@@ -64,7 +64,7 @@ public abstract class JVectorLuceneOnDiskGraph implements AutoCloseable
     /**
      * See CassandraDiskANN::search
      */
-    public abstract CloseableIterator<ScoredRowId> search(VectorFloat<?> queryVector, int topK, int rerankK, float threshold, Bits bits, QueryContext context, IntConsumer nodesVisited);
+    public abstract CloseableIterator<ScoredRowId> search(VectorFloat<?> queryVector, int limit, int rerankK, float threshold, Bits bits, QueryContext context, IntConsumer nodesVisited);
 
     public abstract void close() throws IOException;
 

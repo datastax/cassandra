@@ -150,18 +150,18 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 
     /**
      * @param queryVector the query vector
-     * @param topK the number of results to look for in the index (>= limit)
+     * @param limit the number of results to look for in the index (>= limit)
      * @param rerankK the number of results to look for in the index (>= limit)
      * @param threshold the minimum similarity score to accept
      * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
      * @param context unused (vestige from HNSW, retained in signature to allow calling both easily)
      * @param nodesVisitedConsumer a consumer that will be called with the number of nodes visited during the search
-     * @return Row IDs associated with the topK vectors near the query. If a threshold is specified, only vectors with
-     * a similarity score >= threshold will be returned.
+     * @return Iterator of Row IDs associated with the vectors near the query. If a threshold is specified, only vectors
+     * with a similarity score >= threshold will be returned.
      */
     @Override
     public CloseableIterator<ScoredRowId> search(VectorFloat<?> queryVector,
-                                                 int topK,
+                                                 int limit,
                                                  int rerankK,
                                                  float threshold,
                                                  Bits acceptBits,
@@ -188,7 +188,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
             var rr = view.rerankerFor(queryVector, sf);
             ssp = new SearchScoreProvider(asf, rr);
         }
-        var result = searcher.search(ssp, topK, rerankK, threshold, context.getAnnRerankFloor(), ordinalsMap.ignoringDeleted(acceptBits));
+        var result = searcher.search(ssp, limit, rerankK, threshold, context.getAnnRerankFloor(), ordinalsMap.ignoringDeleted(acceptBits));
         if (V3OnDiskFormat.ENABLE_RERANK_FLOOR)
             context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
         Tracing.trace("DiskANN search visited {} nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
@@ -201,7 +201,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         }
         else
         {
-            var nodeScores = new AutoResumingNodeScoreIterator(searcher, result, nodesVisitedConsumer, topK, rerankK, false);
+            var nodeScores = new AutoResumingNodeScoreIterator(searcher, result, nodesVisitedConsumer, limit, rerankK, false);
             return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
         }
     }

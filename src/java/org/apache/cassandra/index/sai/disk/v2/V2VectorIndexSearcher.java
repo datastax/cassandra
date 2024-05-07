@@ -272,14 +272,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                                     searcherContext);
     }
 
-    private CloseableIterator<ScoredRowId> orderByBruteForce(VectorFloat<?> queryVector, IntArrayList segmentRowIds, int limit, int topK) throws IOException
+    private CloseableIterator<ScoredRowId> orderByBruteForce(VectorFloat<?> queryVector, IntArrayList segmentRowIds, int limit, int rerankK) throws IOException
     {
-        // If we use compressed vectors, we still have to order the topK results using full resolution similarity
+        // If we use compressed vectors, we still have to order the rerankK results using full resolution similarity
         // scores, so only use the compressed vectors when there are enough vectors to make it worthwhile.
-        // VSTODO is there a multiplier for topK that makes sense? Does it depend on vector length? Further
+        // VSTODO is there a multiplier for rerankK that makes sense? Does it depend on vector length? Further
         // testing needed. Initial testing suggests the difference in these two paths is less than a millisecond.
-        if (graph.getCompressedVectors() != null && segmentRowIds.size() > topK)
-            return orderByBruteForce(graph.getCompressedVectors(), queryVector, segmentRowIds, limit, topK);
+        if (graph.getCompressedVectors() != null && segmentRowIds.size() > rerankK)
+            return orderByBruteForce(graph.getCompressedVectors(), queryVector, segmentRowIds, limit, rerankK);
         return orderByBruteForce(queryVector, segmentRowIds);
     }
 
@@ -292,7 +292,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
                                                              VectorFloat<?> queryVector,
                                                              IntArrayList segmentRowIds,
                                                              int limit,
-                                                             int topK) throws IOException
+                                                             int rerankK) throws IOException
     {
         var approximateScores = new PriorityQueue<BruteForceRowIdIterator.RowWithApproximateScore>(segmentRowIds.size(),
                                                                                                    (a, b) -> Float.compare(b.getApproximateScore(), a.getApproximateScore()));
@@ -313,7 +313,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
             }
         }
         var reranker = new JVectorLuceneOnDiskGraph.CloseableReranker(similarityFunction, queryVector, graph.getVectorSupplier());
-        return new BruteForceRowIdIterator(approximateScores, reranker, limit, topK);
+        return new BruteForceRowIdIterator(approximateScores, reranker, limit, rerankK);
     }
 
     /**
@@ -603,9 +603,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         return Math.log(number) / Math.log(2);
     }
 
-    private int getRawExpectedNodes(int topK, int nPermittedOrdinals)
+    private int getRawExpectedNodes(int limit, int nPermittedOrdinals)
     {
-        return VectorMemtableIndex.expectedNodesVisited(topK, nPermittedOrdinals, graph.size());
+        return VectorMemtableIndex.expectedNodesVisited(limit, nPermittedOrdinals, graph.size());
     }
 
     @Override

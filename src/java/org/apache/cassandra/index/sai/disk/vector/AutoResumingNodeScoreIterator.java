@@ -34,7 +34,7 @@ import org.apache.cassandra.utils.AbstractIterator;
 public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult.NodeScore>
 {
     private final GraphSearcher searcher;
-    private final int topK;
+    private final int limit;
     private final int rerankK;
     private final boolean inMemory;
     private final IntConsumer nodesVisitedConsumer;
@@ -48,13 +48,14 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
      * @param searcher the {@link GraphSearcher} to use to resume search.
      * @param result the first {@link SearchResult} to iterate over
      * @param nodesVisitedConsumer a consumer that accepts the total number of nodes visited
-     * @param topK the limit to pass to the {@link GraphSearcher} when resuming search
+     * @param limit the limit to pass to the {@link GraphSearcher} when resuming search
+     * @param rerankK the rerankK to pass to the {@link GraphSearcher} when resuming search
      * @param inMemory whether the graph is in memory or on disk (used for trace logging)
      */
     public AutoResumingNodeScoreIterator(GraphSearcher searcher,
                                          SearchResult result,
                                          IntConsumer nodesVisitedConsumer,
-                                         int topK,
+                                         int limit,
                                          int rerankK,
                                          boolean inMemory)
     {
@@ -62,7 +63,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         this.nodeScores = Arrays.stream(result.getNodes()).iterator();
         this.cumulativeNodesVisited = result.getVisitedCount();
         this.nodesVisitedConsumer = nodesVisitedConsumer;
-        this.topK = topK;
+        this.limit = limit;
         this.rerankK = rerankK;
         this.inMemory = inMemory;
     }
@@ -73,7 +74,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         if (nodeScores.hasNext())
             return nodeScores.next();
 
-        var nextResult = searcher.resume(topK, rerankK);
+        var nextResult = searcher.resume(limit, rerankK);
         maybeLogTrace(nextResult);
         cumulativeNodesVisited += nextResult.getVisitedCount();
         // If the next result is empty, we are done searching.
