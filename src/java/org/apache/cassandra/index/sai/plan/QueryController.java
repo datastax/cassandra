@@ -534,9 +534,6 @@ public class QueryController implements Plan.Executor
         {
             // We expect the number of top results found in each sstable to be proportional to its number of rows
             // we don't pad this number more because resuming a search if we guess too low is very very inexpensive.
-            //
-            // Note that this is only used for calls to `orderBy`, i.e., vanilla ANN with no other predicates;
-            // `orderResultsBy` does not know how to auto-resume.
             int sstableLimit = V3OnDiskFormat.REDUCE_TOPK_ACROSS_SSTABLES
                                ? max(1, (int) (limit * ((double) sstable.getTotalRows() / totalRows)))
                                : limit;
@@ -547,7 +544,7 @@ public class QueryController implements Plan.Executor
                 assert expressions.size() == 1 : "only one index is expected in ANN expression, found " + expressions.size() + " in " + expressions;
                 annIndexExpression = expressions.get(0);
                 var iterators = sourceKeys.isEmpty() ? annIndexExpression.index.orderBy(annIndexExpression.expression, mergeRange, queryContext, sstableLimit)
-                                                     : annIndexExpression.index.orderResultsBy(queryContext, sourceKeys, annIndexExpression.expression, limit);
+                                                     : annIndexExpression.index.orderResultsBy(queryContext, sourceKeys, annIndexExpression.expression, sstableLimit);
                 results.addAll(iterators);
             }
             catch (Throwable ex)
