@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.IntStream;
 
 import org.junit.Assert;
@@ -97,7 +98,10 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
 
         builder.add(new LongIterator(new long[] { 1L, 2L, 4L, 9L }));
 
-        Assert.assertEquals(convert(1L, 2L, 4L, 9L), convert(builder.build()));
+        RangeIterator range = builder.build();
+        // no need to wrap single input iterator in an intersection
+        Assert.assertTrue("Single iterator wrapped in RangeIntersectionIterator", range instanceof LongIterator);
+        Assert.assertEquals(convert(1L, 2L, 4L, 9L), convert(range));
     }
 
     @Test
@@ -216,15 +220,38 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
 
         // disjoint case
         builder = RangeIntersectionIterator.builder();
-        builder.add(new LongIterator(new long[] { 1L, 2L, 3L }));
-        builder.add(new LongIterator(new long[] { 4L, 5L, 6L }));
 
+        // In the disjoint case, the input iterators should be eagerly closed on build and an empty iterator is
+        // returned. These mocks are used to verify that the input iterators are closed.
+        final AtomicBoolean firstIteratorClosed = new AtomicBoolean(false);
+        final AtomicBoolean secondIteratorClosed = new AtomicBoolean(false);
+        LongIterator firstIterator = new LongIterator(new long[] { 1L, 2L, 3L }) {
+            @Override
+            public void close()
+            {
+                firstIteratorClosed.set(true);
+            }
+        };
+        LongIterator secondIterator = new LongIterator(new long[] { 4L, 5L, 6L }) {
+            @Override
+            public void close()
+            {
+                secondIteratorClosed.set(true);
+            }
+        };
+
+        builder.add(firstIterator);
+        builder.add(secondIterator);
+
+        Assert.assertFalse(firstIteratorClosed.get());
+        Assert.assertFalse(secondIteratorClosed.get());
         Assert.assertTrue(builder.statistics.isDisjoint());
 
         var disjointIntersection = builder.build();
         Assert.assertNotNull(disjointIntersection);
         Assert.assertFalse(disjointIntersection.hasNext());
-
+        Assert.assertTrue("First input iterator was not closed", firstIteratorClosed.get());
+        Assert.assertTrue("Second input iterator was not closed", secondIteratorClosed.get());
     }
 
     @Test
@@ -300,6 +327,7 @@ public class RangeIntersectionIteratorTest extends AbstractRangeIteratorTest
     {
         var tokens = RangeIntersectionIterator.<PrimaryKey>builder()
                                                         .add(new LongIterator(new long[] { 1L, 2L, 3L }))
+                                                        .add(new LongIterator(new long[] { 2L, 5L, 6L }))
                                                         .build();
 
         Assert.assertNotNull(tokens);
