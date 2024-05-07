@@ -20,10 +20,13 @@ package org.apache.cassandra.index.sai.cql.types;
 import java.util.Arrays;
 import java.util.Collection;
 
+import org.junit.After;
 import org.junit.Before;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 
 public abstract class IndexingTypeSupport extends SAITester
 {
@@ -31,6 +34,8 @@ public abstract class IndexingTypeSupport extends SAITester
 
     protected final DataSet<?> dataset;
 
+    private final Version version;
+    private Version latest;
     private final boolean widePartitions;
     private final Scenario scenario;
     private Object[][] allRows;
@@ -48,29 +53,41 @@ public abstract class IndexingTypeSupport extends SAITester
     {
         return Arrays.asList(new Object[][]
         {
-            { dataset, true, Scenario.MEMTABLE_QUERY },
-            { dataset, true, Scenario.SSTABLE_QUERY},
-            { dataset, true, Scenario.COMPACTED_QUERY},
-            { dataset, true, Scenario.MIXED_QUERY},
-            { dataset, true, Scenario.POST_BUILD_QUERY},
-            { dataset, false, Scenario.MEMTABLE_QUERY },
-            { dataset, false, Scenario.SSTABLE_QUERY},
-            { dataset, false, Scenario.COMPACTED_QUERY},
-            { dataset, false, Scenario.MIXED_QUERY},
-            { dataset, false, Scenario.POST_BUILD_QUERY}
+            { Version.CA, dataset, true, Scenario.MEMTABLE_QUERY },
+            { Version.CA, dataset, true, Scenario.SSTABLE_QUERY},
+            { Version.CA, dataset, true, Scenario.COMPACTED_QUERY},
+            { Version.CA, dataset, true, Scenario.MIXED_QUERY},
+            { Version.CA, dataset, true, Scenario.POST_BUILD_QUERY},
+            { Version.AA, dataset, true, Scenario.SSTABLE_QUERY},
+            { Version.AA, dataset, true, Scenario.COMPACTED_QUERY},
+            { Version.AA, dataset, true, Scenario.MIXED_QUERY},
+            { Version.AA, dataset, true, Scenario.POST_BUILD_QUERY},
+            { Version.CA, dataset, false, Scenario.MEMTABLE_QUERY },
+            { Version.CA, dataset, false, Scenario.SSTABLE_QUERY},
+            { Version.CA, dataset, false, Scenario.COMPACTED_QUERY},
+            { Version.CA, dataset, false, Scenario.MIXED_QUERY},
+            { Version.CA, dataset, false, Scenario.POST_BUILD_QUERY},
+            { Version.AA, dataset, false, Scenario.SSTABLE_QUERY},
+            { Version.AA, dataset, false, Scenario.COMPACTED_QUERY},
+            { Version.AA, dataset, false, Scenario.MIXED_QUERY},
+            { Version.AA, dataset, false, Scenario.POST_BUILD_QUERY}
         });
     }
 
-    public IndexingTypeSupport(DataSet<?> dataset, boolean widePartitions, Scenario scenario)
+    public IndexingTypeSupport(Version version, DataSet<?> dataset, boolean widePartitions, Scenario scenario)
     {
+        this.version = version;
         this.dataset = dataset;
         this.widePartitions = widePartitions;
         this.scenario = scenario;
     }
 
     @Before
-    public void createTable()
+    public void initialize()
     {
+        latest = Version.latest();
+        SAIUtil.setLatestVersion(version);
+
         dataset.init();
 
         createTable(String.format("CREATE TABLE %%s (pk int, ck int, value %s, PRIMARY KEY(pk, ck))", dataset));
@@ -79,6 +96,13 @@ public abstract class IndexingTypeSupport extends SAITester
 
         allRows = generateRows(dataset, widePartitions);
     }
+
+    @After
+    public void teardown()
+    {
+        SAIUtil.setLatestVersion(latest);
+    }
+
 
     protected void runIndexQueryScenarios() throws Throwable
     {
@@ -111,7 +135,7 @@ public abstract class IndexingTypeSupport extends SAITester
         dataset.querySet().runQueries(this, allRows);
     }
 
-    public static void insertData(CQLTester tester, Object[][] allRows, Scenario scenario) throws Throwable
+    public void insertData(CQLTester tester, Object[][] allRows, Scenario scenario) throws Throwable
     {
         int sstableCounter = 0;
         int sstableIncrement = NUMBER_OF_VALUES / 8;

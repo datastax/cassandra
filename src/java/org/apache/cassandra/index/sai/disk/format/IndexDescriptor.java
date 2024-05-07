@@ -138,7 +138,7 @@ public class IndexDescriptor
 
     public static IndexDescriptor createNew(Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
     {
-        return new IndexDescriptor(Version.LATEST, descriptor, partitioner, clusteringComparator);
+        return new IndexDescriptor(Version.latest(), descriptor, partitioner, clusteringComparator);
     }
 
     public static IndexDescriptor createFrom(SSTableReader sstable)
@@ -153,7 +153,7 @@ public class IndexDescriptor
                                            sstable.metadata().comparator);
         }
         // we always want a non-null IndexDescriptor, even if it's empty
-        return new IndexDescriptor(Version.LATEST,
+        return new IndexDescriptor(Version.latest(),
                                    sstable.descriptor,
                                    sstable.metadata().partitioner,
                                    sstable.metadata().comparator);
@@ -198,7 +198,7 @@ public class IndexDescriptor
                     return version;
             }
             // this is called by flush while creating new index files, as well as loading files that already exist
-            return Version.LATEST;
+            return Version.latest();
         });
     }
 
@@ -265,7 +265,7 @@ public class IndexDescriptor
                                             RowMapping rowMapping,
                                             long keyCount)
     {
-        return Version.LATEST.onDiskFormat().newPerIndexWriter(index, this, tracker, rowMapping, keyCount);
+        return Version.latest().onDiskFormat().newPerIndexWriter(index, this, tracker, rowMapping, keyCount);
     }
 
     /**

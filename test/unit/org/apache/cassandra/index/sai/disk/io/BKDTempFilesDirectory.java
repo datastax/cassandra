@@ -68,7 +68,7 @@ public class BKDTempFilesDirectory extends Directory
 
         final File file = delegate.descriptor.tmpFileFor(new Component(Component.Type.CUSTOM, "SAI" +
                                                                                               "+" +
-                                                                                              Version.LATEST +
+                                                                                              Version.latest() +
                                                                                               "+" +
                                                                                               index +
                                                                                               "+" +

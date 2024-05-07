@@ -15,33 +15,31 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.index.sai.cql.types;
 
-import java.util.Collection;
+package org.apache.cassandra.index.sai;
 
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 
 import org.apache.cassandra.index.sai.disk.format.Version;
 
-@RunWith(Parameterized.class)
-public class TextTest extends IndexingTypeSupport
+public class SAIUtil
 {
-    @Parameterized.Parameters(name = "version={0},dataset={1},wide={2},scenario={3}")
-    public static Collection<Object[]> generateParameters()
+    public static void setLatestVersion(Version version)
     {
-        return generateParameters(new DataSet.TextDataSet());
-    }
+        Field latest = null;
+        try
+        {
+            latest = Version.class.getDeclaredField("LATEST");
+            latest.setAccessible(true);
+            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            modifiersField.setAccessible(true);
+            latest.set(null, version);
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
 
-    public TextTest(Version version, DataSet<?> dataset, boolean widePartitions, Scenario scenario)
-    {
-        super(version, dataset, widePartitions, scenario);
-    }
-
-    @Test
-    public void test() throws Throwable
-    {
-        runIndexQueryScenarios();
     }
 }

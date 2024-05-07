@@ -38,6 +38,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
 
+import static org.apache.cassandra.index.sai.SAIUtil.setLatestVersion;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -58,7 +59,7 @@ public class IndexDescriptorTest
     {
         temporaryFolder.create();
         descriptor = Descriptor.fromFilename(temporaryFolder.newFolder().getAbsolutePath() + "/ca-1-bti-Data.db");
-        latest = Version.LATEST;
+        latest = Version.latest();
     }
 
     @After
@@ -180,16 +181,6 @@ public class IndexDescriptorTest
         assertTrue(indexDescriptor.hasComponent(IndexComponent.META, indexContext));
         assertTrue(indexDescriptor.hasComponent(IndexComponent.KD_TREE, indexContext));
         assertTrue(indexDescriptor.hasComponent(IndexComponent.KD_TREE_POSTING_LISTS, indexContext));
-    }
-
-    private void setLatestVersion(Version version) throws Throwable
-    {
-        Field latest = Version.class.getDeclaredField("LATEST");
-        latest.setAccessible(true);
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(latest, latest.getModifiers() & ~Modifier.FINAL);
-        latest.set(null, version);
     }
 
     private void createFileOnDisk(String filename) throws Throwable

@@ -815,11 +815,11 @@ public class StorageAttachedIndex implements Index
     @Override
     public Set<Component> getComponents()
     {
-        return Version.LATEST.onDiskFormat()
+        return Version.latest().onDiskFormat()
                              .perIndexComponents(indexContext)
                              .stream()
                              .map(c -> new Component(Component.Type.CUSTOM,
-                                                     Version.LATEST.fileNameFormatter().format(c, indexContext)))
+                                                     Version.latest().fileNameFormatter().format(c, indexContext)))
                              .collect(Collectors.toSet());
     }
 

@@ -916,13 +916,13 @@ public class NativeIndexDDLTest extends SAITester
         IndexContext numericIndexContext = createIndexContext(numericIndexName, Int32Type.instance);
         IndexContext stringIndexContext = createIndexContext(stringIndexName, UTF8Type.instance);
 
-        for (IndexComponent component : Version.LATEST.onDiskFormat().perSSTableComponents())
+        for (IndexComponent component : Version.latest().onDiskFormat().perSSTableComponents())
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, null, corruptionType, true, true, rebuild);
 
-        for (IndexComponent component : Version.LATEST.onDiskFormat().perIndexComponents(numericIndexContext))
+        for (IndexComponent component : Version.latest().onDiskFormat().perIndexComponents(numericIndexContext))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, numericIndexContext, corruptionType, false, true, rebuild);
 
-        for (IndexComponent component : Version.LATEST.onDiskFormat().perIndexComponents(stringIndexContext))
+        for (IndexComponent component : Version.latest().onDiskFormat().perIndexComponents(stringIndexContext))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, stringIndexContext, corruptionType, true, false, rebuild);
     }
 
@@ -988,8 +988,8 @@ public class NativeIndexDDLTest extends SAITester
             reloadSSTableIndex();
 
             // Verify the index cannot be read:
-            verifySSTableIndexes(numericIndexContext.getIndexName(), Version.LATEST.onDiskFormat().perSSTableComponents().contains(component) ? 0 : 1, failedNumericIndex ? 0 : 1);
-            verifySSTableIndexes(stringIndexContext.getIndexName(), Version.LATEST.onDiskFormat().perSSTableComponents().contains(component) ? 0 : 1, failedStringIndex ? 0 : 1);
+            verifySSTableIndexes(numericIndexContext.getIndexName(), Version.latest().onDiskFormat().perSSTableComponents().contains(component) ? 0 : 1, failedNumericIndex ? 0 : 1);
+            verifySSTableIndexes(stringIndexContext.getIndexName(), Version.latest().onDiskFormat().perSSTableComponents().contains(component) ? 0 : 1, failedStringIndex ? 0 : 1);
 
             try
             {

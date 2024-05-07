@@ -356,7 +356,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
         assertEquals(3, actualRows);
 
         //TODO This needs revisiting with STAR-903 because we are now reading rows one at a time
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", keyspace, table, TABLE_QUERY_METRIC_TYPE), Version.LATEST == Version.AA ? 2 : 3);
+        waitForEquals(objectNameNoIndex("TotalPartitionReads", keyspace, table, TABLE_QUERY_METRIC_TYPE), Version.latest() == Version.AA ? 2 : 3);
         waitForVerifyHistogram(objectNameNoIndex("RowsFiltered", keyspace, table, PER_QUERY_METRIC_TYPE), 1);
         waitForEquals(objectNameNoIndex("TotalRowsFiltered", keyspace, table, TABLE_QUERY_METRIC_TYPE), 3);
     }
