@@ -241,11 +241,11 @@ public class SensorsRegistry implements SchemaChangeListener
             tableIds.remove(tableId);
             byTableId.remove(tableId);
 
-            Set<Sensor> removed = removeSensor(ImmutableSet.of(identity.values()), s -> s.getContext().getTableId().equals(tableId));
+            Set<Sensor> removed = removeSensor(ImmutableSet.of(identity.values()), s -> s.getContext().getTableId() != null && s.getContext().getTableId().equals(tableId));
             removed.forEach(this::notifyOnSensorRemoved);
 
-            removeSensor(byKeyspace.values(), s -> s.getContext().getTableId().equals(tableId));
-            removeSensor(byType.values(), s -> s.getContext().getTableId().equals(tableId));
+            removeSensor(byKeyspace.values(), s -> s.getContext().getTableId() != null && s.getContext().getTableId().equals(tableId));
+            removeSensor(byType.values(), s -> s.getContext().getTableId() != null && s.getContext().getTableId().equals(tableId));
         }
         finally
         {

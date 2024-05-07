@@ -184,6 +184,9 @@ public class SensorsRegistryTest
         Sensor context2Type2Sensor = SensorsRegistry.instance.getOrCreateSensor(context2, type2).get();
         verify(listener, times(1)).onSensorCreated(context2Type2Sensor);
 
+        Sensor ksOnlySensor = SensorsRegistry.instance.getOrCreateSensor(ksOnlyContext, ksOnlyType).get();
+        verify(listener, times(1)).onSensorCreated(ksOnlySensor);
+
         verify(listener, never()).onSensorRemoved(any());
 
         // Drop the table and verify the listener is notified about removal of related sensors
@@ -192,6 +195,7 @@ public class SensorsRegistryTest
         verify(listener, times(1)).onSensorRemoved(context2Type2Sensor);
         verify(listener, never()).onSensorRemoved(context1Type1Sensor);
         verify(listener, never()).onSensorRemoved(context1Type2Sensor);
+        verify(listener, never()).onSensorRemoved(ksOnlySensor);
 
         // Drop the keyspace and verify the listener is notified about removal of the remaining sensors
         SensorsRegistry.instance.onDropKeyspace(Keyspace.open(KEYSPACE).getMetadata(), false);
@@ -199,6 +203,7 @@ public class SensorsRegistryTest
         verify(listener, times(1)).onSensorRemoved(context1Type2Sensor);
         verify(listener, times(1)).onSensorRemoved(context2Type1Sensor);
         verify(listener, times(1)).onSensorRemoved(context2Type2Sensor);
+        verify(listener, times(1)).onSensorRemoved(ksOnlySensor);
 
         // Unregister the listener and verify it is not notified anymore about creation and removal of sensors
         clearInvocations(listener);
