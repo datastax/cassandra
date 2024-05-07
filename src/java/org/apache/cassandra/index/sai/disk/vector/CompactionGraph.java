@@ -244,8 +244,10 @@ public class CompactionGraph implements Closeable, Accountable
         logger.debug("Writing graph with {} rows and {} distinct vectors",
                      postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), builder.getGraph().size());
 
-        try (var postingsOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.POSTING_LISTS, context), true);
-             var pqOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.PQ, context), true))
+        var pqOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.PQ, context);
+        var postingsOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.POSTING_LISTS, context);
+        try (var postingsOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.POSTING_LISTS, context), postingsOrder, true);
+             var pqOutput = IndexFileUtils.instance.openOutput(descriptor.fileFor(IndexComponent.PQ, context), pqOrder, true))
         {
             SAICodecUtils.writeHeader(postingsOutput);
             SAICodecUtils.writeHeader(pqOutput);
