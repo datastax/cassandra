@@ -19,13 +19,10 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.Closeable;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.io.util.FileUtils;
 
 /**
  * Range iterators contain primary keys, in sorted order, with no duplicates.  They also
@@ -127,13 +124,10 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
         @VisibleForTesting
         protected final Statistics statistics;
 
-        @VisibleForTesting
-        protected final PriorityQueue<RangeIterator> ranges;
 
         public Builder(IteratorType type)
         {
             statistics = new Statistics(type);
-            ranges = new PriorityQueue<>(16, Comparator.comparing(rangeIterator -> rangeIterator.peek()));
         }
 
         public PrimaryKey getMinimum()
@@ -151,38 +145,15 @@ public abstract class RangeIterator extends AbstractIterator<PrimaryKey> impleme
             return statistics.tokenCount;
         }
 
-        public int rangeCount()
-        {
-            return ranges.size();
-        }
+        public abstract int rangeCount();
 
-        public Collection<RangeIterator> ranges()
-        {
-            return ranges;
-        }
+        public abstract Collection<RangeIterator> ranges();
 
-        public Builder add(RangeIterator range)
-        {
-            if (range == null)
-                return this;
+        // Implementation takes ownership of the range iterator. If the implementation decides not to include it, such
+        // that `rangeCount` may return 0, it must close the range iterator.
+        public abstract Builder add(RangeIterator range);
 
-            if (range.getMaxKeys() > 0)
-                ranges.add(range);
-            else
-                FileUtils.closeQuietly(range);
-            statistics.update(range);
-
-            return this;
-        }
-
-        public Builder add(List<RangeIterator> ranges)
-        {
-            if (ranges == null || ranges.isEmpty())
-                return this;
-
-            ranges.forEach(this::add);
-            return this;
-        }
+        public abstract Builder add(List<RangeIterator> ranges);
 
         public final RangeIterator build()
         {
