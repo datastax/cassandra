@@ -38,15 +38,15 @@ public class LuceneCompat
     {
         if (slice.order() == ByteOrder.LITTLE_ENDIAN)
             return DirectReader.getInstance(slice, bitsPerValue, offset);
-        // Lucene 7.5 and earlier used big-endian formatting
+        // Lucene 7.5 and earlier used big-endian ordering
         return LegacyDirectReader.getInstance(slice, bitsPerValue, offset);
     }
 
-    public static DirectWriterAdaptor directWriterGetInstance(DataOutput out, ByteOrder order, long numValues, int bitsPerValue)
+    public static DirectWriterAdaptor directWriterGetInstance(ByteOrder order, DataOutput out, long numValues, int bitsPerValue)
     {
         if (order == ByteOrder.LITTLE_ENDIAN)
             return new ModernDirectWriterAdaptor(out, numValues, bitsPerValue);
-        // Lucene 7.5 and earlier used big-endian formatting
+        // Lucene 7.5 and earlier used big-endian ordering
         return new LegacyDirectWriterAdaptor(out, numValues, bitsPerValue);
     }
 
@@ -54,15 +54,15 @@ public class LuceneCompat
     {
         if (order == ByteOrder.LITTLE_ENDIAN)
             return DirectWriter.unsignedBitsRequired(maxValue);
-        // Lucene 7.5 and earlier used big-endian formatting
+        // Lucene 7.5 and earlier used big-endian ordering
         return LegacyDirectWriter.unsignedBitsRequired(maxValue);
     }
 
-    public static ResettableByteBuffersIndexOutput getResettableByteBuffersIndexOutput(int expectedSize, String name, ByteOrder order)
+    public static ResettableByteBuffersIndexOutput getResettableByteBuffersIndexOutput(ByteOrder order, int expectedSize, String name)
     {
         if (order == ByteOrder.LITTLE_ENDIAN)
             return new ModernResettableByteBuffersIndexOutput(expectedSize, name);
-        // Lucene 7.5 and earlier used big-endian formatting
+        // Lucene 7.5 and earlier used big-endian ordering
         return new LegacyResettableByteBuffersIndexOutput(expectedSize, name);
     }
 }

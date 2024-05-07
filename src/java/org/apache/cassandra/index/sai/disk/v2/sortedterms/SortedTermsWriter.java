@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.disk.v2.sortedterms;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.nio.ByteOrder;
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
 

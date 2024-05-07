@@ -23,6 +23,11 @@ import java.nio.ByteOrder;
 
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 
+/**
+ * A wrapper around byte-buffer backed IndexOutputs that adds several methods that interact with the underlying
+ * delegate.
+ */
+
 public abstract class ResettableByteBuffersIndexOutput extends IndexOutput
 {
 

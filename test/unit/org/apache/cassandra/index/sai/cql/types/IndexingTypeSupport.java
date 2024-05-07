@@ -83,7 +83,7 @@ public abstract class IndexingTypeSupport extends SAITester
     }
 
     @Before
-    public void initialize()
+    public void setup()
     {
         latest = Version.latest();
         SAIUtil.setLatestVersion(version);
@@ -102,7 +102,6 @@ public abstract class IndexingTypeSupport extends SAITester
     {
         SAIUtil.setLatestVersion(latest);
     }
-
 
     protected void runIndexQueryScenarios() throws Throwable
     {

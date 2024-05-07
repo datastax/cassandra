@@ -36,11 +36,9 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdaptor;
-import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.lucene.backward_codecs.packed.LegacyDirectWriter;
 import org.apache.lucene.store.DataOutput;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -136,7 +134,7 @@ public class PostingsWriter implements Closeable
         this.dataOutput = dataOutput;
         startOffset = dataOutput.getFilePointer();
         deltaBuffer = new long[blockSize];
-        inMemoryOutput = LuceneCompat.getResettableByteBuffersIndexOutput(1024, "blockOffsets", dataOutput.order());
+        inMemoryOutput = LuceneCompat.getResettableByteBuffersIndexOutput(dataOutput.order(), 1024, "blockOffsets");
         SAICodecUtils.writeHeader(dataOutput);
     }
 
@@ -282,7 +280,7 @@ public class PostingsWriter implements Closeable
         dataOutput.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
         {
-            final DirectWriterAdaptor writer = LuceneCompat.directWriterGetInstance(dataOutput, dataOutput.order(), blockSize, bitsPerValue);
+            final DirectWriterAdaptor writer = LuceneCompat.directWriterGetInstance(dataOutput.order(), dataOutput, blockSize, bitsPerValue);
             for (int i = 0; i < blockSize; ++i)
             {
                 writer.add(deltaBuffer[i]);
@@ -300,7 +298,7 @@ public class PostingsWriter implements Closeable
         output.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
         {
-            final DirectWriterAdaptor writer = LuceneCompat.directWriterGetInstance(output, output.order(), values.size(), bitsPerValue);
+            final DirectWriterAdaptor writer = LuceneCompat.directWriterGetInstance(output.order(), output, values.size(), bitsPerValue);
             for (int i = 0; i < values.size(); ++i)
             {
                 writer.add(values.getLong(i));
@@ -318,7 +316,7 @@ public class PostingsWriter implements Closeable
         output.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
         {
-            final DirectWriterAdaptor writer = LuceneCompat.directWriterGetInstance(output, output.order(), values.size(), bitsPerValue);
+            final DirectWriterAdaptor writer = LuceneCompat.directWriterGetInstance(output.order(), output, values.size(), bitsPerValue);
             for (int i = 0; i < values.size(); ++i)
             {
                 writer.add(values.getInt(i));

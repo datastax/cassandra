@@ -30,7 +30,6 @@ import com.google.common.base.MoreObjects;
 
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
-import org.apache.cassandra.index.sai.disk.oldlucene.LegacyResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
@@ -267,9 +266,10 @@ public class BKDWriter implements Closeable
     }
 
     // reused when writing leaf blocks
-    private final ByteBuffersDataOutput scratchOut = new ByteBuffersDataOutput(32 * 1024); // TODO: Choose between ENDIANNESS
+    // these are only used for bytes, so endianness doesn't matter
+    private final ByteBuffersDataOutput scratchOut = new ByteBuffersDataOutput(32 * 1024);
 
-    private final ByteBuffersDataOutput scratchOut2 = new ByteBuffersDataOutput(2 * 1024); // TODO: Choose between ENDIANNESS
+    private final ByteBuffersDataOutput scratchOut2 = new ByteBuffersDataOutput(2 * 1024);
 
     interface OneDimensionBKDWriterCallback
     {
@@ -472,7 +472,7 @@ public class BKDWriter implements Closeable
                 orderIndex[valueOrderIndex] = x;
             }
 
-            LeafOrderMap.write(orderIndex, leafCount, maxPointsInLeafNode - 1, scratchOut2, order);
+            LeafOrderMap.write(order, orderIndex, leafCount, maxPointsInLeafNode - 1, scratchOut2);
 
             int scratchSize = Math.toIntExact(scratchOut2.size());
             out.writeVInt(scratchSize);
@@ -628,7 +628,7 @@ public class BKDWriter implements Closeable
         }
 
         // Reused while packing the index
-        var writeBuffer = LuceneCompat.getResettableByteBuffersIndexOutput(1024, "", order);
+        var writeBuffer = LuceneCompat.getResettableByteBuffersIndexOutput(order, 1024, "");
 
         // This is the "file" we append the byte[] to:
         List<byte[]> blocks = new ArrayList<>();
@@ -842,7 +842,7 @@ public class BKDWriter implements Closeable
 
         if (compressor != null)
         {
-            var ramOut = LuceneCompat.getResettableByteBuffersIndexOutput(1024, "", order);
+            var ramOut = LuceneCompat.getResettableByteBuffersIndexOutput(order, 1024, "");
             ramOut.writeBytes(minPackedValue, 0, packedBytesLength);
             ramOut.writeBytes(maxPackedValue, 0, packedBytesLength);
 

@@ -24,7 +24,7 @@ import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.util.packed.DirectWriter;
 
 /**
- * Minimal wrapper arount DirectWriter to allow mixed usage of DirectWriter and LegacyDirectWriter.
+ * Minimal wrapper arount DirectWriter to allow it to be used in a common interface with LegacyDirectWriter.
  */
 public class ModernDirectWriterAdaptor implements DirectWriterAdaptor
 {

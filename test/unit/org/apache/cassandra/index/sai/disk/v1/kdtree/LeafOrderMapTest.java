@@ -41,7 +41,7 @@ public class LeafOrderMapTest extends SaiRandomizedTest
 
         var out = new ModernResettableByteBuffersIndexOutput(array.length, "");
 
-        LeafOrderMap.write(array, array.length, array.length - 1, out, ByteOrder.LITTLE_ENDIAN);
+        LeafOrderMap.write(ByteOrder.LITTLE_ENDIAN, array, array.length, array.length - 1, out);
 
         var input = out.toIndexInput();
 

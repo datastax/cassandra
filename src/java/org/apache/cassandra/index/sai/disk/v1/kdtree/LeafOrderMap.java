@@ -22,10 +22,8 @@ import java.nio.ByteOrder;
 
 import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdaptor;
 import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
-import org.apache.lucene.backward_codecs.packed.LegacyDirectWriter;
 import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.util.LongValues;
-import org.apache.lucene.util.packed.DirectWriter;
 
 public class LeafOrderMap
 {
@@ -34,10 +32,10 @@ public class LeafOrderMap
         return Math.toIntExact(reader.get(index));
     }
 
-    public static void write(final int[] array, int length, int maxValue, final DataOutput out, ByteOrder order) throws IOException
+    public static void write(ByteOrder order, final int[] array, int length, int maxValue, final DataOutput out) throws IOException
     {
         final int bits = LuceneCompat.directWriterUnsignedBitsRequired(order, maxValue);
-        final DirectWriterAdaptor writer = LuceneCompat.directWriterGetInstance(out, order, length, bits);
+        final DirectWriterAdaptor writer = LuceneCompat.directWriterGetInstance(order, out, length, bits);
         for (int i = 0; i < length; i++)
         {
             assert array[i] <= maxValue;

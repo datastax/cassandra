@@ -49,7 +49,8 @@ public class Version
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;
     // The latest version can be configured to be an earlier version to support partial upgrades that don't
-    // write newer versions of the on-disk formats.
+    // write newer versions of the on-disk formats. This is volatile rather than final so that tests may
+    // use reflection to change it and safely publish across threads.
     private static volatile Version LATEST = parse(System.getProperty("cassandra.sai.latest.version", "ca"));
 
     private final String version;

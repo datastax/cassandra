@@ -440,7 +440,7 @@ public class IndexDescriptor
      */
     private ChecksumIndexInput checksumIndexInput(IndexContext context, IndexInput indexInput)
     {
-        if (getVersion(context) == Version.AA) // TODO: handle case where IndexInput ordering is already correct
+        if (getVersion(context) == Version.AA)
         {
             return new EndiannessReverserChecksumIndexInput(indexInput);
         }

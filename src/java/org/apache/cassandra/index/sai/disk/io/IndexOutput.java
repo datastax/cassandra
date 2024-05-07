@@ -20,6 +20,10 @@ package org.apache.cassandra.index.sai.disk.io;
 
 import java.nio.ByteOrder;
 
+/**
+ * A subclass of {@link org.apache.lucene.store.IndexOutput} that provides access to the byte order of the underlying data.
+ * This is used to select output implementations compatible with varying versions of Lucene.
+ */
 public abstract class IndexOutput extends org.apache.lucene.store.IndexOutput
 {
     protected final ByteOrder order;

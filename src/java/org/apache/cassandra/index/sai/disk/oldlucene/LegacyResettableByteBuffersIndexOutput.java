@@ -30,7 +30,8 @@ import org.apache.lucene.store.IndexInput;
 
 /***
  * A wrapper around {@link ByteBuffersIndexOutput} that adds several methods that interact
- * with the underlying delegate.
+ * with the underlying delegate. This uses the big-endian byte ordering of Lucene 7.5 and
+ * is used to write indexes/data compatible with the readers in older Lucene versions.
  */
 public class LegacyResettableByteBuffersIndexOutput extends ResettableByteBuffersIndexOutput
 {

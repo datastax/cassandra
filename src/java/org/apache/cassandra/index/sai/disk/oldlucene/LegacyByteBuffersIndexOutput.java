@@ -31,6 +31,8 @@ import org.apache.lucene.store.DataInput;
 
 /**
  * An {@link IndexOutput} writing to a {@link LegacyByteBuffersDataOutput}.
+ * This uses the big-endian byte ordering of Lucene 7.5 and is used to write indexes/data compatible with the
+ * readers in older Lucene versions.
  */
 public final class LegacyByteBuffersIndexOutput extends IndexOutput
 {

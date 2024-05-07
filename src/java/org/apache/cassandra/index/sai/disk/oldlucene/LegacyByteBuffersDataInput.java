@@ -35,7 +35,9 @@ import org.apache.lucene.util.RamUsageEstimator;
 
 /**
  * A {@link DataInput} implementing {@link RandomAccessInput} and reading data from a
- * list of {@link ByteBuffer}s.
+ * list of {@link ByteBuffer}s. This uses the big-endian byte ordering of Lucene 7.5.
+ * Note that this participates in the type hierarchy of the modern Lucene depencency,
+ * so DataInput methods that assume little-endianness must be overridden.
  */
 public final class LegacyByteBuffersDataInput extends DataInput implements Accountable, RandomAccessInput {
     private final ByteBuffer[] blocks;

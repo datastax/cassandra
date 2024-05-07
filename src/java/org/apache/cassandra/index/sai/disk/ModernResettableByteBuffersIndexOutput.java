@@ -34,7 +34,9 @@ import org.apache.lucene.store.IndexInput;
 
 /***
  * A wrapper around {@link ByteBuffersIndexOutput} that adds several methods that interact
- * with the underlying delegate.
+ * with the underlying delegate. This is "modern" in the sense that it uses the current Lucene
+ * dependency for its implementation of I/O. In particular, this means it cannot be used to write
+ * indexes/data compatible with the readers in older Lucene versions.
  */
 public class ModernResettableByteBuffersIndexOutput extends ResettableByteBuffersIndexOutput
 {

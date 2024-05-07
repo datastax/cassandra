@@ -28,7 +28,8 @@ import org.apache.lucene.store.RandomAccessInput;
 
 /**
  * An {@link IndexInput} implementing {@link RandomAccessInput} and backed
- * by a {@link LegacyByteBuffersDataInput}.
+ * by a {@link LegacyByteBuffersDataInput}. Data is read in big-endian byte order,
+ * as produced by Lucene 7.5.
  */
 public final class LegacyByteBuffersIndexInput extends IndexInput implements RandomAccessInput {
     private LegacyByteBuffersDataInput in;

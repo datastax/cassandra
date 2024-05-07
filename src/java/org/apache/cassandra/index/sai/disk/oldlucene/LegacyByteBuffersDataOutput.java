@@ -38,7 +38,10 @@ import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.lucene.util.UnicodeUtil;
 
 /**
- * A {@link DataOutput} storing data in a list of {@link ByteBuffer}s.
+ * A {@link DataOutput} storing data in a list of {@link ByteBuffer}s. The data is written in big-endian byte
+ * order, as produced by Lucene 7.5. Note that this participates in the type hierarchy of the modern Lucene
+ * dependency, so it must carefully override DataOutput methods that would use the modern Lucene byte ordering of
+ * little-endian.
  */
 public final class LegacyByteBuffersDataOutput extends DataOutput implements Accountable {
     private final static ByteBuffer EMPTY = ByteBuffer.allocate(0);
