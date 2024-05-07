@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 import com.google.common.collect.Iterables;
@@ -123,6 +124,16 @@ public class RangeUnionIterator extends RangeIterator
             return this;
         }
 
+        @Override
+        public RangeIterator.Builder add(List<RangeIterator> ranges)
+        {
+            if (ranges == null || ranges.isEmpty())
+                return this;
+
+            ranges.forEach(this::add);
+            return this;
+        }
+
         public RangeIterator.Builder add(Iterable<RangeIterator> ranges)
         {
             if (ranges == null || Iterables.isEmpty(ranges))
@@ -135,6 +146,12 @@ public class RangeUnionIterator extends RangeIterator
         public int rangeCount()
         {
             return rangeIterators.size();
+        }
+
+        @Override
+        public Collection<RangeIterator> ranges()
+        {
+            return rangeIterators;
         }
 
         protected RangeIterator buildIterator()
