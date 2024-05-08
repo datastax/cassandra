@@ -146,7 +146,7 @@ public class VectorCompressionTest extends VectorTester
             if (cv != null)
             {
                 assertEquals((int) (100 * VectorSourceModel.tapered2x(100) * model.overqueryProvider.apply(cv)),
-                             model.topKFor(100, cv));
+                             model.rerankKFor(100, cv));
             }
         }
     }
