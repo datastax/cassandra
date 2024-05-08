@@ -45,8 +45,9 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.vector.AutoResumingNodeScoreIterator;
-import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator;
+import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.PQVersion;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
+import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
@@ -91,10 +92,10 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
              var reader = pqFile.createReader())
         {
             reader.seek(pqSegmentOffset);
-            int version = 0;
+            var version = PQVersion.V0;
             if (reader.readInt() == PQ_MAGIC) {
-                version = reader.readInt();
-                assert version >= 1 : version;
+                version = PQVersion.values()[reader.readInt()];
+                assert PQVersion.V1.compareTo(version) >= 0 : String.format("Old PQ version %s written with PQ_MAGIC!?", version);
                 pqUnitVectors = reader.readBoolean();
             } else {
                 pqUnitVectors = true;
