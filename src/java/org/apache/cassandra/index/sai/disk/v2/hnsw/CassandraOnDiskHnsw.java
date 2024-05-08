@@ -101,7 +101,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
      * @return Row IDs associated with the topK vectors near the query
      */
     @Override
-    public CloseableIterator<ScoredRowId> search(VectorFloat<?> queryVector, int topK, float threshold, Bits acceptBits, QueryContext context, IntConsumer nodesVisited)
+    public CloseableIterator<ScoredRowId> search(VectorFloat<?> queryVector, int limit, int rerankK, float threshold, Bits acceptBits, QueryContext context, IntConsumer nodesVisited)
     {
         if (threshold > 0)
             throw new InvalidRequestException("Geo queries are not supported for legacy SAI indexes -- drop the index and recreate it to enable these");
@@ -112,7 +112,7 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
         try (var view = hnsw.getView(context))
         {
             queue = HnswGraphSearcher.search(((ArrayVectorFloat) queryVector).get(),
-                                             topK,
+                                             rerankK,
                                              vectors,
                                              VectorEncoding.FLOAT32,
                                              LuceneCompat.vsf(similarityFunction),
