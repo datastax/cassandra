@@ -35,11 +35,17 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_RERANK_FLOOR;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_REDUCE_TOPK_ACROSS_SSTABLES;
+
 /**
  * Different vector components compared to V2OnDiskFormat (supporting DiskANN/jvector instead of HNSW/lucene).
  */
 public class V3OnDiskFormat extends V2OnDiskFormat
 {
+    public static final boolean REDUCE_TOPK_ACROSS_SSTABLES = SAI_REDUCE_TOPK_ACROSS_SSTABLES.getBoolean();
+    public static final boolean ENABLE_RERANK_FLOOR = SAI_ENABLE_RERANK_FLOOR.getBoolean();
+
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     public static final V3OnDiskFormat instance = new V3OnDiskFormat();
