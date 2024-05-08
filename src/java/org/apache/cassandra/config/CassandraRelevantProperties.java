@@ -532,6 +532,7 @@ public enum CassandraRelevantProperties
 
     // SAI specific properties
 
+    SAI_ENABLE_LTM_CONSTRUCTION("cassandra.sai.ltm_construction", "true"),
     SAI_ENABLE_RERANK_FLOOR("cassandra.sai.rerank_floor", "true"),
 
     /** Whether to allow the user to specify custom options to the hnsw index */
@@ -566,6 +567,7 @@ public enum CassandraRelevantProperties
      * the results of an ANN query constrained by non-ANN predicates.
      */
     SAI_VECTOR_SEARCH_ORDER_CHUNK_SIZE("cassandra.sai.vector_search.order_chunk_size", "100000"),
+    SAI_WRITE_JVECTOR3_FORMAT("cassandra.sai.write_jv3_format", "false"),
 
     SCHEMA_PULL_INTERVAL_MS("cassandra.schema_pull_interval_ms", "60000"),
     SCHEMA_UPDATE_HANDLER_FACTORY_CLASS("cassandra.schema.update_handler_factory.class"),
