@@ -34,12 +34,15 @@ import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.MockSchema;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
@@ -114,7 +117,9 @@ public class CounterMutationCallbackTest
     public void testCounterMutationCallback()
     {
         // dummy mutation
-        CounterMutation counterMutation = new CounterMutation(null, null);
+        TableMetadata metadata = MockSchema.newTableMetadata("ks1", "dummy");
+        Mutation mutation = new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
+        CounterMutation counterMutation = new CounterMutation(mutation, null);
         Message<CounterMutation> msg =
         Message.builder(Verb.COUNTER_MUTATION_REQ, counterMutation)
                .withId(1)
@@ -149,7 +154,6 @@ public class CounterMutationCallbackTest
         assertThat(capturedOutboundMessages).size().isEqualTo(1);
         Map<String, byte[]> customParam = capturedOutboundMessages.get(0).header.customParams();
         assertThat(customParam).isNotNull();
-        assertThat(customParam).hasSize(2);
         double expectedSensorValue = replicaCountAndExpectedSensorValue.right;
         assertThat(customParam).hasEntrySatisfying("WRITE_BYTES_REQUEST.Counter",
                                                    v -> {

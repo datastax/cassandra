@@ -21,7 +21,11 @@ package org.apache.cassandra.sensors;
 import java.util.Optional;
 
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -39,6 +43,13 @@ public class RequestSensorsTest
     private RequestSensors context2Sensors;
     private RequestSensors sensors;
     private SensorsRegistry sensorsRegistry;
+
+    @BeforeClass
+    public static void beforeClass()
+    {
+        // Required for initializing a MessagingService.instance() in SensorsRegistry constructor
+        DatabaseDescriptor.setConfig(new Config());
+    }
 
     @Before
     public void beforeTest()
