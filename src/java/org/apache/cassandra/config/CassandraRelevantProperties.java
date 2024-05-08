@@ -533,6 +533,8 @@ public enum CassandraRelevantProperties
 
     // SAI specific properties
 
+    SAI_ENABLE_RERANK_FLOOR("cassandra.sai.rerank_floor", "true"),
+
     /** Whether to allow the user to specify custom options to the hnsw index */
     SAI_HNSW_ALLOW_CUSTOM_PARAMETERS("cassandra.sai.hnsw.allow_custom_parameters", "false"),
 
@@ -553,6 +555,7 @@ public enum CassandraRelevantProperties
     SAI_NUMERIC_VALUES_BLOCK_SIZE("dse.sai.numeric_values.block_size", "128"),
     SAI_NUMERIC_VALUES_MONOTONIC_BLOCK_SIZE("dse.sai.numeric_values.monotonic_block_size", "16384"),
     SAI_QUERY_OPT_LEVEL("cassandra.sai.query.optimization.level", "1"),
+    SAI_REDUCE_TOPK_ACROSS_SSTABLES("cassandra.sai.reduce_topk_across_sstables", "true"),
     SAI_TEST_DISABLE_TIMEOUT("cassandra.sai.test.timeout_disabled", "false"),
     SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT("cassandra.test.sai.segment_build_memory_limit"),
     /** Whether to validate terms that will be SAI indexed at the coordinator */
