@@ -34,7 +34,6 @@ import java.util.stream.IntStream;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 
 import static org.junit.Assert.assertTrue;
 
@@ -46,7 +45,6 @@ public class VectorSiftSmallTest extends VectorTester
     public void setup() throws Throwable
     {
         super.setup();
-        V3OnDiskFormat.enableJVector3Format(); // we are testing recall and this is required for higher-accuracy pq
     }
 
     @Test
@@ -57,8 +55,8 @@ public class VectorSiftSmallTest extends VectorTester
         var groundTruth = readIvecs(String.format("test/data/%s/%s_groundtruth.ivecs", DATASET, DATASET));
 
         // Create table and index
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))", "sift_vanilla_test");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
         waitForIndexQueryable();
 
         insertVectors(baseVectors, 0);
@@ -79,7 +77,7 @@ public class VectorSiftSmallTest extends VectorTester
 
         // Create table and index
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))", "compaction_test");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
         waitForIndexQueryable();
 
         // we're going to compact manually, so disable background compactions to avoid interference
