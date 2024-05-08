@@ -24,9 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
@@ -35,7 +33,6 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
-import java.util.function.IntFunction;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
 
@@ -83,6 +80,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v3.CassandraDiskAnn;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
@@ -95,9 +93,16 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.lucene.util.StringHelper;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
 
 public class CassandraOnHeapGraph<T> implements Accountable
 {
+    // Cassandra's PQ features, independent of JVector's
+    public enum PQVersion {
+        V0, // initial version
+        V1, // includes unit vector calculation
+    }
+
     /** minimum number of rows to perform PQ codebook generation */
     public static final int MIN_PQ_ROWS = 1024;
 
@@ -353,6 +358,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         try (var pqOutput = IndexFileUtils.instance().openOutput(descriptor.fileFor(IndexComponent.PQ, context), true, descriptor.getVersion(context));
              var postingsOutput = IndexFileUtils.instance().openOutput(descriptor.fileFor(IndexComponent.POSTING_LISTS, context), true, descriptor.getVersion(context));
              var indexWriter = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
+                               .withVersion(JVECTOR_2_VERSION) // always write old-version format since we're not using the new features
                                .withMap(finalOrdinalMap)
                                .with(new InlineVectors(vectorValues.dimension()))
                                .withStartOffset(termsOffset)
@@ -360,7 +366,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         {
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);
-            indexWriter.getOutput().seek(indexFile.length());
+            indexWriter.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
             SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()));
             assert indexWriter.getOutput().position() == termsOffset : "termsOffset " + termsOffset + " != " + indexWriter.getOutput().position();
 
@@ -380,8 +386,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
             builder.cleanup();
 
             var start = nanoTime();
-            Map<FeatureId, IntFunction<Feature.State>> suppliers = Collections.singletonMap(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
-            indexWriter.write(new EnumMap<>(suppliers));
+            var suppliers = Feature.singleStateFactory(FeatureId.INLINE_VECTORS, nodeId -> new InlineVectors.State(vectorValues.getVector(nodeId)));
+            indexWriter.write(suppliers);
             SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
             logger.info("Writing graph took {}ms", (nanoTime() - start) / 1_000_000);
             long termsLength = indexWriter.getOutput().position() - termsOffset;
@@ -520,17 +526,20 @@ public class CassandraOnHeapGraph<T> implements Accountable
             cv = new BQVectors((BinaryQuantization) compressor, (long[][]) encoded);
         else
             cv = new PQVectors((ProductQuantization) compressor, (ByteSequence<?>[]) encoded);
-        cv.write(writer);
+        cv.write(writer, JVECTOR_2_VERSION);
         return writer.position();
     }
 
     static void writePqHeader(DataOutput writer, boolean unitVectors, CompressionType type)
     throws IOException
     {
-        // version and optional fields
-        writer.writeInt(CassandraDiskAnn.PQ_MAGIC);
-        writer.writeInt(1); // version
-        writer.writeBoolean(unitVectors);
+        if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT)
+        {
+            // version and optional fields
+            writer.writeInt(CassandraDiskAnn.PQ_MAGIC);
+            writer.writeInt(PQVersion.V1.ordinal());
+            writer.writeBoolean(unitVectors);
+        }
 
         // write the compression type
         writer.writeByte(type.ordinal());
