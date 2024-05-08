@@ -408,8 +408,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             // partition key and clustering for equality. This can break lastKey skipping, which is necessary for
             // correctness when PrimaryKey doesn't have a clustering (as otherwise, the same partition may get
             // filtered and considered as a result multiple times).
-            if (lastKey != null && key.partitionKey().equals(lastKey.partitionKey()) && key.clustering().equals(lastKey.clustering()))
-                return null;
             lastKey = key;
 
             try (UnfilteredRowIterator partition = controller.getPartition(key, executionController))

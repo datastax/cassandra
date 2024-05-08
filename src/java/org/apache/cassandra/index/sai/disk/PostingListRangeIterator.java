@@ -63,12 +63,14 @@ public class PostingListRangeIterator extends RangeIterator
     private final IndexContext indexContext;
     private final PrimaryKeyMap primaryKeyMap;
     private final IndexSearcherContext searcherContext;
+    private final boolean isRowAware;
 
     private final AtomicBoolean isClosed = new AtomicBoolean(false);
 
     private boolean needsSkipping = false;
     private PrimaryKey skipToToken = null;
     private long lastSegmentRowId = -1;
+    private PrimaryKey lastKey = null;
 
     /**
      * Create a direct PostingListRangeIterator where the underlying PostingList is materialised
@@ -85,6 +87,7 @@ public class PostingListRangeIterator extends RangeIterator
         this.postingList = searcherContext.postingList;
         this.searcherContext = searcherContext;
         this.queryContext = this.searcherContext.context;
+        isRowAware = indexContext.indexFeatureSet().isRowAware();
     }
 
     @Override
@@ -103,20 +106,29 @@ public class PostingListRangeIterator extends RangeIterator
     @Override
     protected PrimaryKey computeNext()
     {
+        PrimaryKey primaryKey;
         try
         {
             queryContext.checkpoint();
 
-            // just end the iterator if we don't have a postingList or current segment is skipped
-            if (exhausted())
-                return endOfData();
+            do
+            {
+                // just end the iterator if we don't have a postingList or current segment is skipped
+                if (exhausted())
+                    return endOfData();
 
-            long rowId = getNextRowId();
-            if (rowId == PostingList.END_OF_STREAM)
-                return endOfData();
+                long rowId = getNextRowId();
+                if (rowId == PostingList.END_OF_STREAM)
+                    return endOfData();
 
-            var primaryKey = primaryKeyMap.primaryKeyFromRowId(rowId);
-            return new PrimaryKeyWithSource(primaryKey, primaryKeyMap.getSSTableId(), rowId);
+
+                primaryKey = primaryKeyMap.primaryKeyFromRowId(rowId);
+                if (isRowAware)
+                    primaryKey = new PrimaryKeyWithSource(primaryKey, primaryKeyMap.getSSTableId(), rowId);
+            } while (!isRowAware && primaryKey.equals(lastKey));
+            if (!isRowAware)
+                lastKey = primaryKey;
+            return primaryKey;
         }
         catch (Throwable t)
         {
