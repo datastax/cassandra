@@ -368,6 +368,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         {
             SAICodecUtils.writeHeader(pqOutput);
             SAICodecUtils.writeHeader(postingsOutput);
+            indexWriter.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
             SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()));
             assert indexWriter.getOutput().position() == termsOffset : "termsOffset " + termsOffset + " != " + indexWriter.getOutput().position();
 

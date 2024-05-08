@@ -150,6 +150,7 @@ public class CompactionGraph implements Closeable, Accountable
                  .with(new InlineVectors(dimension))
                  .withMapper(new OnDiskGraphIndexWriter.IdentityMapper())
                  .build();
+        writer.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
         SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()));
         inlineVectors = new InlineVectorValues(dimension, writer);
         pqVectorsList = new ArrayList<>(entriesAllocated);
