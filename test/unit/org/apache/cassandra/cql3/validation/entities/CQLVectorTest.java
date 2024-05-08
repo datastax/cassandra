@@ -37,7 +37,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.assertj.core.api.Assertions;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.FLOAT_ONLY_VECTORS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
 import static java.lang.String.format;
 
 public class CQLVectorTest extends CQLTester
@@ -45,7 +45,7 @@ public class CQLVectorTest extends CQLTester
     @BeforeClass
     public static void setupClass()
     {
-        FLOAT_ONLY_VECTORS.setBoolean(false);
+        VECTOR_FLOAT_ONLY.setBoolean(false);
     }
 
     @Test
