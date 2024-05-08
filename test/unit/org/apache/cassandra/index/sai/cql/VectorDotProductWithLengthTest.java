@@ -25,9 +25,17 @@ import org.junit.Test;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 
 public class VectorDotProductWithLengthTest extends VectorTester
 {
+    @Override
+    public void setup() throws Throwable
+    {
+        super.setup();
+        V3OnDiskFormat.enableJVector3Format(); // we are testing unit vector detection which is part of the v3 changes
+    }
+
     // This tests our detection of unit-length vectors used with dot product and PQ.
     // We want to switch to cosine similarity for PQ-based comparisons in those cases to preserve the angular semantics
     // (since PQ compression does not preserve unit length of the compressed results),
