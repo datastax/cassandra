@@ -41,6 +41,12 @@ public class VectorSiftSmallTest extends VectorTester
 {
     private static final String DATASET = "siftsmall"; // change to "sift" for larger dataset. requires manual download
 
+    @Override
+    public void setup() throws Throwable
+    {
+        super.setup();
+    }
+
     @Test
     public void testSiftSmall() throws Throwable
     {
@@ -49,8 +55,8 @@ public class VectorSiftSmallTest extends VectorTester
         var groundTruth = readIvecs(String.format("test/data/%s/%s_groundtruth.ivecs", DATASET, DATASET));
 
         // Create table and index
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))", "sift_vanilla_test");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
         waitForTableIndexesQueryable();
 
         insertVectors(baseVectors, 0);
@@ -70,8 +76,8 @@ public class VectorSiftSmallTest extends VectorTester
         var groundTruth = readIvecs(String.format("test/data/%s/%s_groundtruth.ivecs", DATASET, DATASET));
 
         // Create table and index
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))", "compaction_test");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createTable(KEYSPACE, "CREATE TABLE %s (pk int, val vector<float, 128>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
         waitForTableIndexesQueryable();
 
         // we're going to compact manually, so disable background compactions to avoid interference
