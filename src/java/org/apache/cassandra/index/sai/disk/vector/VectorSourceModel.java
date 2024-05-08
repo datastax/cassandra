@@ -143,7 +143,7 @@ public enum VectorSourceModel
      * 1. Smoothes out the relevance difference between small LIMIT and large
      * 2. Compensates for using lossily-compressed vectors during the search
      */
-    public int topKFor(int limit, CompressedVectors cv)
+    public int rerankKFor(int limit, CompressedVectors cv)
     {
         // if the vectors are uncompressed, bump up the limit a bit to start with but decay it rapidly
         if (cv == null)
