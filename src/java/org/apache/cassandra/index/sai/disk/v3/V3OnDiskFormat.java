@@ -23,6 +23,7 @@ import java.lang.invoke.MethodHandles;
 import java.util.EnumSet;
 import java.util.Set;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,8 +36,10 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_LTM_CONSTRUCTION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_RERANK_FLOOR;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_REDUCE_TOPK_ACROSS_SSTABLES;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_WRITE_JVECTOR3_FORMAT;
 
 /**
  * Different vector components compared to V2OnDiskFormat (supporting DiskANN/jvector instead of HNSW/lucene).
@@ -45,6 +48,11 @@ public class V3OnDiskFormat extends V2OnDiskFormat
 {
     public static final boolean REDUCE_TOPK_ACROSS_SSTABLES = SAI_REDUCE_TOPK_ACROSS_SSTABLES.getBoolean();
     public static final boolean ENABLE_RERANK_FLOOR = SAI_ENABLE_RERANK_FLOOR.getBoolean();
+
+    public static volatile boolean WRITE_JVECTOR3_FORMAT = SAI_WRITE_JVECTOR3_FORMAT.getBoolean();
+    public static final boolean ENABLE_LTM_CONSTRUCTION = SAI_ENABLE_LTM_CONSTRUCTION.getBoolean();
+
+    public static final int JVECTOR_2_VERSION = 2;
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -95,5 +103,11 @@ public class V3OnDiskFormat extends V2OnDiskFormat
         if (indexContext.isVector())
             return VECTOR_COMPONENTS_V3;
         return super.perIndexComponents(indexContext);
+    }
+
+    @VisibleForTesting
+    public static void enableJVector3Format()
+    {
+        WRITE_JVECTOR3_FORMAT = true;
     }
 }
