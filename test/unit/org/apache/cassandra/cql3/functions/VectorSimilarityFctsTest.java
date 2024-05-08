@@ -33,7 +33,7 @@ import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.cql3.CQLTester;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.FLOAT_ONLY_VECTORS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @RunWith(Parameterized.class)
@@ -60,7 +60,7 @@ public class VectorSimilarityFctsTest extends CQLTester
     @BeforeClass
     public static void setupClass()
     {
-        FLOAT_ONLY_VECTORS.setBoolean(false);
+        VECTOR_FLOAT_ONLY.setBoolean(false);
     }
 
     @Test
