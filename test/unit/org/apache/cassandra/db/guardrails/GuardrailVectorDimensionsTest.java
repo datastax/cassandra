@@ -48,7 +48,7 @@ public class GuardrailVectorDimensionsTest extends ThresholdTester
     @BeforeClass
     public static void setupClass()
     {
-        CassandraRelevantProperties.FLOAT_ONLY_VECTORS.setBoolean(false);
+        CassandraRelevantProperties.VECTOR_FLOAT_ONLY.setBoolean(false);
     }
 
     @Test

@@ -28,14 +28,14 @@ import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.assertj.core.api.Assertions;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.FLOAT_ONLY_VECTORS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
 
 public class VectorFctsTest extends CQLTester
 {
     @BeforeClass
     public static void setupClass()
     {
-        FLOAT_ONLY_VECTORS.setBoolean(false);
+        VECTOR_FLOAT_ONLY.setBoolean(false);
     }
 
     @Test
