@@ -36,33 +36,29 @@ public class LuceneCompat
 {
     public static LongValues directReaderGetInstance(SeekingRandomAccessInput slice, int bitsPerValue, long offset)
     {
-        if (slice.order() == ByteOrder.LITTLE_ENDIAN)
-            return DirectReader.getInstance(slice, bitsPerValue, offset);
         // Lucene 7.5 and earlier used big-endian ordering
-        return LegacyDirectReader.getInstance(slice, bitsPerValue, offset);
+        return slice.order() == ByteOrder.LITTLE_ENDIAN ? DirectReader.getInstance(slice, bitsPerValue, offset)
+                                                        : LegacyDirectReader.getInstance(slice, bitsPerValue, offset);
     }
 
     public static DirectWriterAdaptor directWriterGetInstance(ByteOrder order, DataOutput out, long numValues, int bitsPerValue)
     {
-        if (order == ByteOrder.LITTLE_ENDIAN)
-            return new ModernDirectWriterAdaptor(out, numValues, bitsPerValue);
         // Lucene 7.5 and earlier used big-endian ordering
-        return new LegacyDirectWriterAdaptor(out, numValues, bitsPerValue);
+        return order == ByteOrder.LITTLE_ENDIAN ? new ModernDirectWriterAdaptor(out, numValues, bitsPerValue)
+                                                : new LegacyDirectWriterAdaptor(out, numValues, bitsPerValue);
     }
 
     public static int directWriterUnsignedBitsRequired(ByteOrder order, long maxValue)
     {
-        if (order == ByteOrder.LITTLE_ENDIAN)
-            return DirectWriter.unsignedBitsRequired(maxValue);
         // Lucene 7.5 and earlier used big-endian ordering
-        return LegacyDirectWriter.unsignedBitsRequired(maxValue);
+        return order == ByteOrder.LITTLE_ENDIAN ? DirectWriter.unsignedBitsRequired(maxValue)
+                                                : LegacyDirectWriter.unsignedBitsRequired(maxValue);
     }
 
     public static ResettableByteBuffersIndexOutput getResettableByteBuffersIndexOutput(ByteOrder order, int expectedSize, String name)
     {
-        if (order == ByteOrder.LITTLE_ENDIAN)
-            return new ModernResettableByteBuffersIndexOutput(expectedSize, name);
         // Lucene 7.5 and earlier used big-endian ordering
-        return new LegacyResettableByteBuffersIndexOutput(expectedSize, name);
+        return order == ByteOrder.LITTLE_ENDIAN ? new ModernResettableByteBuffersIndexOutput(expectedSize, name)
+                                                : new LegacyResettableByteBuffersIndexOutput(expectedSize, name);
     }
 }

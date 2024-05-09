@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
-import java.nio.ByteOrder;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
@@ -440,12 +439,9 @@ public class IndexDescriptor
      */
     private ChecksumIndexInput checksumIndexInput(IndexContext context, IndexInput indexInput)
     {
-        if (getVersion(context) == Version.AA)
-        {
-            return new EndiannessReverserChecksumIndexInput(indexInput);
-        }
-        else
-            return new BufferedChecksumIndexInput(indexInput);
+        return getVersion(context) == Version.AA
+               ? new EndiannessReverserChecksumIndexInput(indexInput)
+               : new BufferedChecksumIndexInput(indexInput);
     }
 
     public IndexOutputWriter openPerSSTableOutput(IndexComponent component) throws IOException

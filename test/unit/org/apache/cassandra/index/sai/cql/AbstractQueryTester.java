@@ -80,8 +80,12 @@ public class AbstractQueryTester extends SAITester
     {
         List<Object[]> scenarios = new LinkedList<>();
 
-        for (Version version : List.of(Version.AA, Version.CA))
+        for (Version version : Version.ALL)
         {
+            // Excluding BA from the version matrix as it has never seen production deployment as a write target
+            if (version.equals(Version.BA))
+                continue;
+
             scenarios.add(new Object[]{ version, new DataModel.BaseDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA), IndexQuerySupport.BASE_QUERY_SETS });
             scenarios.add(new Object[]{ version, new DataModel.CompoundKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA), IndexQuerySupport.BASE_QUERY_SETS });
             scenarios.add(new Object[]{ version, new DataModel.CompoundKeyWithStaticsDataModel(DataModel.STATIC_COLUMNS, DataModel.STATIC_COLUMN_DATA), IndexQuerySupport.STATIC_QUERY_SETS });

@@ -19,6 +19,8 @@ package org.apache.cassandra.index.sai.cql.types;
 
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.LinkedList;
+import java.util.List;
 
 import org.junit.After;
 import org.junit.Before;
@@ -51,27 +53,22 @@ public abstract class IndexingTypeSupport extends SAITester
 
     protected static Collection<Object[]> generateParameters(DataSet<?> dataset)
     {
-        return Arrays.asList(new Object[][]
+        List<Object[]> scenarios = new LinkedList<>();
+        for (boolean wideRows : new boolean[]{true, false})
         {
-            { Version.CA, dataset, true, Scenario.MEMTABLE_QUERY },
-            { Version.CA, dataset, true, Scenario.SSTABLE_QUERY},
-            { Version.CA, dataset, true, Scenario.COMPACTED_QUERY},
-            { Version.CA, dataset, true, Scenario.MIXED_QUERY},
-            { Version.CA, dataset, true, Scenario.POST_BUILD_QUERY},
-            { Version.AA, dataset, true, Scenario.SSTABLE_QUERY},
-            { Version.AA, dataset, true, Scenario.COMPACTED_QUERY},
-            { Version.AA, dataset, true, Scenario.MIXED_QUERY},
-            { Version.AA, dataset, true, Scenario.POST_BUILD_QUERY},
-            { Version.CA, dataset, false, Scenario.MEMTABLE_QUERY },
-            { Version.CA, dataset, false, Scenario.SSTABLE_QUERY},
-            { Version.CA, dataset, false, Scenario.COMPACTED_QUERY},
-            { Version.CA, dataset, false, Scenario.MIXED_QUERY},
-            { Version.CA, dataset, false, Scenario.POST_BUILD_QUERY},
-            { Version.AA, dataset, false, Scenario.SSTABLE_QUERY},
-            { Version.AA, dataset, false, Scenario.COMPACTED_QUERY},
-            { Version.AA, dataset, false, Scenario.MIXED_QUERY},
-            { Version.AA, dataset, false, Scenario.POST_BUILD_QUERY}
-        });
+            for (Version version : Version.ALL)
+            {
+                // Skip BA version, as it never saw production deployment as a write target
+                if (version.equals(Version.BA))
+                    continue;
+
+                for (Scenario scenario : Scenario.values())
+                    scenarios.add(new Object[]{version, dataset, wideRows, scenario});
+            }
+
+        }
+
+        return scenarios;
     }
 
     public IndexingTypeSupport(Version version, DataSet<?> dataset, boolean widePartitions, Scenario scenario)
