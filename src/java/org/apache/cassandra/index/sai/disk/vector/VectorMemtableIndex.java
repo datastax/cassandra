@@ -319,7 +319,7 @@ public class VectorMemtableIndex implements MemtableIndex
     private int maxBruteForceRows(int limit, int nPermittedOrdinals, int graphSize)
     {
         int expectedNodesVisited = expectedNodesVisited(limit, nPermittedOrdinals, graphSize);
-        int expectedComparisons = indexContext.getIndexWriterConfig().getMaximumNodeConnections() * expectedNodesVisited;
+        int expectedComparisons = indexContext.getIndexWriterConfig().getAnnMaxDegree() * expectedNodesVisited;
         // in-memory comparisons are cheaper than pulling a row off disk and then comparing
         // VSTODO this is dramatically oversimplified
         // larger dimension should increase this, because comparisons are more expensive
