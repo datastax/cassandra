@@ -678,8 +678,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
         SinglePartitionReadQuery readCommand = request.readCommand(nowInSeconds);
         FilteredPartition current;
         try (ReadExecutionController executionController = readCommand.executionController();
-             PartitionIterator iter = readCommand.executeInternal(executionController);
-             RowIterator row = PartitionIterators.getOnlyElement(iter, readCommand);)
+             RowIterator row = PartitionIterators.getOnlyElement(readCommand.executeInternal(executionController), readCommand))
         {
             // FilteredPartition consumes the row but does not close the iterator
             current = FilteredPartition.create(row);
