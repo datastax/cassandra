@@ -20,7 +20,7 @@ package org.apache.cassandra.index.sai.disk.v1.bitpack;
 import java.io.IOException;
 
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
-import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdaptor;
+import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdapter;
 import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.lucene.util.packed.DirectWriter;
@@ -98,7 +98,7 @@ public abstract class AbstractBlockPackedWriter
 
     void writeValues(int numValues, int bitsPerValue) throws IOException
     {
-        final DirectWriterAdaptor writer = LuceneCompat.directWriterGetInstance(out.order(), out, numValues, bitsPerValue);
+        final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(out.order(), out, numValues, bitsPerValue);
         for (int i = 0; i < numValues; ++i)
         {
             writer.add(values[i]);

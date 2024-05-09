@@ -26,11 +26,11 @@ import org.apache.lucene.util.packed.DirectWriter;
 /**
  * Minimal wrapper arount DirectWriter to allow it to be used in a common interface with LegacyDirectWriter.
  */
-public class ModernDirectWriterAdaptor implements DirectWriterAdaptor
+public class ModernDirectWriterAdapter implements DirectWriterAdapter
 {
     private final org.apache.lucene.util.packed.DirectWriter delegate;
 
-    public ModernDirectWriterAdaptor(DataOutput output, long numValues, int bitsPerValue)
+    public ModernDirectWriterAdapter(DataOutput output, long numValues, int bitsPerValue)
     {
         this.delegate = DirectWriter.getInstance(output, numValues, bitsPerValue);
     }

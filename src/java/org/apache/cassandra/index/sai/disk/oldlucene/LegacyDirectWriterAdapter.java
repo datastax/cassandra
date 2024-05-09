@@ -20,12 +20,27 @@ package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import java.io.IOException;
 
+import org.apache.lucene.backward_codecs.packed.LegacyDirectWriter;
+
 /**
- * Minimal wrapper around Lucene's DirectWriter/LegacyDirectWriter, which don't share an interface.
- * We need this to write out AA version indexes using LegacyDirectWriter.
+ * Minimal wrapper around Lucene's LegacyDirectWriter, which doesn't share an interface with DirectWriter.
  */
-public interface DirectWriterAdaptor
+public class LegacyDirectWriterAdapter implements DirectWriterAdapter
 {
-    public void add(long l) throws IOException;
-    public void finish() throws IOException;
+    private final LegacyDirectWriter delegate;
+
+    public LegacyDirectWriterAdapter(org.apache.lucene.store.DataOutput output, long numValues, int bitsPerValue)
+    {
+        this.delegate = LegacyDirectWriter.getInstance(output, numValues, bitsPerValue);
+    }
+
+    public void add(long l) throws IOException
+    {
+        delegate.add(l);
+    }
+
+    public void finish() throws IOException
+    {
+        delegate.finish();
+    }
 }

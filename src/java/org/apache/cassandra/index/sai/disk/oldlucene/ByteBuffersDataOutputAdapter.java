@@ -18,29 +18,14 @@
 
 package org.apache.cassandra.index.sai.disk.oldlucene;
 
-import java.io.IOException;
-
-import org.apache.lucene.backward_codecs.packed.LegacyDirectWriter;
-
+import org.apache.lucene.store.DataOutput;
 /**
- * Minimal wrapper around Lucene's LegacyDirectWriter, which doesn't share an interface with DirectWriter.
+ * Minimal wrapper around Lucene's ByteBufferDataOutput/LegacyByteBufferDataOutput, which don't share an interface.
+ * We need this to call ByteBufferDataOutput-specific methods at callsites that could contain either type.
  */
-public class LegacyDirectWriterAdaptor implements DirectWriterAdaptor
+public abstract class ByteBuffersDataOutputAdapter extends DataOutput
 {
-    private final LegacyDirectWriter delegate;
-
-    public LegacyDirectWriterAdaptor(org.apache.lucene.store.DataOutput output, long numValues, int bitsPerValue)
-    {
-        this.delegate = LegacyDirectWriter.getInstance(output, numValues, bitsPerValue);
-    }
-
-    public void add(long l) throws IOException
-    {
-        delegate.add(l);
-    }
-
-    public void finish() throws IOException
-    {
-        delegate.finish();
-    }
+    public abstract void reset();
+    public abstract long size();
+    public abstract byte[] toArrayCopy();
 }

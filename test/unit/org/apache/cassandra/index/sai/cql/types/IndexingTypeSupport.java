@@ -58,7 +58,7 @@ public abstract class IndexingTypeSupport extends SAITester
         {
             for (Version version : Version.ALL)
             {
-                // Skip BA version, as it never saw production deployment as a write target
+                // Skip BA version, as files at BA do not exist in production anywhere
                 if (version.equals(Version.BA))
                     continue;
 

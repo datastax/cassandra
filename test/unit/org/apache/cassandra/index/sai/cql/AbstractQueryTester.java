@@ -82,7 +82,7 @@ public class AbstractQueryTester extends SAITester
 
         for (Version version : Version.ALL)
         {
-            // Excluding BA from the version matrix as it has never seen production deployment as a write target
+            // Excluding BA from the version matrix as files written at BA do not exist in production anywhere
             if (version.equals(Version.BA))
                 continue;
 

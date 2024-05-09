@@ -14,6 +14,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+/*
+ * This file was imported from the Apache Lucene project at commit b5bf70b7e32d7ddd9742cc821d471c5fabd4e3df,
+ * tagged as releases/lucene-solr/7.5.0. The following modifications have been made to the original file:
+ * - Renamed from ByteBuffersDataInput to LegacyByteBuffersDataInput.
+ * - Return types modified accordingly.
+ * - skipBytes was added.
+ * - readShort/readInt/readLong implemented as big-endian, since superclass implementations are little-endian.
+ * - explicitly override readFloats/readInts/readLongs in case DataInput implementation changes.
+ */
 package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import java.io.EOFException;
@@ -25,6 +35,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -99,6 +110,49 @@ public final class LegacyByteBuffersDataInput extends DataInput implements Accou
             } else {
                 throw e; // Something is wrong.
             }
+        }
+    }
+
+    /**
+     * Reads a specified number of floats into an array at the specified offset.
+     *
+     * @param floats the array to read bytes into
+     * @param offset the offset in the array to start storing floats
+     * @param len the number of floats to read
+     */
+    @Override
+    public void readFloats(float[] floats, int offset, int len) throws IOException {
+        Objects.checkFromIndexSize(offset, len, floats.length);
+        for (int i = 0; i < len; i++) {
+            floats[offset + i] = Float.intBitsToFloat(readInt());
+        }
+    }
+
+    /**
+     * Read a specified number of longs.
+     *
+     * @lucene.experimental
+     */
+    public void readLongs(long[] dst, int offset, int length) throws IOException
+    {
+        Objects.checkFromIndexSize(offset, length, dst.length);
+        for (int i = 0; i < length; ++i) {
+            dst[offset + i] = readLong();
+        }
+    }
+
+    /**
+     * Reads a specified number of ints into an array at the specified offset.
+     *
+     * @param dst the array to read bytes into
+     * @param offset the offset in the array to start storing ints
+     * @param length the number of ints to read
+     */
+    public void readInts(int[] dst, int offset, int length) throws IOException
+    {
+        Objects.checkFromIndexSize(offset, length, dst.length);
+        for (int i = 0; i < length; ++i) {
+            dst[offset + i] = readInt();
         }
     }
 

@@ -41,11 +41,11 @@ public class LuceneCompat
                                                         : LegacyDirectReader.getInstance(slice, bitsPerValue, offset);
     }
 
-    public static DirectWriterAdaptor directWriterGetInstance(ByteOrder order, DataOutput out, long numValues, int bitsPerValue)
+    public static DirectWriterAdapter directWriterGetInstance(ByteOrder order, DataOutput out, long numValues, int bitsPerValue)
     {
         // Lucene 7.5 and earlier used big-endian ordering
-        return order == ByteOrder.LITTLE_ENDIAN ? new ModernDirectWriterAdaptor(out, numValues, bitsPerValue)
-                                                : new LegacyDirectWriterAdaptor(out, numValues, bitsPerValue);
+        return order == ByteOrder.LITTLE_ENDIAN ? new ModernDirectWriterAdapter(out, numValues, bitsPerValue)
+                                                : new LegacyDirectWriterAdapter(out, numValues, bitsPerValue);
     }
 
     public static int directWriterUnsignedBitsRequired(ByteOrder order, long maxValue)
@@ -60,5 +60,12 @@ public class LuceneCompat
         // Lucene 7.5 and earlier used big-endian ordering
         return order == ByteOrder.LITTLE_ENDIAN ? new ModernResettableByteBuffersIndexOutput(expectedSize, name)
                                                 : new LegacyResettableByteBuffersIndexOutput(expectedSize, name);
+    }
+
+    public static ByteBuffersDataOutputAdapter getByteBuffersDataOutputAdapter(ByteOrder order, long expectedSize)
+    {
+        // Lucene 7.5 and earlier used big-endian ordering
+        return order == ByteOrder.LITTLE_ENDIAN ? new ModernByteBuffersDataOutputAdapter(expectedSize)
+                                                : new LegacyByteBuffersDataOutputAdapter(expectedSize);
     }
 }

@@ -14,6 +14,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+/*
+ * This file was imported from the Apache Lucene project at commit b5bf70b7e32d7ddd9742cc821d471c5fabd4e3df,
+ * tagged as releases/lucene-solr/7.5.0. The following modifications have been made to the original file:
+ * - Renamed from ByteBuffersIndexInput to LegacyByteBuffersIndexInput.
+ * - Implements our IndexInput wrapper, which provides endianness.
+ * - Wraps LegacyByteBuffersDataInput instead of ByteBuffersDataInput.
+ */
 package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import java.io.IOException;

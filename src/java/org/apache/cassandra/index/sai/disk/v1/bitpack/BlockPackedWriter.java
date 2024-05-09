@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v1.bitpack;
 import java.io.IOException;
 
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdapter;
 import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 
 import static org.apache.lucene.util.BitUtil.zigZagEncode;
@@ -27,7 +28,7 @@ import static org.apache.lucene.util.BitUtil.zigZagEncode;
 /**
  * A writer for large sequences of longs.
  *
- * Modified copy of {@link org.apache.lucene.util.packed.BlockPackedWriter} to use {@link org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdaptor}
+ * Modified copy of {@link org.apache.lucene.util.packed.BlockPackedWriter} to use {@link DirectWriterAdapter}
  * for optimised reads that doesn't require seeking through the whole file to open a thread-exclusive reader.
  */
 public class BlockPackedWriter extends AbstractBlockPackedWriter

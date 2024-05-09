@@ -30,13 +30,13 @@ import com.google.common.base.MoreObjects;
 
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.ByteBuffersDataOutputAdapter;
 import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointValues;
 import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointsReaderUtils;
-import org.apache.lucene.store.ByteBuffersDataOutput;
 import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.BytesRef;
@@ -127,6 +127,10 @@ public class BKDWriter implements Closeable
     private final ICompressor compressor;
     private final ByteOrder order;
 
+    // reused when writing leaf blocks
+    private final ByteBuffersDataOutputAdapter scratchOut;
+    private final ByteBuffersDataOutputAdapter scratchOut2;
+
     public BKDWriter(long maxDoc, int numDims, int bytesPerDim,
             int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount, boolean singleValuePerDoc,
             ICompressor compressor, ByteOrder order) throws IOException
@@ -193,6 +197,9 @@ public class BKDWriter implements Closeable
         {
             throw new IllegalArgumentException("maxMBSortInHeap=" + maxMBSortInHeap + " only allows for maxPointsSortInHeap=" + maxPointsSortInHeap + ", but this is less than maxPointsInLeafNode=" + maxPointsInLeafNode + "; either increase maxMBSortInHeap or decrease maxPointsInLeafNode");
         }
+
+        scratchOut = LuceneCompat.getByteBuffersDataOutputAdapter(order, 32 * 1024);
+        scratchOut2 = LuceneCompat.getByteBuffersDataOutputAdapter(order, 2 * 1024);
     }
 
     public static void verifyParams(int numDims, int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount)
@@ -264,12 +271,6 @@ public class BKDWriter implements Closeable
 
         return oneDimWriter.finish();
     }
-
-    // reused when writing leaf blocks
-    // these are only used for bytes, so endianness doesn't matter
-    private final ByteBuffersDataOutput scratchOut = new ByteBuffersDataOutput(32 * 1024);
-
-    private final ByteBuffersDataOutput scratchOut2 = new ByteBuffersDataOutput(2 * 1024);
 
     interface OneDimensionBKDWriterCallback
     {
