@@ -153,7 +153,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         builder = new GraphIndexBuilder(vectorValues,
                                         similarityFunction,
-                                        indexConfig.getMaximumNodeConnections(),
+                                        indexConfig.getAnnMaxDegree(),
                                         indexConfig.getConstructionBeamWidth(),
                                         1.2f,
                                         dimension > 3 ? 1.2f : 2.0f);

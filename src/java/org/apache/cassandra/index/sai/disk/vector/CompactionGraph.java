@@ -135,7 +135,7 @@ public class CompactionGraph implements Closeable, Accountable
 
         builder = new GraphIndexBuilder(null,
                                         dimension,
-                                        indexConfig.getMaximumNodeConnections(),
+                                        indexConfig.getAnnMaxDegree(),
                                         indexConfig.getConstructionBeamWidth(),
                                         1.2f,
                                         dimension > 3 ? 1.2f : 1.4f,
