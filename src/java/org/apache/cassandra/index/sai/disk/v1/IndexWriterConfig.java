@@ -21,6 +21,8 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -129,6 +131,17 @@ public class IndexWriterConfig
         return bkdPostingsSkip;
     }
 
+    public int getAnnMaxDegree()
+    {
+        // For historical reasons (Lucene doubled the maximum node connections for its HNSW),
+        // maximumNodeConnections represents half of the graph degree, so double it
+        return 2 * maximumNodeConnections;
+    }
+
+    /** you should probably use getAnnMaxDegree instead */
+    /** @deprecated See https://github.com/datastax/cassandra/pull/1110 */
+    @Deprecated(since = "5.0")
+    @VisibleForTesting
     public int getMaximumNodeConnections()
     {
         return maximumNodeConnections;
