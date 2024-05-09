@@ -15,13 +15,6 @@
  * limitations under the License.
  */
 
-/*
- * This file was imported from the Apache Lucene project at commit b5bf70b7e32d7ddd9742cc821d471c5fabd4e3df,
- * tagged as releases/lucene-solr/7.5.0. The following modifications have been made to the original file:
- * - Renamed from ByteBuffersIndexOutput to LegacyByteBuffersIndexOutput
- * - Implements our IndexOutput wrapper, which provides endianness.
- * - Wraps LegacyByteBuffersDataOutput instead of ByteBuffersDataOutput.
- */
 package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import java.io.IOException;
@@ -41,6 +34,13 @@ import org.apache.lucene.store.DataInput;
  * An {@link IndexOutput} writing to a {@link LegacyByteBuffersDataOutput}.
  * This uses the big-endian byte ordering of Lucene 7.5 and is used to write indexes/data compatible with the
  * readers in older Lucene versions.
+ * This file was imported from the Apache Lucene project at commit b5bf70b7e32d7ddd9742cc821d471c5fabd4e3df,
+ * tagged as releases/lucene-solr/7.5.0. The following modifications have been made to the original file:
+ * <ul>
+ * <li>Renamed from ByteBuffersIndexOutput to LegacyByteBuffersIndexOutput.</li>
+ * <li>Implements our IndexOutput wrapper, which provides endianness.</li>
+ * <li>Wraps LegacyByteBuffersDataOutput instead of ByteBuffersDataOutput.</li>
+ * </ul>
  */
 public final class LegacyByteBuffersIndexOutput extends IndexOutput
 {

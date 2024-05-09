@@ -33,17 +33,20 @@ public class ModernByteBuffersDataOutputAdapter extends ByteBuffersDataOutputAda
 {
     private ByteBuffersDataOutput wrapped;
 
-    public ModernByteBuffersDataOutputAdapter(long expectedSize) {
+    public ModernByteBuffersDataOutputAdapter(long expectedSize)
+    {
         wrapped = new ByteBuffersDataOutput(expectedSize);
     }
 
     @Override
-    public void reset() {
+    public void reset()
+    {
         wrapped.reset();
     }
 
     @Override
-    public long size() {
+    public long size()
+    {
         return wrapped.size();
     }
 

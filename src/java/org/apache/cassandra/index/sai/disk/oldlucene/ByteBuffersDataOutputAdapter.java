@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import org.apache.lucene.store.DataOutput;
+
 /**
  * Minimal wrapper around Lucene's ByteBufferDataOutput/LegacyByteBufferDataOutput, which don't share an interface.
  * We need this to call ByteBufferDataOutput-specific methods at callsites that could contain either type.

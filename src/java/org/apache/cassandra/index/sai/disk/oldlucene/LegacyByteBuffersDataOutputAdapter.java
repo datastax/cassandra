@@ -32,17 +32,20 @@ public class LegacyByteBuffersDataOutputAdapter extends ByteBuffersDataOutputAda
 {
     private LegacyByteBuffersDataOutput wrapped;
 
-    public LegacyByteBuffersDataOutputAdapter(long expectedSize) {
+    public LegacyByteBuffersDataOutputAdapter(long expectedSize)
+    {
         wrapped = new LegacyByteBuffersDataOutput(expectedSize);
     }
 
     @Override
-    public void reset() {
+    public void reset()
+    {
         wrapped.reset();
     }
 
     @Override
-    public long size() {
+    public long size()
+    {
         return wrapped.size();
     }
 

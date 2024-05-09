@@ -15,13 +15,6 @@
  * limitations under the License.
  */
 
-/*
- * This file was imported from the Apache Lucene project at commit b5bf70b7e32d7ddd9742cc821d471c5fabd4e3df,
- * tagged as releases/lucene-solr/7.5.0. The following modifications have been made to the original file:
- * - Renamed from ByteBuffersIndexInput to LegacyByteBuffersIndexInput.
- * - Implements our IndexInput wrapper, which provides endianness.
- * - Wraps LegacyByteBuffersDataInput instead of ByteBuffersDataInput.
- */
 package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import java.io.IOException;
@@ -38,6 +31,13 @@ import org.apache.lucene.store.RandomAccessInput;
  * An {@link IndexInput} implementing {@link RandomAccessInput} and backed
  * by a {@link LegacyByteBuffersDataInput}. Data is read in big-endian byte order,
  * as produced by Lucene 7.5.
+ * This file was imported from the Apache Lucene project at commit b5bf70b7e32d7ddd9742cc821d471c5fabd4e3df,
+ * tagged as releases/lucene-solr/7.5.0. The following modifications have been made to the original file:
+ * <ul>
+ * <li>Renamed from ByteBuffersIndexInput to LegacyByteBuffersIndexInput.</li>
+ * <li>Implements our IndexInput wrapper, which provides endianness.</li>
+ * <li>Wraps LegacyByteBuffersDataInput instead of ByteBuffersDataInput.</li>
+ * </ul>
  */
 public final class LegacyByteBuffersIndexInput extends IndexInput implements RandomAccessInput
 {

@@ -15,15 +15,6 @@
  * limitations under the License.
  */
 
-/*
- * This file was imported from the Apache Lucene project at commit b5bf70b7e32d7ddd9742cc821d471c5fabd4e3df,
- * tagged as releases/lucene-solr/7.5.0. The following modifications have been made to the original file:
- * - Renamed from ByteBuffersDataInput to LegacyByteBuffersDataInput.
- * - Return types modified accordingly.
- * - skipBytes was added.
- * - readShort/readInt/readLong implemented as big-endian, since superclass implementations are little-endian.
- * - explicitly override readFloats/readInts/readLongs in case DataInput implementation changes.
- */
 package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import java.io.EOFException;
@@ -47,6 +38,15 @@ import org.apache.lucene.util.RamUsageEstimator;
  * list of {@link ByteBuffer}s. This uses the big-endian byte ordering of Lucene 7.5.
  * Note that this participates in the type hierarchy of the modern Lucene depencency,
  * so DataInput methods that assume little-endianness must be overridden.
+ * This file was imported from the Apache Lucene project at commit b5bf70b7e32d7ddd9742cc821d471c5fabd4e3df,
+ * tagged as releases/lucene-solr/7.5.0. The following modifications have been made to the original file:
+ * <ul>
+ * <li>Renamed from ByteBuffersDataInput to LegacyByteBuffersDataInput.</li>
+ * <li>Return types modified accordingly.</li>
+ * <li>skipBytes was added.</li>
+ * <li>readShort/readInt/readLong implemented as big-endian, since superclass implementations are little-endian.</li>
+ * <li>explicitly override readFloats/readInts/readLongs in case DataInput implementation changes.</li>
+ * </ul>
  */
 public final class LegacyByteBuffersDataInput extends DataInput implements Accountable, RandomAccessInput
 {

@@ -15,15 +15,6 @@
  * limitations under the License.
  */
 
-/*
- * This file was imported from the Apache Lucene project at commit b5bf70b7e32d7ddd9742cc821d471c5fabd4e3df,
- * tagged as releases/lucene-solr/7.5.0. The following modifications have been made to the original file:
- * - Renamed from ByteBuffersDataOutput to LegacyByteBuffersDataOutput.
- * - Return types modified accordingly.
- * - toDataInput now returns a LegacyByteBuffersDataInput to match encodings.
- * - writeShort/writeInt/writeLong now use added writeCrossBlock* implementations to avoid delegating to the
- *   superclass, which is little-endian.
- */
 package org.apache.cassandra.index.sai.disk.oldlucene;
 
 import java.io.IOException;
@@ -52,6 +43,14 @@ import org.apache.lucene.util.UnicodeUtil;
  * order, as produced by Lucene 7.5. Note that this participates in the type hierarchy of the modern Lucene
  * dependency, so it must carefully override DataOutput methods that would use the modern Lucene byte ordering of
  * little-endian.
+ * This file was imported from the Apache Lucene project at commit b5bf70b7e32d7ddd9742cc821d471c5fabd4e3df,
+ * tagged as releases/lucene-solr/7.5.0. The following modifications have been made to the original file:
+ * <ul>
+ * <li>Renamed from ByteBuffersDataOutput to LegacyByteBuffersDataOutput.</li>
+ * <li>Return types modified accordingly.</li>
+ * <li>toDataInput now returns a LegacyByteBuffersDataInput to match encodings.</li>
+ * <li>writeShort/writeInt/writeLong now use writeCrossBlock* implementations to avoid delegating to superclass.</li>
+ * </ul>
  */
 public final class LegacyByteBuffersDataOutput extends DataOutput implements Accountable
 {
