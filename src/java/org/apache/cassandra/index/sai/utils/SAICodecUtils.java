@@ -59,7 +59,7 @@ public class SAICodecUtils
     public static void writeHeader(DataOutput out) throws IOException
     {
         writeBEInt(out, CODEC_MAGIC);
-        out.writeString(Version.LATEST.toString());
+        out.writeString(Version.latest().toString());
     }
 
     public static int headerSize() {

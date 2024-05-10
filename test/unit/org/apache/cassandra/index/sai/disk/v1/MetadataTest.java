@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.io.util.File;
@@ -73,7 +74,7 @@ public class MetadataTest extends SaiRandomizedTest
                 String name = UUID.randomUUID().toString();
 
                 data.put(name, bytes);
-                try (MetadataWriter.Builder builder = writer.builder(name))
+                try (IndexOutput builder = writer.builder(name))
                 {
                     builder.writeBytes(bytes, 0, bytes.length);
                 }
@@ -173,7 +174,7 @@ public class MetadataTest extends SaiRandomizedTest
         {
             byte[] bytes = nextBytes(11, 1024);
 
-            try (MetadataWriter.Builder builder = writer.builder("name"))
+            try (IndexOutput builder = writer.builder("name"))
             {
                 builder.writeBytes(bytes, 0, bytes.length);
             }
