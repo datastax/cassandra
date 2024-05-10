@@ -223,16 +223,15 @@ public class CompactionGraph implements Closeable, Accountable
             var encoded = (ArrayByteSequence) compressor.encode(vector);
             pqVectorsList.add(encoded);
 
-            bytesUsed += RamEstimation.concurrentHashMapRamUsed(1); // the new posting Map entry
             bytesUsed += encoded.get().length;
-            bytesUsed += VectorPostings.emptyBytesUsed() + VectorPostings.bytesPerPosting();
+            bytesUsed += postings.ramBytesUsed();
             return new InsertionResult(bytesUsed, ordinal, vector);
         }
 
         // postings list already exists, just add the new key (if it's not already in the list)
         postingsOneToOne = false;
         if (postings.add(key))
-            bytesUsed += VectorPostings.bytesPerPosting();
+            bytesUsed += postings.bytesPerPosting();
         return new InsertionResult(bytesUsed);
     }
 
