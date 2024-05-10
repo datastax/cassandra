@@ -24,9 +24,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.function.IntUnaryOperator;
 
-import org.agrona.collections.IntArrayList;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -50,6 +50,8 @@ public class VectorPostingsWriter<T>
                               Set<Integer> deletedOrdinals) throws IOException
     {
         writeDeletedOrdinals(writer, deletedOrdinals);
+        // VSTODO if we're willing to write non-sequentially then we can save a lot of getVector and postingsMap.get calls,
+        // which are expensive when both are on-disk
         writeNodeOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
         writeRowIdToNodeOrdinalMapping(writer, vectorValues, postingsMap);
 
@@ -113,12 +115,13 @@ public class VectorPostingsWriter<T>
         List<Pair<Integer, Integer>> pairs = new ArrayList<>();
 
         // Collect all (rowId, vectorOrdinal) pairs
-        for (int i = 0; i < vectorValues.size(); i++) {
-            int ord = postingsMap.get(vectorValues.vectorValue(i)).getOrdinal();
-            assert ord == i;
+        for (var i = 0; i < vectorValues.size(); i++) {
+            // if it's an on-disk Map then this is an expensive assert, only do it when in memory
+            if (postingsMap instanceof ConcurrentSkipListMap)
+                assert postingsMap.get(vectorValues.getVector(i)).getOrdinal() == i;
 
-            ord = reverseOrdinalsMapper.applyAsInt(ord);
-            IntArrayList rowIds = postingsMap.get(vectorValues.vectorValue(ord)).getRowIds();
+            int ord = reverseOrdinalsMapper.applyAsInt(i);
+            var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
             for (int r = 0; r < rowIds.size(); r++)
                 pairs.add(Pair.create(rowIds.getInt(r), i));
         }
