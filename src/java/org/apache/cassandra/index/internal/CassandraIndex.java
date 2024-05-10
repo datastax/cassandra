@@ -57,6 +57,10 @@ import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Refs;
@@ -77,10 +81,15 @@ public abstract class CassandraIndex implements Index
     protected ColumnMetadata indexedColumn;
     protected CassandraIndexFunctions functions;
 
+    private final RequestTracker requestTracker;
+    private final Context sensorContext;
+
     protected CassandraIndex(ColumnFamilyStore baseCfs, IndexMetadata indexDef)
     {
         this.baseCfs = baseCfs;
         setMetadata(indexDef);
+        this.requestTracker = RequestTracker.instance;
+        this.sensorContext = Context.from(baseCfs.metadata());
     }
 
     /**
@@ -437,6 +446,14 @@ public abstract class CassandraIndex implements Index
                        cell,
                        LivenessInfo.withExpirationTime(cell.timestamp(), cell.ttl(), cell.localDeletionTime()),
                        ctx);
+
+                RequestSensors sensors = requestTracker.get();
+                if (sensors != null)
+                {
+                    sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
+                    // estimate the size of the index entry as the data size of the cell before indexing
+                    sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, cell.dataSize());
+                }
             }
 
             private void removeCells(Clustering<?> clustering, Iterable<Cell<?>> cells)
