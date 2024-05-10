@@ -73,6 +73,7 @@ import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -1449,6 +1450,7 @@ public abstract class CQLSSTableWriterTest
     {
         return new IndexContext(keyspace,
                                 table,
+                                TableId.generate(),
                                 UTF8Type.instance,
                                 new ClusteringComparator(),
                                 ColumnMetadata.regularColumn("sai", "internal", name, validator),
