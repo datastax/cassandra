@@ -49,7 +49,7 @@ public class RequestSensorsTest
         type1 = Type.READ_BYTES;
 
         context2 = new Context("ks2", "t2", "id2");
-        type2 = Type.SEARCH_BYTES;
+        type2 = Type.WRITE_BYTES;
 
         context1Sensors = new RequestSensors(() -> sensorsRegistry);
         context2Sensors = new RequestSensors(() -> sensorsRegistry);
