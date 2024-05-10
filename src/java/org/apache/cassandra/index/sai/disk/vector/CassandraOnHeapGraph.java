@@ -239,7 +239,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 postings.setOrdinal(ordinal);
                 bytesUsed += RamEstimation.concurrentHashMapRamUsed(1); // the new posting Map entry
                 bytesUsed += vectorValues.add(ordinal, vector);
-                bytesUsed += VectorPostings.emptyBytesUsed() + VectorPostings.bytesPerPosting();
+                bytesUsed += postings.ramBytesUsed();
                 postingsByOrdinal.put(ordinal, postings);
                 bytesUsed += builder.addGraphNode(ordinal, vector);
                 return bytesUsed;
@@ -252,7 +252,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // postings list already exists, just add the new key (if it's not already in the list)
         if (postings.add(key))
         {
-            bytesUsed += VectorPostings.bytesPerPosting();
+            bytesUsed += postings.bytesPerPosting();
         }
 
         return bytesUsed;
