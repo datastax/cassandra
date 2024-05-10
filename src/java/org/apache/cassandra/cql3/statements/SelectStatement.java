@@ -63,6 +63,7 @@ import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.WhereClause;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
+import org.apache.cassandra.db.guardrails.GuardrailsConfigProvider;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -993,7 +994,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // want to limit the number of rows returned to the user
             if (Guardrails.pageWeight.enabled(clientState))
             {
-                DataStorageSpec.IntBytesBound pageWeightFailThreshold = DatabaseDescriptor.getGuardrailsConfig().getPageWeightFailThreshold();
+                DataStorageSpec.IntBytesBound pageWeightFailThreshold = GuardrailsConfigProvider.instance.getOrCreate(clientState).getPageWeightFailThreshold();
                 int bytesLimit = pageWeightFailThreshold == null ? NO_LIMIT : pageWeightFailThreshold.toBytes();
                 String limitStr = USAGE_WARNING_PAGE_WEIGHT + FBUtilities.prettyPrintMemory(bytesLimit);
                 ClientWarn.instance.warn(limitStr);
