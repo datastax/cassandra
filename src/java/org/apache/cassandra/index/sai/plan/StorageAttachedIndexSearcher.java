@@ -29,6 +29,7 @@ import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
 
 import org.slf4j.Logger;
@@ -408,6 +409,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             // partition key and clustering for equality. This can break lastKey skipping, which is necessary for
             // correctness when PrimaryKey doesn't have a clustering (as otherwise, the same partition may get
             // filtered and considered as a result multiple times).
+            // we need a non-null partitionKey here, as we want to construct a SinglePartitionReadCommand
+            Preconditions.checkNotNull(key.partitionKey(), "Partition key must not be null");
             if (lastKey != null && key.partitionKey().equals(lastKey.partitionKey()) && key.clustering().equals(lastKey.clustering()))
                 return null;
             lastKey = key;
