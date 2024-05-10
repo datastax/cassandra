@@ -72,7 +72,7 @@ public class SensorsRegistryTest
         type1 = Type.READ_BYTES;
 
         context2 = new Context(KEYSPACE, CF2, Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2).metadata().id.toString());
-        type2 = Type.SEARCH_BYTES;
+        type2 = Type.INDEX_WRITE_BYTES;
     }
 
     @After
