@@ -175,7 +175,8 @@ public class V1OnDiskFormat implements OnDiskFormat
     public PerIndexWriter newPerIndexWriter(StorageAttachedIndex index,
                                             IndexDescriptor indexDescriptor,
                                             LifecycleNewTracker tracker,
-                                            RowMapping rowMapping, long keyCount)
+                                            RowMapping rowMapping,
+                                            long keyCount)
     {
         // If we're not flushing or we haven't yet started the initialization build, flush from SSTable contents.
         if (tracker.opType() != OperationType.FLUSH || !index.canFlushFromMemtableIndex())
