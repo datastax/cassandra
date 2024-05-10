@@ -172,7 +172,7 @@ public class KDTreeIndexBuilder
             when(sstableContext.primaryKeyMapFactory()).thenReturn(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY);
             when(sstableContext.indexDescriptor()).thenReturn(indexDescriptor);
 
-            IndexSearcher searcher = Version.LATEST.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
+            IndexSearcher searcher = Version.latest().onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
             assertThat(searcher, is(instanceOf(KDTreeIndexSearcher.class)));
             return (KDTreeIndexSearcher) searcher;
         }
