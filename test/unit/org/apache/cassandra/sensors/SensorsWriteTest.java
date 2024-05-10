@@ -29,12 +29,16 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.CounterMutation;
+import org.apache.cassandra.db.CounterMutationVerbHandler;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.MutationVerbHandler;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -47,11 +51,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 public class SensorsWriteTest
 {
-    public static final String KEYSPACE1 = "SensorsWriteTest";
-    public static final String CF_STANDARD = "Standard";
-    public static final String CF_STANDARD2 = "Standard2";
-    public static final String CF_STANDARD_CLUSTERING = "StandardClustering";
-
+    private static final String KEYSPACE1 = "SensorsWriteTest";
+    private static final String CF_STANDARD = "Standard";
+    private static final String CF_STANDARD2 = "Standard2";
+    private static final String CF_STANDARD_CLUSTERING = "StandardClustering";
+    private static final String CF_COUTNER = "Counter";
 
     private ColumnFamilyStore store;
     private CopyOnWriteArrayList<Message> capturedOutboundMessages;
@@ -67,7 +71,8 @@ public class SensorsWriteTest
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD2,
                                                               1, AsciiType.instance, AsciiType.instance, null),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD_CLUSTERING,
-                                                              1, AsciiType.instance, AsciiType.instance, AsciiType.instance));
+                                                              1, AsciiType.instance, AsciiType.instance, AsciiType.instance),
+                                    SchemaLoader.counterCFMD(KEYSPACE1, CF_COUTNER));
 
         CompactionManager.instance.disableAutoCompaction();
     }
@@ -79,6 +84,7 @@ public class SensorsWriteTest
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).metadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).metadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_CLUSTERING).metadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER).metadata());
 
         capturedOutboundMessages = new CopyOnWriteArrayList<>();
         MessagingService.instance().outboundSink.add((message, to) ->
@@ -92,7 +98,9 @@ public class SensorsWriteTest
     public void afterTest()
     {
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).truncateBlocking();
+        Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_CLUSTERING).truncateBlocking();
+        Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER).truncateBlocking();
 
         RequestTracker.instance.set(null);
         SensorsRegistry.instance.clear();
@@ -243,9 +251,37 @@ public class SensorsWriteTest
         assertResponseSensors(localSensor2.getValue(), registrySensor2.getValue(), CF_STANDARD2);
     }
 
+    @Test
+    public void testSingleCounterMutation() throws WriteTimeoutException
+    {
+        store = SensorsTestUtil.discardSSTables(KEYSPACE1, CF_COUTNER);
+        Context context = new Context(KEYSPACE1, CF_COUTNER, store.metadata.id.toString());
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER);
+        cfs.truncateBlocking();
+
+        Mutation mutation = new RowUpdateBuilder(cfs.metadata(), 5, "key1")
+                            .clustering("cc")
+                            .add("val", 1L).build();
+
+        // Use consistency level ANY to disable the live replicas assertion as we don't have any replica in the unit test
+        CounterMutation counterMutation = new CounterMutation(mutation, ConsistencyLevel.ANY);
+        handleCounterMutation(counterMutation);
+
+        Sensor localSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.WRITE_BYTES);
+        assertThat(localSensor.getValue()).isGreaterThan(0);
+        Sensor registrySensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
+        assertThat(registrySensor).isEqualTo(localSensor);
+        assertResponseSensors(localSensor.getValue(), registrySensor.getValue(), CF_COUTNER);
+    }
+
     private static void handleMutation(Mutation mutation)
     {
         MutationVerbHandler.instance.doVerb(Message.builder(Verb.MUTATION_REQ, mutation).build());
+    }
+
+    private static void handleCounterMutation(CounterMutation mutation)
+    {
+        CounterMutationVerbHandler.instance.doVerb(Message.builder(Verb.COUNTER_MUTATION_REQ, mutation).build());
     }
 
     private void assertResponseSensors(double requestValue, double registryValue, String table)
