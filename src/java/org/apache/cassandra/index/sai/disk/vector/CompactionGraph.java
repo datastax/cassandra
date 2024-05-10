@@ -317,11 +317,6 @@ public class CompactionGraph implements Closeable, Accountable
         return pqVectors.ramBytesUsed() + builder.getGraph().ramBytesUsed();
     }
 
-    private long exactRamBytesUsed()
-    {
-        return ObjectSizes.measureDeep(this);
-    }
-
     public boolean requiresFlush()
     {
         return nextOrdinal >= entriesAllocated;
