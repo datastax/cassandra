@@ -108,7 +108,6 @@ import org.apache.cassandra.config.Config.PaxosStatePurging;
 import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.DurationSpec;
-import org.apache.cassandra.config.GuardrailsOptions;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -121,6 +120,8 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.guardrails.Guardrails;
+import org.apache.cassandra.db.guardrails.GuardrailsConfig;
+import org.apache.cassandra.db.guardrails.GuardrailsConfigProvider;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.dht.BootStrapper;
@@ -6506,24 +6507,24 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int getTombstoneWarnThreshold()
     {
-        return DatabaseDescriptor.getGuardrailsConfig().getTombstoneWarnThreshold();
+        return GuardrailsConfigProvider.instance.getOrCreate(null).getTombstoneWarnThreshold();
     }
 
     public void setTombstoneWarnThreshold(int threshold)
     {
-        GuardrailsOptions guardrailsConfig = DatabaseDescriptor.getGuardrailsConfig();
+        GuardrailsConfig guardrailsConfig = GuardrailsConfigProvider.instance.getOrCreate(null);
         guardrailsConfig.setTombstonesThreshold(threshold, guardrailsConfig.getTombstoneFailThreshold());
         logger.info("updated tombstone_warn_threshold to {}", threshold);
     }
 
     public int getTombstoneFailureThreshold()
     {
-        return DatabaseDescriptor.getGuardrailsConfig().getTombstoneFailThreshold();
+        return GuardrailsConfigProvider.instance.getOrCreate(null).getTombstoneFailThreshold();
     }
 
     public void setTombstoneFailureThreshold(int threshold)
     {
-        GuardrailsOptions guardrailsConfig = DatabaseDescriptor.getGuardrailsConfig();
+        GuardrailsConfig guardrailsConfig = GuardrailsConfigProvider.instance.getOrCreate(null);
         guardrailsConfig.setTombstonesThreshold(guardrailsConfig.getTombstoneWarnThreshold(), threshold);
         logger.info("updated tombstone_failure_threshold to {}", threshold);
     }
