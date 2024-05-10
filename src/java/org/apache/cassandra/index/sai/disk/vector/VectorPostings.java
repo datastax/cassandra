@@ -125,7 +125,7 @@ public class VectorPostings<T>
     // we can't do this exactly without reflection, because keys could be Integer or PrimaryKey.
     // PK is larger, so we'll take that and return an upper bound.
     // we already count the float[] vector in vectorValues, so leave it out here
-    public static long bytesPerPosting()
+    public long bytesPerPosting()
     {
         long REF_BYTES = RamUsageEstimator.NUM_BYTES_OBJECT_REF;
         return REF_BYTES
@@ -180,6 +180,14 @@ public class VectorPostings<T>
             for (var i : postings)
                 L.addInt(i);
             return L;
+        }
+
+        // CVP always contains int keys, so we don't have to be pessimistic on size like super does
+        @Override
+        public long bytesPerPosting()
+        {
+            long REF_BYTES = RamUsageEstimator.NUM_BYTES_OBJECT_REF;
+            return REF_BYTES + Integer.BYTES;
         }
     }
 
