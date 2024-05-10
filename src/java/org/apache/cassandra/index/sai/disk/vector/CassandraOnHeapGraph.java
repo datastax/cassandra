@@ -153,7 +153,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                                         similarityFunction,
                                         indexConfig.getAnnMaxDegree(),
                                         indexConfig.getConstructionBeamWidth(),
-                                        1.2f,
+                                        1.0f, // no overflow means add will be a bit slower but flush will be faster
                                         dimension > 3 ? 1.2f : 2.0f);
         searchers = ThreadLocal.withInitial(() -> new GraphSearcher(builder.getGraph()));
     }
