@@ -78,7 +78,8 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     protected static final AtomicIntegerFieldUpdater<AbstractWriteResponseHandler> failuresUpdater =
         AtomicIntegerFieldUpdater.newUpdater(AbstractWriteResponseHandler.class, "failures");
     private volatile int failures = 0;
-    private final Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint;
+    // Used by CNDB
+    protected final Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint;
     private final long queryStartNanoTime;
     private @Nullable final Supplier<Mutation> hintOnFailure;
 
@@ -185,6 +186,12 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     public long queryStartNanoTime()
     {
         return queryStartNanoTime;
+    }
+    
+    // Used by CNDB
+    public Supplier<Mutation> hintOnFailure()
+    {
+        return hintOnFailure;
     }
 
     /**
