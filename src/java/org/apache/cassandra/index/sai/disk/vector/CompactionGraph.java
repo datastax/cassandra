@@ -141,7 +141,7 @@ public class CompactionGraph implements Closeable, Accountable
                                         dimension,
                                         indexConfig.getAnnMaxDegree(),
                                         indexConfig.getConstructionBeamWidth(),
-                                        1.2f,
+                                        1.5f,
                                         dimension > 3 ? 1.2f : 1.4f,
                                         PhysicalCoreExecutor.pool(), ForkJoinPool.commonPool());
 
