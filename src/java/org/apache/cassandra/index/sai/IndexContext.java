@@ -89,6 +89,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -129,6 +130,7 @@ public class IndexContext
 
     private final String keyspace;
     private final String table;
+    private final TableId tableId;
     private final ColumnMetadata column;
     private final IndexTarget.Type indexType;
     private final AbstractType<?> validator;
@@ -154,6 +156,7 @@ public class IndexContext
 
     public IndexContext(@Nonnull String keyspace,
                         @Nonnull String table,
+                        @Nonnull TableId tableId,
                         @Nonnull AbstractType<?> partitionKeyType,
                         @Nonnull ClusteringComparator clusteringComparator,
                         @Nonnull ColumnMetadata column,
@@ -163,6 +166,7 @@ public class IndexContext
     {
         this.keyspace = keyspace;
         this.table = table;
+        this.tableId = tableId;
         this.partitionKeyType = partitionKeyType;
         this.clusteringComparator = clusteringComparator;
         this.column = column;
@@ -241,6 +245,11 @@ public class IndexContext
     public String getTable()
     {
         return table;
+    }
+
+    public TableId getTableId()
+    {
+        return tableId;
     }
 
     public Memtable.Owner owner()

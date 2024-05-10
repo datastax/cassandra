@@ -243,6 +243,7 @@ public class StorageAttachedIndex implements Index
         Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, config);
         this.indexContext = new IndexContext(tableMetadata.keyspace,
                                              tableMetadata.name,
+                                             tableMetadata.id,
                                              tableMetadata.partitionKeyType,
                                              tableMetadata.comparator,
                                              target.left,

@@ -84,15 +84,28 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         }
 
         Tracing.trace("Enqueuing response to {}", message.from());
-
-        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(context, Type.READ_BYTES);
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
-        readRequestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_REQUEST, bytes));
-
-        Optional<Sensor> readTableSensor = SensorsRegistry.instance.getSensor(Context.from(command), Type.READ_BYTES);
-        readTableSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.READ_BYTES_TABLE, bytes));
-
+        addReadBytesSensorToResponse(reply, context);
         MessagingService.instance().send(reply.build(), message.from());
+    }
+
+    private void addReadBytesSensorToResponse(Message.Builder<ReadResponse> reply, Context context)
+    {
+        addSensorDataToResponse(reply, context, Type.READ_BYTES, SensorsCustomParams.READ_BYTES_REQUEST, SensorsCustomParams.READ_BYTES_TABLE);
+    }
+
+    /**
+     * TODO: Refactor on the basis of https://github.com/datastax/cassandra/pull/1074/files#diff-2d48c168d5192fe4989baf96618533f271cafab1db3f212f6a0ff1b3dff3d606R88-R124 once CNDB-8772 is merged.
+     */
+    private void addSensorDataToResponse(Message.Builder<ReadResponse> reply, Context context, Type type, String requestBytesParam, String tableBytesParam)
+    {
+        Optional<Sensor> readRequestSensor = RequestTracker.instance.get().getSensor(context, type);
+        readRequestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue()))
+                         .ifPresent(bytes -> reply.withCustomParam(requestBytesParam, bytes));
+
+        Optional<Sensor> readTableSensor = SensorsRegistry.instance.getSensor(context, type);
+        readTableSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue()))
+                       .ifPresent(bytes -> reply.withCustomParam(tableBytesParam, bytes));
     }
 
     private void validateTransientStatus(Message<ReadCommand> message)

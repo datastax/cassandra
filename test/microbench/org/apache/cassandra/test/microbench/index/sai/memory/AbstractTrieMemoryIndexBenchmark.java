@@ -104,6 +104,7 @@ public abstract class AbstractTrieMemoryIndexBenchmark
         Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(table, stringMetadata);
         stringContext = new IndexContext(table.keyspace,
                                          table.name,
+                                         table.id,
                                          table.partitionKeyType,
                                          table.comparator,
                                          target.left,
@@ -114,6 +115,7 @@ public abstract class AbstractTrieMemoryIndexBenchmark
         IndexMetadata integerMetadata = IndexMetadata.fromSchemaMetadata(INTEGER_INDEX, IndexMetadata.Kind.CUSTOM, integerOptions);
         integerContext = new IndexContext(table.keyspace,
                                           table.name,
+                                          table.id,
                                           table.partitionKeyType,
                                           table.comparator,
                                           target.left,
