@@ -22,9 +22,9 @@ import java.io.IOException;
 
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.lucene.store.IndexOutput;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_NUMERIC_VALUES_BLOCK_SIZE;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_NUMERIC_VALUES_MONOTONIC_BLOCK_SIZE;

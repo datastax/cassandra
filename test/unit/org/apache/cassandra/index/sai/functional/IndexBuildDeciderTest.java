@@ -147,8 +147,8 @@ public class IndexBuildDeciderTest extends SAITester
 
     private int indexFileCount(IndexContext context)
     {
-        return Version.LATEST.onDiskFormat().perIndexComponents(context).size()
-               + Version.LATEST.onDiskFormat().perSSTableComponents().size();
+        return Version.latest().onDiskFormat().perIndexComponents(context).size()
+               + Version.latest().onDiskFormat().perSSTableComponents().size();
     }
 
     public static class IndexBuildDeciderWithoutInitialBuild implements IndexBuildDecider

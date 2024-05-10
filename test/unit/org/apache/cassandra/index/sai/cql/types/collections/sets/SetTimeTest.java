@@ -26,19 +26,20 @@ import org.junit.runners.Parameterized;
 import org.apache.cassandra.index.sai.cql.types.DataSet;
 import org.apache.cassandra.index.sai.cql.types.IndexingTypeSupport;
 import org.apache.cassandra.index.sai.cql.types.collections.CollectionDataSet;
+import org.apache.cassandra.index.sai.disk.format.Version;
 
 @RunWith(Parameterized.class)
 public class SetTimeTest extends IndexingTypeSupport
 {
-    @Parameterized.Parameters(name = "dataset={0},wide={1},scenario={2}")
+    @Parameterized.Parameters(name = "version={0},dataset={1},wide={2},scenario={3}")
     public static Collection<Object[]> generateParameters()
     {
         return generateParameters(new CollectionDataSet.SetDataSet<>(new DataSet.TimeDataSet()));
     }
 
-    public SetTimeTest(DataSet<?> dataset, boolean widePartitions, Scenario scenario)
+    public SetTimeTest(Version version, DataSet<?> dataset, boolean widePartitions, Scenario scenario)
     {
-        super(dataset, widePartitions, scenario);
+        super(version, dataset, widePartitions, scenario);
     }
 
     @Test
