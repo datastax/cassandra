@@ -75,14 +75,14 @@ public class SingleNodeQueryFailureTest extends SAITester
     @Test
     public void testFailedKeyFetcherOnMultiIndexesQuery() throws Throwable
     {
-        assumeTrue(Version.LATEST == Version.AA);
+        assumeTrue(Version.latest() == Version.AA);
         testFailedMultiIndexesQuery("key_fetcher", IKeyFetcher.class, "apply");
     }
 
     @Test
     public void testFailedKeyReaderOnMultiIndexesQuery() throws Throwable
     {
-        assumeTrue(Version.LATEST == Version.AA);
+        assumeTrue(Version.latest() == Version.AA);
         testFailedMultiIndexesQuery("key_reader", IKeyFetcher.class, "createReader");
     }
 

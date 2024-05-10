@@ -50,8 +50,9 @@ public class Version
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;
     // The latest version can be configured to be an earlier version to support partial upgrades that don't
-    // write newer versions of the on-disk formats.
-    public static final Version LATEST = parse(CassandraRelevantProperties.SAI_LATEST_VERSION.getString());
+    // write newer versions of the on-disk formats. This is volatile rather than final so that tests may
+    // use reflection to change it and safely publish across threads.
+    private static volatile Version LATEST = parse(CassandraRelevantProperties.SAI_LATEST_VERSION.getString());
 
     private final String version;
     private final OnDiskFormat onDiskFormat;
@@ -73,6 +74,11 @@ public class Version
                 return v;
         }
         throw new IllegalArgumentException("Unrecognized SAI version string " + input);
+    }
+
+    public static Version latest()
+    {
+        return LATEST;
     }
 
     @Override
