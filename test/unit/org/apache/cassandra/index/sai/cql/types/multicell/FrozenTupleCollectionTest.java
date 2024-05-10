@@ -27,11 +27,12 @@ import org.junit.runners.Parameterized;
 import org.apache.cassandra.index.sai.cql.types.DataSet;
 import org.apache.cassandra.index.sai.cql.types.IndexingTypeSupport;
 import org.apache.cassandra.index.sai.cql.types.collections.CollectionDataSet;
+import org.apache.cassandra.index.sai.disk.format.Version;
 
 @RunWith(Parameterized.class)
 public class FrozenTupleCollectionTest extends IndexingTypeSupport
 {
-    @Parameterized.Parameters(name = "dataset={0},wide={1},scenario={2}")
+    @Parameterized.Parameters(name = "version={0},dataset={1},wide={2},scenario={3}")
     public static Collection<Object[]> generateParameters()
     {
         return generateParameters(new FrozenTupleDataSet(
@@ -41,9 +42,9 @@ public class FrozenTupleCollectionTest extends IndexingTypeSupport
         ));
     }
 
-    public FrozenTupleCollectionTest(DataSet<?> dataset, boolean widePartitions, IndexingTypeSupport.Scenario scenario)
+    public FrozenTupleCollectionTest(Version version, DataSet<?> dataset, boolean widePartitions, Scenario scenario)
     {
-        super(dataset, widePartitions, scenario);
+        super(version, dataset, widePartitions, scenario);
     }
 
     @Test

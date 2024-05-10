@@ -18,10 +18,12 @@
 package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.IOException;
+import java.nio.ByteOrder;
 
+import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdapter;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.util.LongValues;
-import org.apache.lucene.util.packed.DirectWriter;
 
 public class LeafOrderMap
 {
@@ -30,10 +32,10 @@ public class LeafOrderMap
         return Math.toIntExact(reader.get(index));
     }
 
-    public static void write(final int[] array, int length, int maxValue, final DataOutput out) throws IOException
+    public static void write(ByteOrder order, final int[] array, int length, int maxValue, final DataOutput out) throws IOException
     {
-        final int bits = DirectWriter.unsignedBitsRequired(maxValue);
-        final DirectWriter writer = DirectWriter.getInstance(out, length, bits);
+        final int bits = LuceneCompat.directWriterUnsignedBitsRequired(order, maxValue);
+        final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(order, out, length, bits);
         for (int i = 0; i < length; i++)
         {
             assert array[i] <= maxValue;
