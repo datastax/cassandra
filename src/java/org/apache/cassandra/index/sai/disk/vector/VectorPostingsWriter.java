@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.function.IntUnaryOperator;
 
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
@@ -49,6 +50,8 @@ public class VectorPostingsWriter<T>
                               Set<Integer> deletedOrdinals) throws IOException
     {
         writeDeletedOrdinals(writer, deletedOrdinals);
+        // VSTODO if we're willing to write non-sequentially then we can save a lot of getVector and postingsMap.get calls,
+        // which are expensive when both are on-disk
         writeNodeOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
         writeRowIdToNodeOrdinalMapping(writer, vectorValues, postingsMap);
 
@@ -113,10 +116,11 @@ public class VectorPostingsWriter<T>
 
         // Collect all (rowId, vectorOrdinal) pairs
         for (var i = 0; i < vectorValues.size(); i++) {
-            int ord = postingsMap.get(vectorValues.getVector(i)).getOrdinal();
-            assert ord == i;
+            // if it's an on-disk Map then this is an expensive assert, only do it when in memory
+            if (postingsMap instanceof ConcurrentSkipListMap)
+                assert postingsMap.get(vectorValues.getVector(i)).getOrdinal() == i;
 
-            ord = reverseOrdinalsMapper.applyAsInt(ord);
+            int ord = reverseOrdinalsMapper.applyAsInt(i);
             var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
             for (int r = 0; r < rowIds.size(); r++)
                 pairs.add(Pair.create(rowIds.getInt(r), i));
