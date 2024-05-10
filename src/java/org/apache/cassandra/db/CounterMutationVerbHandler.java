@@ -23,7 +23,8 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.transport.Dispatcher;
 
@@ -39,6 +40,10 @@ public class CounterMutationVerbHandler extends AbstractMutationVerbHandler<Coun
         final CounterMutation cm = message.payload;
         logger.trace("Applying forwarded {}", cm);
 
+        // Initialize the sensor and set ExecutorLocals
+        RequestSensors requestSensors = new RequestSensors();
+        RequestTracker.instance.set(requestSensors);
+
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
         // We should not wait for the result of the write in this thread,
         // otherwise we could have a distributed deadlock between replicas
@@ -49,7 +54,7 @@ public class CounterMutationVerbHandler extends AbstractMutationVerbHandler<Coun
         // it's own in that case.
         StorageProxy.applyCounterMutationOnLeader(cm,
                                                   localDataCenter,
-                                                  () -> MessagingService.instance().send(message.emptyResponse(), respondToAddress),
+                                                  new CounterMutationCallback(message, message.from(), requestSensors),
                                                   Dispatcher.RequestTime.forImmediateExecution());
     }
 }
