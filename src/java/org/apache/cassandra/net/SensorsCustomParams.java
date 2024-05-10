@@ -80,6 +80,14 @@ public final class SensorsCustomParams
         return buffer.array();
     }
 
+    public static double sensorValueFromBytes(byte[] bytes)
+    {
+        ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);
+        buffer.put(bytes);
+        buffer.flip();
+        return buffer.getDouble();
+    }
+
     public static String encodeTableInWriteBytesRequestParam(String tableName)
     {
         return String.format(WRITE_BYTES_REQUEST_TEMPLATE, tableName);
