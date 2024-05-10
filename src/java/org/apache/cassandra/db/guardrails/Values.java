@@ -25,6 +25,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.service.ClientState;
@@ -127,5 +128,29 @@ public class Values<T> extends Guardrail
         if (!toWarn.isEmpty())
             warn(format("Provided values %s are not recommended for %s (warned values are: %s)",
                         toWarn.stream().sorted().collect(Collectors.toList()), what, warned));
+    }
+    
+    // Used by CNDB
+    @VisibleForTesting
+    public Set<T> disallowedValues(Set<T> values, ClientState state)
+    {
+        Set<T> disallowed = disallowedValues.apply(state);
+        return Sets.intersection(values, disallowed);
+    }
+
+    // Used by CNDB
+    @VisibleForTesting
+    public Set<T> ignoredValues(Set<T> values, ClientState state)
+    {
+        Set<T> ignored = ignoredValues.apply(state);
+        return Sets.intersection(values, ignored);
+    }
+
+    // Used by CNDB
+    @VisibleForTesting
+    public Set<T> warnedValues(Set<T> values, ClientState state)
+    {
+        Set<T> warned = warnedValues.apply(state);
+        return Sets.intersection(values, warned);
     }
 }
