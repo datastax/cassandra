@@ -173,7 +173,7 @@ public class IndexContext
         this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
                                               : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
 
-        this.primaryKeyFactory = Version.LATEST.onDiskFormat().primaryKeyFactory(clusteringComparator);
+        this.primaryKeyFactory = Version.latest().onDiskFormat().primaryKeyFactory(clusteringComparator);
 
         if (config != null)
         {
@@ -575,7 +575,7 @@ public class IndexContext
      */
     public int openPerIndexFiles()
     {
-        return viewManager.getView().size() * Version.LATEST.onDiskFormat().openFilesPerIndex(this);
+        return viewManager.getView().size() * Version.latest().onDiskFormat().openFilesPerIndex(this);
     }
 
     public void drop(Collection<SSTableReader> sstablesToRebuild)

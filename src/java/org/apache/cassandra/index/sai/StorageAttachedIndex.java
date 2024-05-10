@@ -99,6 +99,7 @@ import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -810,10 +811,11 @@ public class StorageAttachedIndex implements Index
     @Override
     public Set<Component> getComponents()
     {
-        return Version.LATEST.onDiskFormat()
+        return Version.latest().onDiskFormat()
                              .perIndexComponents(indexContext)
                              .stream()
-                             .map(c -> c.type.createComponent(Version.LATEST.fileNameFormatter().format(c, indexContext)))
+                             .map(c -> new Component(SSTableFormat.Components.Types.CUSTOM,
+                                                     Version.latest().fileNameFormatter().format(c, indexContext)))
                              .collect(Collectors.toSet());
 
     }

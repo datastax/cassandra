@@ -545,7 +545,7 @@ public enum CassandraRelevantProperties
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection_clause_limit", "2"),
 
     /** Latest version to be used for SAI index writing */
-    SAI_LATEST_VERSION("cassandra.sai.latest_version", "ba"),
+    SAI_LATEST_VERSION("cassandra.sai.latest_version", "ca"),
 
     SAI_MAX_ANALYZED_SIZE("cassandra.sai.max_analyzed_size_kb", "8"),
     SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "8"),
