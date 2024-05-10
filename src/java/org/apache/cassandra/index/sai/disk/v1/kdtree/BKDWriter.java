@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -27,15 +28,16 @@ import java.util.function.IntFunction;
 
 import com.google.common.base.MoreObjects;
 
-import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.io.CryptoUtils;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.ByteBuffersDataOutputAdapter;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
+import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointValues;
 import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointsReaderUtils;
-import org.apache.lucene.store.ByteBuffersDataOutput;
 import org.apache.lucene.store.DataOutput;
-import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
@@ -123,18 +125,24 @@ public class BKDWriter implements Closeable
     private final long maxDoc;
 
     private final ICompressor compressor;
+    private final ByteOrder order;
+
+    // reused when writing leaf blocks
+    private final ByteBuffersDataOutputAdapter scratchOut;
+    private final ByteBuffersDataOutputAdapter scratchOut2;
 
     public BKDWriter(long maxDoc, int numDims, int bytesPerDim,
             int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount, boolean singleValuePerDoc,
-            ICompressor compressor) throws IOException
+            ICompressor compressor, ByteOrder order) throws IOException
     {
         this(maxDoc, numDims, bytesPerDim, maxPointsInLeafNode, maxMBSortInHeap, totalPointCount, singleValuePerDoc,
-             totalPointCount > Integer.MAX_VALUE, compressor);
+             totalPointCount > Integer.MAX_VALUE, compressor, order);
     }
 
     protected BKDWriter(long maxDoc, int numDims, int bytesPerDim,
                         int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount,
-                        boolean singleValuePerDoc, boolean longOrds, ICompressor compressor) throws IOException
+                        boolean singleValuePerDoc, boolean longOrds, ICompressor compressor,
+                        ByteOrder order) throws IOException
     {
         verifyParams(numDims, maxPointsInLeafNode, maxMBSortInHeap, totalPointCount);
         // We use tracking dir to deal with removing files on exception, so each place that
@@ -145,6 +153,7 @@ public class BKDWriter implements Closeable
         this.totalPointCount = totalPointCount;
         this.maxDoc = maxDoc;
         this.compressor = compressor;
+        this.order = order;
         docsSeen = new LongBitSet(maxDoc);
         packedBytesLength = numDims * bytesPerDim;
 
@@ -188,6 +197,9 @@ public class BKDWriter implements Closeable
         {
             throw new IllegalArgumentException("maxMBSortInHeap=" + maxMBSortInHeap + " only allows for maxPointsSortInHeap=" + maxPointsSortInHeap + ", but this is less than maxPointsInLeafNode=" + maxPointsInLeafNode + "; either increase maxMBSortInHeap or decrease maxPointsInLeafNode");
         }
+
+        scratchOut = LuceneCompat.getByteBuffersDataOutputAdapter(order, 32 * 1024);
+        scratchOut2 = LuceneCompat.getByteBuffersDataOutputAdapter(order, 2 * 1024);
     }
 
     public static void verifyParams(int numDims, int maxPointsInLeafNode, double maxMBSortInHeap, long totalPointCount)
@@ -259,11 +271,6 @@ public class BKDWriter implements Closeable
 
         return oneDimWriter.finish();
     }
-
-    // reused when writing leaf blocks
-    private final ByteBuffersDataOutput scratchOut = new ByteBuffersDataOutput(32 * 1024);
-
-    private final ByteBuffersDataOutput scratchOut2 = new ByteBuffersDataOutput(2 * 1024);
 
     interface OneDimensionBKDWriterCallback
     {
@@ -466,7 +473,7 @@ public class BKDWriter implements Closeable
                 orderIndex[valueOrderIndex] = x;
             }
 
-            LeafOrderMap.write(orderIndex, leafCount, maxPointsInLeafNode - 1, scratchOut2);
+            LeafOrderMap.write(order, orderIndex, leafCount, maxPointsInLeafNode - 1, scratchOut2);
 
             int scratchSize = Math.toIntExact(scratchOut2.size());
             out.writeVInt(scratchSize);
@@ -622,7 +629,7 @@ public class BKDWriter implements Closeable
         }
 
         // Reused while packing the index
-        var writeBuffer = new ResettableByteBuffersIndexOutput(1024, "");
+        var writeBuffer = LuceneCompat.getResettableByteBuffersIndexOutput(order, 1024, "");
 
         // This is the "file" we append the byte[] to:
         List<byte[]> blocks = new ArrayList<>();
@@ -836,7 +843,7 @@ public class BKDWriter implements Closeable
 
         if (compressor != null)
         {
-            var ramOut = new ResettableByteBuffersIndexOutput(1024, "");
+            var ramOut = LuceneCompat.getResettableByteBuffersIndexOutput(order, 1024, "");
             ramOut.writeBytes(minPackedValue, 0, packedBytesLength);
             ramOut.writeBytes(maxPackedValue, 0, packedBytesLength);
 
