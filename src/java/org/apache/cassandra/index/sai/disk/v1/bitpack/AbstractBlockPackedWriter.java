@@ -19,8 +19,10 @@ package org.apache.cassandra.index.sai.disk.v1.bitpack;
 
 import java.io.IOException;
 
-import org.apache.cassandra.index.sai.disk.ResettableByteBuffersIndexOutput;
-import org.apache.lucene.store.IndexOutput;
+import org.apache.cassandra.index.sai.disk.io.IndexOutput;
+import org.apache.cassandra.index.sai.disk.oldlucene.DirectWriterAdapter;
+import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
+import org.apache.cassandra.index.sai.disk.oldlucene.ResettableByteBuffersIndexOutput;
 import org.apache.lucene.util.packed.DirectWriter;
 
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.checkBlockSize;
@@ -47,7 +49,7 @@ public abstract class AbstractBlockPackedWriter
     {
         checkBlockSize(blockSize, MIN_BLOCK_SIZE, MAX_BLOCK_SIZE);
         this.out = out;
-        this.blockMetaWriter = new ResettableByteBuffersIndexOutput(blockSize, "NumericValuesMeta");
+        this.blockMetaWriter = LuceneCompat.getResettableByteBuffersIndexOutput(out.order(), 1024, "NumericValuesMeta");
         values = new long[blockSize];
     }
 
@@ -96,7 +98,7 @@ public abstract class AbstractBlockPackedWriter
 
     void writeValues(int numValues, int bitsPerValue) throws IOException
     {
-        final DirectWriter writer = DirectWriter.getInstance(out, numValues, bitsPerValue);
+        final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(out.order(), out, numValues, bitsPerValue);
         for (int i = 0; i < numValues; ++i)
         {
             writer.add(values[i]);
