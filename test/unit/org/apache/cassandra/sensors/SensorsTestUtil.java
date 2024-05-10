@@ -50,7 +50,7 @@ public final class SensorsTestUtil
      * Returns the sensor registered in the thread local {@link RequestSensors}
      * @return the thread local read sensor
      */
-    static Sensor getThreadLocalRequestSensor(Context context, Type type)
+    public static Sensor getThreadLocalRequestSensor(Context context, Type type)
     {
         return RequestTracker.instance.get().getSensor(context, type).get();
     }
