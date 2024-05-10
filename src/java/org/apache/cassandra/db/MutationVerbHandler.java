@@ -17,8 +17,9 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Collection;
 import java.util.Optional;
-import java.util.Set;
+import java.util.function.Function;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
@@ -45,24 +46,43 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
     {
         Tracing.trace("Enqueuing response to {}", respondToAddress);
 
-        Set<Sensor> writeRequestSensors = RequestTracker.instance.get().getSensors(Type.WRITE_BYTES);
         Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
-        for (Sensor requestSensor : writeRequestSensors)
+        addSensorsToResponse(response);
+
+        MessagingService.instance().send(response.build(), respondToAddress);
+    }
+
+    private void addSensorsToResponse(Message.Builder<NoPayload> response)
+    {
+        // Add write bytes sensors to the response
+        Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
+        Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteBytesTableParam;
+        Collection<Sensor> sensors = RequestTracker.instance.get().getSensors(Type.WRITE_BYTES);
+        addSensorsToResponse(sensors, requestParam, tableParam, response);
+
+        // Add index write bytes sensors to the response
+        requestParam = SensorsCustomParams::encodeTableInIndexWriteBytesRequestParam;
+        tableParam = SensorsCustomParams::encodeTableInIndexWriteBytesTableParam;
+        sensors = RequestTracker.instance.get().getSensors(Type.INDEX_WRITE_BYTES);
+        addSensorsToResponse(sensors, requestParam, tableParam, response);
+    }
+
+    private void addSensorsToResponse(Collection<Sensor> sensors, Function<String, String> requestParamSupplier, Function<String, String> tableParamSupplier, Message.Builder<NoPayload> response)
+    {
+        for (Sensor requestSensor : sensors)
         {
-            String requestBytesParam = SensorsCustomParams.encodeTableInWriteByteRequestParam(requestSensor.getContext().getTable());
+            String requestBytesParam = requestParamSupplier.apply(requestSensor.getContext().getTable());
             byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(requestSensor.getValue());
             response.withCustomParam(requestBytesParam, requestBytes);
 
-            // for each table in the mutation, send the global per table write bytes as observed by the registry
-            Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(requestSensor.getContext(), Type.WRITE_BYTES);
+            // for each table in the mutation, send the global per table write/index bytes as observed by the registry
+            Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(requestSensor.getContext(), requestSensor.getType());
             registrySensor.ifPresent(sensor -> {
-                String tableBytesParam = SensorsCustomParams.encodeTableInWriteByteTableParam(sensor.getContext().getTable());
+                String tableBytesParam = tableParamSupplier.apply(sensor.getContext().getTable());
                 byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
                 response.withCustomParam(tableBytesParam, tableBytes);
             });
         }
-
-        MessagingService.instance().send(response.build(), respondToAddress);
     }
 
     private void failed()

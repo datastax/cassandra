@@ -71,8 +71,8 @@ public class CounterMutationCallback implements Runnable
     private static void addSensorsToResponse(Message.Builder<NoPayload> response, RequestSensors requestSensors, int replicaMultiplier)
     {
         // Add write bytes sensors to the response
-        Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteByteRequestParam;
-        Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteByteTableParam;
+        Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
+        Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteBytesTableParam;
 
         Collection<Sensor> sensors = requestSensors.getSensors(Type.WRITE_BYTES);
         addSensorsToResponse(sensors, requestParam, tableParam, response, replicaMultiplier);
