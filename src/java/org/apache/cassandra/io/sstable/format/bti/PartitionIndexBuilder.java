@@ -33,7 +33,8 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  * <p>
  * The files created by this builder are read by {@link PartitionIndex}.
  */
-class PartitionIndexBuilder implements AutoCloseable
+// Used by CNDB
+public class PartitionIndexBuilder implements AutoCloseable
 {
     private final SequentialWriter writer;
     private final IncrementalTrieWriter<PartitionIndex.Payload> trieWriter;
