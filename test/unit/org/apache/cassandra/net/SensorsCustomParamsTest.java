@@ -40,7 +40,7 @@ public class SensorsCustomParamsTest
     {
         String table = "t1";
         String expectedParam = String.format("WRITE_BYTES_REQUEST.%s", "t1");
-        String actualParam = SensorsCustomParams.encodeTableInWriteByteRequestParam(table);
+        String actualParam = SensorsCustomParams.encodeTableInWriteBytesRequestParam(table);
         assertEquals(expectedParam, actualParam);
     }
 
@@ -49,7 +49,41 @@ public class SensorsCustomParamsTest
     {
         String table = "t1";
         String expectedParam = String.format("WRITE_BYTES_TABLE.%s", "t1");
-        String actualParam = SensorsCustomParams.encodeTableInWriteByteTableParam(table);
+        String actualParam = SensorsCustomParams.encodeTableInWriteBytesTableParam(table);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInIndexWriteBytesRequestParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("INDEX_WRITE_BYTES_REQUEST.%s", table);
+        String actualParam = SensorsCustomParams.encodeTableInIndexWriteBytesRequestParam(table);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInIndexWriteBytesTableParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("INDEX_WRITE_BYTES_TABLE.%s", "t1");
+        String actualParam = SensorsCustomParams.encodeTableInIndexWriteBytesTableParam(table);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testIndexReadBytesRequestParam()
+    {
+        String expectedParam = "INDEX_READ_BYTES_REQUEST";
+        String actualParam = SensorsCustomParams.INDEX_READ_BYTES_REQUEST;
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testIndexReadBytesTableParam()
+    {
+        String expectedParam = "INDEX_READ_BYTES_TABLE";
+        String actualParam = SensorsCustomParams.INDEX_READ_BYTES_TABLE;
         assertEquals(expectedParam, actualParam);
     }
 }
