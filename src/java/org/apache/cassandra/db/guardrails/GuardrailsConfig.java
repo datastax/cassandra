@@ -525,9 +525,17 @@ public interface GuardrailsConfig
     int getTombstoneWarnThreshold();
 
     /**
-     * @return The threshold to fail when a read scanes more tombstones than threshold.
+     * @return The threshold to fail when a read scans more tombstones than threshold.
      */
     int getTombstoneFailThreshold();
+
+    /**
+     * Sets warning and failure thresholds for the number of tombstones read by a query
+     *
+     * @param warn value to set for warn threshold
+     * @param fail value to set for fail threshold
+     */
+    void setTombstonesThreshold(int warn, int fail);
 
     /**
      * @return The threshold to warn when the number of batch mutations is more than threshold.
