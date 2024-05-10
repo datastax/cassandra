@@ -46,6 +46,24 @@ public final class SensorsCustomParams
      * To support batch writes, table name is encoded in the following format: WRITE_BYTES_TABLE."table"
      */
     public static final String WRITE_BYTES_TABLE_TEMPLATE = "WRITE_BYTES_TABLE.%s";
+    /**
+     * The per-request index read bytes value for a given keyspace and table.
+     */
+    public static final String INDEX_READ_BYTES_REQUEST = "INDEX_READ_BYTES_REQUEST";
+    /**
+     * The total index read bytes value for a given keyspace and table, across all requests. This is a monotonically increasing value.
+     */
+    public static final String INDEX_READ_BYTES_TABLE = "INDEX_READ_BYTES_TABLE";
+    /**
+     * The per-request index write bytes value for a given keyspace and table.
+     * To support batch writes, table name is encoded in the following format: INDEX_WRITE_BYTES_REQUEST."table"
+     */
+    public static final String INDEX_WRITE_BYTES_REQUEST_TEMPLATE = "INDEX_WRITE_BYTES_REQUEST.%s";
+    /**
+     * The total index write bytes value for a given keyspace and table, across all requests.
+     * To support batch writes, table name is encoded in the following format: INDEX_WRITE_BYTES_TABLE."table"
+     */
+    public static final String INDEX_WRITE_BYTES_TABLE_TEMPLATE = "INDEX_WRITE_BYTES_TABLE.%s";
 
     private SensorsCustomParams()
     {
@@ -62,13 +80,23 @@ public final class SensorsCustomParams
         return buffer.array();
     }
 
-    public static String encodeTableInWriteByteRequestParam(String tableName)
+    public static String encodeTableInWriteBytesRequestParam(String tableName)
     {
         return String.format(WRITE_BYTES_REQUEST_TEMPLATE, tableName);
     }
 
-    public static String encodeTableInWriteByteTableParam(String tableName)
+    public static String encodeTableInWriteBytesTableParam(String tableName)
     {
         return String.format(WRITE_BYTES_TABLE_TEMPLATE, tableName);
+    }
+
+    public static String encodeTableInIndexWriteBytesRequestParam(String tableName)
+    {
+        return String.format(INDEX_WRITE_BYTES_REQUEST_TEMPLATE, tableName);
+    }
+
+    public static String encodeTableInIndexWriteBytesTableParam(String tableName)
+    {
+        return String.format(INDEX_WRITE_BYTES_TABLE_TEMPLATE, tableName);
     }
 }
