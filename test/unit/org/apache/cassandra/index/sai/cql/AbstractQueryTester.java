@@ -22,11 +22,14 @@ import java.util.LinkedList;
 import java.util.List;
 
 import com.google.common.collect.ImmutableList;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.apache.cassandra.inject.Injections;
 
@@ -40,15 +43,21 @@ public class AbstractQueryTester extends SAITester
                                                                               .build();
 
     @Parameterized.Parameter(0)
-    public DataModel dataModel;
+    public Version version;
     @Parameterized.Parameter(1)
+    public DataModel dataModel;
+    @Parameterized.Parameter(2)
     public List<IndexQuerySupport.BaseQuerySet> sets;
 
     protected DataModel.Executor executor;
 
+    private Version latest;
+
     @Before
     public void setup() throws Throwable
     {
+        latest = Version.latest();
+        SAIUtil.setLatestVersion(version);
         requireNetwork();
 
         schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", DataModel.KEYSPACE));
@@ -58,20 +67,32 @@ public class AbstractQueryTester extends SAITester
         executor = new SingleNodeExecutor(this, INDEX_QUERY_COUNTER);
     }
 
+    @After
+    public void teardown() throws Throwable
+    {
+        SAIUtil.setLatestVersion(latest);
+    }
+
+
     @SuppressWarnings("unused")
-    @Parameterized.Parameters(name = "{0}")
+    @Parameterized.Parameters(name = "{0}_{1}")
     public static List<Object[]> params() throws Throwable
     {
         List<Object[]> scenarios = new LinkedList<>();
 
-        scenarios.add(new Object[]{ new DataModel.BaseDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA), IndexQuerySupport.BASE_QUERY_SETS });
+        for (Version version : Version.ALL)
+        {
+            // Excluding BA from the version matrix as files written at BA do not exist in production anywhere
+            if (version.equals(Version.BA))
+                continue;
 
-        scenarios.add(new Object[]{ new DataModel.CompoundKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA), IndexQuerySupport.BASE_QUERY_SETS });
+            scenarios.add(new Object[]{ version, new DataModel.BaseDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA), IndexQuerySupport.BASE_QUERY_SETS });
+            scenarios.add(new Object[]{ version, new DataModel.CompoundKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA), IndexQuerySupport.BASE_QUERY_SETS });
+            scenarios.add(new Object[]{ version, new DataModel.CompoundKeyWithStaticsDataModel(DataModel.STATIC_COLUMNS, DataModel.STATIC_COLUMN_DATA), IndexQuerySupport.STATIC_QUERY_SETS });
+            scenarios.add(new Object[]{ version, new DataModel.CompositePartitionKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA),
+                                        ImmutableList.builder().addAll(IndexQuerySupport.BASE_QUERY_SETS).addAll(IndexQuerySupport.COMPOSITE_PARTITION_QUERY_SETS).build()});
 
-        scenarios.add(new Object[]{ new DataModel.CompoundKeyWithStaticsDataModel(DataModel.STATIC_COLUMNS, DataModel.STATIC_COLUMN_DATA), IndexQuerySupport.STATIC_QUERY_SETS });
-
-        scenarios.add(new Object[]{ new DataModel.CompositePartitionKeyDataModel(DataModel.NORMAL_COLUMNS, DataModel.NORMAL_COLUMN_DATA),
-                                    ImmutableList.builder().addAll(IndexQuerySupport.BASE_QUERY_SETS).addAll(IndexQuerySupport.COMPOSITE_PARTITION_QUERY_SETS).build()});
+        }
 
         return scenarios;
     }
