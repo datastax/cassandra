@@ -746,7 +746,7 @@ public final class Guardrails implements GuardrailsMBean
     @Override
     public void setStorageAttachedIndexesPerTableThreshold(int warn, int fail)
     {
-        DEFAULT_CONFIG.setSecondaryIndexesPerTableThreshold(warn, fail);
+        DEFAULT_CONFIG.setStorageAttachedIndexesPerTableThreshold(warn, fail);
     }
 
     @Override
@@ -764,7 +764,7 @@ public final class Guardrails implements GuardrailsMBean
     @Override
     public void setStorageAttachedIndexesTotalThreshold(int warn, int fail)
     {
-        DEFAULT_CONFIG.setSecondaryIndexesPerTableThreshold(warn, fail);
+        DEFAULT_CONFIG.setStorageAttachedIndexesTotalThreshold(warn, fail);
     }
 
     @Override
