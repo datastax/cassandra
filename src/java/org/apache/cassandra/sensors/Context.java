@@ -21,6 +21,7 @@ package org.apache.cassandra.sensors;
 import java.util.Objects;
 
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -92,5 +93,10 @@ public class Context
     public static Context from(TableMetadata table)
     {
         return new Context(table.keyspace, table.name, table.id.toString());
+    }
+
+    public static Context from(IndexContext indexContext)
+    {
+        return new Context(indexContext.getKeyspace(), indexContext.getTable(), indexContext.getTableId().toString());
     }
 }
