@@ -72,7 +72,6 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.ObjectSizes;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
@@ -315,11 +314,6 @@ public class CompactionGraph implements Closeable, Accountable
     public long ramBytesUsed()
     {
         return pqVectors.ramBytesUsed() + builder.getGraph().ramBytesUsed();
-    }
-
-    private long exactRamBytesUsed()
-    {
-        return ObjectSizes.measureDeep(this);
     }
 
     public boolean requiresFlush()
