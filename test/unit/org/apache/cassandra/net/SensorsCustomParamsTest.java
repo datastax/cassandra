@@ -72,7 +72,7 @@ public class SensorsCustomParamsTest
     {
         String table = "t1";
         String expectedParam = String.format("WRITE_BYTES_REQUEST.%s", "t1");
-        String actualParam = SensorsCustomParams.encodeTableInWriteByteRequestParam(table);
+        String actualParam = SensorsCustomParams.encodeTableInWriteBytesRequestParam(table);
         assertEquals(expectedParam, actualParam);
     }
 
@@ -81,7 +81,41 @@ public class SensorsCustomParamsTest
     {
         String table = "t1";
         String expectedParam = String.format("WRITE_BYTES_TABLE.%s", "t1");
-        String actualParam = SensorsCustomParams.encodeTableInWriteByteTableParam(table);
+        String actualParam = SensorsCustomParams.encodeTableInWriteBytesTableParam(table);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInIndexWriteBytesRequestParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("INDEX_WRITE_BYTES_REQUEST.%s", table);
+        String actualParam = SensorsCustomParams.encodeTableInIndexWriteBytesRequestParam(table);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testEncodeTableInIndexWriteBytesTableParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("INDEX_WRITE_BYTES_TABLE.%s", "t1");
+        String actualParam = SensorsCustomParams.encodeTableInIndexWriteBytesTableParam(table);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testIndexReadBytesRequestParam()
+    {
+        String expectedParam = "INDEX_READ_BYTES_REQUEST";
+        String actualParam = SensorsCustomParams.INDEX_READ_BYTES_REQUEST;
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
+    public void testIndexReadBytesTableParam()
+    {
+        String expectedParam = "INDEX_READ_BYTES_TABLE";
+        String actualParam = SensorsCustomParams.INDEX_READ_BYTES_TABLE;
         assertEquals(expectedParam, actualParam);
     }
 
@@ -111,8 +145,8 @@ public class SensorsCustomParamsTest
         Message<NoPayload> msg = builder.build();
         assertNotNull(msg.header.customParams());
         assertEquals(2, msg.header.customParams().size());
-        String requestParam = SensorsCustomParams.encodeTableInWriteByteRequestParam("t1");
-        String tableParam = SensorsCustomParams.encodeTableInWriteByteTableParam("t1");
+        String requestParam = SensorsCustomParams.encodeTableInWriteBytesRequestParam("t1");
+        String tableParam = SensorsCustomParams.encodeTableInWriteBytesTableParam("t1");
         assertTrue(msg.header.customParams().containsKey(requestParam));
         assertTrue(msg.header.customParams().containsKey(tableParam));
         double epsilon = 0.000001;

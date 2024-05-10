@@ -40,7 +40,7 @@ public class CounterMutationCallback implements Runnable
     private final Message<CounterMutation> respondTo;
     private final InetAddressAndPort respondToAddress;
     private final RequestSensors requestSensors;
-    private int replicaCount = 0; // Default to CL.ANY
+    private int replicaCount = 0;
 
     public CounterMutationCallback(Message<CounterMutation> respondTo, InetAddressAndPort respondToAddress, RequestSensors requestSensors)
     {
@@ -62,7 +62,7 @@ public class CounterMutationCallback implements Runnable
     {
         Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
         int replicaMultiplier = replicaCount == 0 ?
-                                1 : // replica count was not explictiy set (default) or it is indeed CL.ANY. In both cases, we should send the response accomodating for the local replica (aka. mutation leader) sensor values
+                                1 : // replica count was not explicitly set (default). At the bare minimum, we should send the response accomodating for the local replica (aka. mutation leader) sensor values
                                 replicaCount;
         addSensorsToResponse(response, requestSensors, replicaMultiplier);
         MessagingService.instance().send(response.build(), respondToAddress);
@@ -71,8 +71,8 @@ public class CounterMutationCallback implements Runnable
     private static void addSensorsToResponse(Message.Builder<NoPayload> response, RequestSensors requestSensors, int replicaMultiplier)
     {
         // Add write bytes sensors to the response
-        Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteByteRequestParam;
-        Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteByteTableParam;
+        Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
+        Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteBytesTableParam;
 
         Collection<Sensor> sensors = requestSensors.getSensors(Type.WRITE_BYTES);
         addSensorsToResponse(sensors, requestParam, tableParam, response, replicaMultiplier);

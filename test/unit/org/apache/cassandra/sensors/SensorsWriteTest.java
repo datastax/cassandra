@@ -93,6 +93,7 @@ public class SensorsWriteTest
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).metadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_CLUSTERING).metadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER).metadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER).metadata());
 
         // enable sensor registy for system keyspace
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open("system").getMetadata());
@@ -396,8 +397,8 @@ public class SensorsWriteTest
 
     private void assertResponseSensors(double requestValue, double registryValue, String table)
     {
-        Supplier<String> requestParamSupplier = () -> SensorsCustomParams.encodeTableInWriteByteRequestParam(table);
-        Supplier<String> tableParamSupplier = () -> SensorsCustomParams.encodeTableInWriteByteTableParam(table);
+        Supplier<String> requestParamSupplier = () -> SensorsCustomParams.encodeTableInWriteBytesRequestParam(table);
+        Supplier<String> tableParamSupplier = () -> SensorsCustomParams.encodeTableInWriteBytesTableParam(table);
         // verify against the last message to enable testing of multiple mutations in a for loop
         Message message = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
         assertResponseSensors(message, requestValue, registryValue, requestParamSupplier, tableParamSupplier);
@@ -416,7 +417,6 @@ public class SensorsWriteTest
 
         assertThat(message.header.customParams()).containsKey(expectedRequestParam);
         assertThat(message.header.customParams()).containsKey(expectedTableParam);
-
         double requestWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedRequestParam));
         double tableWriteBytes = SensorsTestUtil.bytesToDouble(message.header.customParams().get(expectedTableParam));
         assertThat(requestWriteBytes).isEqualTo(requestValue);
