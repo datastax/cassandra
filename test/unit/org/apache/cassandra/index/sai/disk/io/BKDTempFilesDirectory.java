@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.sstable.Component;
@@ -67,14 +68,15 @@ public class BKDTempFilesDirectory extends Directory
 
         final File file = delegate.descriptor.tmpFileFor(new Component(SSTableFormat.Components.Types.CUSTOM, "SAI" +
                                                                                               "+" +
-                                                                                              Version.LATEST +
+                                                                                              Version.latest() +
                                                                                               "+" +
                                                                                               index +
                                                                                               "+" +
                                                                                               name +
                                                                                               ".db"));
 
-        return IndexFileUtils.instance().openOutput(file, false, delegate.getVersion());
+        var order = delegate.getVersion().onDiskFormat().byteOrderFor(IndexComponent.META, null);
+        return IndexFileUtils.instance().openOutput(file, order, false, delegate.getVersion());
     }
 
     @Override
