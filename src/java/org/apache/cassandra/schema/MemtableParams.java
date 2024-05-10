@@ -134,6 +134,17 @@ public final class MemtableParams
         }
     }
 
+    /**
+     * Useful for testing where we can provide a factory that produces spied instances of memtable so that we can
+     * modify behaviour of certains methods.
+     */
+    // Used by CNDB
+    @VisibleForTesting
+    public static MemtableParams forTesting(Memtable.Factory factory, String configurationKey)
+    {
+        return new MemtableParams(factory, configurationKey);
+    }
+
     @VisibleForTesting
     static Map<String, ParameterizedClass> expandDefinitions(Map<String, InheritingClass> memtableConfigurations)
     {

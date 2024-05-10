@@ -254,7 +254,8 @@ public final class SystemKeyspace
                 + "WITH COMMENT='Last successful paxos repairs by range'")
         .build();
 
-    private static final TableMetadata Local =
+    // Used by CNDB
+    public static final TableMetadata Local =
         parse(LOCAL,
                 "information about the local node",
                 "CREATE TABLE %s ("
@@ -282,7 +283,8 @@ public final class SystemKeyspace
                 ).recordDeprecatedSystemColumn("thrift_version", UTF8Type.instance)
                 .build();
 
-    private static final TableMetadata PeersV2 =
+    // Used by CNDB
+    public static final TableMetadata PeersV2 =
         parse(PEERS_V2,
                 "information about known peers in the cluster",
                 "CREATE TABLE %s ("
@@ -467,7 +469,8 @@ public final class SystemKeyspace
 
     /** @deprecated See CASSANDRA-7544 */
     @Deprecated(since = "4.0")
-    private static final TableMetadata LegacyPeers =
+    // Used by CNDB
+    public static final TableMetadata LegacyPeers =
         parse(LEGACY_PEERS,
             "information about known peers in the cluster",
             "CREATE TABLE %s ("
