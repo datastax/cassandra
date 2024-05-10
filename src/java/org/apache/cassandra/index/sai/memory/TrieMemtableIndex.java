@@ -54,6 +54,10 @@ import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Reducer;
@@ -72,6 +76,8 @@ public class TrieMemtableIndex implements MemtableIndex
     private final LongAdder estimatedOffHeapMemoryUsed = new LongAdder();
 
     private final Memtable memtable;
+    private final Context sensorContext;
+    private final RequestTracker requestTracker;
 
     public TrieMemtableIndex(IndexContext indexContext, Memtable memtable)
     {
@@ -84,6 +90,8 @@ public class TrieMemtableIndex implements MemtableIndex
         {
             this.rangeIndexes[shard] = new TrieMemoryIndex(indexContext, memtable, boundaries.getBounds(shard));
         }
+        this.sensorContext = Context.from(indexContext);
+        this.requestTracker = RequestTracker.instance;
     }
 
     @Override
@@ -162,16 +170,23 @@ public class TrieMemtableIndex implements MemtableIndex
         if (value == null || value.remaining() == 0)
             return;
 
+        RequestSensors sensors = requestTracker.get();
+        if (sensors != null)
+            sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
         rangeIndexes[boundaries.getShardForKey(key)].add(key,
                                                          clustering,
                                                          value,
                                                          allocatedBytes -> {
                                                              memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
                                                              estimatedOnHeapMemoryUsed.add(allocatedBytes);
+                                                             if (sensors != null)
+                                                                 sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, allocatedBytes);
                                                          },
                                                          allocatedBytes -> {
                                                              memtable.markExtraOffHeapUsed(allocatedBytes, opGroup);
                                                              estimatedOffHeapMemoryUsed.add(allocatedBytes);
+                                                             if (sensors != null)
+                                                                 sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, allocatedBytes);
                                                          });
         writeCount.increment();
     }

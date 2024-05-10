@@ -63,6 +63,7 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.Util.dk;
@@ -144,6 +145,7 @@ public class SegmentFlushTest
 
         IndexContext indexContext = new IndexContext("ks",
                                                      "cf",
+                                                     TableId.generate(),
                                                      UTF8Type.instance,
                                                      new ClusteringComparator(),
                                                      column,

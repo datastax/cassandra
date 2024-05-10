@@ -241,6 +241,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         return new IndexContext(cfs.metadata().keyspace,
                                 cfs.metadata().name,
+                                cfs.metadata().id,
                                 cfs.metadata().partitionKeyType,
                                 cfs.metadata().comparator,
                                 expression.column(),
