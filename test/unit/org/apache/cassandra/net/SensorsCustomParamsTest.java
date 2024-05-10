@@ -27,12 +27,21 @@ import static org.junit.Assert.assertEquals;
 public class SensorsCustomParamsTest
 {
     @Test
-    public void testDoubleAsBytes()
+    public void testSensorValueAsBytes()
     {
         double d = Double.MAX_VALUE;
         byte[] bytes = SensorsCustomParams.sensorValueAsBytes(d);
         ByteBuffer bb = ByteBuffer.wrap(bytes);
         assertEquals(Double.MAX_VALUE, bb.getDouble(), 0.0);
+    }
+
+    @Test
+    public void testSensorValueFromBytes()
+    {
+        ByteBuffer buffer = ByteBuffer.allocate(Double.BYTES);
+        buffer.putDouble(Double.MAX_VALUE);
+        double d = SensorsCustomParams.sensorValueFromBytes(buffer.array());
+        assertEquals(Double.MAX_VALUE, d, 0.0);
     }
 
     @Test
