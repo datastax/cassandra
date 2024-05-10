@@ -231,10 +231,10 @@ public class SSTableIndexWriter implements PerIndexWriter
         // If we've hit the minimum flush size and we've breached the global limit, flush a new segment:
         boolean reachMemoryLimit = limiter.usageExceedsLimit() && currentBuilder.hasReachedMinimumFlushSize();
 
-        if (currentBuilder.requiresFlush() || reachMemoryLimit)
+        if (reachMemoryLimit)
         {
             logger.debug(indexContext.logMessage("Global limit of {} and minimum flush size of {} exceeded. " +
-                                                 "Current builder usage is {} for {} cells. Global Usage is {}. Flushing..."),
+                                                 "Current builder usage is {} for {} rows. Global Usage is {}. Flushing..."),
                          FBUtilities.prettyPrintMemory(limiter.limitBytes()),
                          FBUtilities.prettyPrintMemory(currentBuilder.getMinimumFlushBytes()),
                          FBUtilities.prettyPrintMemory(currentBuilder.totalBytesAllocated()),
@@ -242,7 +242,7 @@ public class SSTableIndexWriter implements PerIndexWriter
                          FBUtilities.prettyPrintMemory(limiter.currentBytesUsed()));
         }
 
-        return reachMemoryLimit || currentBuilder.exceedsSegmentLimit(sstableRowId);
+        return reachMemoryLimit || currentBuilder.exceedsSegmentLimit(sstableRowId) || currentBuilder.requiresFlush();
     }
 
     private void flushSegment() throws IOException
