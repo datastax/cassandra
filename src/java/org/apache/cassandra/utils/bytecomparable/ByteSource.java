@@ -122,6 +122,14 @@ public interface ByteSource
         return new Multi(srcs, terminator);
     }
 
+    /**
+     * Appends a single terminating byte to the parameterized ByteSource.
+     */
+    static ByteSource appendTerminator(ByteSource src, int terminator)
+    {
+        return new ByteSourceWithTerminator(src, terminator);
+    }
+
     static ByteSource of(String s, Version version)
     {
         return new ReinterpreterArray(s.getBytes(StandardCharsets.UTF_8), version);
@@ -538,6 +546,34 @@ public interface ByteSource
             if (srcs[srcnum] == null)
                 return NEXT_COMPONENT_NULL;
             return NEXT_COMPONENT;
+        }
+    }
+
+    /**
+     * A single ByteSource with the parameterized byte added once the source is exhausted.
+     */
+    static class ByteSourceWithTerminator implements ByteSource
+    {
+        private final ByteSource src;
+        private final int lastByte;
+        boolean done = false;
+
+        ByteSourceWithTerminator(ByteSource src, int lastByte)
+        {
+            this.src = src;
+            this.lastByte = lastByte;
+        }
+
+        @Override
+        public int next()
+        {
+            if (done)
+                return END_OF_STREAM;
+            int n = src.next();
+            if (n != END_OF_STREAM)
+                return n;
+            done = true;
+            return lastByte;
         }
     }
 

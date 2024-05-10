@@ -34,6 +34,7 @@ import io.github.jbellis.jvector.pq.PQVectors;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
@@ -67,10 +68,11 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     // segment writer
     private SegmentBuilder currentBuilder;
+    private final Version version;
     private final List<SegmentMetadata> segments = new ArrayList<>();
     private long maxSSTableRowId;
 
-    public SSTableIndexWriter(IndexDescriptor indexDescriptor, IndexContext indexContext, NamedMemoryLimiter limiter, BooleanSupplier isIndexValid, long keyCount)
+    public SSTableIndexWriter(IndexDescriptor indexDescriptor, IndexContext indexContext, NamedMemoryLimiter limiter, BooleanSupplier isIndexValid, long keyCount, Version version)
     {
         this.indexDescriptor = indexDescriptor;
         this.indexContext = indexContext;
@@ -78,6 +80,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;
         this.keyCount = keyCount;
+        this.version = version;
     }
 
     @Override
@@ -338,7 +341,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
         else if (indexContext.isLiteral())
         {
-            builder = new SegmentBuilder.RAMStringSegmentBuilder(rowIdOffset, indexContext.getValidator(), limiter);
+            builder = new SegmentBuilder.RAMStringSegmentBuilder(rowIdOffset, indexContext.getValidator(), limiter, version);
         }
         else
         {

@@ -712,6 +712,10 @@ public class IndexContext
                           .toString();
     }
 
+    // TODO would it make sense to rename? This is used in multiple contexts and incorrectly labeled composite types
+    // as literal, which led to their incorrect encoding in the trie. The main use for this method is to determine
+    // if the type requires a trie or a kd tree. There are also encoding implications, but as seen in this PR, those
+    // weren't used correctly.
     public boolean isLiteral()
     {
         return TypeUtil.isLiteral(getValidator());

@@ -22,20 +22,25 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
@@ -47,6 +52,7 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -57,6 +63,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 import static org.apache.cassandra.Util.dk;
 import static org.junit.Assert.assertEquals;
@@ -66,6 +73,7 @@ import static org.junit.Assert.fail;
 
 //TODO This test needs rethinking because we always now end up with a single segment after a flush
 // and we are not restricted to Integer.MAX_VALUE in the segments
+@RunWith(Parameterized.class)
 public class SegmentFlushTest
 {
     private static long segmentRowIdOffset;
@@ -76,6 +84,18 @@ public class SegmentFlushTest
     private static ByteBuffer minTerm;
     private static ByteBuffer maxTerm;
     private static int numRowsPerSegment;
+
+    @Parameterized.Parameter
+    public Version version;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static Collection<Object[]> data()
+    {
+        // Required because it configures SEGMENT_BUILD_MEMORY_LIMIT, which is needed for Version.AA
+        if (DatabaseDescriptor.getRawConfig() == null)
+            DatabaseDescriptor.setConfig(DatabaseDescriptor.loadConfig());
+        return Version.ALL.stream().map(v -> new Object[]{v}).collect(Collectors.toList());
+    }
 
     @BeforeClass
     public static void init()
@@ -127,7 +147,7 @@ public class SegmentFlushTest
                                                      config,
                                                      MockSchema.newCFS("ks"));
 
-        SSTableIndexWriter writer = new SSTableIndexWriter(indexDescriptor, indexContext, V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER, () -> true, 2);
+        SSTableIndexWriter writer = new SSTableIndexWriter(indexDescriptor, indexContext, V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER, () -> true, 2, version);
 
         List<DecoratedKey> keys = Arrays.asList(dk("1"), dk("2"));
         Collections.sort(keys);
@@ -159,8 +179,8 @@ public class SegmentFlushTest
         minKey = SAITester.TEST_FACTORY.createTokenOnly(key1.getToken());
         DecoratedKey maxDecoratedKey = segments == 1 ? key2 : key1;
         maxKey = SAITester.TEST_FACTORY.createTokenOnly(maxDecoratedKey.getToken());
-        minTerm = term1;
-        maxTerm = segments == 1 ? term2 : term1;
+        minTerm = encodeUnescapeThenDecode(term1, UTF8Type.instance);
+        maxTerm = encodeUnescapeThenDecode(segments == 1 ? term2 : term1, UTF8Type.instance);
         numRowsPerSegment = segments == 1 ? 2 : 1;
         verifySegmentMetadata(segmentMetadata);
         verifyStringIndex(indexDescriptor, indexContext, segmentMetadata);
@@ -173,8 +193,8 @@ public class SegmentFlushTest
             maxSegmentRowId = 0;
             minKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());
             maxKey = SAITester.TEST_FACTORY.createTokenOnly(key2.getToken());;
-            minTerm = term2;
-            maxTerm = term2;
+            minTerm = encodeUnescapeThenDecode(term2, UTF8Type.instance);
+            maxTerm = encodeUnescapeThenDecode(term2, UTF8Type.instance);
             numRowsPerSegment = 1;
 
             segmentMetadata = segmentMetadatas.get(1);
@@ -194,7 +214,8 @@ public class SegmentFlushTest
                                                   termsData,
                                                   postingLists,
                                                   segmentMetadata.componentMetadatas.get(IndexComponent.TERMS_DATA).root,
-                                                  termsFooterPointer))
+                                                  termsFooterPointer,
+                                                  Version.CA))
         {
             TermsIterator iterator = reader.allTerms(0);
             assertEquals(minTerm, iterator.getMinTerm());
@@ -236,6 +257,12 @@ public class SegmentFlushTest
         builder1.newRow(Clustering.EMPTY);
         builder1.addCell(BufferCell.live(column, 0, value));
         return builder1.build();
+    }
+
+    private ByteBuffer encodeUnescapeThenDecode(ByteBuffer original, AbstractType<?> type)
+    {
+        var encoded = version.onDiskFormat().encodeForOnDiskTrie(original, type);
+        return ByteBuffer.wrap(ByteSourceInverse.readBytes(encoded.asComparableBytes(ByteComparable.Version.OSS41)));
     }
 
     private void assertOverflow(long sstableRowId1, long sstableRowId2) throws Exception

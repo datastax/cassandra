@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.EnumSet;
 import java.util.Set;
@@ -32,6 +33,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -53,6 +55,9 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.store.IndexInput;
 
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
@@ -161,7 +166,7 @@ public class V1OnDiskFormat implements OnDiskFormat
                                           SegmentMetadata segmentMetadata) throws IOException
     {
         if (indexContext.isLiteral())
-            return new InvertedIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor, indexContext);
+            return new InvertedIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor, indexContext, Version.AA, true);
         return new KDTreeIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor, indexContext);
     }
 
@@ -184,7 +189,7 @@ public class V1OnDiskFormat implements OnDiskFormat
             logger.debug(index.getIndexContext().logMessage("Starting a compaction index build. Global segment memory usage: {}"),
                          prettyPrintMemory(limiter.currentBytesUsed()));
 
-            return new SSTableIndexWriter(indexDescriptor, index.getIndexContext(), limiter, index.isIndexValid(), keyCount);
+            return new SSTableIndexWriter(indexDescriptor, index.getIndexContext(), limiter, index.isIndexValid(), keyCount, Version.LATEST);
         }
 
         return new MemtableIndexWriter(index.getIndexContext().getPendingMemtableIndex(tracker),
@@ -302,6 +307,30 @@ public class V1OnDiskFormat implements OnDiskFormat
     public ByteOrder byteOrderFor(IndexComponent indexComponent, IndexContext context)
     {
         return ByteOrder.BIG_ENDIAN;
+    }
+
+    @Override
+    public ByteComparable encodeForInMemoryTrie(ByteBuffer input, AbstractType<?> type)
+    {
+        // All elements
+        return TypeUtil.isLiteral(type) ? version -> ByteSource.appendTerminator(ByteSource.of(input, version), ByteSource.TERMINATOR)
+                                        : TypeUtil.asComparableBytes(input, type);
+    }
+
+    @Override
+    public ByteComparable convertFromInMemoryToOnDiskEncoding(ByteComparable term, AbstractType<?> type)
+    {
+        return TypeUtil.isLiteral(type) ? v -> ByteSourceInverse.unescape(ByteSource.peekable(term.asComparableBytes(v)))
+                                        : term;
+    }
+
+    @Override
+    public ByteComparable encodeForOnDiskTrie(ByteBuffer input, AbstractType<?> type)
+    {
+        // Note that fixedLength is the same as unescape(escape(input, type), type), but we skip some steps, so this
+        // is a bit faster.
+        return TypeUtil.isLiteral(type) ? ByteComparable.fixedLength(input)
+                                        : TypeUtil.asComparableBytes(input, type);
     }
 
     protected boolean isBuildCompletionMarker(IndexComponent indexComponent)

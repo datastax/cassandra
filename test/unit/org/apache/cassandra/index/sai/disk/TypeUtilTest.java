@@ -231,7 +231,7 @@ public class TypeUtilTest extends SaiRandomizedTest
         CompositeType type = CompositeType.getInstance(UTF8Type.instance, Int32Type.instance);
 
         // simulate: index memtable insertion
-        String[] data = new String[10000];
+        ByteBuffer[] data = new ByteBuffer[10000];
         byte[] temp = new byte[100];
         for (int i = 0; i < data.length; i++)
         {
@@ -239,21 +239,21 @@ public class TypeUtilTest extends SaiRandomizedTest
             String v1 = new String(temp);
             int v2 = rng.nextInt();
 
-            data[i] = TypeUtil.getString(type.decompose(v1, v2), type);
+            data[i] = type.decompose(v1, v2);
         }
 
-        Arrays.sort(data, String::compareTo);
+        Arrays.sort(data, type);
 
         for (int i = 1; i < data.length; i++)
         {
             // simulate: index memtable flush
-            ByteBuffer b0 = TypeUtil.fromString(data[i - 1], type);
-            ByteBuffer b1 = TypeUtil.fromString(data[i], type);
+            ByteBuffer b0 = data[i - 1];
+            ByteBuffer b1 = data[i];
             assertTrue("#" + i, TypeUtil.compare(b0, b1, type) <= 0);
 
             // simulate: saving into on-disk trie
-            ByteComparable t0 = ByteComparable.fixedLength(b0);
-            ByteComparable t1 = ByteComparable.fixedLength(b1);
+            ByteComparable t0 = v -> type.asComparableBytes(b0, v);
+            ByteComparable t1 = v -> type.asComparableBytes(b1, v);
             assertTrue("#" + i, ByteComparable.compare(t0, t1, ByteComparable.Version.OSS41) <= 0);
         }
     }

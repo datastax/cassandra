@@ -45,6 +45,7 @@ import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.MarshalException;
@@ -202,11 +203,25 @@ public class TypeUtil
         return type.fromString(value);
     }
 
+    public static ByteComparable asComparableBytes(ByteBuffer value, AbstractType<?> type)
+    {
+        return version -> asComparableBytes(value, type, version);
+    }
+
     public static ByteSource asComparableBytes(ByteBuffer value, AbstractType<?> type, ByteComparable.Version version)
     {
         if (type instanceof InetAddressType || type instanceof IntegerType || type instanceof DecimalType)
             return ByteSource.optionalFixedLength(ByteBufferAccessor.instance, value);
         return type.asComparableBytes(value, version);
+    }
+
+    /**
+     * Convenience method to create a {@link ByteComparable} from a {@link ByteBuffer} value for a given {@link CompositeType}
+     * with a terminator. This method is in this class to keep references to the {@link ByteBufferAccessor#instance} here.
+     */
+    public static ByteComparable asComparableBytes(ByteBuffer value, int terminator, CompositeType type)
+    {
+        return v -> type.asComparableBytes(ByteBufferAccessor.instance, value, v, terminator);
     }
 
     /**
@@ -262,12 +277,10 @@ public class TypeUtil
     {
         if (isInetAddress(type))
             return compareInet(b1, b2);
-        // BigInteger values, frozen types and composite types (map entries) use compareUnsigned to maintain
-        // a consistent order between the in-memory index and the on-disk index.
-        else if (isBigInteger(type) || isBigDecimal(type) || isCompositeOrFrozen(type))
+        else if (useFastByteOperations(type))
             return FastByteOperations.compareUnsigned(b1, b2);
 
-        return type.compare(b1, b2 );
+        return type.compare(b1, b2);
     }
 
     /**
@@ -281,8 +294,8 @@ public class TypeUtil
     {
         if (isInetAddress(type))
             return compareInet(requestedValue.encoded, columnValue.encoded);
-        // Override comparisons for frozen collections and composite types (map entries)
-        else if (isCompositeOrFrozen(type))
+        // Override comparisons for frozen collections
+        else if (isFrozen(type))
             return FastByteOperations.compareUnsigned(requestedValue.raw, columnValue.raw);
 
         return type.compare(requestedValue.raw, columnValue.raw);
@@ -308,11 +321,24 @@ public class TypeUtil
 
     public static Comparator<ByteBuffer> comparator(AbstractType<?> type)
     {
-        // Override the comparator for BigInteger, frozen collections and composite types
-        if (isBigInteger(type) || isBigDecimal(type) || isCompositeOrFrozen(type))
+        // Override the comparator for BigInteger, frozen collections (not including composite types) and
+        // composite types before DB version to maintain a consistent order between the in-memory index and the on-disk index.
+        if (useFastByteOperations(type))
             return FastByteOperations::compareUnsigned;
 
         return type;
+    }
+
+    private static boolean useFastByteOperations(AbstractType<?> type)
+    {
+        // TODO when I remove isCompositeOrFrozen from this conditional, some failing tests pass. What
+        // additional test coverage do I need to validate this? Is it still valid for big int and decimal?
+        // BigInteger values, frozen types and composite types (map entries) use compareUnsigned to maintain
+        // a consistent order between the in-memory index and the on-disk index.
+        return isBigInteger(type)
+               || isBigDecimal(type)
+               || (!isComposite(type) && isFrozen(type))
+               || (isComposite(type) && !Version.LATEST.onOrAfter(Version.DB));
     }
 
     public static float[] decomposeVector(AbstractType<?> type, ByteBuffer byteBuffer)

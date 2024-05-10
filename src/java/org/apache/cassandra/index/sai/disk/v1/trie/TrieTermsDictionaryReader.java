@@ -53,9 +53,10 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
                                      long root,
                                      ByteComparable start,
                                      ByteComparable end,
-                                     boolean inclStart)
+                                     boolean inclStart,
+                                     boolean collecting)
     {
-        super(source, root, start, end, inclStart ? LeftBoundTreatment.ADMIT_EXACT : LeftBoundTreatment.GREATER, true);
+        super(source, root, start, end, inclStart ? LeftBoundTreatment.ADMIT_EXACT : LeftBoundTreatment.GREATER, collecting);
     }
 
     public static final TrieSerializer<Long, DataOutputPlus> trieSerializer = new TrieSerializer<>()

@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.metrics.MulticastQueryEventListeners;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -48,20 +49,26 @@ public class InvertedIndexSearcher extends IndexSearcher
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private final TermsReader reader;
-    private final QueryEventListener.TrieIndexEventListener perColumnEventListener;
+    protected final TermsReader reader;
+    protected final QueryEventListener.TrieIndexEventListener perColumnEventListener;
+    private final Version version;
+    private final boolean filterRangeResults;
 
-    InvertedIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
-                          PerIndexFiles perIndexFiles,
-                          SegmentMetadata segmentMetadata,
-                          IndexDescriptor indexDescriptor,
-                          IndexContext indexContext) throws IOException
+    protected InvertedIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
+                                    PerIndexFiles perIndexFiles,
+                                    SegmentMetadata segmentMetadata,
+                                    IndexDescriptor indexDescriptor,
+                                    IndexContext indexContext,
+                                    Version version,
+                                    boolean filterRangeResults) throws IOException
     {
         super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexDescriptor, indexContext);
 
         long root = metadata.getIndexRoot(IndexComponent.TERMS_DATA);
         assert root >= 0;
 
+        this.version = version;
+        this.filterRangeResults = filterRangeResults;
         perColumnEventListener = (QueryEventListener.TrieIndexEventListener)indexContext.getColumnQueryMetrics();
 
         Map<String,String> map = metadata.componentMetadatas.get(IndexComponent.TERMS_DATA).attributes;
@@ -71,7 +78,9 @@ public class InvertedIndexSearcher extends IndexSearcher
         reader = new TermsReader(indexContext,
                                  indexFiles.termsData(),
                                  indexFiles.postingLists(),
-                                 root, footerPointer);
+                                 root,
+                                 footerPointer,
+                                 version);
     }
 
     @Override
@@ -94,16 +103,19 @@ public class InvertedIndexSearcher extends IndexSearcher
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
 
+        // We use the version to encode the search boundaries for the trie to ensure we use version appropriate bounds.
         if (exp.getOp().isEquality() || exp.getOp() == Expression.Op.MATCH)
         {
-            final ByteComparable term = ByteComparable.fixedLength(exp.lower.value.encoded);
+            final ByteComparable term = version.onDiskFormat().encodeForOnDiskTrie(exp.lower.value.encoded, indexContext.getValidator());
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
             return reader.exactMatch(term, listener, context);
         }
         else if (exp.getOp() == Expression.Op.RANGE)
         {
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
-            return reader.rangeMatch(exp, listener, context);
+            var lower = exp.getEncodedLowerBoundByteComparable(version, false);
+            var upper = exp.getEncodedUpperBoundByteComparable(version, false);
+            return reader.rangeMatch(filterRangeResults ? exp : null, lower, upper, listener, context);
         }
         throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));
     }

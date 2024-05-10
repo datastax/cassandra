@@ -19,11 +19,13 @@
 package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Set;
 
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -38,6 +40,7 @@ import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * An interface to the on-disk format of an index. This provides format agnostics methods
@@ -211,4 +214,27 @@ public interface OnDiskFormat
      * @return The {@link ByteOrder} for the file associated with the {@link IndexComponent}
      */
     public ByteOrder byteOrderFor(IndexComponent component, IndexContext context);
+
+    /**
+     * Encode the given {@link ByteBuffer} into a {@link ByteComparable} object based on the provided {@link AbstractType}
+     * for storage in the in memory trie index. This is valid for term insertion and for encoding search bounds.
+     * @return The encoded {@link ByteComparable} object
+     */
+    public ByteComparable encodeForInMemoryTrie(ByteBuffer input, AbstractType<?> type);
+
+    /**
+     * Convert the given {@link ByteComparable} encoding based on the provided {@link AbstractType} from the in memory
+     * trie index to the on-disk trie index. This is needed for historical reasons and may not be needed in the future.
+     * @return The unescaped {@link ByteComparable} object
+     */
+    public ByteComparable convertFromInMemoryToOnDiskEncoding(ByteComparable term, AbstractType<?> type);
+
+    /**
+     * Encode the given {@link ByteBuffer} into a {@link ByteComparable} object for use in the on-disk trie index.
+     * This is valid for term insertion and for encoding search bounds.
+     * @param input The term to encode
+     * @param type The type of the term
+     * @return The encoded term
+     */
+    public ByteComparable encodeForOnDiskTrie(ByteBuffer input, AbstractType<?> type);
 }

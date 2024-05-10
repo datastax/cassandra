@@ -41,7 +41,7 @@ import org.apache.cassandra.index.sai.analyzer.ByteLimitedMaterializer;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
-import org.apache.cassandra.index.sai.disk.io.BytesRefUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
@@ -50,9 +50,10 @@ import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.BytesRefBuilder;
 
 import static org.apache.cassandra.utils.FBUtilities.busyWaitWhile;
 
@@ -101,8 +102,8 @@ public abstract class SegmentBuilder
     private PrimaryKey minKey;
     private PrimaryKey maxKey;
     // in termComparator order
-    private ByteBuffer minTerm;
-    private ByteBuffer maxTerm;
+    protected ByteBuffer minTerm;
+    protected ByteBuffer maxTerm;
 
     protected final AtomicInteger updatesInFlight = new AtomicInteger(0);
     protected final QuickSlidingWindowReservoir termSizeReservoir = new QuickSlidingWindowReservoir(100);
@@ -160,14 +161,13 @@ public abstract class SegmentBuilder
     public static class RAMStringSegmentBuilder extends SegmentBuilder
     {
         final RAMStringIndexer ramIndexer;
+        private final Version version;
 
-        final BytesRefBuilder stringBuffer = new BytesRefBuilder();
-
-        RAMStringSegmentBuilder(long rowIdOffset, AbstractType<?> termComparator, NamedMemoryLimiter limiter)
+        RAMStringSegmentBuilder(long rowIdOffset, AbstractType<?> termComparator, NamedMemoryLimiter limiter, Version version)
         {
             super(rowIdOffset, termComparator, limiter);
-
-            ramIndexer = new RAMStringIndexer(termComparator);
+            this.version = version;
+            ramIndexer = new RAMStringIndexer();
             totalBytesAllocated = ramIndexer.estimatedBytesUsed();
             totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
@@ -179,8 +179,11 @@ public abstract class SegmentBuilder
 
         protected long addInternal(ByteBuffer term, int segmentRowId)
         {
-            BytesRefUtil.copyBufferToBytesRef(term, stringBuffer);
-            return ramIndexer.add(stringBuffer.get(), segmentRowId);
+            var encodedTerm = version.onDiskFormat().encodeForOnDiskTrie(term, termComparator);
+            // VSTODD is it worth estimating the size of the byte array to prevent unnecessary array creation?
+            var bytes = ByteSourceInverse.readBytes(encodedTerm.asComparableBytes(Walker.BYTE_COMPARABLE_VERSION));
+            var bytesRef = new BytesRef(bytes);
+            return ramIndexer.add(bytesRef, segmentRowId);
         }
 
         @Override
@@ -189,7 +192,7 @@ public abstract class SegmentBuilder
             try (InvertedIndexWriter writer = new InvertedIndexWriter(indexDescriptor,
                                                                       indexContext))
             {
-                return writer.writeAll(ramIndexer.getTermsWithPostings());
+                return writer.writeAll(ramIndexer.getTermsWithPostings(minTerm, maxTerm));
             }
         }
     }
@@ -429,6 +432,7 @@ public abstract class SegmentBuilder
         minKey = minKey == null ? key : minKey;
         maxKey = key;
 
+        // These terms are intentionally not encoded. The TypeUtil is an SAI class and is version aware.
         minTerm = TypeUtil.min(term, minTerm, termComparator);
         maxTerm = TypeUtil.max(term, maxTerm, termComparator);
 
