@@ -845,6 +845,20 @@ public class Directories
             return FileUtils.folderSize(location);
         }
 
+        // Used by CNDB
+        @VisibleForTesting
+        public long getTotalSpace()
+        {
+            return PathUtils.tryGetSpace(location.toPath(), FileStore::getTotalSpace);
+        }
+
+        // Used by CNDB
+        @VisibleForTesting
+        public long getSpaceUsed()
+        {
+            return getTotalSpace() - getAvailableSpace();
+        }
+
         @Override
         public boolean equals(Object o)
         {
