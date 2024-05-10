@@ -72,7 +72,6 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.ObjectSizes;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
@@ -92,7 +91,7 @@ public class CompactionGraph implements Closeable, Accountable
     private final IndexDescriptor descriptor;
     private final IndexContext context;
     private final boolean unitVectors;
-    private final int entriesAllocated;
+    private final int postingsEntriesAllocated;
     private final File postingsFile;
     private boolean postingsOneToOne;
     private int nextOrdinal = 0;
@@ -120,7 +119,7 @@ public class CompactionGraph implements Closeable, Accountable
         var rowsPerKey = Keyspace.open(dd.ksname).getColumnFamilyStore(dd.cfname).getMeanRowsPerPartition();
         long estimatedRows = (long) (1.1 * keyCount * rowsPerKey); // 10% fudge factor
         int maxRowsInGraph = Integer.MAX_VALUE - 100_000; // leave room for a few more async additions until we flush
-        entriesAllocated = estimatedRows > maxRowsInGraph ? maxRowsInGraph : (int) estimatedRows;
+        postingsEntriesAllocated = estimatedRows > maxRowsInGraph ? maxRowsInGraph : (int) estimatedRows;
 
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
         similarityFunction = indexConfig.getSimilarityFunction();
@@ -135,7 +134,7 @@ public class CompactionGraph implements Closeable, Accountable
                                          .averageValueSize(VectorPostings.emptyBytesUsed() + RamUsageEstimator.NUM_BYTES_OBJECT_REF + 2 * Integer.BYTES)
                                          .keyMarshaller(new VectorFloatMarshaller())
                                          .valueMarshaller(new VectorPostings.Marshaller())
-                                         .entries(entriesAllocated)
+                                         .entries(postingsEntriesAllocated)
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
         builder = new GraphIndexBuilder(null,
@@ -165,7 +164,7 @@ public class CompactionGraph implements Closeable, Accountable
         writer.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
         SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()));
         inlineVectors = new InlineVectorValues(dimension, writer);
-        pqVectorsList = new ArrayList<>(entriesAllocated);
+        pqVectorsList = new ArrayList<>(postingsEntriesAllocated);
         pqVectors = new PQVectors(compressor, pqVectorsList);
         // VSTODO add LVQ
         builder.setBuildScoreProvider(BuildScoreProvider.pqBuildScoreProvider(similarityFunction, inlineVectors, pqVectors));
@@ -226,7 +225,7 @@ public class CompactionGraph implements Closeable, Accountable
             var encoded = (ArrayByteSequence) compressor.encode(vector);
             pqVectorsList.add(encoded);
 
-            bytesUsed += encoded.get().length;
+            bytesUsed += encoded.ramBytesUsed();
             bytesUsed += postings.ramBytesUsed();
             return new InsertionResult(bytesUsed, ordinal, vector);
         }
@@ -319,7 +318,7 @@ public class CompactionGraph implements Closeable, Accountable
 
     public boolean requiresFlush()
     {
-        return nextOrdinal >= entriesAllocated;
+        return nextOrdinal >= postingsEntriesAllocated;
     }
 
     private static class VectorFloatMarshaller implements BytesReader<VectorFloat<?>>, BytesWriter<VectorFloat<?>> {
