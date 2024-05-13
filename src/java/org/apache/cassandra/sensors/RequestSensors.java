@@ -46,15 +46,17 @@ public class RequestSensors
 {
     private final Supplier<SensorsRegistry> sensorsRegistry;
     private final ConcurrentMap<Pair<Context, Type>, Sensor> sensors = new ConcurrentHashMap<>();
+    private final String keyspace;
 
-    public RequestSensors()
+    public RequestSensors(String keyspace)
     {
-        this(() -> SensorsRegistry.instance);
+        this(() -> SensorsRegistry.instance, keyspace);
     }
 
-    public RequestSensors(Supplier<SensorsRegistry> sensorsRegistry)
+    public RequestSensors(Supplier<SensorsRegistry> sensorsRegistry, String keyspace)
     {
         this.sensorsRegistry = sensorsRegistry;
+        this.keyspace = keyspace;
     }
 
     public void registerSensor(Context context, Type type)
@@ -75,6 +77,11 @@ public class RequestSensors
     public void incrementSensor(Context context, Type type, double value)
     {
         Optional.ofNullable(sensors.get(Pair.create(context, type))).ifPresent(s -> s.increment(value));
+    }
+
+    public String getKeyspace()
+    {
+        return keyspace;
     }
 
     public void syncAllSensors()

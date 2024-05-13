@@ -19,6 +19,7 @@
 package org.apache.cassandra.sensors;
 
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiPredicate;
 
 import org.junit.After;
 import org.junit.Before;
@@ -40,6 +41,7 @@ import org.apache.cassandra.db.ReadCommandVerbHandler;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.SensorsCustomParams;
@@ -57,9 +59,10 @@ public class SensorsInternodeMessageTest
 
     private ColumnFamilyStore store;
     private CopyOnWriteArrayList<Message> capturedOutboundMessages;
+    private BiPredicate<Message<?>, InetAddressAndPort> outboundSinkHandler;
 
     @BeforeClass
-    public static void defineSchema() throws Exception
+    public static void beforeClass() throws Exception
     {
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
@@ -70,6 +73,7 @@ public class SensorsInternodeMessageTest
         );
 
         CompactionManager.instance.disableAutoCompaction();
+        MessagingService.instance().listen();
     }
 
     @Before
@@ -80,11 +84,8 @@ public class SensorsInternodeMessageTest
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER).metadata());
 
         capturedOutboundMessages = new CopyOnWriteArrayList<>();
-        MessagingService.instance().outboundSink.add((message, to) ->
-                                                     {
-                                                         capturedOutboundMessages.add(message);
-                                                         return true;
-                                                     });
+        outboundSinkHandler = (message, to) -> capturedOutboundMessages.add(message);
+        MessagingService.instance().outboundSink.add(outboundSinkHandler);
     }
 
     @After
@@ -95,6 +96,7 @@ public class SensorsInternodeMessageTest
 
         RequestTracker.instance.set(null);
         SensorsRegistry.instance.clear();
+        MessagingService.instance().outboundSink.remove(outboundSinkHandler);
     }
 
     @Test

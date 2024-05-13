@@ -40,7 +40,8 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         logger.trace("Applying forwarded {}", cm);
 
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors requestSensors = new RequestSensors();
+        String keyspace = cm.getKeyspaceName();
+        RequestSensors requestSensors = new RequestSensors(keyspace);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 

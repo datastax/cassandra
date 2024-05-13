@@ -39,10 +39,6 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
@@ -99,24 +95,6 @@ public class SensorsRegistry implements SchemaChangeListener
     private SensorsRegistry()
     {
         Schema.instance.registerListener(this);
-        MessagingService.instance().outboundSink.add(this::trackOutboundMessages);
-    }
-
-    /**
-     * Tracks outbound messages size and count in Sensors Regsitry
-     */
-    private boolean trackOutboundMessages(Message<?> message, InetAddressAndPort ignored)
-    {
-        if (message.header.customParams() == null || !message.header.customParams().containsKey(SensorsCustomParams.KEYSPACE))
-            return true;
-
-        String keyspace = SensorsCustomParams.headerStringFromBytes(message.header.customParams().get(SensorsCustomParams.KEYSPACE));
-        double size = message.serializedSize(MessagingService.current_version);
-        Context context = new Context(keyspace);
-        this.updateSensor(context, Type.INTERNODE_MSG_BYTES, size);
-        this.updateSensor(context, Type.INTERNODE_MSG_COUNT, 1.0);
-
-        return true;
     }
 
     public void registerListener(SensorsRegistryListener listener)

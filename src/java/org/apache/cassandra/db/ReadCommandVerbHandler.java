@@ -61,7 +61,8 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         // Initialize the sensor and set ExecutorLocals
         Context context = Context.from(command);
-        RequestSensors sensors = new RequestSensors();
+        String keyspace = command.metadata().keyspace;
+        RequestSensors sensors = new RequestSensors(keyspace);
         sensors.registerSensor(context, Type.READ_BYTES);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
@@ -92,7 +93,6 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
     private void addInternodeSensorToResponse(Message.Builder<ReadResponse> reply, Context context)
     {
-        reply.withCustomParam(SensorsCustomParams.KEYSPACE, SensorsCustomParams.headerStringAsBytes(context.getKeyspace()));
         Context internodeSensorContext = new Context(context.getKeyspace());
         Optional<Sensor> internodeBytesSensor = SensorsRegistry.instance.getSensor(internodeSensorContext, Type.INTERNODE_MSG_BYTES);
         internodeBytesSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.INTERNODE_MSG_BYTES, bytes));

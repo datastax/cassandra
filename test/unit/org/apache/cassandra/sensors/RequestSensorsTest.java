@@ -62,9 +62,9 @@ public class RequestSensorsTest
         context2 = new Context("ks2", "t2", "id2");
         type2 = Type.WRITE_BYTES;
 
-        context1Sensors = new RequestSensors(() -> sensorsRegistry);
-        context2Sensors = new RequestSensors(() -> sensorsRegistry);
-        sensors = new RequestSensors(() -> sensorsRegistry);
+        context1Sensors = new RequestSensors(() -> sensorsRegistry, "ks1");
+        context2Sensors = new RequestSensors(() -> sensorsRegistry, "ks2");
+        sensors = new RequestSensors(() -> sensorsRegistry, "ks");
     }
 
     @Test

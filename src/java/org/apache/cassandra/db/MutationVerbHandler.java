@@ -69,7 +69,6 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         addSensorsToResponse(sensors, requestParam, tableParam, response);
 
         // Add internode message sensors to the response
-        response.withCustomParam(SensorsCustomParams.KEYSPACE, SensorsCustomParams.headerStringAsBytes(keyspace));
         Context context = new Context(keyspace);
         Optional<Sensor> internodeBytes = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_BYTES);
         internodeBytes.ifPresent(sensor -> {
@@ -126,7 +125,8 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         try
         {
             // Initialize the sensor and set ExecutorLocals
-            RequestSensors sensors = new RequestSensors();
+            String keyspace = message.payload.getKeyspaceName();
+            RequestSensors sensors = new RequestSensors(keyspace);
             ExecutorLocals locals = ExecutorLocals.create(sensors);
             ExecutorLocals.set(locals);
 

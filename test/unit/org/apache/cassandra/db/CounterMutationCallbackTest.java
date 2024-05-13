@@ -117,7 +117,7 @@ public class CounterMutationCallbackTest
     public void testCounterMutationCallback()
     {
         // dummy mutation
-        TableMetadata metadata = MockSchema.newTableMetadata("ks1", "dummy");
+        TableMetadata metadata = MockSchema.newTableMetadata(KEYSPACE1, "dummy");
         Mutation mutation = new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
         CounterMutation counterMutation = new CounterMutation(mutation, null);
         Message<CounterMutation> msg =
@@ -130,7 +130,7 @@ public class CounterMutationCallbackTest
                .withParam(TRACE_SESSION, UUID.randomUUID())
                .build();
 
-        RequestSensors requestSensors = new RequestSensors();
+        RequestSensors requestSensors = new RequestSensors(KEYSPACE1);
         RequestTracker.instance.set(requestSensors);
 
         Context context = Context.from(Keyspace.open(KEYSPACE1).getMetadata().tables.get(CF_COUTNER).get());

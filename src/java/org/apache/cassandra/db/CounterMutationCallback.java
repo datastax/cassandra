@@ -73,7 +73,6 @@ public class CounterMutationCallback implements Runnable
     private static void addSensorsToResponse(Message.Builder<NoPayload> response, String keyspace, RequestSensors requestSensors, int replicaMultiplier)
     {
         // Add internode message sensors to the response
-        response.withCustomParam(SensorsCustomParams.KEYSPACE, SensorsCustomParams.headerStringAsBytes(keyspace));
         Context context = new Context(keyspace);
         Optional<Sensor> internodeBytesSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_BYTES);
         internodeBytesSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> response.withCustomParam(SensorsCustomParams.INTERNODE_MSG_BYTES, bytes));
