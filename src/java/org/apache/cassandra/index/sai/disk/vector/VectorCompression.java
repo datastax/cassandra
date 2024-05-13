@@ -25,13 +25,13 @@ public class VectorCompression
     public static final VectorCompression NO_COMPRESSION = new VectorCompression(CompressionType.NONE, -1, -1);
 
     public final CompressionType type;
-    private final int originalSize;
-    private final int compressedSize;
+    private final int originalSize; // in bytes
+    private final int compressedSize; // in bytes
 
-    public VectorCompression(CompressionType type, int originalSize, double ratio)
+    public VectorCompression(CompressionType type, int dimension, double ratio)
     {
         this.type = type;
-        this.originalSize = originalSize;
+        this.originalSize = dimension * Float.BYTES;
         this.compressedSize = (int) (originalSize * ratio);
     }
 

@@ -102,7 +102,7 @@ public class VectorCompressionTest extends VectorTester
     {
         // with fewer than MIN_PQ_ROWS we expect to observe no compression no matter
         // what the source model would prefer
-        testOne(1, VectorSourceModel.OTHER, 200, new VectorCompression(NONE, 200 * Float.BYTES, 1.0));
+        testOne(1, VectorSourceModel.OTHER, 200, VectorCompression.NO_COMPRESSION);
     }
 
     private void testOne(VectorSourceModel model, int originalDimension, VectorCompression expectedCompression) throws IOException
@@ -140,7 +140,7 @@ public class VectorCompressionTest extends VectorTester
              var searcher = (V3VectorIndexSearcher) segment.getIndexSearcher())
         {
             var vc = searcher.getCompression();
-            var msg = String.format("Expected %s but got %s@%s", expectedCompression, vc.type, vc.getCompressedSize());
+            var msg = String.format("Expected %s but got %s", expectedCompression, vc);
             assertEquals(msg, expectedCompression, vc);
             if (vc.type != NONE)
             {
