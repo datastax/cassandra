@@ -60,11 +60,11 @@ public class VectorSiftSmallTest extends VectorTester
         waitForTableIndexesQueryable();
 
         insertVectors(baseVectors, 0);
-        double memoryRecall = testRecall(queryVectors, groundTruth);
+        double memoryRecall = testRecall(100, queryVectors, groundTruth);
         assertTrue("Memory recall is " + memoryRecall, memoryRecall > 0.975);
 
         flush();
-        var diskRecall = testRecall(queryVectors, groundTruth);
+        var diskRecall = testRecall(100, queryVectors, groundTruth);
         assertTrue("Disk recall is " + diskRecall, diskRecall > 0.975);
     }
 
@@ -83,7 +83,7 @@ public class VectorSiftSmallTest extends VectorTester
         // we're going to compact manually, so disable background compactions to avoid interference
         disableCompaction();
 
-        int segments = 5;
+        int segments = 10;
         int vectorsPerSegment = baseVectors.size() / segments;
         assert baseVectors.size() % vectorsPerSegment == 0; // simplifies split logic
         for (int i = 0; i < segments; i++)
@@ -91,12 +91,18 @@ public class VectorSiftSmallTest extends VectorTester
             insertVectors(baseVectors.subList(i * vectorsPerSegment, (i + 1) * vectorsPerSegment), i * vectorsPerSegment);
             flush();
         }
-        double memoryRecall = testRecall(queryVectors, groundTruth);
-        assertTrue("Pre-compaction recall is " + memoryRecall, memoryRecall > 0.975);
+        for (int topK : List.of(1, 100))
+        {
+            double recall = testRecall(topK, queryVectors, groundTruth);
+            assertTrue("Pre-compaction recall is " + recall, recall > 0.975);
+        }
 
         compact();
-        var diskRecall = testRecall(queryVectors, groundTruth);
-        assertTrue("Post-compaction recall is " + diskRecall, diskRecall > 0.975);
+        for (int topK : List.of(1, 100))
+        {
+            var recall = testRecall(topK, queryVectors, groundTruth);
+            assertTrue("Post-compaction recall is " + recall, recall > 0.975);
+        }
     }
 
     public static ArrayList<float[]> readFvecs(String filePath) throws IOException
@@ -123,16 +129,16 @@ public class VectorSiftSmallTest extends VectorTester
         return vectors;
     }
 
-    private static ArrayList<HashSet<Integer>> readIvecs(String filename)
+    private static ArrayList<List<Integer>> readIvecs(String filename)
     {
-        var groundTruthTopK = new ArrayList<HashSet<Integer>>();
+        var groundTruthTopK = new ArrayList<List<Integer>>();
 
         try (var dis = new DataInputStream(new FileInputStream(filename)))
         {
             while (dis.available() > 0)
             {
                 var numNeighbors = Integer.reverseBytes(dis.readInt());
-                var neighbors = new HashSet<Integer>(numNeighbors);
+                List<Integer> neighbors = new ArrayList<>(numNeighbors);
 
                 for (var i = 0; i < numNeighbors; i++)
                 {
@@ -151,10 +157,9 @@ public class VectorSiftSmallTest extends VectorTester
         return groundTruthTopK;
     }
 
-    public double testRecall(List<float[]> queryVectors, List<HashSet<Integer>> groundTruth)
+    public double testRecall(int topK, List<float[]> queryVectors, List<List<Integer>> groundTruth)
     {
         AtomicInteger topKfound = new AtomicInteger(0);
-        int topK = 100;
 
         // Perform query and compute recall
         var stream = IntStream.range(0, queryVectors.size()).parallel();
@@ -165,8 +170,11 @@ public class VectorSiftSmallTest extends VectorTester
             try {
                 UntypedResultSet result = execute("SELECT pk FROM %s ORDER BY val ANN OF " + queryVectorAsString + " LIMIT " + topK);
                 var gt = groundTruth.get(i);
+                assert topK <= gt.size();
+                // we don't care about order within the topK but we do need to restrict the size first
+                var gtSet = new HashSet<>(gt.subList(0, topK));
 
-                int n = (int)result.stream().filter(row -> gt.contains(row.getInt("pk"))).count();
+                int n = (int)result.stream().filter(row -> gtSet.contains(row.getInt("pk"))).count();
                 topKfound.addAndGet(n);
             } catch (Throwable throwable) {
                 throw new RuntimeException(throwable);
