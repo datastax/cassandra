@@ -86,7 +86,19 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         Tracing.trace("Enqueuing response to {}", message.from());
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
         addReadBytesSensorToResponse(reply, context);
+        addInternodeSensorToResponse(reply, context);
         MessagingService.instance().send(reply.build(), message.from());
+    }
+
+    private void addInternodeSensorToResponse(Message.Builder<ReadResponse> reply, Context context)
+    {
+        reply.withCustomParam(SensorsCustomParams.KEYSPACE, SensorsCustomParams.headerStringAsBytes(context.getKeyspace()));
+        Context internodeSensorContext = new Context(context.getKeyspace());
+        Optional<Sensor> internodeBytesSensor = SensorsRegistry.instance.getSensor(internodeSensorContext, Type.INTERNODE_MSG_BYTES);
+        internodeBytesSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.INTERNODE_MSG_BYTES, bytes));
+
+        Optional<Sensor> internodeCountSensor = SensorsRegistry.instance.getSensor(internodeSensorContext, Type.INTERNODE_MSG_COUNT);
+        internodeCountSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(count -> reply.withCustomParam(SensorsCustomParams.INTERNODE_MSG_COUNT, count));
     }
 
     private void addReadBytesSensorToResponse(Message.Builder<ReadResponse> reply, Context context)

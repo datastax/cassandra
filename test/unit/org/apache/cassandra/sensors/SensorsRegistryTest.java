@@ -52,6 +52,8 @@ public class SensorsRegistryTest
     private Type type1;
     private Context context2;
     private Type type2;
+    private Context ksOnlyContext;
+    private Type ksOnlyType;
 
     @BeforeClass
     public static void defineSchema() throws Exception
@@ -73,6 +75,9 @@ public class SensorsRegistryTest
 
         context2 = new Context(KEYSPACE, CF2, Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2).metadata().id.toString());
         type2 = Type.INDEX_WRITE_BYTES;
+
+        ksOnlyContext = new Context(KEYSPACE);
+        ksOnlyType = Type.INTERNODE_MSG_BYTES;
     }
 
     @After

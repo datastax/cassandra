@@ -19,6 +19,7 @@
 package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 
 import org.apache.cassandra.sensors.Sensor;
 
@@ -28,6 +29,12 @@ import org.apache.cassandra.sensors.Sensor;
  */
 public final class SensorsCustomParams
 {
+    /**
+     * The keyspace name for a given sensor context. Comes in handy whenever we need to track the sensor values at the keyspace level
+     * where information about keyspace is absent wihtout needing to deseriazlie the message or link back the response to the request
+     * e.g. when trakcing internode message bytes at the MessageService level.
+     */
+    public static final String KEYSPACE = "KEYSPACE";
     /**
      * The per-request read bytes value for a given keyspace and table.
      */
@@ -64,6 +71,14 @@ public final class SensorsCustomParams
      * To support batch writes, table name is encoded in the following format: INDEX_WRITE_BYTES_TABLE.<table>
      */
     public static final String INDEX_WRITE_BYTES_TABLE_TEMPLATE = "INDEX_WRITE_BYTES_TABLE.%s";
+    /**
+     * The total internode message bytes received by the writer or coordinator for a given keyspace.
+     */
+    public static final String INTERNODE_MSG_BYTES = "INTERNODE_MSG_BYTES";
+    /**
+     * The total internode message count received by the writer or coordinator for a given keyspace.
+     */
+    public static final String INTERNODE_MSG_COUNT = "INTERNODE_MSG_COUNT";
 
     private SensorsCustomParams()
     {
@@ -106,5 +121,15 @@ public final class SensorsCustomParams
     public static String encodeTableInIndexWriteBytesTableParam(String tableName)
     {
         return String.format(INDEX_WRITE_BYTES_TABLE_TEMPLATE, tableName);
+    }
+
+    public static byte[] headerStringAsBytes(String value)
+    {
+        return value.getBytes(StandardCharsets.UTF_8);
+    }
+
+    public static String headerStringFromBytes(byte[] bytes)
+    {
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 }

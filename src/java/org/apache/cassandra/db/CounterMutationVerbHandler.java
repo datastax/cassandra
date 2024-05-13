@@ -22,12 +22,9 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.StorageProxy;
 
 public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
@@ -46,14 +43,6 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         RequestSensors requestSensors = new RequestSensors();
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
-
-        // register write sensors and increment internode message sensors so they can be synced with the various Mutation#apply methods
-        for (PartitionUpdate update : message.payload.getPartitionUpdates())
-        {
-            Context context = Context.from(update.metadata());
-            // mutation bytes are updated later on via ColumnFamilyStore#apply
-            requestSensors.registerSensor(context, Type.WRITE_BYTES);
-        }
 
         String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getLocalDatacenter();
         // We should not wait for the result of the write in this thread,

@@ -22,7 +22,6 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
-import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.ForwardingInfo;
@@ -44,17 +43,18 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 {
     public static final MutationVerbHandler instance = new MutationVerbHandler();
 
-    private void respond(Message<?> respondTo, InetAddressAndPort respondToAddress)
+    private void respond(Message<Mutation> respondTo, InetAddressAndPort respondToAddress)
     {
         Tracing.trace("Enqueuing response to {}", respondToAddress);
 
         Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
-        addSensorsToResponse(response);
+        String keyspace = respondTo.payload.getKeyspaceName();
+        addSensorsToResponse(response, keyspace);
 
         MessagingService.instance().send(response.build(), respondToAddress);
     }
 
-    private void addSensorsToResponse(Message.Builder<NoPayload> response)
+    private void addSensorsToResponse(Message.Builder<NoPayload> response, String keyspace)
     {
         // Add write bytes sensors to the response
         Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
@@ -67,6 +67,21 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         tableParam = SensorsCustomParams::encodeTableInIndexWriteBytesTableParam;
         sensors = RequestTracker.instance.get().getSensors(Type.INDEX_WRITE_BYTES);
         addSensorsToResponse(sensors, requestParam, tableParam, response);
+
+        // Add internode message sensors to the response
+        response.withCustomParam(SensorsCustomParams.KEYSPACE, SensorsCustomParams.headerStringAsBytes(keyspace));
+        Context context = new Context(keyspace);
+        Optional<Sensor> internodeBytes = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_BYTES);
+        internodeBytes.ifPresent(sensor -> {
+            byte[] bytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
+            response.withCustomParam(SensorsCustomParams.INTERNODE_MSG_BYTES, bytes);
+        });
+
+        Optional<Sensor> internodeCount = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_COUNT);
+        internodeCount.ifPresent(sensor -> {
+            byte[] count = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
+            response.withCustomParam(SensorsCustomParams.INTERNODE_MSG_COUNT, count);
+        });
     }
 
     private void addSensorsToResponse(Collection<Sensor> sensors, Function<String, String> requestParamSupplier, Function<String, String> tableParamSupplier, Message.Builder<NoPayload> response)
@@ -83,20 +98,6 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
                 String tableBytesParam = tableParamSupplier.apply(sensor.getContext().getTable());
                 byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
                 response.withCustomParam(tableBytesParam, tableBytes);
-            });
-
-            Optional<Sensor> internodeBytes = SensorsRegistry.instance.getSensor(requestSensor.getContext(), Type.INTERNODE_MSG_BYTES);
-            internodeBytes.ifPresent(sensor -> {
-                String tableBytesParam = SensorsCustomParams.encodeTableInInternodeMsgCountTableParam(sensor.getContext().getTable());
-                byte[] bytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
-                response.withCustomParam(tableBytesParam, bytes);
-            });
-
-            Optional<Sensor> internodeCount = SensorsRegistry.instance.getSensor(requestSensor.getContext(), Type.INTERNODE_MSG_COUNT);
-            internodeCount.ifPresent(sensor -> {
-                String tableBytesParam = SensorsCustomParams.encodeTableInInternodeMsgCountTableParam(sensor.getContext().getTable());
-                byte[] count = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
-                response.withCustomParam(tableBytesParam, count);
             });
         }
     }
@@ -128,24 +129,6 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
             RequestSensors sensors = new RequestSensors();
             ExecutorLocals locals = ExecutorLocals.create(sensors);
             ExecutorLocals.set(locals);
-
-            // split the internode message bytes and count into between tables in the mutation
-            int sensorsCount = message.payload.getPartitionUpdates().size();
-            double internodeBytesPerTable = (double) message.serializedSize(MessagingService.current_version) / sensorsCount;
-            double internodeCountPerTable = 1.0d / sensorsCount;
-
-            // register write sensors and increment internode message sensors so they can be synced with the various Mutation#apply methods
-            for (PartitionUpdate update : message.payload.getPartitionUpdates())
-            {
-                Context context = Context.from(update.metadata());
-                // mutation bytes are update later on via ColumnFamilyStore#apply
-                sensors.registerSensor(context, Type.WRITE_BYTES);
-
-                sensors.registerSensor(context, Type.INTERNODE_MSG_BYTES);
-                sensors.registerSensor(context, Type.INTERNODE_MSG_COUNT);
-                sensors.incrementSensor(context, Type.INTERNODE_MSG_BYTES, internodeBytesPerTable);
-                sensors.incrementSensor(context, Type.INTERNODE_MSG_COUNT, internodeCountPerTable);
-            }
 
             message.payload.applyFuture(WriteOptions.DEFAULT).thenAccept(o -> respond(message, respondToAddress)).exceptionally(wto -> {
                 failed();
