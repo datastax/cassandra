@@ -30,7 +30,6 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.pq.PQVectors;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
@@ -41,6 +40,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -330,12 +330,11 @@ public class SSTableIndexWriter implements PerIndexWriter
         {
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
-            var cvi = CassandraOnHeapGraph.getCompressedVectorsIfPresent(indexContext, cv1 -> cv1 instanceof PQVectors);
-            if (cvi == null || cvi.unitVectors.isEmpty() || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION) {
+            var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
+            if (pqi == null || pqi.unitVectors.isEmpty() || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION) {
                 builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(indexDescriptor, indexContext, rowIdOffset, keyCount, limiter);
             } else {
-                var pq = ((PQVectors) cvi.cv).getProductQuantization();
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(indexDescriptor, indexContext, rowIdOffset, keyCount, limiter, pq, cvi.unitVectors.get());
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(indexDescriptor, indexContext, rowIdOffset, keyCount, limiter, pqi.pq, pqi.unitVectors.get());
             }
         }
         else if (indexContext.isLiteral())
