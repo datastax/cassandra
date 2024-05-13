@@ -18,6 +18,10 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -26,6 +30,9 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.ImmutableSet;
+
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -47,16 +54,18 @@ public class RequestSensors
     private final Supplier<SensorsRegistry> sensorsRegistry;
     private final ConcurrentMap<Pair<Context, Type>, Sensor> sensors = new ConcurrentHashMap<>();
     private final String keyspace;
+    private final Collection<TableMetadata> tables;
 
-    public RequestSensors(String keyspace)
+    public RequestSensors(String keyspace, Collection<TableMetadata> tables)
     {
-        this(() -> SensorsRegistry.instance, keyspace);
+        this(() -> SensorsRegistry.instance, keyspace, tables);
     }
 
-    public RequestSensors(Supplier<SensorsRegistry> sensorsRegistry, String keyspace)
+    public RequestSensors(Supplier<SensorsRegistry> sensorsRegistry, String keyspace, Collection<TableMetadata> tables)
     {
         this.sensorsRegistry = sensorsRegistry;
         this.keyspace = keyspace;
+        this.tables = tables;
     }
 
     public void registerSensor(Context context, Type type)
@@ -82,6 +91,11 @@ public class RequestSensors
     public String getKeyspace()
     {
         return keyspace;
+    }
+
+    public Collection<TableMetadata> getTables()
+    {
+        return tables;
     }
 
     public void syncAllSensors()

@@ -120,7 +120,7 @@ public class SensorsRegistry implements SchemaChangeListener
 
         try
         {
-            if (!keyspaces.contains(context.getKeyspace()) || (context.getTableId() != null && !tableIds.contains(context.getTableId())))
+            if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
                 return Optional.empty();
 
             // Create a candidate sensor and try inserting in the identity map: this is to make sure concurrent calls will
@@ -133,13 +133,10 @@ public class SensorsRegistry implements SchemaChangeListener
 
             Set<Sensor> keyspaceSet = byKeyspace.computeIfAbsent(sensor.getContext().getKeyspace(), (ignored) -> Sets.newConcurrentHashSet());
             keyspaceSet.add(sensor);
+            Set<Sensor> tableSet = byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
+            tableSet.add(sensor);
             Set<Sensor> opSet = byType.computeIfAbsent(sensor.getType().name(), (ignored) -> Sets.newConcurrentHashSet());
             opSet.add(sensor);
-            if (context.getTableId() != null)
-            {
-                Set<Sensor> tableSet = byTableId.computeIfAbsent(sensor.getContext().getTableId(), (ignored) -> Sets.newConcurrentHashSet());
-                tableSet.add(sensor);
-            }
 
             return Optional.of(sensor);
         }
@@ -219,11 +216,11 @@ public class SensorsRegistry implements SchemaChangeListener
             tableIds.remove(tableId);
             byTableId.remove(tableId);
 
-            Set<Sensor> removed = removeSensor(ImmutableSet.of(identity.values()), s -> s.getContext().getTableId() != null && s.getContext().getTableId().equals(tableId));
+            Set<Sensor> removed = removeSensor(ImmutableSet.of(identity.values()), s -> s.getContext().getTableId().equals(tableId));
             removed.forEach(this::notifyOnSensorRemoved);
 
-            removeSensor(byKeyspace.values(), s -> s.getContext().getTableId() != null && s.getContext().getTableId().equals(tableId));
-            removeSensor(byType.values(), s -> s.getContext().getTableId() != null && s.getContext().getTableId().equals(tableId));
+            removeSensor(byKeyspace.values(), s -> s.getContext().getTableId().equals(tableId));
+            removeSensor(byType.values(), s -> s.getContext().getTableId().equals(tableId));
         }
         finally
         {

@@ -52,8 +52,6 @@ public class SensorsRegistryTest
     private Type type1;
     private Context context2;
     private Type type2;
-    private Context ksOnlyContext;
-    private Type ksOnlyType;
 
     @BeforeClass
     public static void defineSchema() throws Exception
@@ -75,9 +73,6 @@ public class SensorsRegistryTest
 
         context2 = new Context(KEYSPACE, CF2, Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2).metadata().id.toString());
         type2 = Type.INDEX_WRITE_BYTES;
-
-        ksOnlyContext = new Context(KEYSPACE);
-        ksOnlyType = Type.INTERNODE_MSG_BYTES;
     }
 
     @After
@@ -189,9 +184,6 @@ public class SensorsRegistryTest
         Sensor context2Type2Sensor = SensorsRegistry.instance.getOrCreateSensor(context2, type2).get();
         verify(listener, times(1)).onSensorCreated(context2Type2Sensor);
 
-        Sensor ksOnlySensor = SensorsRegistry.instance.getOrCreateSensor(ksOnlyContext, ksOnlyType).get();
-        verify(listener, times(1)).onSensorCreated(ksOnlySensor);
-
         verify(listener, never()).onSensorRemoved(any());
 
         // Drop the table and verify the listener is notified about removal of related sensors
@@ -200,7 +192,6 @@ public class SensorsRegistryTest
         verify(listener, times(1)).onSensorRemoved(context2Type2Sensor);
         verify(listener, never()).onSensorRemoved(context1Type1Sensor);
         verify(listener, never()).onSensorRemoved(context1Type2Sensor);
-        verify(listener, never()).onSensorRemoved(ksOnlySensor);
 
         // Drop the keyspace and verify the listener is notified about removal of the remaining sensors
         SensorsRegistry.instance.onDropKeyspace(Keyspace.open(KEYSPACE).getMetadata(), false);
@@ -208,7 +199,6 @@ public class SensorsRegistryTest
         verify(listener, times(1)).onSensorRemoved(context1Type2Sensor);
         verify(listener, times(1)).onSensorRemoved(context2Type1Sensor);
         verify(listener, times(1)).onSensorRemoved(context2Type2Sensor);
-        verify(listener, times(1)).onSensorRemoved(ksOnlySensor);
 
         // Unregister the listener and verify it is not notified anymore about creation and removal of sensors
         clearInvocations(listener);

@@ -19,7 +19,6 @@
 package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 
 import org.apache.cassandra.sensors.Sensor;
 
@@ -67,12 +66,14 @@ public final class SensorsCustomParams
     public static final String INDEX_WRITE_BYTES_TABLE_TEMPLATE = "INDEX_WRITE_BYTES_TABLE.%s";
     /**
      * The total internode message bytes received by the writer or coordinator for a given keyspace.
+     * To support batch writes, table name is encoded in the following format: INTERNODE_MSG_BYTES.<table>
      */
-    public static final String INTERNODE_MSG_BYTES = "INTERNODE_MSG_BYTES";
+    public static final String INTERNODE_MSG_BYTES_TABLE_TEMPLATE = "INTERNODE_MSG_BYTES_TABLE.%s";
     /**
      * The total internode message count received by the writer or coordinator for a given keyspace.
+     * To support batch writes, table name is encoded in the following format: INTERNODE_MSG_COUNT.<table>
      */
-    public static final String INTERNODE_MSG_COUNT = "INTERNODE_MSG_COUNT";
+    public static final String INTERNODE_MSG_COUNT_TABLE_TEMPLATE = "INTERNODE_MSG_COUNT_TABLE.%s";
 
     private SensorsCustomParams()
     {
@@ -115,5 +116,15 @@ public final class SensorsCustomParams
     public static String encodeTableInIndexWriteBytesTableParam(String tableName)
     {
         return String.format(INDEX_WRITE_BYTES_TABLE_TEMPLATE, tableName);
+    }
+
+    public static String encodeTableInInternodeBytesTableParam(String tableName)
+    {
+        return String.format(INTERNODE_MSG_BYTES_TABLE_TEMPLATE, tableName);
+    }
+
+    public static String encodeTableInInternodeCountTableParam(String tableName)
+    {
+        return String.format(INTERNODE_MSG_COUNT_TABLE_TEMPLATE, tableName);
     }
 }

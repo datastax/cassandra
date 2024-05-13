@@ -20,8 +20,10 @@ package org.apache.cassandra.db;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.ForwardingInfo;
@@ -31,6 +33,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
@@ -48,13 +51,12 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         Tracing.trace("Enqueuing response to {}", respondToAddress);
 
         Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
-        String keyspace = respondTo.payload.getKeyspaceName();
-        addSensorsToResponse(response, keyspace);
+        addSensorsToResponse(response, respondTo.payload);
 
         MessagingService.instance().send(response.build(), respondToAddress);
     }
 
-    private void addSensorsToResponse(Message.Builder<NoPayload> response, String keyspace)
+    private void addSensorsToResponse(Message.Builder<NoPayload> response, Mutation mutation)
     {
         // Add write bytes sensors to the response
         Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
@@ -69,18 +71,23 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         addSensorsToResponse(sensors, requestParam, tableParam, response);
 
         // Add internode message sensors to the response
-        Context context = new Context(keyspace);
-        Optional<Sensor> internodeBytes = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_BYTES);
-        internodeBytes.ifPresent(sensor -> {
-            byte[] bytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
-            response.withCustomParam(SensorsCustomParams.INTERNODE_MSG_BYTES, bytes);
-        });
+        for (PartitionUpdate update : mutation.getPartitionUpdates())
+        {
+            Context context = Context.from(update.metadata());
+            Optional<Sensor> internodeBytes = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_BYTES);
+            internodeBytes.ifPresent(sensor -> {
+                byte[] bytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
+                String internodeBytesTableParam = SensorsCustomParams.encodeTableInInternodeBytesTableParam(context.getTable());
+                response.withCustomParam(internodeBytesTableParam, bytes);
+            });
 
-        Optional<Sensor> internodeCount = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_COUNT);
-        internodeCount.ifPresent(sensor -> {
-            byte[] count = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
-            response.withCustomParam(SensorsCustomParams.INTERNODE_MSG_COUNT, count);
-        });
+            Optional<Sensor> internodeCount = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_COUNT);
+            internodeCount.ifPresent(sensor -> {
+                byte[] count = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
+                String internodeCountTableParam = SensorsCustomParams.encodeTableInInternodeCountTableParam(context.getTable());
+                response.withCustomParam(internodeCountTableParam, count);
+            });
+        }
     }
 
     private void addSensorsToResponse(Collection<Sensor> sensors, Function<String, String> requestParamSupplier, Function<String, String> tableParamSupplier, Message.Builder<NoPayload> response)
@@ -126,7 +133,8 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         {
             // Initialize the sensor and set ExecutorLocals
             String keyspace = message.payload.getKeyspaceName();
-            RequestSensors sensors = new RequestSensors(keyspace);
+            Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toList());
+            RequestSensors sensors = new RequestSensors(keyspace, tables);
             ExecutorLocals locals = ExecutorLocals.create(sensors);
             ExecutorLocals.set(locals);
 
@@ -144,18 +152,18 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
     private static void forwardToLocalNodes(Message<Mutation> originalMessage, ForwardingInfo forwardTo)
     {
         Message.Builder<Mutation> builder =
-            Message.builder(originalMessage)
-                   .withParam(ParamType.RESPOND_TO, originalMessage.from())
-                   .withoutParam(ParamType.FORWARD_TO);
+        Message.builder(originalMessage)
+               .withParam(ParamType.RESPOND_TO, originalMessage.from())
+               .withoutParam(ParamType.FORWARD_TO);
 
         boolean useSameMessageID = forwardTo.useSameMessageID(originalMessage.id());
         // reuse the same Message if all ids are identical (as they will be for 4.0+ node originated messages)
         Message<Mutation> message = useSameMessageID ? builder.build() : null;
 
         forwardTo.forEach((id, target) ->
-        {
-            Tracing.trace("Enqueuing forwarded write to {}", target);
-            MessagingService.instance().send(useSameMessageID ? message : builder.withId(id).build(), target);
-        });
+                          {
+                              Tracing.trace("Enqueuing forwarded write to {}", target);
+                              MessagingService.instance().send(useSameMessageID ? message : builder.withId(id).build(), target);
+                          });
     }
 }

@@ -17,13 +17,18 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Collection;
+import java.util.stream.Collectors;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.service.StorageProxy;
 
@@ -41,7 +46,8 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
 
         // Initialize the sensor and set ExecutorLocals
         String keyspace = cm.getKeyspaceName();
-        RequestSensors requestSensors = new RequestSensors(keyspace);
+        Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toSet());
+        RequestSensors requestSensors = new RequestSensors(keyspace, tables);
         ExecutorLocals locals = ExecutorLocals.create(requestSensors);
         ExecutorLocals.set(locals);
 

@@ -19,6 +19,7 @@ package org.apache.cassandra.db;
 
 import java.util.Optional;
 
+import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,7 +63,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         // Initialize the sensor and set ExecutorLocals
         Context context = Context.from(command);
         String keyspace = command.metadata().keyspace;
-        RequestSensors sensors = new RequestSensors(keyspace);
+        RequestSensors sensors = new RequestSensors(keyspace, ImmutableSet.of(command.metadata()));
         sensors.registerSensor(context, Type.READ_BYTES);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
         ExecutorLocals.set(locals);
@@ -93,12 +94,13 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
     private void addInternodeSensorToResponse(Message.Builder<ReadResponse> reply, Context context)
     {
-        Context internodeSensorContext = new Context(context.getKeyspace());
-        Optional<Sensor> internodeBytesSensor = SensorsRegistry.instance.getSensor(internodeSensorContext, Type.INTERNODE_MSG_BYTES);
-        internodeBytesSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(SensorsCustomParams.INTERNODE_MSG_BYTES, bytes));
+        Optional<Sensor> internodeBytesSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_BYTES);
+        String internodeBytesTableParam = SensorsCustomParams.encodeTableInInternodeBytesTableParam(context.getTable());
+        internodeBytesSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> reply.withCustomParam(internodeBytesTableParam, bytes));
 
-        Optional<Sensor> internodeCountSensor = SensorsRegistry.instance.getSensor(internodeSensorContext, Type.INTERNODE_MSG_COUNT);
-        internodeCountSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(count -> reply.withCustomParam(SensorsCustomParams.INTERNODE_MSG_COUNT, count));
+        Optional<Sensor> internodeCountSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_COUNT);
+        String internodeCountTableParam = SensorsCustomParams.encodeTableInInternodeCountTableParam(context.getTable());
+        internodeCountSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(count -> reply.withCustomParam(internodeCountTableParam, count));
     }
 
     private void addReadBytesSensorToResponse(Message.Builder<ReadResponse> reply, Context context)

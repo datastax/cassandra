@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.Optional;
 import java.util.function.Function;
 
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -65,27 +66,31 @@ public class CounterMutationCallback implements Runnable
         int replicaMultiplier = replicaCount == 0 ?
                                 1 : // replica count was not explicitly set (default). At the bare minimum, we should send the response accomodating for the local replica (aka. mutation leader) sensor values
                                 replicaCount;
-        String keyspace = respondTo.payload.getKeyspaceName();
-        addSensorsToResponse(response, keyspace, requestSensors, replicaMultiplier);
+        addSensorsToResponse(response, respondTo.payload.getMutation(), requestSensors, replicaMultiplier);
         MessagingService.instance().send(response.build(), respondToAddress);
     }
 
-    private static void addSensorsToResponse(Message.Builder<NoPayload> response, String keyspace, RequestSensors requestSensors, int replicaMultiplier)
+    private static void addSensorsToResponse(Message.Builder<NoPayload> response, Mutation mutation, RequestSensors requestSensors, int replicaMultiplier)
     {
-        // Add internode message sensors to the response
-        Context context = new Context(keyspace);
-        Optional<Sensor> internodeBytesSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_BYTES);
-        internodeBytesSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> response.withCustomParam(SensorsCustomParams.INTERNODE_MSG_BYTES, bytes));
-
-        Optional<Sensor> internodeCountSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_COUNT);
-        internodeCountSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(count -> response.withCustomParam(SensorsCustomParams.INTERNODE_MSG_COUNT, count));
-
         // Add write bytes sensors to the response
         Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
         Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteBytesTableParam;
 
         Collection<Sensor> sensors = requestSensors.getSensors(Type.WRITE_BYTES);
         addSensorsToResponse(sensors, requestParam, tableParam, response, replicaMultiplier);
+
+        // Add internode message sensors to the response
+        for (PartitionUpdate update : mutation.getPartitionUpdates())
+        {
+            Context context = Context.from(update.metadata());
+            Optional<Sensor> internodeBytesSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_BYTES);
+            String internodeBytesTableParam = SensorsCustomParams.encodeTableInInternodeBytesTableParam(context.getTable());
+            internodeBytesSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> response.withCustomParam(internodeBytesTableParam, bytes));
+
+            Optional<Sensor> internodeCountSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_COUNT);
+            String internodeCountTableParam = SensorsCustomParams.encodeTableInInternodeCountTableParam(context.getTable());
+            internodeCountSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(count -> response.withCustomParam(internodeCountTableParam, count));
+        }
     }
 
     private static void addSensorsToResponse(Collection<Sensor> sensors,

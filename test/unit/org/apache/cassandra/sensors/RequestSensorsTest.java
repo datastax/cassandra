@@ -20,6 +20,7 @@ package org.apache.cassandra.sensors;
 
 import java.util.Optional;
 
+import com.google.common.collect.ImmutableSet;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -62,9 +63,9 @@ public class RequestSensorsTest
         context2 = new Context("ks2", "t2", "id2");
         type2 = Type.WRITE_BYTES;
 
-        context1Sensors = new RequestSensors(() -> sensorsRegistry, "ks1");
-        context2Sensors = new RequestSensors(() -> sensorsRegistry, "ks2");
-        sensors = new RequestSensors(() -> sensorsRegistry, "ks");
+        context1Sensors = new RequestSensors(() -> sensorsRegistry, "ks1", ImmutableSet.of());
+        context2Sensors = new RequestSensors(() -> sensorsRegistry, "ks2", ImmutableSet.of());
+        sensors = new RequestSensors(() -> sensorsRegistry, "ks", ImmutableSet.of());
     }
 
     @Test

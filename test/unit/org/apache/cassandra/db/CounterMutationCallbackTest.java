@@ -25,6 +25,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -117,7 +118,7 @@ public class CounterMutationCallbackTest
     public void testCounterMutationCallback()
     {
         // dummy mutation
-        TableMetadata metadata = MockSchema.newTableMetadata(KEYSPACE1, "dummy");
+        TableMetadata metadata = MockSchema.newTableMetadata(KEYSPACE1, CF_COUTNER);
         Mutation mutation = new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
         CounterMutation counterMutation = new CounterMutation(mutation, null);
         Message<CounterMutation> msg =
@@ -130,7 +131,7 @@ public class CounterMutationCallbackTest
                .withParam(TRACE_SESSION, UUID.randomUUID())
                .build();
 
-        RequestSensors requestSensors = new RequestSensors(KEYSPACE1);
+        RequestSensors requestSensors = new RequestSensors(KEYSPACE1, ImmutableSet.of(metadata));
         RequestTracker.instance.set(requestSensors);
 
         Context context = Context.from(Keyspace.open(KEYSPACE1).getMetadata().tables.get(CF_COUTNER).get());
