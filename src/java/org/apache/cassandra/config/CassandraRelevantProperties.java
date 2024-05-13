@@ -532,6 +532,7 @@ public enum CassandraRelevantProperties
 
     // SAI specific properties
 
+    SAI_ENABLE_EDGES_CACHE("cassandra.sai.enable_edges_cache", "false"),
     SAI_ENABLE_LTM_CONSTRUCTION("cassandra.sai.ltm_construction", "true"),
     SAI_ENABLE_RERANK_FLOOR("cassandra.sai.rerank_floor", "true"),
 
