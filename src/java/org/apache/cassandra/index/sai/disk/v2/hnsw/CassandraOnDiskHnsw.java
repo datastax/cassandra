@@ -44,6 +44,7 @@ import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
 import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -183,6 +184,14 @@ public class CassandraOnDiskHnsw extends JVectorLuceneOnDiskGraph
     public VectorSupplier getVectorSupplier()
     {
         return new HNSWVectorSupplier(vectors);
+    }
+
+    @Override
+    public VectorCompression getCompression()
+    {
+        return new VectorCompression(VectorCompression.CompressionType.NONE,
+                                     vectors.dimension() * Float.BYTES,
+                                     vectors.dimension() * Float.BYTES);
     }
 
     @Override
