@@ -72,7 +72,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private final FileHandle graphHandle;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final Set<FeatureId> features;
-    private final CachingGraphIndex graph;
+    private final GraphIndex graph;
     private final VectorSimilarityFunction similarityFunction;
     @Nullable
     private final CompressedVectors compressedVectors;
@@ -93,7 +93,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         graphHandle = indexFiles.termsData();
         var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
         features = rawGraph.getFeatureSet();
-        graph = cachingGraphFor(rawGraph);
+        graph = V3OnDiskFormat.ENABLE_EDGES_CACHE ? cachingGraphFor(rawGraph) : rawGraph;
 
         long pqSegmentOffset = this.componentMetadatas.get(IndexComponent.PQ).offset;
         try (var pqFile = indexFiles.pq();
@@ -164,7 +164,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         return pq;
     }
 
-    private CachingGraphIndex cachingGraphFor(OnDiskGraphIndex rawGraph)
+    private GraphIndex cachingGraphFor(OnDiskGraphIndex rawGraph)
     {
         // cache edges around the entry point
         // we can easily hold 1% of the edges in memory for typical index sizes, but
@@ -294,7 +294,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     @Override
     public VectorSupplier getVectorSupplier()
     {
-        return new ANNVectorSupplier(graph.getView());
+        return new ANNVectorSupplier((GraphIndex.ScoringView) graph.getView());
     }
 
     private static class ANNVectorSupplier implements VectorSupplier
