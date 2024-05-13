@@ -42,7 +42,7 @@ public enum VectorSourceModel
     NV_QA_4((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.125), 1.5),
     COHERE_V3((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.0625), 1.25),
 
-    OTHER(COSINE, VectorSourceModel::genericCompression, VectorSourceModel::genericOverquery);
+    OTHER(COSINE, VectorSourceModel::genericCompressionFor, VectorSourceModel::genericOverquery);
 
     /**
      * Default similarity function for this model.
@@ -77,10 +77,10 @@ public enum VectorSourceModel
         return valueOf(value.toUpperCase());
     }
 
-    private static VectorCompression genericCompression(int originalDimension)
+    private static VectorCompression genericCompressionFor(int dimension)
     {
         // Model is unspecified / unknown, so we guess.
-        return new VectorCompression(PRODUCT_QUANTIZATION, originalDimension, defaultPQBytesFor(originalDimension));
+        return new VectorCompression(PRODUCT_QUANTIZATION, dimension * Float.BYTES, defaultPQBytesFor(dimension));
     }
 
     private static int defaultPQBytesFor(int originalDimension)
