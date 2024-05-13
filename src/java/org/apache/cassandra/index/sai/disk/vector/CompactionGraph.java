@@ -23,7 +23,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.EnumMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ForkJoinPool;
 
@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.disk.Feature;
 import io.github.jbellis.jvector.graph.disk.FeatureId;
+import io.github.jbellis.jvector.graph.disk.FusedADC;
 import io.github.jbellis.jvector.graph.disk.InlineVectorValues;
 import io.github.jbellis.jvector.graph.disk.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
@@ -62,6 +63,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.VectorPostings.CompactionVectorPostings;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Component;
@@ -147,12 +149,19 @@ public class CompactionGraph implements Closeable, Accountable
         var indexFile = descriptor.fileFor(IndexComponent.TERMS_DATA, context);
         termsOffset = (indexFile.exists() ? indexFile.length() : 0)
                       + SAICodecUtils.headerSize();
-        writer = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
-                 .withVersion(JVECTOR_2_VERSION) // VSTODO old version until we add LVQ
-                 .withStartOffset(termsOffset)
-                 .with(new InlineVectors(dimension))
-                 .withMapper(new OnDiskGraphIndexWriter.IdentityMapper())
-                 .build();
+        var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
+                            .withStartOffset(termsOffset)
+                            .with(new InlineVectors(dimension))
+                            .withMapper(new OnDiskGraphIndexWriter.IdentityMapper());
+        if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT)
+        {
+            writerBuilder = writerBuilder.with(new FusedADC(indexConfig.getMaximumNodeConnections(), compressor));
+        }
+        else
+        {
+            writerBuilder = writerBuilder.withVersion(JVECTOR_2_VERSION);
+        }
+        writer = writerBuilder.build();
         writer.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
         SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()));
         inlineVectors = new InlineVectorValues(dimension, writer);
@@ -247,8 +256,12 @@ public class CompactionGraph implements Closeable, Accountable
                                                                               pqVectors.count(), builder.getGraph().size());
         assert postingsMap.keySet().size() == builder.getGraph().size() : String.format("postings map entry count %d != vector count %d",
                                                                                         postingsMap.keySet().size(), builder.getGraph().size());
-        logger.debug("Writing graph with {} rows and {} distinct vectors",
-                     postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), builder.getGraph().size());
+        if (logger.isDebugEnabled())
+        {
+            logger.debug("Writing graph with {} rows and {} distinct vectors",
+                         postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), builder.getGraph().size());
+            logger.debug("Estimated size is {} + {}", pqVectors.ramBytesUsed(), builder.getGraph().ramBytesUsed());
+        }
 
         var pqOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.PQ, context);
         var postingsOrder = descriptor.getVersion(context).onDiskFormat().byteOrderFor(IndexComponent.POSTING_LISTS, context);
@@ -261,10 +274,11 @@ public class CompactionGraph implements Closeable, Accountable
             // write PQ
             long pqOffset = pqOutput.getFilePointer();
             CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
-            pqVectors.write(pqOutput.asSequentialWriter(), JVECTOR_2_VERSION); // VSTODO old version until we add LVQ
+            pqVectors.write(pqOutput.asSequentialWriter(), JVECTOR_2_VERSION); // VSTODO old version until we add APQ
             long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             // write postings
+            // VSTODO make this async?  it's i/o bound and cleanup next step is cpu bound
             long postingsOffset = postingsOutput.getFilePointer();
             long postingsPosition = new VectorPostingsWriter<Integer>(postingsOneToOne, i -> i)
                                             .writePostings(postingsOutput.asSequentialWriter(), inlineVectors, postingsMap, Set.of());
@@ -274,7 +288,18 @@ public class CompactionGraph implements Closeable, Accountable
             builder.cleanup();
 
             var start = nanoTime();
-            writer.write(new EnumMap<>(FeatureId.class));
+            if (writer.getFeatureSet().contains(FeatureId.FUSED_ADC))
+            {
+                try (var view = builder.getGraph().getView())
+                {
+                    var supplier = Feature.singleStateFactory(FeatureId.FUSED_ADC, ordinal -> new FusedADC.State(view, pqVectors, ordinal));
+                    writer.write(supplier);
+                }
+            }
+            else
+            {
+                writer.write(Map.of());
+            }
             SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
             logger.info("Writing graph took {}ms", (nanoTime() - start) / 1_000_000);
             long termsLength = writer.getOutput().position() - termsOffset;
