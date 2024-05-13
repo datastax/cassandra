@@ -61,7 +61,7 @@ public class VectorCompression
 
     public String toString()
     {
-        return String.format("VectorCompression(%s, %d)", type, getCompressedSize());
+        return String.format("VectorCompression(%s, %d->%d)", type, originalSize, compressedSize);
     }
 
     public int getOriginalSize()
