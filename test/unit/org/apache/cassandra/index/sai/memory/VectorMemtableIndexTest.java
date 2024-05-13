@@ -54,8 +54,9 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.locator.TokenMetadata;
@@ -115,7 +116,8 @@ public class VectorMemtableIndexTest extends SAITester
     @Test
     public void randomQueryTest() throws Exception
     {
-        memtableIndex = new VectorMemtableIndex(indexContext);
+        var memtable = cfs.getCurrentMemtable();
+        memtableIndex = new VectorMemtableIndex(indexContext, memtable);
 
         for (int row = 0; row < getRandom().nextIntBetween(1000, 5000); row++)
         {
@@ -131,7 +133,7 @@ public class VectorMemtableIndexTest extends SAITester
 
         for (int executionCount = 0; executionCount < 1000; executionCount++)
         {
-            Expression expression = generateRandomExpression();
+            var orderer = generateRandomOrderer();
             AbstractBounds<PartitionPosition> keyRange = generateRandomBounds(keys);
             Set<Integer> keysInRange = keys.stream().filter(keyRange::contains)
                                            .map(k -> Int32Type.instance.compose(k.getKey()))
@@ -142,22 +144,22 @@ public class VectorMemtableIndexTest extends SAITester
 
             long expectedNumResults = Math.min(limit, keysInRange.size());
 
-            try (var iterator = memtableIndex.orderBy(new QueryContext(), expression, keyRange, limit))
+            try (var iterator = memtableIndex.orderBy(new QueryContext(), orderer, keyRange, limit))
             {
-                ScoredPrimaryKey lastKey = null;
+                PrimaryKeyWithScore lastKey = null;
                 while (iterator.hasNext() && expectedNumResults > foundKeys.size())
                 {
-                    ScoredPrimaryKey primaryKey = iterator.next();
+                    PrimaryKeyWithScore primaryKeyWithScore = (PrimaryKeyWithScore) iterator.next();
                     if (lastKey != null)
                         // This assertion only holds true as long as we query at most the expectedNumResults.
-                        // Once we query deeper, we might get a key with a lower score than the last key.
+                        // Once we query deeper, we might get a key with a higher score than the last key.
                         // This is a direct consequence of the approximate part of ANN.
-                        assertTrue("Returned keys are not ordered by score", lastKey.score >= primaryKey.score);
-                    lastKey = primaryKey;
-                    int key = Int32Type.instance.compose(primaryKey.partitionKey().getKey());
+                        assertTrue("Returned keys are not ordered by score", primaryKeyWithScore.compareTo(lastKey) <= 0);
+                    lastKey = primaryKeyWithScore;
+                    int key = Int32Type.instance.compose(primaryKeyWithScore.partitionKey().getKey());
                     assertFalse(foundKeys.contains(key));
 
-                    assertTrue(keyRange.contains(primaryKey.partitionKey()));
+                    assertTrue(keyRange.contains(primaryKeyWithScore.partitionKey()));
                     assertTrue(rowMap.containsKey(key));
                     foundKeys.add(key);
                 }
@@ -182,11 +184,9 @@ public class VectorMemtableIndexTest extends SAITester
         // VSTODO
     }
 
-    private Expression generateRandomExpression()
+    private Orderer generateRandomOrderer()
     {
-        Expression expression = new Expression(indexContext);
-        expression.add(Operator.ANN, randomVector());
-        return expression;
+        return new Orderer(indexContext, Operator.ANN, randomVector());
     }
 
     private ByteBuffer randomVector() {

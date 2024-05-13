@@ -87,7 +87,7 @@ import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.index.sai.utils.ScoredPrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
@@ -297,7 +297,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     }
 
     /**
-     * @return an itererator over {@link ScoredPrimaryKey} in the graph's {@link SearchResult} order
+     * @return an itererator over {@link PrimaryKeyWithSortKey} in the graph's {@link SearchResult} order
      */
     public CloseableIterator<SearchResult.NodeScore> search(QueryContext context, VectorFloat<?> queryVector, int limit, float threshold, Bits toAccept)
     {

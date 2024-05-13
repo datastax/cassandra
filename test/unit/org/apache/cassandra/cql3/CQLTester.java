@@ -1495,6 +1495,24 @@ public abstract class CQLTester
 
     public static void assertRows(UntypedResultSet result, Object[]... rows)
     {
+        assertRows(result, false, rows);
+    }
+
+    public static void assertRows(UntypedResultSet result, boolean printAssertedRows, Object[]... rows)
+    {
+        // Useful for manual debugging, but generally unnecessary on
+        if (printAssertedRows)
+        {
+            // Print all the rows
+            for (Object[] row : rows)
+            {
+                System.out.print("Expected row:");
+                for (Object column : row)
+                    System.out.print("  " + column);
+                System.out.println();
+            }
+        }
+
         if (result == null)
         {
             if (rows.length > 0)

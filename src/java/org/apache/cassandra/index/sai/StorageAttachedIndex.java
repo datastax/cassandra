@@ -649,6 +649,22 @@ public class StorageAttachedIndex implements Index
     @Override
     public void postQuerySort(ResultSet cqlRows, Restriction restriction, int columnIndex, QueryOptions options)
     {
+        if (restriction instanceof SingleColumnRestriction.OrderRestriction)
+        {
+            SingleColumnRestriction.OrderRestriction orderRestriction = (SingleColumnRestriction.OrderRestriction) restriction;
+            var type = indexContext.getValidator();
+            // TODO if this is the right way to compare, we should do this step in two passes.
+            Comparator<List<ByteBuffer>> comparator = (List<ByteBuffer> a, List<ByteBuffer> b) -> {
+                var aEncoded = TypeUtil.encode(a.get(columnIndex), type);
+                var bEncoded = TypeUtil.encode(b.get(columnIndex), type);
+                return TypeUtil.compare(aEncoded, bEncoded, type);
+            };
+            if (orderRestriction.getDirection() == Operator.ORDER_BY_DESC)
+                comparator = comparator.reversed();
+            cqlRows.rows.sort(comparator);
+            return;
+        }
+
         // For now, only support ANN
         assert restriction instanceof SingleColumnRestriction.AnnRestriction;
 
@@ -686,7 +702,7 @@ public class StorageAttachedIndex implements Index
 
         // to avoid overflow HNSW internal data structure and avoid OOM when filtering top-k
         if (command.limits().isUnlimited() || command.limits().count() > MAX_TOP_K)
-            throw new InvalidRequestException(String.format("Use of ANN OF in an ORDER BY clause requires a LIMIT that is not greater than %s. LIMIT was %s",
+            throw new InvalidRequestException(String.format("SAI based ORDER BY clause requires a LIMIT that is not greater than %s. LIMIT was %s",
                                                             MAX_TOP_K, command.limits().isUnlimited() ? "NO LIMIT" : command.limits().count()));
 
         indexContext.validate(command.rowFilter());

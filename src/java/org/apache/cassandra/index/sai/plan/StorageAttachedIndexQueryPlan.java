@@ -19,7 +19,6 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -40,7 +39,6 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
-import org.apache.cassandra.schema.TableMetadata;
 
 public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
 {
@@ -54,8 +52,8 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
      */
     private final RowFilter postIndexFilter;
     private final Set<Index> indexes;
-    private final boolean isTopK;
     private final IndexFeatureSet indexFeatureSet;
+    private final Orderer orderer;
 
     private StorageAttachedIndexQueryPlan(ColumnFamilyStore cfs,
                                           TableQueryMetrics queryMetrics,
@@ -68,7 +66,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         this.postIndexFilter = filter.restrict(RowFilter.Expression::isUserDefined);
         this.indexes = indexes;
         this.indexFeatureSet = indexFeatureSet;
-        this.isTopK = filter.root().expressions().stream().anyMatch(p -> p.operator() == Operator.ANN);
+        this.orderer = Orderer.from(cfs.getIndexManager(), filter);
     }
 
     @Nullable
@@ -133,6 +131,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         return new StorageAttachedIndexSearcher(cfs,
                                                 queryMetrics,
                                                 command,
+                                                orderer,
                                                 indexFeatureSet,
                                                 DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
     }
@@ -147,7 +146,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
             return partitions -> partitions;
 
         // in case of top-k query, filter out rows that are not actually global top-K
-        return partitions -> (PartitionIterator) new VectorTopKProcessor(command).filter(partitions);
+        return partitions -> (PartitionIterator) new TopKProcessor(command).filter(partitions);
     }
 
     /**
@@ -168,6 +167,6 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     @Override
     public boolean isTopK()
     {
-        return isTopK;
+        return orderer != null;
     }
 }

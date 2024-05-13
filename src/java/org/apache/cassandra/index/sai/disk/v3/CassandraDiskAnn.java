@@ -45,13 +45,13 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.vector.AutoResumingNodeScoreIterator;
+import org.apache.cassandra.index.sai.disk.vector.NodeScoreToRowIdWithScoreIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.PQVersion;
 import org.apache.cassandra.index.sai.disk.vector.JVectorLuceneOnDiskGraph;
-import org.apache.cassandra.index.sai.disk.vector.NodeScoreToScoredRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
-import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
+import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -161,13 +161,13 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
      * with a similarity score >= threshold will be returned.
      */
     @Override
-    public CloseableIterator<ScoredRowId> search(VectorFloat<?> queryVector,
-                                                 int limit,
-                                                 int rerankK,
-                                                 float threshold,
-                                                 Bits acceptBits,
-                                                 QueryContext context,
-                                                 IntConsumer nodesVisitedConsumer)
+    public CloseableIterator<RowIdWithScore> search(VectorFloat<?> queryVector,
+                                                    int limit,
+                                                    int rerankK,
+                                                    float threshold,
+                                                    Bits acceptBits,
+                                                    QueryContext context,
+                                                    IntConsumer nodesVisitedConsumer)
     {
         VectorValidation.validateIndexable(queryVector, similarityFunction);
 
@@ -198,12 +198,12 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         {
             nodesVisitedConsumer.accept(result.getVisitedCount());
             var nodeScores = CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
-            return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
+            return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
         }
         else
         {
             var nodeScores = new AutoResumingNodeScoreIterator(searcher, result, nodesVisitedConsumer, limit, rerankK, false);
-            return new NodeScoreToScoredRowIdIterator(nodeScores, ordinalsMap.getRowIdsView());
+            return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
         }
     }
 
