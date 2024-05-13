@@ -307,7 +307,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
         var searcher = searchers.get();
         var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
-        var rerankK = sourceModel.rerankKFor(limit, null);
+        var rerankK = sourceModel.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
         var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
         Tracing.trace("ANN search visited {} in-memory nodes to return {} results", result.getVisitedCount(), result.getNodes().length);
         context.addAnnNodesVisited(result.getVisitedCount());
@@ -418,14 +418,14 @@ public class CassandraOnHeapGraph<T> implements Accountable
      * "Best" means the most recent one that hits the row count target of {@link ProductQuantization#MAX_PQ_TRAINING_SET_SIZE},
      * or the one with the most rows if none are larger than that.
      */
-    public static CompressedVectorInfo getCompressedVectorsIfPresent(IndexContext indexContext, Function<CompressedVectors, Boolean> matcher)
+    public static PqInfo getPqIfPresent(IndexContext indexContext, Function<VectorCompression, Boolean> matcher)
     {
         // Retrieve the first compressed vectors for a segment with at least MAX_PQ_TRAINING_SET_SIZE rows
-        // or the one with the most rows if none are larger than MAX_PQ_TRAINING_SET_SIZE
+        // or the one with the most rows if none reach that size
         var indexes = new ArrayList<>(indexContext.getView().getIndexes());
         indexes.sort(Comparator.comparing(SSTableIndex::getSSTable, CompactionSSTable.maxTimestampDescending));
 
-        CompressedVectorInfo cvi = null;
+        PqInfo cvi = null;
         long maxRows = 0;
         for (SSTableIndex index : indexes)
         {
@@ -434,13 +434,12 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 if (segment.metadata.numRows < maxRows)
                     continue;
 
-                var searcher = segment.getIndexSearcher();
-                var v2Searcher = (V2VectorIndexSearcher) searcher;
-                var cv = v2Searcher.getCompressedVectors();
+                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                var cv = searcher.getCompression();
                 if (matcher.apply(cv))
                 {
                     // We can exit now because we won't find a better candidate
-                    var candidate = new CompressedVectorInfo(cv, v2Searcher.containsUnitVectors());
+                    var candidate = new PqInfo(searcher.getPQ(), searcher.containsUnitVectors());
                     if (segment.metadata.numRows >= ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
                         return candidate;
 
@@ -497,8 +496,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // build encoder (expensive for PQ, cheaper for BQ)
             if (preferredCompression.type == CompressionType.PRODUCT_QUANTIZATION)
             {
-                var cvi = getCompressedVectorsIfPresent(indexContext, preferredCompression::matches);
-                var previousCV = cvi == null ? null : cvi.cv;
+                var cvi = getPqIfPresent(indexContext, preferredCompression::equals);
+                var previousCV = cvi == null ? null : cvi.pq;
                 compressor = computeOrRefineFrom(previousCV, preferredCompression);
             }
             else
@@ -547,23 +546,23 @@ public class CassandraOnHeapGraph<T> implements Accountable
         writer.writeByte(type.ordinal());
     }
 
-    VectorCompressor<?> computeOrRefineFrom(CompressedVectors previousCV, VectorCompression preferredCompression)
+    VectorCompressor<?> computeOrRefineFrom(ProductQuantization previousPQ, VectorCompression preferredCompression)
     {
         // refining an existing codebook is much faster than starting from scratch
         VectorCompressor<?> compressor;
-        if (previousCV == null)
+        if (previousPQ == null)
         {
             if (vectorValues.size() < MIN_PQ_ROWS)
                 compressor = null;
             else
-                compressor = ProductQuantization.compute(vectorValues, preferredCompression.compressToBytes, 256, false);
+                compressor = ProductQuantization.compute(vectorValues, preferredCompression.getCompressedSize(), 256, false);
         }
         else
         {
             if (vectorValues.size() < MIN_PQ_ROWS)
-                compressor = previousCV.getCompressor();
+                compressor = previousPQ;
             else
-                compressor = ((ProductQuantization) previousCV.getCompressor()).refine(vectorValues);
+                compressor = previousPQ.refine(vectorValues);
         }
         return compressor;
     }
@@ -610,15 +609,15 @@ public class CassandraOnHeapGraph<T> implements Accountable
         FAIL
     }
 
-    public static class CompressedVectorInfo
+    public static class PqInfo
     {
-        public final CompressedVectors cv;
+        public final ProductQuantization pq;
         /** an empty Optional indicates that the index was written with an older version that did not record this information */
         public final Optional<Boolean> unitVectors;
 
-        public CompressedVectorInfo(CompressedVectors cv, Optional<Boolean> unitVectors)
+        public PqInfo(ProductQuantization pq, Optional<Boolean> unitVectors)
         {
-            this.cv = cv;
+            this.pq = pq;
             this.unitVectors = unitVectors;
         }
     }
