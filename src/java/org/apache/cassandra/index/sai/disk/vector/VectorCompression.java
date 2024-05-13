@@ -18,42 +18,64 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-import io.github.jbellis.jvector.pq.BQVectors;
-import io.github.jbellis.jvector.pq.CompressedVectors;
-import io.github.jbellis.jvector.pq.PQVectors;
+import java.util.Objects;
 
 public class VectorCompression
 {
-    public final CompressionType type;
-    public final int compressToBytes;
+    public static final VectorCompression NO_COMPRESSION = new VectorCompression(CompressionType.NONE, -1, -1);
 
-    public VectorCompression(CompressionType type, int compressToBytes)
+    public final CompressionType type;
+    private final int originalSize; // in bytes
+    private final int compressedSize; // in bytes
+
+    public VectorCompression(CompressionType type, int dimension, double ratio)
     {
         this.type = type;
-        this.compressToBytes = compressToBytes;
+        this.originalSize = dimension * Float.BYTES;
+        this.compressedSize = (int) (originalSize * ratio);
     }
 
-    /**
-     * @return true if the given CompressedVectors implements a matching compression type and size
-     */
-    public boolean matches(CompressedVectors cv)
+    public VectorCompression(CompressionType type, int originalSize, int compressedSize)
     {
+        this.type = type;
+        this.originalSize = originalSize;
+        this.compressedSize = compressedSize;
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        VectorCompression that = (VectorCompression) o;
         if (type == CompressionType.NONE)
-            return cv == null;
-        if (cv == null)
-            return false;
+            return that.type == CompressionType.NONE;
+        return originalSize == that.originalSize && compressedSize == that.compressedSize && type == that.type;
+    }
 
-        if (type == CompressionType.PRODUCT_QUANTIZATION)
-            return cv instanceof PQVectors && cv.getCompressedSize() == compressToBytes;
-
-        assert type == CompressionType.BINARY_QUANTIZATION;
-        // BQ algorithm is the same no matter what the size is
-        return cv instanceof BQVectors;
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(type, getOriginalSize(), getCompressedSize());
     }
 
     public String toString()
     {
-        return String.format("VectorCompression(%s, %d)", type, compressToBytes);
+        return String.format("VectorCompression(%s, %d->%d)", type, originalSize, compressedSize);
+    }
+
+    public int getOriginalSize()
+    {
+        if (type == CompressionType.NONE)
+            throw new UnsupportedOperationException();
+        return originalSize;
+    }
+
+    public int getCompressedSize()
+    {
+        if (type == CompressionType.NONE)
+            throw new UnsupportedOperationException();
+        return compressedSize;
     }
 
     public enum CompressionType
