@@ -26,6 +26,7 @@ import java.util.UUID;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -289,7 +290,7 @@ public class TrieIndexFormat implements SSTableFormat
     //
     static class TrieIndexVersion extends Version
     {
-        public static final String current_version = "cc";
+        public static final String current_version = CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.getString();
         public static final String earliest_supported_version = "aa";
 
         // aa (DSE 6.0): trie index format

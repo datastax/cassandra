@@ -438,7 +438,11 @@ public enum CassandraRelevantProperties
     /**
      * Whether to enable the use of {@link EndpointGroupingRangeCommandIterator}
      */
-    RANGE_READ_ENDPOINT_GROUPING_ENABLED("cassandra.range_read_endpoint_grouping_enabled", "true");
+    RANGE_READ_ENDPOINT_GROUPING_ENABLED("cassandra.range_read_endpoint_grouping_enabled", "true"),
+    /**
+     * Allows to set custom current trie index format. This node will produce sstables in this format.
+     */
+    TRIE_INDEX_FORMAT_VERSION("cassandra.trie_index_format_version", "cc");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
