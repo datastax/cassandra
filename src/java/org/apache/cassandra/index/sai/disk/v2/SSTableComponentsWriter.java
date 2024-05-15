@@ -76,14 +76,8 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     @Override
     public void complete(Stopwatch stopwatch) throws IOException
     {
-        try
-        {
-            indexDescriptor.createComponentOnDisk(IndexComponent.GROUP_COMPLETION_MARKER);
-        }
-        finally
-        {
-            IOUtils.close(tokenWriter, sortedTermsWriter, metadataWriter);
-        }
+        IOUtils.close(tokenWriter, sortedTermsWriter, metadataWriter);
+        indexDescriptor.createComponentOnDisk(IndexComponent.GROUP_COMPLETION_MARKER);
     }
 
     @Override
