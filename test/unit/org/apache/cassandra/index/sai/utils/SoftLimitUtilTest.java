@@ -153,11 +153,16 @@ public class SoftLimitUtilTest
 
             // Estimate the probability we get at least n successes after softLimit tries with probability p.
             // Make sure we have enough confidence we get at least n, but not enough we get n + 1.
-            BinomialDistribution successDistribution = new BinomialDistribution(softLimit, p);
-            double confidenceLowerBound = probabilityOfAtLeastNSuccesses(successDistribution, n + 1);
-            double confidenceUpperBound = probabilityOfAtLeastNSuccesses(successDistribution, n);
-            assertTrue(c + " lower than required lower bound " + confidenceLowerBound,c >= confidenceLowerBound);
-            assertTrue(c + " higher than required upper bound " + confidenceLowerBound, c < confidenceUpperBound);
+            // softLimit is capped at Integer.MAX_VALUE. If it's potentially capped, we can't compare to the confidence
+            // bounds from the binomial distribution.
+            if (softLimit < Integer.MAX_VALUE)
+            {
+                BinomialDistribution successDistribution = new BinomialDistribution(softLimit, p);
+                double confidenceLowerBound = probabilityOfAtLeastNSuccesses(successDistribution, n + 1);
+                double confidenceUpperBound = probabilityOfAtLeastNSuccesses(successDistribution, n);
+                assertTrue(c + " lower than required lower bound " + confidenceLowerBound, c >= confidenceLowerBound);
+                assertTrue(c + " higher than required upper bound " + confidenceUpperBound, c < confidenceUpperBound);
+            }
         }
     }
 
