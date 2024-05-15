@@ -22,14 +22,13 @@ import java.util.Collection;
 import java.util.Optional;
 import java.util.function.Function;
 
-import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.SensorsCustomParams;
-import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
@@ -39,16 +38,14 @@ import org.apache.cassandra.sensors.Type;
  */
 public class CounterMutationCallback implements Runnable
 {
-    private final Message<CounterMutation> respondTo;
+    private final Message<CounterMutation> requestMessage;
     private final InetAddressAndPort respondToAddress;
-    private final RequestSensors requestSensors;
     private int replicaCount = 0;
 
-    public CounterMutationCallback(Message<CounterMutation> respondTo, InetAddressAndPort respondToAddress, RequestSensors requestSensors)
+    public CounterMutationCallback(Message<CounterMutation> requestMessage, InetAddressAndPort respondToAddress)
     {
-        this.respondTo = respondTo;
+        this.requestMessage = requestMessage;
         this.respondToAddress = respondToAddress;
-        this.requestSensors = requestSensors;
     }
 
     /**
@@ -62,44 +59,40 @@ public class CounterMutationCallback implements Runnable
     @Override
     public void run()
     {
-        Message.Builder<NoPayload> response = respondTo.emptyResponseBuilder();
+        Message.Builder<NoPayload> responseBuilder = requestMessage.emptyResponseBuilder();
         int replicaMultiplier = replicaCount == 0 ?
                                 1 : // replica count was not explicitly set (default). At the bare minimum, we should send the response accomodating for the local replica (aka. mutation leader) sensor values
                                 replicaCount;
-        addSensorsToResponse(response, respondTo.payload.getMutation(), requestSensors, replicaMultiplier);
-        MessagingService.instance().send(response.build(), respondToAddress);
+        addSensorsToResponse(responseBuilder, requestMessage.payload.getMutation(), replicaMultiplier);
+        MessagingService.instance().send(responseBuilder.build(), respondToAddress);
     }
 
-    private static void addSensorsToResponse(Message.Builder<NoPayload> response, Mutation mutation, RequestSensors requestSensors, int replicaMultiplier)
+    private static void addSensorsToResponse(Message.Builder<NoPayload> response, Mutation mutation, int replicaMultiplier)
     {
+        // Add internode bytes sensors to the response after updating each per-table sensor with the current response
+        // message size: this is missing the sensor values, but it's a good enough approximation
+        Collection<Sensor> requestSensors = RequestTracker.instance.get().getSensors(Type.INTERNODE_BYTES);
+        int perSensorSize = response.currentSize(MessagingService.current_version) / requestSensors.size();
+        requestSensors.forEach(sensor -> RequestTracker.instance.get().incrementSensor(sensor.getContext(), sensor.getType(), perSensorSize));
+        RequestTracker.instance.get().syncAllSensors();
+        Function<String, String> requestParam = SensorsCustomParams::encodeTableInInternodeBytesRequestParam;
+        Function<String, String> tableParam = SensorsCustomParams::encodeTableInInternodeBytesTableParam;
+        addSensorsToResponse(requestSensors, requestParam, tableParam, response, replicaMultiplier);
+
         // Add write bytes sensors to the response
-        Function<String, String> requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
-        Function<String, String> tableParam = SensorsCustomParams::encodeTableInWriteBytesTableParam;
-
-        Collection<Sensor> sensors = requestSensors.getSensors(Type.WRITE_BYTES);
-        addSensorsToResponse(sensors, requestParam, tableParam, response, replicaMultiplier);
-
-        // Add internode message sensors to the response
-        for (PartitionUpdate update : mutation.getPartitionUpdates())
-        {
-            Context context = Context.from(update.metadata());
-            Optional<Sensor> internodeBytesSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_BYTES);
-            String internodeBytesTableParam = SensorsCustomParams.encodeTableInInternodeBytesTableParam(context.getTable());
-            internodeBytesSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> response.withCustomParam(internodeBytesTableParam, bytes));
-
-            Optional<Sensor> internodeCountSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_MSG_COUNT);
-            String internodeCountTableParam = SensorsCustomParams.encodeTableInInternodeCountTableParam(context.getTable());
-            internodeCountSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(count -> response.withCustomParam(internodeCountTableParam, count));
-        }
+        requestParam = SensorsCustomParams::encodeTableInWriteBytesRequestParam;
+        tableParam = SensorsCustomParams::encodeTableInWriteBytesTableParam;
+        requestSensors = RequestTracker.instance.get().getSensors(Type.WRITE_BYTES);
+        addSensorsToResponse(requestSensors, requestParam, tableParam, response, replicaMultiplier);
     }
 
-    private static void addSensorsToResponse(Collection<Sensor> sensors,
+    private static void addSensorsToResponse(Collection<Sensor> requestSensors,
                                              Function<String, String> requestParamSupplier,
                                              Function<String, String> tableParamSupplier,
                                              Message.Builder<NoPayload> response,
                                              int replicaMultiplier)
     {
-        for (Sensor requestSensor : sensors)
+        for (Sensor requestSensor : requestSensors)
         {
             String requestBytesParam = requestParamSupplier.apply(requestSensor.getContext().getTable());
             byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(requestSensor.getValue() * replicaMultiplier);

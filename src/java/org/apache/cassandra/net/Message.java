@@ -604,7 +604,25 @@ public class Message<T>
             if (payload == null)
                 throw new IllegalArgumentException();
 
-            return new Message<>(new Header(hasId ? id : nextId(), verb, from, createdAtNanos, expiresAtNanos, flags, params), payload);
+            return doBuild(hasId ? id : nextId());
+        }
+
+        public int currentSize(int version)
+        {
+            // use dummy id just for the sake of computing the serialized size
+            return doBuild(0).serializedSize(version);
+        }
+
+        private Message<T> doBuild(long id)
+        {
+            if (verb == null)
+                throw new IllegalArgumentException();
+            if (from == null)
+                throw new IllegalArgumentException();
+            if (payload == null)
+                throw new IllegalArgumentException();
+
+            return new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, params), payload);
         }
     }
 

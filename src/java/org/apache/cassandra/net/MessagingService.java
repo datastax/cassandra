@@ -40,11 +40,6 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.nodes.Nodes;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestTracker;
-import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -625,37 +620,10 @@ public class MessagingService extends MessagingServiceMBeanImpl
     public void listen()
     {
         inboundSockets.open();
-        outboundSink.add(this::trackOutboundMessages);
     }
 
     public void waitUntilListening() throws InterruptedException
     {
         inboundSockets.open().await();
-    }
-
-    private boolean trackOutboundMessages(Message<?> message, InetAddressAndPort ignored)
-    {
-        RequestSensors requestSensors = RequestTracker.instance.get();
-        if (requestSensors == null)
-            return true;
-
-        String keyspace = requestSensors.getKeyspace();
-        double size = message.serializedSize(MessagingService.current_version);
-        // split the internode message bytes and count into between tables in the mutation
-        int tablesCount = requestSensors.getTables().size();
-        double internodeBytesPerTable = size / tablesCount;
-        double internodeCountPerTable = 1.0d / tablesCount;
-
-        for (TableMetadata tm : requestSensors.getTables())
-        {
-            Context context = new Context(keyspace, tm.name, tm.id.toString());
-            requestSensors.registerSensor(context, Type.INTERNODE_MSG_BYTES);
-            requestSensors.registerSensor(context, Type.INTERNODE_MSG_COUNT);
-            requestSensors.incrementSensor(context, Type.INTERNODE_MSG_BYTES, internodeBytesPerTable);
-            requestSensors.incrementSensor(context, Type.INTERNODE_MSG_COUNT, internodeCountPerTable);
-        }
-        requestSensors.syncAllSensors();
-
-        return true;
     }
 }
