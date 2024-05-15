@@ -154,7 +154,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
         catch (IOException | RuntimeException | Error ex)
         {
             // in case of failure, close only those components which have been opened in this try-catch block
-            Throwables.closeAndAddSuppressed(ex, builder.getPartitionIndex(), builder.getRowIndexFile(), builder.getDataFile(), builder.getFilter());
+            Throwables.closeNonNullAndAddSuppressed(ex, builder.getPartitionIndex(), builder.getRowIndexFile(), builder.getDataFile(), builder.getFilter());
             throw ex;
         }
     }
@@ -177,7 +177,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
         }
         catch (IOException | RuntimeException | Error ex)
         {
-            Throwables.closeAndAddSuppressed(ex, bf);
+            Throwables.closeNonNullAndAddSuppressed(ex, bf);
             throw ex;
         }
 
