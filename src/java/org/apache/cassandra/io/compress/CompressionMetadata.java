@@ -341,6 +341,14 @@ public class CompressionMetadata extends WrappedSharedCloseable
         return Math.toIntExact(uncompressedDataPosition >> chunkLengthBits) - startChunkIndex;
     }
 
+    /**
+     * Searches for the chunk with the given offset and returns the offset of uncompressed data for the found chunk.
+     * @param chunkOffset exact chunk offset to search for; if we deal with a slice this is a chunk offset
+     *                    in the original compressed file
+     * @return offset of uncompressed data for the found chunk; if we deal with a slice this is the offset
+     * in the original uncompressed data
+     * @throws IllegalArgumentException if no chunk with the given offset is found
+     */
     public long getDataOffsetForChunkOffset(long chunkOffset)
     {
         long l = 0;
@@ -357,7 +365,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
             else if (offset > chunkOffset)
                 h = idx - 1;
             else
-                return idx * parameters.chunkLength();
+                return (idx + startChunkIndex) << chunkLengthBits;
         }
 
         throw new IllegalArgumentException("No chunk with offset " + chunkOffset);
