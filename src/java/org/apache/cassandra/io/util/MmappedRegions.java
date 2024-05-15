@@ -62,16 +62,19 @@ public class MmappedRegions extends SharedCloseableImpl
      */
     private volatile State copy;
 
+    private final long uncompressedSliceOffset;
+
     private MmappedRegions(ChannelProxy channel, CompressionMetadata metadata, long length, long uncompressedSliceOffset)
     {
-        this(new State(channel, metadata != null ? metadata.chunkFor(uncompressedSliceOffset).offset : uncompressedSliceOffset), metadata, length);
+        this(new State(channel, metadata != null ? metadata.chunkFor(uncompressedSliceOffset).offset : uncompressedSliceOffset), metadata, length, uncompressedSliceOffset);
     }
 
-    private MmappedRegions(State state, CompressionMetadata metadata, long length)
+    private MmappedRegions(State state, CompressionMetadata metadata, long length, long uncompressedSliceOffset)
     {
         super(new Tidier(state));
 
         this.state = state;
+        this.uncompressedSliceOffset = uncompressedSliceOffset;
 
         if (metadata != null)
         {
@@ -90,6 +93,7 @@ public class MmappedRegions extends SharedCloseableImpl
     {
         super(original);
         this.state = original.copy;
+        this.uncompressedSliceOffset = original.uncompressedSliceOffset;
     }
 
     public static MmappedRegions empty(ChannelProxy channel)
@@ -199,37 +203,36 @@ public class MmappedRegions extends SharedCloseableImpl
 
     private void updateState(CompressionMetadata metadata)
     {
-        long compressedPos = state.getPosition(); // position on disk of the current compressed chunk in the original (compressed) file
-        long initUncompressedPos = metadata.getDataOffsetForChunkOffset(compressedPos); // uncompressed position of the current compressed chunk in the original (compressed) file
-        long uncompressedPos = initUncompressedPos;
+        long uncompressedPosition = metadata.getDataOffsetForChunkOffset(state.getPosition()); // uncompressed position of the current compressed chunk in the original (compressed) file
+        long compressedPosition = state.getPosition();   // position on disk of the current compressed chunk in the original (compressed) file
         long segmentSize = 0;
 
-        assert metadata.chunkFor(uncompressedPos).offset == compressedPos : "Invalid metadata";
+        assert metadata.chunkFor(uncompressedPosition).offset == compressedPosition;
 
-        while (uncompressedPos - initUncompressedPos < metadata.dataLength)
+        while (uncompressedPosition - uncompressedSliceOffset < metadata.dataLength)
         {
             // chunk contains the position on disk in the original file
-            CompressionMetadata.Chunk chunk = metadata.chunkFor(uncompressedPos);
+            CompressionMetadata.Chunk chunk = metadata.chunkFor(uncompressedPosition);
 
             //Reached a new mmap boundary
             if (segmentSize + chunk.length + 4 > MAX_SEGMENT_SIZE)
             {
                 if (segmentSize > 0)
                 {
-                    state.add(compressedPos, segmentSize);
-                    compressedPos += segmentSize;
+                    state.add(compressedPosition, segmentSize);
+                    compressedPosition += segmentSize;
                     segmentSize = 0;
                 }
             }
 
             segmentSize += chunk.length + 4; // compressed size of the chunk including 4 bytes of checksum
-            uncompressedPos += metadata.chunkLength(); // uncompressed size of the chunk
+            uncompressedPosition += metadata.chunkLength(); // uncompressed size of the chunk
         }
 
         if (segmentSize > 0)
-            state.add(compressedPos, segmentSize);
+            state.add(compressedPosition, segmentSize);
 
-        state.length = compressedPos + segmentSize;
+        state.length = compressedPosition + segmentSize;
     }
 
     public boolean isValid(ChannelProxy channel)
