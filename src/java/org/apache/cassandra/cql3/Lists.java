@@ -70,10 +70,7 @@ public abstract class Lists
 
     private static AbstractType<?> elementsType(AbstractType<?> type)
     {
-        AbstractType<?> unwrapped = type.unwrap();
-        return type.isVector()
-               ? ((VectorType<?>) unwrapped).getElementsType()
-               : ((ListType<?>) unwrapped).getElementsType();
+        return ((ListType<?>) type.unwrap()).getElementsType();
     }
 
     /**
