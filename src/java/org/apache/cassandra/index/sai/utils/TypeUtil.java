@@ -40,7 +40,6 @@ import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.LongType;
-import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.rows.Cell;
@@ -556,7 +555,7 @@ public class TypeUtil
      */
     private static AbstractType<?> baseType(AbstractType<?> type)
     {
-        return type.isReversed() ? ((ReversedType<?>) type).baseType : type;
+        return type.unwrap();
     }
 
     public static ByteBuffer encodeDecimal(ByteBuffer value)
