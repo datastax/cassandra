@@ -43,7 +43,6 @@ public class SetType<T> extends CollectionType<Set<T>>
 
     private final AbstractType<T> elements;
     private final SetSerializer<T> serializer;
-    private final boolean isMultiCell;
 
     public static SetType<?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
@@ -75,10 +74,9 @@ public class SetType<T> extends CollectionType<Set<T>>
 
     public SetType(AbstractType<T> elements, boolean isMultiCell)
     {
-        super(ComparisonType.CUSTOM, Kind.SET);
+        super(ComparisonType.CUSTOM, Kind.SET, isMultiCell);
         this.elements = elements;
         this.serializer = SetSerializer.getInstance(elements.getSerializer(), elements.comparatorSet);
-        this.isMultiCell = isMultiCell;
     }
 
     @Override
@@ -117,12 +115,6 @@ public class SetType<T> extends CollectionType<Set<T>>
     public AbstractType<?> valueComparator()
     {
         return EmptyType.instance;
-    }
-
-    @Override
-    public boolean isMultiCell()
-    {
-        return isMultiCell;
     }
 
     @Override
