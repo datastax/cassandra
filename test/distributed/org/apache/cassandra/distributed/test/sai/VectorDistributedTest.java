@@ -43,6 +43,7 @@ import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -477,12 +478,7 @@ public class VectorDistributedTest extends TestBaseImpl
 
     private float[] randomVector()
     {
-        float[] rawVector = new float[dimensionCount];
-        for (int i = 0; i < dimensionCount; i++)
-        {
-            rawVector[i] = getRandom().nextFloat();
-        }
-        return rawVector;
+        return CQLTester.randomVector(dimensionCount);
     }
 
     private List<float[]> generateUSBoundedGeoVectors(int vectorCount)

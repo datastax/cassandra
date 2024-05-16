@@ -116,7 +116,7 @@ public class VectorCompressionTest extends VectorTester
         waitForTableIndexesQueryable();
 
         for (int i = 0; i < rows; i++)
-            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, randomVector(originalDimension));
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, randomVectorBoxed(originalDimension));
         flush();
         // the larger models may flush mid-test automatically, so compact to make sure that we
         // end up with a single sstable (otherwise PQ might conclude there aren't enough vectors to train on)

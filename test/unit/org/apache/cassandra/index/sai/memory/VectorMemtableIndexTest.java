@@ -33,6 +33,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -122,7 +123,7 @@ public class VectorMemtableIndexTest extends SAITester
             int pk = getRandom().nextIntBetween(0, 10000);
             while (rowMap.containsKey(pk))
                 pk = getRandom().nextIntBetween(0, 10000);
-            var value = randomVector();
+            var value = randomVectorSerialized();
             rowMap.put(pk, value);
             addRow(pk, value);
         }
@@ -185,16 +186,12 @@ public class VectorMemtableIndexTest extends SAITester
     private Expression generateRandomExpression()
     {
         Expression expression = new Expression(indexContext);
-        expression.add(Operator.ANN, randomVector());
+        expression.add(Operator.ANN, randomVectorSerialized());
         return expression;
     }
 
-    private ByteBuffer randomVector() {
-        List<Float> rawVector = new ArrayList<>(dimensionCount);
-        for (int i = 0; i < dimensionCount; i++) {
-            rawVector.add(getRandom().nextFloat());
-        }
-        return VectorType.getInstance(FloatType.instance, dimensionCount).getSerializer().serialize(rawVector);
+    private ByteBuffer randomVectorSerialized() {
+        return CQLTester.randomVectorSerialized(dimensionCount);
     }
 
     private AbstractBounds<PartitionPosition> generateRandomBounds(List<DecoratedKey> keys)
