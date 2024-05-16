@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
+import com.google.common.collect.ImmutableList;
+
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.ArgumentDeserializer;
@@ -68,7 +70,7 @@ public class ReversedType<T> extends AbstractType<T>
 
     private ReversedType(AbstractType<T> baseType)
     {
-        super(ComparisonType.CUSTOM, baseType.isMultiCell());
+        super(ComparisonType.CUSTOM, baseType.isMultiCell(), ImmutableList.of(baseType));
         this.baseType = baseType;
     }
 
