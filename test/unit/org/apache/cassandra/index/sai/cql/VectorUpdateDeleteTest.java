@@ -910,11 +910,11 @@ public class VectorUpdateDeleteTest extends VectorTester
 
         // Insert 100 vectors
         for (int i = 0; i < 100; i++)
-            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, randomVector(vectorDimension));
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, randomVectorBoxed(vectorDimension));
 
         // Update those vectors so some ordinals are changed
         for (int i = 0; i < 100; i++)
-            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, randomVector(vectorDimension));
+            execute("INSERT INTO %s (pk, val) VALUES (?, ?)", i, randomVectorBoxed(vectorDimension));
 
         // Delete the first 50 PKs.
         for (int i = 0; i < 50; i++)
@@ -926,7 +926,7 @@ public class VectorUpdateDeleteTest extends VectorTester
             // Query for the first 10 vectors, we don't care which.
             // Use a range query to hit the right brute force code path
             var results = execute("SELECT pk FROM %s WHERE token(pk) < 0 ORDER BY val ann of ? LIMIT 10",
-                                  randomVector(vectorDimension));
+                                  randomVectorBoxed(vectorDimension));
             assertThat(results).hasSize(10);
             // Make sure we don't get any of the deleted PKs
             assertThat(results).allSatisfy(row -> assertThat(row.getInt("pk")).isGreaterThanOrEqualTo(50));
