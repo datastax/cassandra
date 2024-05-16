@@ -99,6 +99,8 @@ public class V1OnDiskFormat implements OnDiskFormat
 
     static
     {
+        logger.debug("Segment build memory limit set to {} bytes", prettyPrintMemory(SEGMENT_BUILD_MEMORY_LIMIT));
+
         CassandraMetricsRegistry.MetricName bufferSpaceUsed = DefaultNameFactory.createMetricName(AbstractMetrics.TYPE, "SegmentBufferSpaceUsedBytes", null);
         CassandraMetricsRegistry.Metrics.register(bufferSpaceUsed, (Gauge<Long>) SEGMENT_BUILD_MEMORY_LIMITER::currentBytesUsed);
 
