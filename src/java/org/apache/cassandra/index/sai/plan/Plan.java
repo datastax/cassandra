@@ -31,6 +31,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Preconditions;
 
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIntersectionIterator;
@@ -39,6 +40,7 @@ import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.io.util.FileUtils;
 
+import static java.lang.Math.max;
 import static org.apache.cassandra.index.sai.plan.Plan.CostCoefficients.*;
 
 /**
@@ -916,7 +918,7 @@ abstract public class Plan
 
                 // To get the first key, we just need to advance the iterator to the next key, but if we don't get a match,
                 // all subsequent attempts will cause skipping to the value given by the second iterator.
-                costPerKey += Math.max(loops - 1, 0) * (subplan0.estimateCostPerSkip(0.0) + subplan0.costPerKey());
+                costPerKey += max(loops - 1, 0) * (subplan0.estimateCostPerSkip(0.0) + subplan0.costPerKey());
 
                 // Additional cost of skipping on the remaining iterators.
                 // Note that we may do fewer skips on the iterator at indexes >= 2 because we short circuit if there is no match.
@@ -924,7 +926,7 @@ abstract public class Plan
                 for (int i = 1; i < subplans.size(); i++)
                 {
                     KeysIteration subplan = subplans.get(i);
-                    double skipDistance = Math.min(1.0, 1.0 / (Math.max(1.0, subplan0.expectedKeys()) * matchProbability));
+                    double skipDistance = Math.min(1.0, 1.0 / (max(1.0, subplan0.expectedKeys()) * matchProbability));
                     costPerKey += matchProbability * loops * (subplan.estimateCostPerSkip(skipDistance) + subplan.costPerKey());
                     matchProbability *= subplan.selectivity();
                 }
@@ -1523,4 +1525,14 @@ abstract public class Plan
         }
     }
 
+    /**
+     * how much cheaper is it to perform an in-memory approximate similarity
+     * compared to loading the full resolution vector from disk
+     * @return 0..1, lower is cheaper
+     */
+    public static double memoryToDiskFactor()
+    {
+        double hitRate = ChunkCache.instance == null ? 1.0 : ChunkCache.instance.metrics.hitRate();
+        return 0.25 * (Double.isFinite(hitRate) ? max(0.1, hitRate) : 1.0);
+    }
 }

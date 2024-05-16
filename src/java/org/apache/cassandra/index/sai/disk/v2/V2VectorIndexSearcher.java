@@ -60,6 +60,7 @@ import org.apache.cassandra.index.sai.disk.vector.ScoredRowId;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -282,11 +283,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
     private CloseableIterator<ScoredRowId> orderByBruteForce(VectorFloat<?> queryVector, IntArrayList segmentRowIds, int limit, int rerankK) throws IOException
     {
-        // If we use compressed vectors, we still have to order the rerankK results using full resolution similarity
+        // If we use compressed vectors, we still have to order rerankK results using full resolution similarity
         // scores, so only use the compressed vectors when there are enough vectors to make it worthwhile.
-        // VSTODO is there a multiplier for rerankK that makes sense? Does it depend on vector length? Further
-        // testing needed. Initial testing suggests the difference in these two paths is less than a millisecond.
-        if (graph.getCompressedVectors() != null && segmentRowIds.size() > rerankK)
+        if (graph.getCompressedVectors() != null && segmentRowIds.size() - rerankK > Plan.memoryToDiskFactor() * segmentRowIds.size())
             return orderByBruteForce(graph.getCompressedVectors(), queryVector, segmentRowIds, limit, rerankK);
         return orderByBruteForce(queryVector, segmentRowIds);
     }
