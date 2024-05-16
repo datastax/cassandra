@@ -2708,8 +2708,14 @@ public abstract class CQLTester
         return new Vector<>(values);
     }
 
+    public ByteBuffer randomVectorSerialized(int dimension)
+    {
+        var rawVector = randomVectorBoxed(dimension);
+        return VectorType.getInstance(FloatType.instance, dimension).getSerializer().serialize(rawVector);
+    }
+
     /** @return a normalized vector with the given dimension */
-    public float[] randomVector(int dimension)
+    public static float[] randomVector(int dimension)
     {
         // this can be called from concurrent threads so don't use getRandom()
         ThreadLocalRandom R = ThreadLocalRandom.current();
@@ -2727,20 +2733,6 @@ public abstract class CQLTester
     protected static void normalize(float[] v)
     {
         float sum = 0.0f;
-        for (int i = 0; i < v.length; i++)
-        {
-            sum += v[i] * v[i];
-        }
-
-        sum = (float) Math.sqrt(sum);
-        for (int i = 0; i < v.length; i++)
-            v[i] /= sum;
-    }
-
-    /** Normalize the given vector in-place */
-    protected static void normalize(Float[] v)
-    {
-        var sum = 0.0f;
         for (int i = 0; i < v.length; i++)
         {
             sum += v[i] * v[i];
