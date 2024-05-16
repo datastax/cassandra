@@ -41,9 +41,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.antlr.runtime.RecognitionException;
-import org.apache.cassandra.config.*;
-import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.cql3.functions.*;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.FieldIdentifier;
+import org.apache.cassandra.cql3.Terms;
+import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.WhereClause;
+import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.functions.FunctionName;
+import org.apache.cassandra.cql3.functions.FunctionResolver;
+import org.apache.cassandra.cql3.functions.ScalarFunction;
+import org.apache.cassandra.cql3.functions.UDAggregate;
+import org.apache.cassandra.cql3.functions.UDFunction;
+import org.apache.cassandra.cql3.functions.UserFunction;
 import org.apache.cassandra.cql3.functions.masking.ColumnMask;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -80,12 +91,22 @@ import org.apache.cassandra.utils.Simulate;
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
-
 import static org.apache.cassandra.config.CassandraRelevantProperties.IGNORE_CORRUPTED_SCHEMA_TABLES;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_FLUSH_LOCAL_SCHEMA_CHANGES;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
-import static org.apache.cassandra.schema.SchemaKeyspaceTables.*;
+import static org.apache.cassandra.schema.SchemaKeyspaceTables.AGGREGATES;
+import static org.apache.cassandra.schema.SchemaKeyspaceTables.ALL;
+import static org.apache.cassandra.schema.SchemaKeyspaceTables.COLUMNS;
+import static org.apache.cassandra.schema.SchemaKeyspaceTables.COLUMN_MASKS;
+import static org.apache.cassandra.schema.SchemaKeyspaceTables.DROPPED_COLUMNS;
+import static org.apache.cassandra.schema.SchemaKeyspaceTables.FUNCTIONS;
+import static org.apache.cassandra.schema.SchemaKeyspaceTables.INDEXES;
+import static org.apache.cassandra.schema.SchemaKeyspaceTables.KEYSPACES;
+import static org.apache.cassandra.schema.SchemaKeyspaceTables.TABLES;
+import static org.apache.cassandra.schema.SchemaKeyspaceTables.TRIGGERS;
+import static org.apache.cassandra.schema.SchemaKeyspaceTables.TYPES;
+import static org.apache.cassandra.schema.SchemaKeyspaceTables.VIEWS;
 import static org.apache.cassandra.utils.Simulate.With.GLOBAL_CLOCK;
 
 /**
@@ -745,9 +766,7 @@ public final class SchemaKeyspace
 
     private static void addColumnToSchemaMutation(TableMetadata table, ColumnMetadata column, Mutation.SimpleBuilder builder)
     {
-        AbstractType<?> type = column.type;
-        if (type instanceof ReversedType)
-            type = ((ReversedType<?>) type).baseType;
+        AbstractType<?> type = column.type.unwrap();
 
         builder.update(Columns)
                .row(table.name, column.name.toString())

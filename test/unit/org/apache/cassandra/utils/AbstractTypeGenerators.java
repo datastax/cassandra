@@ -1094,8 +1094,7 @@ public final class AbstractTypeGenerators
 
     public static void extractUDTs(AbstractType<?> type, Set<UserType> matches)
     {
-        if (type instanceof ReversedType)
-            type = ((ReversedType) type).baseType;
+        type = type.unwrap();
         if (type instanceof UserType)
             matches.add((UserType) type);
         for (AbstractType<?> t : type.subTypes())
@@ -1377,9 +1376,7 @@ public final class AbstractTypeGenerators
 
     public static AbstractType unwrap(AbstractType type)
     {
-        if (type instanceof ReversedType)
-            return ((ReversedType) type).baseType;
-        return type;
+        return type.unwrap();
     }
 
     public static AbstractType unfreeze(AbstractType t)
