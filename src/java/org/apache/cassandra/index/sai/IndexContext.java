@@ -241,14 +241,7 @@ public class IndexContext
 
     public void index(DecoratedKey key, Row row, Memtable memtable, OpOrder.Group opGroup)
     {
-        MemtableIndex current = liveMemtables.get(memtable);
-
-        // VSTODO this is obsolete once we no longer support Java 8
-        // We expect the relevant IndexMemtable to be present most of the time, so only make the
-        // call to computeIfAbsent() if it's not. (see https://bugs.openjdk.java.net/browse/JDK-8161372)
-        MemtableIndex target = (current != null)
-                               ? current
-                               : liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this));
+        MemtableIndex target = liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this));
 
         long start = System.nanoTime();
 
