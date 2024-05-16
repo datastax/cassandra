@@ -19,15 +19,16 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.nio.FloatBuffer;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
-
 import javax.annotation.Nullable;
+
+import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQL3Type;
@@ -91,7 +92,7 @@ public final class VectorType<T> extends AbstractType<List<T>>
 
     private VectorType(AbstractType<T> elementType, int dimension)
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.CUSTOM, false, ImmutableList.of(elementType));
         if (!isVectorTypeAllowed)
             throw new InvalidRequestException("vector type is not allowed");
         if (isVectorTypeFloatOnly && !(elementType instanceof FloatType))
@@ -270,12 +271,6 @@ public final class VectorType<T> extends AbstractType<List<T>>
         {
             throw new MarshalException(String.format("cannot parse '%s' as hex bytes", source), e);
         }
-    }
-
-    @Override
-    public List<AbstractType<?>> subTypes()
-    {
-        return Collections.singletonList(elementType);
     }
 
     @Override
