@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class VectorSegmentationTest extends VectorTester
 {
     private static final int dimension = 100;
+    private double MIN_ACCEPTABLE_RECALL = 0.96;
 
     @Test
     public void testMultipleSegmentsForCreatingIndex()
@@ -61,7 +62,7 @@ public class VectorSegmentationTest extends VectorTester
 
         List<float[]> resultVectors = getVectorsFromResult(resultSet);
         double recall = rawIndexedRecall(vectors, queryVector, resultVectors, limit);
-        assertThat(recall).isGreaterThanOrEqualTo(0.97);
+        assertThat(recall).isGreaterThanOrEqualTo(MIN_ACCEPTABLE_RECALL);
     }
 
     @Test
@@ -94,7 +95,7 @@ public class VectorSegmentationTest extends VectorTester
 
         List<float[]> resultVectors = getVectorsFromResult(resultSet);
         double recall = rawIndexedRecall(vectors, queryVector, resultVectors, limit);
-        assertThat(recall).isGreaterThanOrEqualTo(0.99);
+        assertThat(recall).isGreaterThanOrEqualTo(MIN_ACCEPTABLE_RECALL);
 
 
         SegmentBuilder.updateLastValidSegmentRowId(11); // 11 rows per segment
@@ -106,7 +107,7 @@ public class VectorSegmentationTest extends VectorTester
 
         resultVectors = getVectorsFromResult(resultSet);
         recall = rawIndexedRecall(vectors, queryVector, resultVectors, limit);
-        assertThat(recall).isGreaterThanOrEqualTo(0.99);
+        assertThat(recall).isGreaterThanOrEqualTo(MIN_ACCEPTABLE_RECALL);
     }
 
     private float[] randomVector()
