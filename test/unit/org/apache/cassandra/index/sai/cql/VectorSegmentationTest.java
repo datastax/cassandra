@@ -43,7 +43,7 @@ public class VectorSegmentationTest extends VectorTester
         List<float[]> vectors = new ArrayList<>();
         for (int row = 0; row < vectorCount; row++)
         {
-            float[] vector = nextVector();
+            float[] vector = randomVector();
             vectors.add(vector);
             execute("INSERT INTO %s (pk, val) VALUES (?, ?)", row, vector(vector));
         }
@@ -55,7 +55,7 @@ public class VectorSegmentationTest extends VectorTester
         waitForTableIndexesQueryable();
 
         int limit = 35;
-        float[] queryVector = nextVector();
+        float[] queryVector = randomVector();
         UntypedResultSet resultSet = execute("SELECT * FROM %s ORDER BY val ANN OF ? LIMIT " + limit, vector(queryVector));
         assertThat(resultSet.size()).isEqualTo(limit);
 
@@ -79,7 +79,7 @@ public class VectorSegmentationTest extends VectorTester
         {
             for (int row = 0; row < rowsPerSSTable; row++)
             {
-                float[] vector = nextVector();
+                float[] vector = randomVector();
                 execute("INSERT INTO %s (pk, val) VALUES (?, ?)", pk++, vector(vector));
                 vectors.add(vector);
             }
@@ -88,7 +88,7 @@ public class VectorSegmentationTest extends VectorTester
         }
 
         int limit = 30;
-        float[] queryVector = nextVector();
+        float[] queryVector = randomVector();
         UntypedResultSet resultSet = execute("SELECT * FROM %s ORDER BY val ANN OF ? LIMIT " + limit, vector(queryVector));
         assertThat(resultSet.size()).isEqualTo(limit);
 
@@ -100,7 +100,7 @@ public class VectorSegmentationTest extends VectorTester
         SegmentBuilder.updateLastValidSegmentRowId(11); // 11 rows per segment
         compact();
 
-        queryVector = nextVector();
+        queryVector = randomVector();
         resultSet = execute("SELECT * FROM %s ORDER BY val ANN OF ? LIMIT " + limit, vector(queryVector));
         assertThat(resultSet.size()).isEqualTo(limit);
 
@@ -109,14 +109,9 @@ public class VectorSegmentationTest extends VectorTester
         assertThat(recall).isGreaterThanOrEqualTo(0.99);
     }
 
-    private float[] nextVector()
+    private float[] randomVector()
     {
-        float[] rawVector = new float[dimension];
-        for (int i = 0; i < dimension; i++)
-        {
-            rawVector[i] = getRandom().nextFloat();
-        }
-        return rawVector;
+        return randomVector(dimension);
     }
 
     private List<float[]> getVectorsFromResult(UntypedResultSet result)

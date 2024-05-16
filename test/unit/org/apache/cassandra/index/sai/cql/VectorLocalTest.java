@@ -89,7 +89,7 @@ public class VectorLocalTest extends VectorTester
 
         flush();
 
-        var queryVector = randomVector(2);
+        var queryVector = randomVectorBoxed(2);
 
         final int limit = 10;
         UntypedResultSet result;
@@ -138,14 +138,14 @@ public class VectorLocalTest extends VectorTester
 
         // query memtable index
         int limit = Math.min(getRandom().nextIntBetween(30, 50), vectors.size());
-        var queryVector = randomVector(dimension);
+        var queryVector = randomVectorBoxed(dimension);
         UntypedResultSet resultSet = search(queryVector, limit);
         assertDescendingScore(queryVector, getVectorsFromResult(resultSet, dimension));
 
         flush();
 
         // query on-disk index
-        queryVector = randomVector(dimension);
+        queryVector = randomVectorBoxed(dimension);
         resultSet = search(queryVector, limit);
         assertDescendingScore(queryVector, getVectorsFromResult(resultSet, dimension));
 
@@ -158,21 +158,21 @@ public class VectorLocalTest extends VectorTester
         vectors.addAll(additionalVectors);
 
         // query both memtable index and on-disk index
-        queryVector = randomVector(dimension);
+        queryVector = randomVectorBoxed(dimension);
         resultSet = search(queryVector, limit);
         assertDescendingScore(queryVector, getVectorsFromResult(resultSet, dimension));
 
         flush();
 
         // query multiple on-disk indexes
-        queryVector = randomVector(dimension);
+        queryVector = randomVectorBoxed(dimension);
         resultSet = search(queryVector, limit);
         assertDescendingScore(queryVector, getVectorsFromResult(resultSet, dimension));
 
         compact();
 
         // query compacted on-disk index
-        queryVector = randomVector(dimension);
+        queryVector = randomVectorBoxed(dimension);
         resultSet = search(queryVector, limit);
         assertDescendingScore(queryVector, getVectorsFromResult(resultSet, dimension));
     }
