@@ -231,8 +231,6 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
         }
         else if (compressedVectors == null)
         {
-            // VSTODO should we just skip the index entirely and brute force it the index is so small
-            // that we didn't generate PQ for it?
             ssp = new SearchScoreProvider(view.rerankerFor(queryVector, similarityFunction));
         }
         else
