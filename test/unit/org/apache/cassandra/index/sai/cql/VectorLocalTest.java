@@ -79,7 +79,7 @@ public class VectorLocalTest extends VectorTester
         waitForIndexQueryable();
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
-        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVector(2)).collect(Collectors.toList());
+        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(2)).collect(Collectors.toList());
 
         int pk = 0;
         for (Vector<Float> vector : vectors)
@@ -89,7 +89,7 @@ public class VectorLocalTest extends VectorTester
 
         flush();
 
-        var queryVector = randomVector(2);
+        var queryVector = randomVectorBoxed(2);
 
         final int limit = 10;
         UntypedResultSet result;
@@ -130,7 +130,7 @@ public class VectorLocalTest extends VectorTester
         waitForIndexQueryable();
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
-        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVector(dimension)).collect(Collectors.toList());
+        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(dimension)).collect(Collectors.toList());
 
         int pk = 0;
         for (Vector<Float> vector : vectors)
@@ -138,41 +138,41 @@ public class VectorLocalTest extends VectorTester
 
         // query memtable index
         int limit = Math.min(getRandom().nextIntBetween(30, 50), vectors.size());
-        var queryVector = randomVector(dimension);
+        var queryVector = randomVectorBoxed(dimension);
         UntypedResultSet resultSet = search(queryVector, limit);
         assertDescendingScore(queryVector, getVectorsFromResult(resultSet, dimension));
 
         flush();
 
         // query on-disk index
-        queryVector = randomVector(dimension);
+        queryVector = randomVectorBoxed(dimension);
         resultSet = search(queryVector, limit);
         assertDescendingScore(queryVector, getVectorsFromResult(resultSet, dimension));
 
         // populate some more vectors
         int additionalVectorCount = getRandom().nextIntBetween(500, 1000);
-        List<Vector<Float>> additionalVectors = IntStream.range(0, additionalVectorCount).mapToObj(s -> randomVector(dimension)).collect(Collectors.toList());
+        List<Vector<Float>> additionalVectors = IntStream.range(0, additionalVectorCount).mapToObj(s -> randomVectorBoxed(dimension)).collect(Collectors.toList());
         for (Vector<Float> vector : additionalVectors)
             execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", pk++, vector);
 
         vectors.addAll(additionalVectors);
 
         // query both memtable index and on-disk index
-        queryVector = randomVector(dimension);
+        queryVector = randomVectorBoxed(dimension);
         resultSet = search(queryVector, limit);
         assertDescendingScore(queryVector, getVectorsFromResult(resultSet, dimension));
 
         flush();
 
         // query multiple on-disk indexes
-        queryVector = randomVector(dimension);
+        queryVector = randomVectorBoxed(dimension);
         resultSet = search(queryVector, limit);
         assertDescendingScore(queryVector, getVectorsFromResult(resultSet, dimension));
 
         compact();
 
         // query compacted on-disk index
-        queryVector = randomVector(dimension);
+        queryVector = randomVectorBoxed(dimension);
         resultSet = search(queryVector, limit);
         assertDescendingScore(queryVector, getVectorsFromResult(resultSet, dimension));
     }
@@ -297,7 +297,7 @@ public class VectorLocalTest extends VectorTester
             vectorCount = partitions * vectorCountPerPartition;
         }
 
-        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVector(dimension)).collect(Collectors.toList());
+        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(dimension)).collect(Collectors.toList());
 
         int i = 0;
         for (int pk = 1; pk <= partitions; pk++)
@@ -313,7 +313,7 @@ public class VectorLocalTest extends VectorTester
         for (int executionCount = 0; executionCount < 50; executionCount++)
         {
             int key = getRandom().nextIntBetween(1, partitions);
-            var queryVector = randomVector(dimension);
+            var queryVector = randomVectorBoxed(dimension);
             searchWithKey(queryVector, key, vectorCountPerPartition, 1000);
             searchWithKey(queryVector, key, 1, 1);
         }
@@ -324,7 +324,7 @@ public class VectorLocalTest extends VectorTester
         for (int executionCount = 0; executionCount < 50; executionCount++)
         {
             int key = getRandom().nextIntBetween(1, partitions);
-            var queryVector = randomVector(dimension);
+            var queryVector = randomVectorBoxed(dimension);
             searchWithKey(queryVector, key, vectorCountPerPartition, 1000);
             searchWithKey(queryVector, key, 1, 1);
         }
@@ -333,7 +333,7 @@ public class VectorLocalTest extends VectorTester
         for (int executionCount = 0; executionCount < 50; executionCount++)
         {
             int nonExistingKey = getRandom().nextIntBetween(1, partitions) + partitions;
-            var queryVector = randomVector(dimension);
+            var queryVector = randomVectorBoxed(dimension);
             searchWithNonExistingKey(queryVector, nonExistingKey);
         }
     }

@@ -241,7 +241,7 @@ public class SAITester extends CQLTester
                                 MockSchema.newCFS("test_ks"));
     }
 
-    protected static Vector<Float> vector(float... v)
+    public static Vector<Float> vector(float... v)
     {
         var v2 = new Float[v.length];
         for (int i = 0; i < v.length; i++)
