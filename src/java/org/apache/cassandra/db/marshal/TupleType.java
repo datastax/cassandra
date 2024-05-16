@@ -65,13 +65,13 @@ public class TupleType extends AbstractType<ByteBuffer>
 
     public TupleType(List<AbstractType<?>> types)
     {
-        this(types, true);
+        this(types, true, false);
     }
 
     @VisibleForTesting
-    public TupleType(List<AbstractType<?>> types, boolean freezeInner)
+    public TupleType(List<AbstractType<?>> types, boolean freezeInner, boolean isMultiCell)
     {
-        super(ComparisonType.CUSTOM);
+        super(ComparisonType.CUSTOM, isMultiCell);
 
         if (freezeInner)
             this.types = Lists.newArrayList(transform(types, AbstractType::freeze));
@@ -88,7 +88,7 @@ public class TupleType extends AbstractType<ByteBuffer>
 
     public TupleType overrideKeyspace(Function<String, String> overrideKeyspace)
     {
-        return new TupleType(types.stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(Collectors.toList()), isMultiCell());
+        return new TupleType(types.stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(Collectors.toList()), true, isMultiCell());
     }
 
     private static List<TypeSerializer<?>> fieldSerializers(List<AbstractType<?>> types)
