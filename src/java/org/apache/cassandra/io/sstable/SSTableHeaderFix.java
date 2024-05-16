@@ -35,7 +35,6 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,6 +53,7 @@ import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.File;
@@ -398,8 +398,8 @@ public abstract class SSTableHeaderFix
         {
             // Note, the logic is similar as just calling 'fixType()' using the composite partition key,
             // but the log messages should use the composite partition key column names.
-            List<AbstractType<?>> headerKeyComponents = ((CompositeType) headerKeyType).types;
-            List<AbstractType<?>> schemaKeyComponents = ((CompositeType) schemaKeyType).types;
+            List<AbstractType<?>> headerKeyComponents = ((CompositeType) headerKeyType).subTypes();
+            List<AbstractType<?>> schemaKeyComponents = ((CompositeType) schemaKeyType).subTypes();
             if (headerKeyComponents.size() != schemaKeyComponents.size())
             {
                 // different number of components in composite partition keys - very suspicious
@@ -740,15 +740,15 @@ public abstract class SSTableHeaderFix
 
     private AbstractType<?> fixTypeInnerComposite(CompositeType cHeader, CompositeType cSchema, boolean droppedColumnMode)
     {
-        if (cHeader.types.size() != cSchema.types.size())
+        if (cHeader.subTypes().size() != cSchema.subTypes().size())
             // different number of components - bummer...
             return null;
-        List<AbstractType<?>> cHeaderFixed = new ArrayList<>(cHeader.types.size());
+        List<AbstractType<?>> cHeaderFixed = new ArrayList<>(cHeader.subTypes().size());
         boolean anyChanged = false;
-        for (int i = 0; i < cHeader.types.size(); i++)
+        for (int i = 0; i < cHeader.subTypes().size(); i++)
         {
-            AbstractType<?> cHeaderComp = cHeader.types.get(i);
-            AbstractType<?> cHeaderCompFixed = fixTypeInner(cHeaderComp, cSchema.types.get(i), droppedColumnMode);
+            AbstractType<?> cHeaderComp = cHeader.subTypes().get(i);
+            AbstractType<?> cHeaderCompFixed = fixTypeInner(cHeaderComp, cSchema.subTypes().get(i), droppedColumnMode);
             if (cHeaderCompFixed == null)
                 // incompatible, bummer...
                 return null;
