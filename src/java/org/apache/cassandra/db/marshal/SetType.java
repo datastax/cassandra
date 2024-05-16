@@ -26,8 +26,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.cql3.Sets;
@@ -60,23 +60,12 @@ public class SetType<T> extends CollectionType<Set<T>>
         return getInstance(l.get(0).freeze(), true);
     }
 
+    @SuppressWarnings("unchecked")
     public static <T> SetType<T> getInstance(AbstractType<T> elements, boolean isMultiCell)
     {
-        ConcurrentHashMap<AbstractType<?>, SetType> internMap = isMultiCell ? instances : frozenInstances;
-        SetType<T> t = internMap.get(elements);
-        return null == t
-             ? internMap.computeIfAbsent(elements, k -> new SetType<>(k, isMultiCell))
-             : t;
-    }
-
-    @Override
-    public SetType<T> overrideKeyspace(Function<String, String> overrideKeyspace)
-    {
-        AbstractType<T> newType = elements.overrideKeyspace(overrideKeyspace);
-        if (newType == elements)
-            return this;
-
-        return getInstance(newType, isMultiCell());
+        return getInstance(isMultiCell ? instances : frozenInstances,
+                           elements,
+                           () -> new SetType<>(elements, isMultiCell));
     }
 
     public SetType(AbstractType<T> elements, boolean isMultiCell)
@@ -90,6 +79,19 @@ public class SetType<T> extends CollectionType<Set<T>>
     public <V> boolean referencesUserType(V name, ValueAccessor<V> accessor)
     {
         return elements.referencesUserType(name, accessor);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public SetType<T> with(ImmutableList<AbstractType<?>> subTypes, boolean isMultiCell)
+    {
+        Preconditions.checkArgument(subTypes.size() == 1,
+                                    "Invalid number of subTypes for SetType (got %s)", subTypes.size());
+
+        if (subTypes.equals(this.subTypes()) && isMultiCell == this.isMultiCell())
+            return this;
+
+        return getInstance((AbstractType<T>) subTypes.get(0), isMultiCell);
     }
 
     @Override

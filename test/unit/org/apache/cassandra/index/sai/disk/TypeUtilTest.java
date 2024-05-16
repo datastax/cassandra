@@ -104,12 +104,12 @@ public class TypeUtilTest extends SaiRandomizedTest
     {
         for(CQL3Type elementType : StorageAttachedIndex.SUPPORTED_TYPES)
         {
-            TupleType type = new TupleType(Arrays.asList(elementType.getType(), elementType.getType()), true, false);
+            TupleType type = new TupleType(Arrays.asList(elementType.getType(), elementType.getType()), true);
             assertFalse(TypeUtil.isFrozenCollection(type));
             assertTrue(TypeUtil.isFrozen(type));
             assertTrue(TypeUtil.isLiteral(type));
 
-            type = new TupleType(Arrays.asList(elementType.getType(), elementType.getType()), false, false);
+            type = new TupleType(Arrays.asList(elementType.getType(), elementType.getType()), false);
             assertFalse(TypeUtil.isFrozenCollection(type));
             assertTrue(TypeUtil.isFrozen(type));
             assertTrue(TypeUtil.isLiteral(type));
