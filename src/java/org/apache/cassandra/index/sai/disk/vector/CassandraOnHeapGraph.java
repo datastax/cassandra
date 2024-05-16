@@ -37,6 +37,7 @@ import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
@@ -620,5 +621,12 @@ public class CassandraOnHeapGraph<T> implements Accountable
             this.pq = pq;
             this.unitVectors = unitVectors;
         }
+    }
+
+    /** ensures that the graph is connected -- normally not necessary but it can help tests reason about the state */
+    @VisibleForTesting
+    public void cleanup()
+    {
+        builder.cleanup();
     }
 }
