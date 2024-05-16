@@ -25,6 +25,8 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
 
 import org.slf4j.Logger;
@@ -269,22 +271,29 @@ public class CompactionGraph implements Closeable, Accountable
             SAICodecUtils.writeHeader(postingsOutput);
             SAICodecUtils.writeHeader(pqOutput);
 
-            // write PQ
+            // write PQ (time to do this is negligible, don't bother doing it async)
             long pqOffset = pqOutput.getFilePointer();
             CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
             pqVectors.write(pqOutput.asSequentialWriter(), JVECTOR_2_VERSION); // VSTODO old version until we add APQ
             long pqLength = pqOutput.getFilePointer() - pqOffset;
 
-            // write postings
-            // VSTODO make this async?  it's i/o bound and cleanup next step is cpu bound
+            // write postings asynchronously while we run cleanup()
             long postingsOffset = postingsOutput.getFilePointer();
-            long postingsPosition = new VectorPostingsWriter<Integer>(postingsOneToOne, i -> i)
-                                            .writePostings(postingsOutput.asSequentialWriter(), inlineVectors, postingsMap, Set.of());
-            long postingsLength = postingsPosition - postingsOffset;
+            var es = Executors.newSingleThreadExecutor();
+            var postingsFuture = es.submit(() -> {
+                return new VectorPostingsWriter<Integer>(postingsOneToOne, i -> i)
+                       .writePostings(postingsOutput.asSequentialWriter(), inlineVectors, postingsMap, deletedOrdinals);
+            });
 
-            // complete (internal clean up) and write the graph
+            // complete internal graph clean up
             builder.cleanup();
 
+            // wait for postings to finish writing
+            long postingsEnd = postingsFuture.get();
+            long postingsLength = postingsEnd - postingsOffset;
+            es.shutdown();
+
+            // write the graph
             var start = nanoTime();
             if (writer.getFeatureSet().contains(FeatureId.FUSED_ADC))
             {
@@ -308,6 +317,10 @@ public class CompactionGraph implements Closeable, Accountable
 
             // add components to the metadata map
             return CassandraOnHeapGraph.createMetadataMap(termsOffset, termsLength, postingsOffset, postingsLength, pqOffset, pqLength);
+        }
+        catch (ExecutionException | InterruptedException e)
+        {
+            throw new RuntimeException(e);
         }
     }
 
