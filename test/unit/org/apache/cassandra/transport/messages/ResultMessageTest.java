@@ -198,8 +198,7 @@ public class ResultMessageTest
         }
         else if (type.isReversed())
         {
-            ReversedType<?> rt = (ReversedType<?>) type;
-            checkType(rt.baseType, keyspaceName);
+            checkType(type.unwrap(), keyspaceName);
         }
         else if (type.isCollection())
         {
