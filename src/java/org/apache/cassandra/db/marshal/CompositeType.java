@@ -28,7 +28,6 @@ import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
@@ -119,12 +118,6 @@ public class CompositeType extends AbstractCompositeType
         return getInstance(ImmutableList.copyOf(types));
     }
 
-    @Override
-    public CompositeType overrideKeyspace(Function<String, String> overrideKeyspace)
-    {
-        return getInstance(subTypes().stream().map(t -> t.overrideKeyspace(overrideKeyspace)).collect(ImmutableList.toImmutableList()));
-    }
-
     protected static int startingOffsetInternal(boolean isStatic)
     {
         return isStatic ? 2 : 0;
@@ -165,14 +158,11 @@ public class CompositeType extends AbstractCompositeType
         return true;
     }
 
-    public static CompositeType getInstance(List<AbstractType<?>> types)
+    public static CompositeType getInstance(ImmutableList<AbstractType<?>> types)
     {
         assert types != null && !types.isEmpty();
-        ImmutableList<AbstractType<?>> typesCopy = ImmutableList.copyOf(Iterables.transform(types, AbstractType::freeze));
-        CompositeType t = instances.get(typesCopy);
-        return null == t
-             ? instances.computeIfAbsent(typesCopy, CompositeType::new)
-             : t;
+        ImmutableList<AbstractType<?>> typesCopy = freeze(types);
+        return getInstance(instances, typesCopy, () -> new CompositeType(typesCopy));
     }
 
     protected CompositeType(Iterable<AbstractType<?>> subTypes)
@@ -184,6 +174,15 @@ public class CompositeType extends AbstractCompositeType
     {
         super(types);
         this.serializer = new Serializer(this.subTypes);
+    }
+
+    @Override
+    public CompositeType with(ImmutableList<AbstractType<?>> subTypes, boolean isMultiCell)
+    {
+        if (isMultiCell)
+            throw new IllegalArgumentException("Cannot create a multi-cell CompositeType");
+
+        return getInstance(subTypes);
     }
 
     @Override
