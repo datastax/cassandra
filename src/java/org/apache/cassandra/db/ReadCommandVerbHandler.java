@@ -112,7 +112,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
                                      bytes);
         });
 
-        Optional<Sensor> tableSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_BYTES);
+        Optional<Sensor> tableSensor = SensorsRegistry.instance.getOrCreateSensor(context, Type.INTERNODE_BYTES);
         tableSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue())).ifPresent(bytes -> {
             reply.withCustomParam(SensorsCustomParams.encodeTableInInternodeBytesTableParam(context.getTable()),
                                   bytes);
@@ -133,7 +133,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         readRequestSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue()))
                          .ifPresent(bytes -> reply.withCustomParam(requestBytesParam, bytes));
 
-        Optional<Sensor> readTableSensor = SensorsRegistry.instance.getSensor(context, type);
+        Optional<Sensor> readTableSensor = SensorsRegistry.instance.getOrCreateSensor(context, type);
         readTableSensor.map(s -> SensorsCustomParams.sensorValueAsBytes(s.getValue()))
                        .ifPresent(bytes -> reply.withCustomParam(tableBytesParam, bytes));
     }

@@ -48,7 +48,6 @@ import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -120,11 +119,11 @@ public class SensorsInternodeTest
         .build()
         .applyUnsafe();
 
-
         DecoratedKey key = store.getPartitioner().decorateKey(ByteBufferUtil.bytes("0"));
         ReadCommand command = Util.cmd(store, key).build();
-        Runnable handler = () -> ReadCommandVerbHandler.instance.doVerb(Message.builder(Verb.READ_REQ, command).build());
-        testInternodeSensors(handler, ImmutableSet.of(context));
+        Message request = Message.builder(Verb.READ_REQ, command).build();
+        Runnable handler = () -> ReadCommandVerbHandler.instance.doVerb(request);
+        testInternodeSensors(request, handler, ImmutableSet.of(context));
     }
 
     @Test
@@ -137,8 +136,9 @@ public class SensorsInternodeTest
                             .add("val", "0")
                             .build();
 
-        Runnable handler = () -> MutationVerbHandler.instance.doVerb(Message.builder(Verb.MUTATION_REQ, mutation).build());
-        testInternodeSensors(handler, ImmutableSet.of(context));
+        Message request = Message.builder(Verb.MUTATION_REQ, mutation).build();
+        Runnable handler = () -> MutationVerbHandler.instance.doVerb(request);
+        testInternodeSensors(request, handler, ImmutableSet.of(context));
     }
 
     @Test
@@ -164,8 +164,9 @@ public class SensorsInternodeTest
                       .build());
 
         Mutation mutation = Mutation.merge(mutations);
-        Runnable handler = () -> MutationVerbHandler.instance.doVerb(Message.builder(Verb.MUTATION_REQ, mutation).build());
-        testInternodeSensors(handler, ImmutableSet.of(context1, context2));
+        Message request = Message.builder(Verb.MUTATION_REQ, mutation).build();
+        Runnable handler = () -> MutationVerbHandler.instance.doVerb(request);
+        testInternodeSensors(request, handler, ImmutableSet.of(context1, context2));
     }
 
     @Test
@@ -182,56 +183,30 @@ public class SensorsInternodeTest
 
         CounterMutation counterMutation = new CounterMutation(mutation, ConsistencyLevel.ANY);
 
-        Runnable handler = () -> CounterMutationVerbHandler.instance.doVerb(Message.builder(Verb.COUNTER_MUTATION_REQ, counterMutation).build());
-        testInternodeSensors(handler, ImmutableSet.of(context));
+        Message request = Message.builder(Verb.COUNTER_MUTATION_REQ, counterMutation).build();
+        Runnable handler = () -> CounterMutationVerbHandler.instance.doVerb(request);
+        testInternodeSensors(request, handler, ImmutableSet.of(context));
     }
 
-    private void testInternodeSensors(Runnable handler, Collection<Context> contexts)
+    private void testInternodeSensors(Message request, Runnable handler, Collection<Context> contexts)
     {
-
-        /** TODO: not sure how to rewrite this test
-        // Boostraps the internode sensors in the registry. Notice that the first outbound message will not have any internode sensors
-        // because the resitry will be initilized after the first outbound message is intercepted.
+        // Run the handler:
         handler.run();
-        Sensor firstInternodeBytesSensor = SensorsRegistry.instance.getSensor(contexts.iterator().next(), Type.INTERNODE_BYTES).get();
-        double baselineMsgSize = firstInternodeBytesSensor.getValue(); // the size of the first internode message, which doesn't include the internode sensors headers
 
-        for (Context context : contexts)
-        {
-            SensorsRegistry.instance.getSensor(context, Type.INTERNODE_BYTES).get().reset();
-        }
+        // Get the request size, response size and total size per table:
+        int tableCount = contexts.size();
+        int requestSizePerTable = request.serializedSize(MessagingService.current_version) / tableCount;
+        Message response = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
+        int responseSizePerTable = response.serializedSize(MessagingService.current_version) / tableCount;
+        int total = requestSizePerTable + responseSizePerTable;
 
-        // Capture the first values of internode message sensors
-        handler.run();
+        // For each context/table, get the internode bytes and verify their value is between the request and total size:
+        // it can't be equal to the total size because we don't record the custom headers in the internode sensor.
         for (Context context : contexts)
         {
             Sensor internodeBytesSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_BYTES).get();
             double internodeBytes = internodeBytesSensor.getValue();
-            double tableCount = contexts.size();
-            assertThat(internodeBytes).isGreaterThan(baselineMsgSize / tableCount);
+            assertThat(internodeBytes).isBetween(requestSizePerTable * 1.0, total * 1.0);
         }
-
-        double internodeBytes = firstInternodeBytesSensor.getValue();
-
-        // handle the same command/mutation two more times
-        handler.run();
-        handler.run();
-
-        for (Context context : contexts)
-        {
-            Sensor internodeBytesSensor = SensorsRegistry.instance.getSensor(context, Type.INTERNODE_BYTES).get();
-            double newInternodeBytes = internodeBytesSensor.getValue();
-            assertThat(newInternodeBytes).isEqualTo(internodeBytes * 3.0);
-
-            // check the latest outbound message accomodated for the previous two internode messages
-            Message<?> message = capturedOutboundMessages.get(capturedOutboundMessages.size() - 1);
-            assertThat(message.header.customParams()).isNotNull();
-            String internodeBytesTableParam = SensorsCustomParams.encodeTableInInternodeBytesTableParam(context.getTable());
-            assertThat(message.header.customParams()).containsKey(internodeBytesTableParam);
-
-            double internodeBytesInHeader = SensorsTestUtil.bytesToDouble(message.header.customParams().get(internodeBytesTableParam));
-            assertThat(internodeBytesInHeader).isEqualTo(internodeBytes * 2.0);
-        }
-         **/
     }
 }
