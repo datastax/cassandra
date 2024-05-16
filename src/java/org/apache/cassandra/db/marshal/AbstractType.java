@@ -86,9 +86,16 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public final ComparisonType comparisonType;
     public final boolean isByteOrderComparable;
     public final ValueComparators comparatorSet;
+    public final boolean isMultiCell;
 
     protected AbstractType(ComparisonType comparisonType)
     {
+        this(comparisonType, false);
+    }
+
+    protected AbstractType(ComparisonType comparisonType, boolean isMultiCell)
+    {
+        this.isMultiCell = isMultiCell;
         this.comparisonType = comparisonType;
         this.isByteOrderComparable = comparisonType == ComparisonType.BYTE_ORDER;
         reverseComparator = (o1, o2) -> AbstractType.this.compare(o2, o1);
@@ -439,9 +446,9 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return false;
     }
 
-    public boolean isMultiCell()
+    public final boolean isMultiCell()
     {
-        return false;
+        return isMultiCell;
     }
 
     public boolean isFreezable()
