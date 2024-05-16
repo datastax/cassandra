@@ -117,7 +117,6 @@ public class SensorsRegistry implements SchemaChangeListener
     public Optional<Sensor> getOrCreateSensor(Context context, Type type)
     {
         updateLock.readLock().lock();
-
         try
         {
             if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
