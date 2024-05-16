@@ -218,10 +218,10 @@ public class DynamicCompositeType extends AbstractCompositeType
          * If both types are ReversedType(Type), we need to compare on the wrapped type (which may differ between the two types) to avoid
          * incompatible comparisons being made.
          */
-        if ((comp1 instanceof ReversedType) && (comp2 instanceof ReversedType))
+        if (comp1.isReversed() && comp2.isReversed())
         {
-            comp1 = ((ReversedType<?>) comp1).baseType;
-            comp2 = ((ReversedType<?>) comp2).baseType;
+            comp1 = comp1.unwrap();
+            comp2 = comp2.unwrap();
         }
 
         // Fast test if the comparator uses singleton instances
@@ -295,7 +295,7 @@ public class DynamicCompositeType extends AbstractCompositeType
             // The comparable bytes for the component need to ensure comparisons consistent with
             // AbstractCompositeType.compareCustom(ByteBuffer, ByteBuffer) and
             // DynamicCompositeType.getComparator(int, ByteBuffer, ByteBuffer):
-            if (version == Version.LEGACY || !(comp instanceof ReversedType))
+            if (version == Version.LEGACY || !comp.isReversed())
             {
                 // ...most often that means just adding the short name of the type, followed by the full name of the type.
                 srcs.add(ByteSource.of(comp.getClass().getSimpleName(), version));
@@ -303,14 +303,14 @@ public class DynamicCompositeType extends AbstractCompositeType
             }
             else
             {
-                // ...however some times the component uses a complex type (currently the only supported complex type
+                // ...however sometimes the component uses a complex type (currently the only supported complex type
                 // is ReversedType - we can't have elements that are of MapType, CompositeType, TupleType, etc.)...
-                ReversedType<?> reversedComp = (ReversedType<?>) comp;
+                AbstractType<?> baseType = comp.unwrap();
                 // ...in this case, we need to add the short name of ReversedType before the short name of the base
                 // type, to ensure consistency with DynamicCompositeType.getComparator(int, ByteBuffer, ByteBuffer).
                 srcs.add(ByteSource.of(REVERSED_TYPE, version));
-                srcs.add(ByteSource.of(reversedComp.baseType.getClass().getSimpleName(), version));
-                srcs.add(ByteSource.of(reversedComp.baseType.getClass().getName(), version));
+                srcs.add(ByteSource.of(baseType.getClass().getSimpleName(), version));
+                srcs.add(ByteSource.of(baseType.getClass().getName(), version));
             }
             // Only then the payload of the component gets encoded.
             int componentLength = accessor.getUnsignedShort(data, offset);

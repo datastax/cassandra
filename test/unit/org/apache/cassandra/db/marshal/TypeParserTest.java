@@ -70,11 +70,11 @@ public class TypeParserTest
 
         type = TypeParser.parse("LongType(reversed=true)");
         assert type == ReversedType.getInstance(LongType.instance);
-        assert ((ReversedType<?>)type).baseType == LongType.instance;
+        assert type.unwrap() == LongType.instance;
 
         type = TypeParser.parse("LongType(reversed)");
         assert type == ReversedType.getInstance(LongType.instance);
-        assert ((ReversedType<?>)type).baseType == LongType.instance;
+        assert type.unwrap() == LongType.instance;
     }
 
     @Test

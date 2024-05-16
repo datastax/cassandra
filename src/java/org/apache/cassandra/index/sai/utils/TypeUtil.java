@@ -556,7 +556,7 @@ public class TypeUtil
      */
     private static AbstractType<?> baseType(AbstractType<?> type)
     {
-        return type.isReversed() ? ((ReversedType<?>) type).baseType : type;
+        return type.unwrap();
     }
 
     public static ByteBuffer encodeDecimal(ByteBuffer value)
