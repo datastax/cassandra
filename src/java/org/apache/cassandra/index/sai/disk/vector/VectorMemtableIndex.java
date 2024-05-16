@@ -523,4 +523,10 @@ public class VectorMemtableIndex implements MemtableIndex
             return endOfData();
         }
     }
+
+    /** ensures that the graph is connected -- normally not necessary but it can help tests reason about the state */
+    public void cleanup()
+    {
+        graph.cleanup();
+    }
 }
