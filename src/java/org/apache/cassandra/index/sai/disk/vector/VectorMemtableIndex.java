@@ -54,6 +54,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
@@ -320,12 +321,7 @@ public class VectorMemtableIndex implements MemtableIndex
     {
         int expectedNodesVisited = expectedNodesVisited(limit, nPermittedOrdinals, graphSize);
         int expectedComparisons = indexContext.getIndexWriterConfig().getAnnMaxDegree() * expectedNodesVisited;
-        // in-memory comparisons are cheaper than pulling a row off disk and then comparing
-        // VSTODO this is dramatically oversimplified
-        // larger dimension should increase this, because comparisons are more expensive
-        // lower chunk cache hit ratio should decrease this, because loading rows is more expensive
-        double memoryToDiskFactor = 0.25;
-        return (int) min(max(limit, memoryToDiskFactor * expectedComparisons), GLOBAL_BRUTE_FORCE_ROWS);
+        return (int) min(max(limit, Plan.memoryToDiskFactor() * expectedComparisons), GLOBAL_BRUTE_FORCE_ROWS);
     }
 
     /**
