@@ -56,7 +56,7 @@ public class VectorTester extends SAITester
         setMaxBruteForceRows(n);
     }
 
-    static void setMaxBruteForceRows(int n)
+    public static void setMaxBruteForceRows(int n)
     {
         V2VectorIndexSearcher.GLOBAL_BRUTE_FORCE_ROWS = n;
         VectorMemtableIndex.GLOBAL_BRUTE_FORCE_ROWS = n;
