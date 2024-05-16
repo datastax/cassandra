@@ -50,6 +50,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.any;
 import static com.google.common.collect.Iterables.transform;
 import static java.lang.String.format;
@@ -313,7 +314,7 @@ public final class Types implements Iterable<UserType>
                                          originalType.fieldTypes()
                                                      .stream()
                                                      .map(t -> t.withUpdatedUserTypes(updatedTypes.values()))
-                                                     .collect(Collectors.toList()),
+                                                     .collect(ImmutableList.toImmutableList()),
                                          true);
 
             updatedTypes.put(type.name, type);
@@ -452,15 +453,15 @@ public final class Types implements Iterable<UserType>
 
             UserType prepare(String keyspace, Types types)
             {
-                List<FieldIdentifier> preparedFieldNames =
-                    fieldNames.stream()
-                              .map(FieldIdentifier::forInternalString)
-                              .collect(toList());
+                ImmutableList<FieldIdentifier> preparedFieldNames =
+                fieldNames.stream()
+                          .map(FieldIdentifier::forInternalString)
+                          .collect(toImmutableList());
 
-                List<AbstractType<?>> preparedFieldTypes =
-                    fieldTypes.stream()
-                              .map(t -> t.prepareInternal(keyspace, types).getType())
-                              .collect(toList());
+                ImmutableList<AbstractType<?>> preparedFieldTypes =
+                fieldTypes.stream()
+                          .map(t -> t.prepareInternal(keyspace, types).getType())
+                          .collect(toImmutableList());
 
                 return new UserType(keyspace, bytes(name), preparedFieldNames, preparedFieldTypes, true);
             }

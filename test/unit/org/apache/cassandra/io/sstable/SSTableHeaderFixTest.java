@@ -33,6 +33,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 import org.junit.After;
 import org.junit.Before;
@@ -874,7 +875,7 @@ public class SSTableHeaderFixTest
             if (type.getClass() == CompositeType.class)
             {
                 CompositeType cHeader = (CompositeType) type;
-                return CompositeType.getInstance(cHeader.types.stream().map(this::freezeUdt).collect(Collectors.toList()));
+                return CompositeType.getInstance(cHeader.subTypes().stream().map(this::freezeUdt).collect(ImmutableList.toImmutableList()));
             }
         }
         else if (type instanceof TupleType)
@@ -884,7 +885,7 @@ public class SSTableHeaderFixTest
                 UserType cHeader = (UserType) type;
                 cHeader = cHeader.freeze();
                 return new UserType(cHeader.keyspace, cHeader.name, cHeader.fieldNames(),
-                                    cHeader.allTypes().stream().map(this::freezeUdt).collect(Collectors.toList()),
+                                    cHeader.subTypes().stream().map(this::freezeUdt).collect(ImmutableList.toImmutableList()),
                                     cHeader.isMultiCell());
             }
         }
@@ -896,7 +897,7 @@ public class SSTableHeaderFixTest
         AbstractType<?> keyType = header.getKeyType();
         if (keyType instanceof CompositeType)
         {
-            for (AbstractType<?> component : ((CompositeType) keyType).types)
+            for (AbstractType<?> component : ((CompositeType) keyType).subTypes())
                 assertFrozenUdt("partition-key-component", component, frozen, checkInner);
         }
         assertFrozenUdt("partition-key", keyType, frozen, checkInner);
@@ -914,7 +915,7 @@ public class SSTableHeaderFixTest
         if (type instanceof CompositeType)
         {
             if (checkInner)
-                for (AbstractType<?> component : ((CompositeType) type).types)
+                for (AbstractType<?> component : ((CompositeType) type).subTypes())
                     assertFrozenUdt(name, component, frozen, true);
         }
         else if (type instanceof CollectionType)
@@ -954,7 +955,7 @@ public class SSTableHeaderFixTest
                 TupleType tuple = (TupleType) type;
                 // only descend for non-frozen types (checking frozen in frozen is just stupid)
                 if (tuple.isMultiCell())
-                    for (AbstractType<?> component : tuple.allTypes())
+                    for (AbstractType<?> component : tuple.subTypes())
                         assertFrozenUdt(name + "<tuple>", component, frozen, true);
             }
         }

@@ -65,15 +65,7 @@ public abstract class Lists
 
     public static ColumnSpecification valueSpecOf(ColumnSpecification column)
     {
-        return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), elementsType(column.type));
-    }
-
-    private static AbstractType<?> elementsType(AbstractType<?> type)
-    {
-        AbstractType<?> unwrapped = type.unwrap();
-        return type.isVector()
-               ? ((VectorType<?>) unwrapped).getElementsType()
-               : ((ListType<?>) unwrapped).getElementsType();
+        return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), column.type.subTypes().get(0));
     }
 
     /**
