@@ -19,16 +19,18 @@ package org.apache.cassandra.serializers;
 
 import java.util.List;
 
+import com.google.common.collect.ImmutableList;
+
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 
 public class TupleSerializer extends BytesSerializer
 {
-    public final List<TypeSerializer<?>> fields;
+    public final ImmutableList<TypeSerializer<?>> fields;
 
     public TupleSerializer(List<TypeSerializer<?>> fields)
     {
-        this.fields = fields;
+        this.fields = ImmutableList.copyOf(fields);
     }
 
     public <V> void validate(V input, ValueAccessor<V> accessor) throws MarshalException
