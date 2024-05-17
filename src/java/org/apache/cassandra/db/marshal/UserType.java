@@ -145,12 +145,6 @@ public class UserType extends TupleType implements SchemaElement
         return false;
     }
 
-    @Override
-    public boolean isFreezable()
-    {
-        return true;
-    }
-
     public AbstractType<?> fieldType(int i)
     {
         return type(i);
