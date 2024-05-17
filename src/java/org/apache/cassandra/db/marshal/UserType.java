@@ -72,6 +72,7 @@ public class UserType extends TupleType implements SchemaElement
     private final ImmutableList<FieldIdentifier> fieldNames;
     private final ImmutableList<String> stringFieldNames;
     private final UserTypeSerializer serializer;
+    private final int hashCode;
 
     public UserType(String keyspace, ByteBuffer name, Iterable<FieldIdentifier> fieldNames, Iterable<AbstractType<?>> fieldTypes, boolean isMultiCell)
     {
@@ -82,6 +83,7 @@ public class UserType extends TupleType implements SchemaElement
     {
         super(isMultiCell ? fieldTypes : freeze(fieldTypes), isMultiCell);
         assert fieldNames.size() == fieldTypes.size();
+        this.hashCode = Objects.hashCode(fieldNames, keyspace, name, super.hashCode());
         this.keyspace = keyspace;
         this.name = name;
         this.fieldNames = fieldNames;
@@ -314,7 +316,7 @@ public class UserType extends TupleType implements SchemaElement
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(keyspace, name, fieldNames, subTypes, isMultiCell);
+        return hashCode;
     }
 
     @Override
@@ -348,12 +350,13 @@ public class UserType extends TupleType implements SchemaElement
     @Override
     public boolean equals(Object o)
     {
-        if (o.getClass() != UserType.class)
+        if (o == this)
+            return true;
+        if (!super.equals(o))
             return false;
 
-        UserType that = (UserType)o;
-
-        return equalsWithoutTypes(that) && subTypes.equals(that.subTypes);
+        UserType that = (UserType) o;
+        return equalsWithoutTypes(that);
     }
 
     private boolean equalsWithoutTypes(UserType other)
