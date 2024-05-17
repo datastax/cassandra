@@ -1390,9 +1390,7 @@ public interface Selectable extends AssignmentTestable
             public Selectable prepare(TableMetadata cfm)
             {
                 Selectable selectable = raw.prepare(cfm);
-                AbstractType<?> type = this.typeRaw.prepare(cfm.keyspace).getType();
-                if (type.isFreezable())
-                    type = type.freeze();
+                AbstractType<?> type = this.typeRaw.prepare(cfm.keyspace).getType().freeze();
                 return new WithTypeHint(typeRaw.toString(), type, selectable);
             }
         }
