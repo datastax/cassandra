@@ -1794,7 +1794,9 @@ comparatorTypeWithoutTuples returns [CQL3Type.Raw t]
     | K_FROZEN '<' f=comparatorType '>'
       {
         try {
-            $t = f.freeze();
+            // antlr might try to recover and give a null for f. It will still properly error out in the end, but we want
+            // to avoid NPE in the call to #freeze() so we should bypass this or we'll have a weird user-facing error.
+            $t = f == null ? null : f.freeze();
         } catch (InvalidRequestException e) {
             addRecognitionError(e.getMessage());
         }

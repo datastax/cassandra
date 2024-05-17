@@ -33,6 +33,7 @@ import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.assertj.core.api.Assertions;
@@ -435,6 +436,40 @@ public class CQLVectorTest extends CQLTester
 
         // make sure the function referencing the UDT is dropped before dropping the UDT at cleanup
         execute("DROP FUNCTION " + f);
+    }
+
+    @Test
+    public void invalidSyntax() throws Throwable
+    {
+        assertInvalidThrowMessage("mismatched input '>' expecting ','",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v vector<text>)", KEYSPACE));
+        assertInvalidThrowMessage("no viable alternative at input '2'",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v vector<2>)", KEYSPACE));
+        assertInvalidThrowMessage("no viable alternative at input '>'",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v vector<>)", KEYSPACE));
+        assertInvalidThrowMessage("Unknown type cql_test_keyspace.vector",
+                                  InvalidRequestException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v vector)", KEYSPACE));
+
+        // explicitly frozen, which is not supported
+        assertInvalidThrowMessage("frozen<> is only allowed on collections, tuples, and user-defined types",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<vector<text, 2>>)", KEYSPACE));
+        assertInvalidThrowMessage("mismatched input '>' expecting ','",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<vector<text>>)", KEYSPACE));
+        assertInvalidThrowMessage("no viable alternative at input '2'",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<vector<2>>)", KEYSPACE));
+        assertInvalidThrowMessage("no viable alternative at input '>'",
+                                  SyntaxException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<vector<>>)", KEYSPACE));
+        assertInvalidThrowMessage("Unknown type cql_test_keyspace.vector",
+                                  InvalidRequestException.class,
+                                  format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<vector>)", KEYSPACE));
     }
 
     @SafeVarargs
