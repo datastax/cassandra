@@ -91,6 +91,7 @@ public class ListType<T> extends CollectionType<List<T>>
         return elements;
     }
 
+    @Override
     public AbstractType<TimeUUID> nameComparator()
     {
         return TimeUUIDType.instance;
