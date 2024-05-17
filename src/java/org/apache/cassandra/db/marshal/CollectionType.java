@@ -17,11 +17,11 @@
  */
 package org.apache.cassandra.db.marshal;
 
-import java.nio.ByteBuffer;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.Locale;
@@ -52,7 +52,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
  * Please note that this comparator shouldn't be used "manually" (as a custom
  * type for instance).
  */
-public abstract class CollectionType<T> extends AbstractType<T>
+public abstract class CollectionType<T> extends MultiCellCapableType<T>
 {
     public static CellPath.Serializer cellPathSerializer = new CollectionPathSerializer();
 
@@ -97,7 +97,6 @@ public abstract class CollectionType<T> extends AbstractType<T>
         this.kind = kind;
     }
 
-    public abstract AbstractType<?> nameComparator();
     public abstract AbstractType<?> valueComparator();
 
     protected abstract List<ByteBuffer> serializedValues(Iterator<Cell<?>> cells);
