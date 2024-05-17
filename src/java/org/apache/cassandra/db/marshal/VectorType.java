@@ -86,6 +86,7 @@ public final class VectorType<T> extends AbstractType<List<T>>
     private final TypeSerializer<T> elementSerializer;
     private final int valueLengthIfFixed;
     private final VectorSerializer serializer;
+    private final int hashCode;
 
     private static final boolean isVectorTypeAllowed = CassandraRelevantProperties.VECTOR_TYPE_ALLOWED.getBoolean();
     private static final boolean isVectorTypeFloatOnly = CassandraRelevantProperties.VECTOR_FLOAT_ONLY.getBoolean();
@@ -108,6 +109,7 @@ public final class VectorType<T> extends AbstractType<List<T>>
         this.serializer = elementType.isValueLengthFixed() ?
                           new FixedLengthSerializer() :
                           new VariableLengthSerializer();
+        this.hashCode = Objects.hash(elementType, dimension);
     }
 
     @SuppressWarnings("unchecked")
@@ -322,16 +324,18 @@ public final class VectorType<T> extends AbstractType<List<T>>
     @Override
     public boolean equals(Object o)
     {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if (this == o)
+            return true;
+        if (!super.equals(o))
+            return false;
         VectorType<?> that = (VectorType<?>) o;
-        return dimension == that.dimension && Objects.equals(elementType, that.elementType);
+        return dimension == that.dimension;
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(elementType, dimension);
+        return hashCode;
     }
 
     @Override
