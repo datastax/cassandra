@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
@@ -38,9 +37,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable.Version;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
-
-import static com.google.common.collect.Iterables.any;
-import static com.google.common.collect.Iterables.transform;
 
 /*
  * The encoding of a CompositeType column name should be:
@@ -457,29 +453,6 @@ public class CompositeType extends AbstractCompositeType
                 return false;
         }
         return true;
-    }
-
-    @Override
-    public <V> boolean referencesUserType(V name, ValueAccessor<V> accessor)
-    {
-        return any(subTypes, t -> t.referencesUserType(name, accessor));
-    }
-
-    @Override
-    public CompositeType withUpdatedUserType(UserType udt)
-    {
-        if (!referencesUserType(udt.name))
-            return this;
-
-        instances.remove(subTypes);
-
-        return getInstance(transform(subTypes, t -> t.withUpdatedUserType(udt)));
-    }
-
-    @Override
-    public AbstractType<?> expandUserTypes()
-    {
-        return getInstance(transform(subTypes, AbstractType::expandUserTypes));
     }
 
     private static class StaticParsedComparator implements ParsedComparator

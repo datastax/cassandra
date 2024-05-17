@@ -429,28 +429,21 @@ public class UserType extends TupleType implements SchemaElement
     @Override
     public UserType withUpdatedUserType(UserType udt)
     {
-        if (!referencesUserType(udt.name))
-            return this;
+        // If we're not the UDT to update, we can rely on the default implementation
+        if (!name.equals(udt.name))
+            return (UserType) super.withUpdatedUserType(udt);
 
-        // preserve frozen/non-frozen status of the updated UDT
-        if (name.equals(udt.name))
-        {
-            return isMultiCell == udt.isMultiCell
-                 ? udt
-                 : new UserType(udt.keyspace, name, udt.fieldNames(), udt.fieldTypes(), isMultiCell);
-        }
+        assert udt.isMultiCell();
 
-        return new UserType(udt.keyspace,
-                            name,
-                            fieldNames,
-                            ImmutableList.copyOf(transform(fieldTypes(), t -> t.withUpdatedUserType(udt))),
-                            isMultiCell());
+        // The type we're updating may be frozen, while the updated user type will never be (a UDT is never frozen in
+        // its definition, only in its use). So if we are frozen, we should freeze the UDT we switch to.
+        return isMultiCell() ? udt : udt.freeze();
     }
 
     @Override
-    public boolean referencesDuration()
+    public AbstractType<?> expandUserTypes()
     {
-        return fieldTypes().stream().anyMatch(f -> f.referencesDuration());
+        return new TupleType(ImmutableList.copyOf(transform(subTypes, AbstractType::expandUserTypes)), isMultiCell());
     }
 
     @Override
