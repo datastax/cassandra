@@ -63,7 +63,7 @@ public class LuceneAnalyzerTest extends SAITester
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'The quick brown fox jumps over the lazy DOG.')");
 
@@ -95,7 +95,7 @@ public class LuceneAnalyzerTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES (1, 'dog')");
 
@@ -286,7 +286,7 @@ public class LuceneAnalyzerTest extends SAITester
                     "\t{\"filter\":\"porterstem\"}\n" +
                     "]'}");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'the queries test')");
 
