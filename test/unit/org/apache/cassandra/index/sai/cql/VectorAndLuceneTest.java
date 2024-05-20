@@ -36,7 +36,7 @@ public class VectorAndLuceneTest extends VectorTester
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'" +
                     " WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // The str_val is set up to make sure that tokens are properly analyzed and lowercased.
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'One Duplicate phrase', [1.0, 2.0, 3.0])");
@@ -77,7 +77,7 @@ public class VectorAndLuceneTest extends VectorTester
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'" +
                     " WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'this test has tokens', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'not so plural token', [2.0, 3.0, 4.0])");
