@@ -48,14 +48,13 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.gms.Gossiper;
-import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.transport.ProtocolVersion;
 
-import static junit.framework.TestCase.assertEquals;
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
+import static org.junit.Assert.assertEquals;
 
 
 public class StorageAttachedIndexTest
