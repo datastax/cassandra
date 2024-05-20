@@ -39,7 +39,7 @@ public class LuceneUpdateDeleteTest extends SAITester
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // The analyzed text column will result in overlapping and non-overlapping tokens in the in memory trie map.
         // Note that capitalization is covered as well as tokenization.
@@ -87,7 +87,7 @@ public class LuceneUpdateDeleteTest extends SAITester
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // The analyzed text column will result in overlapping and non-overlapping tokens in the in memory trie map.
         // Note that capitalization is covered as well as tokenization.
@@ -149,7 +149,7 @@ public class LuceneUpdateDeleteTest extends SAITester
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // The analyzed text column will result in overlapping and non-overlapping tokens in the in memory trie map.
         // Note that capitalization is covered as well as tokenization.
@@ -205,7 +205,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, ck, str_val, val) VALUES (0, 0, 'A', 'dog 0')");
         execute("INSERT INTO %s (pk, ck, str_val, val) VALUES (1, 1, 'B', 'dog 1')");
@@ -230,7 +230,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, ck, ck2, str_val, val) VALUES (0, 0, 0, 'A', 'first insert')");
         execute("INSERT INTO %s (pk, ck, ck2, str_val, val) VALUES (1, 1, 1, 'B', 'second insert')");
@@ -254,7 +254,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', 'first insert')");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', 'second insert')");
@@ -278,7 +278,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', 'first insert')");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', 'second insert')");
@@ -308,7 +308,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', 'first insert')");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', 'second insert')");
@@ -335,7 +335,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', 'first insert')");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'A', 'second insert')");
@@ -360,7 +360,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 1, 'A', 'first insert')");
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 2, 'B', 'second insert')");
@@ -386,7 +386,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 1, 'A', 'some text')");
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 2, 'B', 'updated text')");
@@ -416,7 +416,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, not_analyzed, val) VALUES (0, 'A', 'this will be tokenized')");
         execute("INSERT INTO %s (pk, not_analyzed, val) VALUES (0, 'A', 'this will be tokenized')");
@@ -455,7 +455,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val, not_analyzed) VALUES (0, 'a sad doG.', 'more text')");
         execute("INSERT INTO %s (id, val, not_analyzed) VALUES (1, 'A Happy DOG.', 'different text')");
@@ -472,7 +472,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, val) VALUES (0, 'this is')");
         flush();
@@ -511,7 +511,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector
