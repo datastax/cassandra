@@ -33,7 +33,7 @@ public class AnalyzerQueryLongTest extends CQLTester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndex(KEYSPACE, currentTable(), "val");
+        waitForIndexQueryable(KEYSPACE,"val");
         var iterations = 15000;
         for (int i = 0; i < iterations; i++)
         {
@@ -66,7 +66,7 @@ public class AnalyzerQueryLongTest extends CQLTester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndex(KEYSPACE, currentTable(), "val");
+        waitForIndexQueryable(KEYSPACE,"val");
         var iterations = 15000;
         for (int i = 0; i < iterations; i++)
         {
@@ -96,7 +96,7 @@ public class AnalyzerQueryLongTest extends CQLTester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': '[{\"tokenizer\": \"standard\"}, {\"filter\": \"lowercase\"}]' }");
-        waitForIndex(KEYSPACE, currentTable(), "val");
+        waitForIndexQueryable(KEYSPACE, "val");
         var iterations = 15000;
         for (int i = 0; i < iterations; i++)
         {
