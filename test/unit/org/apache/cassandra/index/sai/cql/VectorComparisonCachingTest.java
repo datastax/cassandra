@@ -60,7 +60,7 @@ public class VectorComparisonCachingTest extends VectorTester
         // 1 row per segment
         SegmentBuilder.updateLastValidSegmentRowId(0);
         // one sstable with 3 segments, each has one row
-        compact(KEYSPACE);
+        compact();
 
 
         var similarityScoreCacheLookups = getMetricValue(objectNameNoIndex("Lookups", CQLTester.KEYSPACE, currentTable(), "SimilarityScoreCache"));
@@ -99,7 +99,7 @@ public class VectorComparisonCachingTest extends VectorTester
         }
 
         // one sstable with 3 segments
-        compact(KEYSPACE);
+        compact();
 
 
         var similarityScoreCacheLookups = getMetricValue(objectNameNoIndex("Lookups", CQLTester.KEYSPACE, currentTable(), "SimilarityScoreCache"));
@@ -140,7 +140,7 @@ public class VectorComparisonCachingTest extends VectorTester
         // 1 row per segment
         SegmentBuilder.updateLastValidSegmentRowId(0);
         // one sstable with 3 segments, each has one row
-        compact(KEYSPACE);
+        compact();
 
 
         var similarityScoreCacheLookups = getMetricValue(objectNameNoIndex("Lookups", CQLTester.KEYSPACE, currentTable(), "SimilarityScoreCache"));
@@ -180,7 +180,7 @@ public class VectorComparisonCachingTest extends VectorTester
         }
 
         // one sstable with 3 segments
-        compact(KEYSPACE);
+        compact();
 
 
         var similarityScoreCacheLookups = getMetricValue(objectNameNoIndex("Lookups", CQLTester.KEYSPACE, currentTable(), "SimilarityScoreCache"));
