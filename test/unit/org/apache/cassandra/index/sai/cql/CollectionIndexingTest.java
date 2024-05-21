@@ -52,7 +52,7 @@ public class CollectionIndexingTest extends SAITester
     {
         createPopulatedMap();
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         assertEquals(0, execute("SELECT * FROM %s WHERE value CONTAINS ''").size());
         assertEquals(0, execute("SELECT * FROM %s WHERE value CONTAINS '' AND value CONTAINS 'v1'").size());
     }

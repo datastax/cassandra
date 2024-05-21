@@ -46,7 +46,7 @@ public class LuceneAnalyzerTest extends SAITester
                     "\t\"filters\":[{\"name\":\"porterstem\"}]\n" +
                     "}'};");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'the query')");
 
@@ -63,7 +63,7 @@ public class LuceneAnalyzerTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
                     "'index_analyzer': 'standard', 'query_analyzer': 'lowercase'};");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES (1, 'the query')");
         execute("INSERT INTO %s (id, val) VALUES (2, 'my test Query')");
@@ -99,7 +99,7 @@ public class LuceneAnalyzerTest extends SAITester
         // the index analyzer includes a lowercase filter but the query analyzer does not.
         createIndex("CREATE CUSTOM INDEX ON %s(c1) USING 'StorageAttachedIndex' WITH OPTIONS =" +
                     "{'index_analyzer': 'standard', 'query_analyzer': 'whitespace'}");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // The standard analyzer maps this to just one output 'the', but the query analyzer would map this to 'THE'
         execute("INSERT INTO %s (pk, c1) VALUES (?, ?)", 1, "THE");
@@ -300,7 +300,7 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 0, "");
         flush();
         assertRows(execute("SELECT * FROM %s WHERE v = ''"));
@@ -311,7 +311,7 @@ public class LuceneAnalyzerTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'standard'}");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 0, "");
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "some text to analyze");
         flush();
@@ -326,7 +326,7 @@ public class LuceneAnalyzerTest extends SAITester
 
         executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' " +
                    "WITH OPTIONS = {'index_analyzer':'english'}");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'the test')");
         // When indexing a document with only stop words, the document should not be indexed.
