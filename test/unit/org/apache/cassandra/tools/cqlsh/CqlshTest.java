@@ -164,10 +164,4 @@ public class CqlshTest extends CQLTester
         csv.toFile().deleteOnExit();
         return csv;
     }
-
-    @SafeVarargs
-    protected final <T> Vector<T> vector(T... values)
-    {
-        return new Vector<>(values);
-    }
 }
