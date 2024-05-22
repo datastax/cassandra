@@ -55,7 +55,7 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 import static org.junit.Assert.assertEquals;
-import static org.apache.cassandra.index.sai.SAITester.vector;
+import static org.apache.cassandra.cql3.CQLTester.vector;
 
 
 public class StorageAttachedIndexTest
@@ -86,9 +86,9 @@ public class StorageAttachedIndexTest
         QueryProcessor.executeInternal(String.format("CREATE CUSTOM INDEX ON %s.%s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function': 'dot_product'}", KEYSPACE, TABLE));
 
         vectorFloatList = new ArrayList<>();
-        CQLTester.Vector<Float> vector1 = vector(1, 2);
-        CQLTester.Vector<Float> vector2 = vector(3, 4);
-        CQLTester.Vector<Float> vector3 = vector(5, 6);
+        CQLTester.Vector<Float> vector1 = vector(1f, 2f);
+        CQLTester.Vector<Float> vector2 = vector(3f, 4f);
+        CQLTester.Vector<Float> vector3 = vector(5f, 6f);
         vectorFloatList.add(vector1);
         vectorFloatList.add(vector2);
         vectorFloatList.add(vector3);

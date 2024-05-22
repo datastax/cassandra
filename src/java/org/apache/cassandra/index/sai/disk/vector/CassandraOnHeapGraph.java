@@ -62,8 +62,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.lucene.util.StringHelper;
 
-import static java.lang.Math.max;
-
 public class CassandraOnHeapGraph<T>
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraOnHeapGraph.class);
