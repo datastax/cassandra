@@ -302,10 +302,4 @@ public abstract class MaskingFunctionTester extends CQLTester
 
         return false;
     }
-
-    @SafeVarargs
-    protected final <T> Vector<T> vector(T... values)
-    {
-        return new Vector<>(values);
-    }
 }
