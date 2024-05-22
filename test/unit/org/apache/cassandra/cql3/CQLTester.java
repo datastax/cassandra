@@ -2672,6 +2672,13 @@ public abstract class CQLTester
         return Arrays.asList(values);
     }
 
+    @SafeVarargs
+    public static <T> Vector<T> vector(T... values)
+    {
+        return new Vector<>(values);
+    }
+
+    /** @return a normalized vector with the given dimension */
     public float[] randomVector(int dimension)
     {
         // this can be called from concurrent threads so don't use getRandom()
