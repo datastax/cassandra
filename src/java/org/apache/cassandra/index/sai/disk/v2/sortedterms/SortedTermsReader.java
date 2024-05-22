@@ -136,7 +136,7 @@ public class SortedTermsReader
     public long getExactPointId(@Nonnull ByteComparable term)
     {
         Preconditions.checkNotNull(term, "term null");
-        try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(), meta.trieFP))
+        try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(null), meta.trieFP))
         {
             long result = reader.exactMatch(term);
             return result < 0 ? NOT_FOUND : result;

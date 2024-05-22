@@ -436,7 +436,7 @@ public class AllowFilteringTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk text, i int, j int, k int, vec vector<float, 3>, PRIMARY KEY((pk, i), j))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // Should not fail because allow filtering is set but not required
         assertRows(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,1,1] LIMIT 10 ALLOW FILTERING;"));

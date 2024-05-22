@@ -196,7 +196,7 @@ public class VectorTypeTest extends VectorTester
         createTable("CREATE TABLE %s (pk int, b int, v vector<float, 3>, PRIMARY KEY(pk, b))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, b, v) VALUES (0, 0, [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, b, v) VALUES (1, 2, [2.0, 3.0, 4.0])");
@@ -756,7 +756,7 @@ public class VectorTypeTest extends VectorTester
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // There was an edge case where we failed because there was just a single row in the table.
         execute("INSERT INTO %s (pk, val) VALUES (1, 'match me')");
