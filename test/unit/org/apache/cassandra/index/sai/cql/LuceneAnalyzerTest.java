@@ -63,7 +63,7 @@ public class LuceneAnalyzerTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
                     "'index_analyzer': 'standard'};");
 
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES (1, 'some row')");
         execute("INSERT INTO %s (id, val) VALUES (2, 'a different row')");

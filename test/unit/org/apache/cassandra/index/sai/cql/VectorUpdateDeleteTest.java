@@ -480,7 +480,7 @@ public class VectorUpdateDeleteTest extends VectorTester
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector
