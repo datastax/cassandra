@@ -2657,6 +2657,12 @@ public abstract class CQLTester
         return Arrays.asList(values);
     }
 
+    @SafeVarargs
+    public static <T> Vector<T> vector(T... values)
+    {
+        return new Vector<>(values);
+    }
+
     /** @return a normalized vector with the given dimension */
     protected static Vector<Float> randomVector(int dimension)
     {
