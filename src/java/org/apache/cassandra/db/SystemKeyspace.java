@@ -688,12 +688,11 @@ public final class SystemKeyspace
     }
 
     /**
-     * Populate WRITE_BYTES sensor values for the user commit that initiated Paxos.
+     * Populates sensor values of a given {@link Type} associated with the user commit that initiated Paxos.
      */
     private static void transferPaxosSensorBytes(TableMetadata targetSensorMetadata, Type type)
     {
         RequestSensors sensors = RequestTracker.instance.get();
-        // transfer bytes read off of Paxos system table to the user table for the commit that initiated Paxos
         if (sensors != null)
             sensors.getSensor(PaxosContext, type).ifPresent(paxosSensor -> {
                 sensors.incrementSensor(Context.from(targetSensorMetadata), type, paxosSensor.getValue());

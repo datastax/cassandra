@@ -42,7 +42,7 @@ public class ProposeVerbHandler implements IVerbHandler<Commit>
         // Initialize the sensor and set ExecutorLocals
         RequestSensors sensors = new RequestSensors();
         Context context = Context.from(message.payload.update.metadata());
-        // propose consults the Paxos table for more recent promises, hence regsiter a read sensor
+        // Propose phase consults the Paxos table for more recent promises, so a read sensor is registered in addition to the write sensor
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.WRITE_BYTES);
         ExecutorLocals locals = ExecutorLocals.create(sensors);

@@ -302,10 +302,12 @@ public class SensorsWriteTest
         Sensor registryWriteSensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registryWriteSensor).isEqualTo(writeSensor);
         assertResponseSensors(writeSensor.getValue(), registryWriteSensor.getValue(), CF_STANDARD);
-
-        // handle the commit again, this time paxos has state because if the first proposal and read bytes will be populated
-        handlePaxosPrepare(proposal);
         Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
+        assertThat(readSensor.getValue()).isZero();
+
+        // handle the commit again, this time paxos has state because of the first proposal and read bytes will be populated
+        handlePaxosPrepare(proposal);
+        readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isGreaterThan(0);
         Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
         assertThat(registryReadSensor).isEqualTo(readSensor);
@@ -327,10 +329,12 @@ public class SensorsWriteTest
         Sensor registryWriteSensor = SensorsTestUtil.getRegistrySensor(context, Type.WRITE_BYTES);
         assertThat(registryWriteSensor).isEqualTo(writeSensor);
         assertResponseSensors(writeSensor.getValue(), registryWriteSensor.getValue(), CF_STANDARD);
-
-        // handle the commit again, this time paxos has state because if the first proposal and read bytes will be populated
-        handlePaxosPropose(proposal);
         Sensor readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
+        assertThat(readSensor.getValue()).isZero();
+
+        // handle the commit again, this time paxos has state because of the first proposal and read bytes will be populated
+        handlePaxosPropose(proposal);
+        readSensor = SensorsTestUtil.getThreadLocalRequestSensor(context, Type.READ_BYTES);
         assertThat(readSensor.getValue()).isGreaterThan(0);
         Sensor registryReadSensor = SensorsTestUtil.getRegistrySensor(context, Type.READ_BYTES);
         assertThat(registryReadSensor).isEqualTo(readSensor);
