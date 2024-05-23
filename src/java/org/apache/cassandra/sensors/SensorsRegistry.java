@@ -117,7 +117,6 @@ public class SensorsRegistry implements SchemaChangeListener
     public Optional<Sensor> getOrCreateSensor(Context context, Type type)
     {
         updateLock.readLock().lock();
-
         try
         {
             if (!keyspaces.contains(context.getKeyspace()) || !tableIds.contains(context.getTableId()))
@@ -146,12 +145,12 @@ public class SensorsRegistry implements SchemaChangeListener
         }
     }
 
-    protected void updateSensor(Context context, Type type, double value)
+    protected void incrementSensor(Context context, Type type, double value)
     {
         getOrCreateSensor(context, type).ifPresent(s -> s.increment(value));
     }
 
-    protected Future<Void> updateSensorAsync(Context context, Type type, double value, long delay, TimeUnit unit)
+    protected Future<Void> incrementSensorAsync(Context context, Type type, double value, long delay, TimeUnit unit)
     {
         return asyncUpdater.onTimeout(() ->
                                getOrCreateSensor(context, type).ifPresent(s -> s.increment(value)),
