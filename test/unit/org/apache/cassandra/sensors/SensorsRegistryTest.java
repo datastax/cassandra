@@ -134,22 +134,22 @@ public class SensorsRegistryTest
     }
 
     @Test
-    public void testUpdateSensor()
+    public void testIncrementSensor()
     {
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
 
-        SensorsRegistry.instance.updateSensor(context1, type1, 1.0);
+        SensorsRegistry.instance.incrementSensor(context1, type1, 1.0);
         assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(1.0));
     }
 
     @Test
-    public void testUpdateSensorAsync() throws ExecutionException, InterruptedException, TimeoutException
+    public void testIncrementSensorAsync() throws ExecutionException, InterruptedException, TimeoutException
     {
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
 
-        SensorsRegistry.instance.updateSensorAsync(context1, type1, 1.0, 1, TimeUnit.MILLISECONDS).get(1, TimeUnit.SECONDS);
+        SensorsRegistry.instance.incrementSensorAsync(context1, type1, 1.0, 1, TimeUnit.MILLISECONDS).get(1, TimeUnit.SECONDS);
         assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(1.0));
     }
 
@@ -212,5 +212,26 @@ public class SensorsRegistryTest
 
         verify(listener, never()).onSensorCreated(any());
         verify(listener, never()).onSensorRemoved(any());
+    }
+
+    @Test
+    public void testUpdateAndSyncSensorViaRequestSensors()
+    {
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
+
+        RequestSensors requestSensors = new RequestSensors(() -> SensorsRegistry.instance);
+        requestSensors.registerSensor(context1, type1);
+
+        requestSensors.incrementSensor(context1, type1, 1.0);
+        requestSensors.syncAllSensors();
+        assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(1.0));
+
+        requestSensors.incrementSensor(context1, type1, 1.0);
+        requestSensors.syncAllSensors();
+        assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(2.0));
+
+        requestSensors.syncAllSensors();
+        assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(2.0));
     }
 }
