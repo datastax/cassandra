@@ -37,7 +37,6 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.MutationVerbHandler;
 import org.apache.cassandra.db.RowUpdateBuilder;
-import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -55,6 +54,8 @@ import org.apache.cassandra.service.paxos.ProposeVerbHandler;
 import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.UUIDGen;
 
+import static org.apache.cassandra.db.SystemKeyspace.PAXOS;
+import static org.apache.cassandra.schema.SchemaConstants.SYSTEM_KEYSPACE_NAME;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class SensorsWriteTest
@@ -93,11 +94,10 @@ public class SensorsWriteTest
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).metadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_CLUSTERING).metadata());
         SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER).metadata());
-        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER).metadata());
 
         // enable sensor registy for system keyspace
         SensorsRegistry.instance.onCreateKeyspace(Keyspace.open("system").getMetadata());
-        SensorsRegistry.instance.onCreateTable(Keyspace.open("system").getColumnFamilyStore(SystemKeyspace.PAXOS).metadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open("system").getColumnFamilyStore(PAXOS).metadata());
 
         capturedOutboundMessages = new CopyOnWriteArrayList<>();
         MessagingService.instance().outboundSink.add((message, to) ->
@@ -114,6 +114,7 @@ public class SensorsWriteTest
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD_CLUSTERING).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_COUTNER).truncateBlocking();
+        Keyspace.open(SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(PAXOS).truncateBlocking();
 
         RequestTracker.instance.set(null);
         SensorsRegistry.instance.clear();
