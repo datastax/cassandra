@@ -93,7 +93,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         }
 
         Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
-        int size = reply.currentSize(MessagingService.current_version);
+        int size = reply.currentPayloadSize(MessagingService.current_version);
         RequestTracker.instance.get().incrementSensor(context, Type.INTERNODE_BYTES, size);
         RequestTracker.instance.get().syncAllSensors();
 

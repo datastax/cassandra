@@ -128,7 +128,7 @@ public class CounterMutationCallbackTest
                .withFlag(MessageFlag.CALL_BACK_ON_FAILURE)
                .withParam(TRACE_SESSION, UUID.randomUUID())
                .build();
-        int responseSize = msg.emptyResponseBuilder().currentSize(MessagingService.current_version);
+        int responseSize = msg.emptyResponseBuilder().currentPayloadSize(MessagingService.current_version);
 
         RequestSensors requestSensors = new RequestSensors();
         RequestTracker.instance.set(requestSensors);

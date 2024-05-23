@@ -74,7 +74,7 @@ public class CounterMutationCallback implements Runnable
         // Add internode bytes sensors to the response after updating each per-table sensor with the current response
         // message size: this is missing the sensor values, but it's a good enough approximation
         Collection<Sensor> requestSensors = RequestTracker.instance.get().getSensors(Type.INTERNODE_BYTES);
-        int perSensorSize = response.currentSize(MessagingService.current_version) / tables;
+        int perSensorSize = response.currentPayloadSize(MessagingService.current_version) / tables;
         requestSensors.forEach(sensor -> RequestTracker.instance.get().incrementSensor(sensor.getContext(), sensor.getType(), perSensorSize));
         RequestTracker.instance.get().syncAllSensors();
         Function<String, String> requestParam = SensorsCustomParams::encodeTableInInternodeBytesRequestParam;
