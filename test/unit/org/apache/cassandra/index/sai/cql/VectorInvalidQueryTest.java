@@ -304,7 +304,7 @@ public class VectorInvalidQueryTest extends SAITester
         QueryState queryState = new QueryState(state);
 
         CQLStatement statement = QueryProcessor.parseStatement(formatQuery(query), queryState.getClientState());
-        statement.validate(queryState);
+        statement.validate(queryState.getClientState());
 
         QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
         options.updateConsistency(consistencyLevel);

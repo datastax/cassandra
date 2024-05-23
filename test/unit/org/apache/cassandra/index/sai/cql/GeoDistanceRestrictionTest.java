@@ -74,7 +74,7 @@ public class GeoDistanceRestrictionTest extends VectorTester
         createTable("CREATE TABLE %s (pk int, point vector<float, 2>, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(point) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // Distances computed using https://www.nhc.noaa.gov/gccalc.shtml
         execute("INSERT INTO %s (pk, point, v) VALUES (0, [1, 2], [1, 2, 1])"); // distance is 555 km from [5,5]
@@ -201,7 +201,7 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // Distances computed using https://www.nhc.noaa.gov/gccalc.shtml
         execute("INSERT INTO %s (pk, v) VALUES (0, [1, 2])"); // distance is 555 km from [5,5]
