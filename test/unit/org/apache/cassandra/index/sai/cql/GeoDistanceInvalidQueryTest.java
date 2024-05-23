@@ -91,7 +91,7 @@ public class GeoDistanceInvalidQueryTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE GEO_DISTANCE(v, [-90.1, 1]) < 100"))
         .isInstanceOf(InvalidRequestException.class)
@@ -147,7 +147,7 @@ public class GeoDistanceInvalidQueryTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, x int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // All of these queries fail with and without filtering
         assertThatThrownBy(() -> execute("select pk from %s WHERE pk > 4 AND geo_distance(v,[5,5]) <= 1000000 ORDER BY v ANN of [5,5] limit 3"))

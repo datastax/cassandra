@@ -35,6 +35,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -304,11 +305,11 @@ public class VectorInvalidQueryTest extends SAITester
         QueryState queryState = new QueryState(state);
 
         CQLStatement statement = QueryProcessor.parseStatement(formatQuery(query), queryState.getClientState());
-        statement.validate(queryState);
+        statement.validate(queryState.getClientState());
 
         QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
         options.updateConsistency(consistencyLevel);
 
-        return ((ResultMessage.Rows)statement.execute(queryState, options, System.nanoTime())).result;
+        return ((ResultMessage.Rows)statement.execute(queryState, options, Dispatcher.RequestTime.forImmediateExecution())).result;
     }
 }

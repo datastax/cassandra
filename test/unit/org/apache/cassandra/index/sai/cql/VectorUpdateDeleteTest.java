@@ -483,7 +483,7 @@ public class VectorUpdateDeleteTest extends VectorTester
         // FIXME this fails due to shadowed key logic not accounting for multiple rows with the same vector
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector that is shared by two rows
@@ -511,7 +511,7 @@ public class VectorUpdateDeleteTest extends VectorTester
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector that is shared by two rows
