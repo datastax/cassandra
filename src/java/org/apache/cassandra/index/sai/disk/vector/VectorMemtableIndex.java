@@ -404,7 +404,7 @@ public class VectorMemtableIndex implements MemtableIndex
         return null;
     }
 
-    /**
+    /*
      * A {@link Bits} implementation that filters out all ordinals that do not correspond to a {@link PrimaryKey}
      * in the provided {@link AbstractBounds<PartitionPosition>}.
      */
