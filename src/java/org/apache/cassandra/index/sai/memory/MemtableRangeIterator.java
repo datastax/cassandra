@@ -37,6 +37,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeIterator;
+import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -58,7 +59,7 @@ public class MemtableRangeIterator extends RangeIterator
     {
         super(minKey(memtable, pkFactory),
               maxKey(memtable, pkFactory),
-              memtable.getOperations());
+              memtable.operationCount());
 
         TableMetadata metadata = memtable.metadata();
         this.memtable = memtable;
@@ -71,7 +72,7 @@ public class MemtableRangeIterator extends RangeIterator
                                            .build();
 
         DataRange dataRange = new DataRange(keyRange, new ClusteringIndexSliceFilter(Slices.ALL, false));
-        this.partitionIterator = memtable.makePartitionIterator(columns, dataRange);
+        this.partitionIterator = memtable.partitionIterator(columns, dataRange, SSTableReadsListener.NOOP_LISTENER);
         this.rowIterator = null;
     }
 
@@ -103,7 +104,7 @@ public class MemtableRangeIterator extends RangeIterator
         AbstractBounds<PartitionPosition> partitionBounds = AbstractBounds.bounds(start, true, keyRange.right, true);
         DataRange dataRange = new DataRange(partitionBounds, new ClusteringIndexSliceFilter(Slices.ALL, false));
         FileUtils.closeQuietly(partitionIterator);
-        partitionIterator = memtable.makePartitionIterator(columns, dataRange);
+        partitionIterator = memtable.partitionIterator(columns, dataRange, SSTableReadsListener.NOOP_LISTENER);
         if (partitionIterator.hasNext())
         {
             this.rowIterator = partitionIterator.next();
