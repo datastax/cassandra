@@ -18,11 +18,8 @@
 
 package org.apache.cassandra.index.sai.disk.v2.hnsw;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.function.IntUnaryOperator;
@@ -33,8 +30,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.marshal.FloatType;
-import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
 import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.disk.vector.RamAwareVectorValues;

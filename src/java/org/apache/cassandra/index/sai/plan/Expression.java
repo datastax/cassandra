@@ -37,7 +37,6 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.vector.VectorUtil;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;

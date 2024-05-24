@@ -43,7 +43,6 @@ import org.apache.cassandra.db.partitions.BTreePartitionData;
 import org.apache.cassandra.db.partitions.BTreePartitionUpdater;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
@@ -62,7 +61,6 @@ import org.apache.cassandra.utils.memory.NativeAllocator;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_OVERHEAD_COMPUTE_STEPS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_OVERHEAD_SIZE;
-import static org.apache.cassandra.io.sstable.SSTableReadsListener.NOOP_LISTENER;
 
 public class SkipListMemtable extends AbstractAllocatorMemtable
 {
@@ -142,29 +140,6 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     public long partitionCount()
     {
         return partitions.size();
-    }
-
-    public long rowCount()
-    {
-        DataRange range = DataRange.allData(metadata().partitioner);
-        ColumnFilter columnFilter = ColumnFilter.allRegularColumnsBuilder(metadata(), true).build();
-        return rowCount(columnFilter, range);
-    }
-
-    public long rowCount(final ColumnFilter columnFilter, final DataRange dataRange)
-    {
-        int total = 0;
-        for (var iter = partitionIterator(columnFilter, dataRange, NOOP_LISTENER); iter.hasNext(); )
-        {
-            for (UnfilteredRowIterator it = iter.next(); it.hasNext(); )
-            {
-                Unfiltered uRow = it.next();
-                if (uRow.isRow())
-                    total++;
-            }
-        }
-
-        return total;
     }
 
     @Override

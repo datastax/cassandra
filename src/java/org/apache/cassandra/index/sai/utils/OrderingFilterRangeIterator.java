@@ -21,15 +21,11 @@ package org.apache.cassandra.index.sai.utils;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
 import java.util.function.Function;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.Pair;
 
 /**
  * An iterator that consumes a chunk of {@link PrimaryKey}s from the {@link RangeIterator}, passes them to the
