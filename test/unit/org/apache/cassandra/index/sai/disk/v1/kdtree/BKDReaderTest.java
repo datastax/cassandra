@@ -18,10 +18,7 @@
 package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.Before;
@@ -41,7 +38,6 @@ import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.lucene.index.PointValues.Relation;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;

@@ -72,7 +72,7 @@ public class VectorLocalTest extends VectorTester
         createIndex("CREATE CUSTOM INDEX lat_high_precision_index ON %s (lat_high_precision) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex';");
         createIndex("CREATE CUSTOM INDEX lat_lon_embedding_index ON %s (lat_lon_embedding) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' WITH OPTIONS = {'similarity_function': 'EUCLIDEAN'};");
         createIndex("CREATE CUSTOM INDEX lon_high_precision_index ON %s (lon_high_precision) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex';");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
         List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVector(2)).collect(Collectors.toList());
