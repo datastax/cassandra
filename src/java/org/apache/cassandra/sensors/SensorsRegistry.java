@@ -54,8 +54,8 @@ import org.apache.cassandra.utils.concurrent.Timer;
  * </ul>
  * The returned sensors are global, meaning that their value spans across requests/responses, but cannot be modified either
  * directly or indirectly via this class (whose update methods are package protected). In order to modify a sensor value,
- * it must be registered to a request/response via {@link RequestSensors#registerSensor(Type)} and incremented via
- * {@link RequestSensors#incrementSensor(Type, double)}, then synced via {@link RequestSensors#syncAllSensors()}, which
+ * it must be registered to a request/response via {@link RequestSensors#registerSensor(Context, Type)} and incremented via
+ * {@link RequestSensors#incrementSensor(Context, Type, double)}, then synced via {@link RequestSensors#syncAllSensors()}, which
  * will update the related global sensors.
  * <br/><br/>
  * Given sensors are tied to a context, that is to a given keyspace and table, their global instance will be deleted
@@ -146,16 +146,16 @@ public class SensorsRegistry implements SchemaChangeListener
         }
     }
 
-    protected void updateSensor(Context context, Type type, double value)
+    protected void incrementSensor(Context context, Type type, double value)
     {
         getOrCreateSensor(context, type).ifPresent(s -> s.increment(value));
     }
 
-    protected Future<Void> updateSensorAsync(Context context, Type type, double value, long delay, TimeUnit unit)
+    protected Future<Void> incrementSensorAsync(Context context, Type type, double value, long delay, TimeUnit unit)
     {
         return asyncUpdater.onTimeout(() ->
-                               getOrCreateSensor(context, type).ifPresent(s -> s.increment(value)),
-                               delay, unit);
+                                      getOrCreateSensor(context, type).ifPresent(s -> s.increment(value)),
+                                      delay, unit);
     }
 
     public Set<Sensor> getSensorsByKeyspace(String keyspace)

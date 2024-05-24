@@ -97,20 +97,20 @@ public class SensorsCustomParamsTest
     }
 
     @Test
+    public void testEncodeTableInInternodeBytesRequestParam()
+    {
+        String table = "t1";
+        String expectedParam = String.format("INTERNODE_MSG_BYTES_REQUEST.%s", table);
+        String actualParam = SensorsCustomParams.encodeTableInInternodeBytesRequestParam(table);
+        assertEquals(expectedParam, actualParam);
+    }
+
+    @Test
     public void testEncodeTableInInternodeBytesTableParam()
     {
         String table = "t1";
         String expectedParam = String.format("INTERNODE_MSG_BYTES_TABLE.%s", table);
         String actualParam = SensorsCustomParams.encodeTableInInternodeBytesTableParam(table);
-        assertEquals(expectedParam, actualParam);
-    }
-
-    @Test
-    public void testEncodeTableInInternodeCountTableParam()
-    {
-        String table = "t1";
-        String expectedParam = String.format("INTERNODE_MSG_COUNT_TABLE.%s", "t1");
-        String actualParam = SensorsCustomParams.encodeTableInInternodeCountTableParam(table);
         assertEquals(expectedParam, actualParam);
     }
 }
