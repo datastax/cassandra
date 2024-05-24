@@ -182,6 +182,30 @@ public class ShardedSkipListMemtable extends AbstractShardedMemtable
     }
 
     @Override
+    public DecoratedKey minPartitionKey()
+    {
+        for (int i = 0; i < shards.length; i++)
+        {
+            MemtableShard shard = shards[i];
+            if (!shard.isClean())
+                return shard.minPartitionKey();
+        }
+        return null;
+    }
+
+    @Override
+    public DecoratedKey maxPartitionKey()
+    {
+        for (int i = shards.length - 1; i >= 0; i--)
+        {
+            MemtableShard shard = shards[i];
+            if (!shard.isClean())
+                return shard.maxPartitionKey();
+        }
+        return null;
+    }
+
+    @Override
     RegularAndStaticColumns columns()
     {
         for (MemtableShard shard : shards)
@@ -433,6 +457,22 @@ public class ShardedSkipListMemtable extends AbstractShardedMemtable
         public long minLocalDeletionTime()
         {
             return minLocalDeletionTime.get();
+        }
+
+        public DecoratedKey minPartitionKey()
+        {
+            Map.Entry<PartitionPosition, AtomicBTreePartition> entry = partitions.firstEntry();
+            return (entry != null)
+                   ? entry.getValue().partitionKey()
+                   : null;
+        }
+
+        public DecoratedKey maxPartitionKey()
+        {
+            Map.Entry<PartitionPosition, AtomicBTreePartition> entry = partitions.lastEntry();
+            return (entry != null)
+                   ? entry.getValue().partitionKey()
+                   : null;
         }
     }
 
