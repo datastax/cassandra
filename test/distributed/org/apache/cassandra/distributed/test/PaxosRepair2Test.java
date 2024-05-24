@@ -596,7 +596,7 @@ public class PaxosRepair2Test extends TestBaseImpl
         public CloseableIterator<PaxosKeyState> repairIterator(TableId cfId, Collection<Range<Token>> ranges)
         {
             if (!cfId.equals(cfm.id))
-                return CloseableIterator.empty();
+                return CloseableIterator.emptyIterator();
             return CloseableIterator.wrap(Collections.singleton(new PaxosKeyState(cfId, dk, ballot, false)).iterator());
         }
 

@@ -42,6 +42,7 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -225,7 +226,7 @@ public class TermsReader implements Closeable
         {
             this.listener = listener;
             this.exp = exp;
-            lookupStartTime = System.nanoTime();
+            lookupStartTime = Clock.Global.nanoTime();
             this.context = context;
         }
 
@@ -247,7 +248,7 @@ public class TermsReader implements Closeable
                 context.checkpoint();
                 PostingList postings = readAndMergePostings(reader);
 
-                listener.onTraversalComplete(System.nanoTime() - lookupStartTime, TimeUnit.NANOSECONDS);
+                listener.onTraversalComplete(Clock.Global.nanoTime() - lookupStartTime, TimeUnit.NANOSECONDS);
 
                 return postings;
             }

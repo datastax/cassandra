@@ -52,7 +52,7 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // Points chosen to be close to the boundary of the search radius. The assertion failed based on earlier
         // versions of the math used to determine whether the square distance was sufficient to short circuit
@@ -79,7 +79,7 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, v) VALUES (0, [0.10999, 0])"); // distance is 12230.3 m from [0,0]
         execute("INSERT INTO %s (pk, v) VALUES (1, [0.11000, 0])"); // distance is 12231.4 m from [0,0]
@@ -95,7 +95,7 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, v) VALUES (0, [0.00009, 0])"); // distance is 10.007 m from [0,0]
         execute("INSERT INTO %s (pk, v) VALUES (1, [0.00010, 0])"); // distance is 11.120 m from [0,0]
@@ -294,7 +294,7 @@ public class GeoDistanceRestrictionTest extends VectorTester
         createTable("CREATE TABLE %s (pk int, num int, v vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, num, v) VALUES (0, 1, [0, -179])");
         execute("INSERT INTO %s (pk, num, v) VALUES (1, 1, [0, 179])");
@@ -325,7 +325,7 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (location text PRIMARY KEY, coords vector<float, 2>)");
         createIndex("CREATE CUSTOM INDEX ON %s(coords) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // Here are the distances (these distances a not transitive, but do provide general motivation for the
         // results observed in the test)
@@ -363,7 +363,7 @@ public class GeoDistanceRestrictionTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, coords vector<float, 2>)");
         createIndex("CREATE CUSTOM INDEX ON %s(coords) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, coords) VALUES (0, [90,0])");
         execute("INSERT INTO %s (pk, coords) VALUES (1, [89.99999, 0])");

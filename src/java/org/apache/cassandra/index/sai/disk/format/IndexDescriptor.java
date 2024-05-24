@@ -380,10 +380,8 @@ public class IndexDescriptor
      */
     public FileHandle createFlushTimePerIndexFileHandle(IndexComponent indexComponent, IndexContext indexContext)
     {
-        try (final FileHandle.Builder builder = StorageProvider.instance.flushTimeFileHandleBuilderFor(this, indexComponent, indexContext))
-        {
-            return builder.complete();
-        }
+        FileHandle.Builder builder = StorageProvider.instance.flushTimeFileHandleBuilderFor(this, indexComponent, indexContext);
+        return builder.complete();
     }
 
     @Override

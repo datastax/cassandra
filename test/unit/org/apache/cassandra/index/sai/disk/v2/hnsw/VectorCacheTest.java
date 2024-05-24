@@ -21,21 +21,15 @@ package org.apache.cassandra.index.sai.disk.v2.hnsw;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import org.apache.cassandra.db.marshal.FloatType;
-import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.index.sai.disk.vector.ConcurrentVectorValues;
-import org.apache.cassandra.index.sai.disk.vector.RamAwareVectorValues;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriter;

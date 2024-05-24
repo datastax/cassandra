@@ -538,7 +538,7 @@ public class VectorUpdateDeleteTest extends VectorTester
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, num int, val vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         disableCompaction(KEYSPACE);
 
         // Same PK, different num, different vectors
@@ -562,7 +562,7 @@ public class VectorUpdateDeleteTest extends VectorTester
         setMaxBruteForceRows(0);
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", 2));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])"); // -3485513579396041028
         execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 2.0])"); // -4069959284402364209
@@ -589,7 +589,7 @@ public class VectorUpdateDeleteTest extends VectorTester
         setMaxBruteForceRows(0);
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", 2));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
 
         execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])");
@@ -786,7 +786,7 @@ public class VectorUpdateDeleteTest extends VectorTester
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, str_val text, val vector<float, 2>)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         disableCompaction(KEYSPACE);
 
         // Choose a row count that will essentially force us to re-query the index that still has more rows to search.
@@ -823,7 +823,7 @@ public class VectorUpdateDeleteTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, val) VALUES (0, [1.0, 2.0])");
         execute("INSERT INTO %s (pk, val) VALUES (1, [1.0, 3.0])");
@@ -873,7 +873,7 @@ public class VectorUpdateDeleteTest extends VectorTester
         setMaxBruteForceRows(0);
         createTable("CREATE TABLE %s (pk int, val vector<float, " + vectorDimension + ">, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // Insert 100 vectors
         for (int i = 0; i < 100; i++)
