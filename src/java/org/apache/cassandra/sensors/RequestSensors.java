@@ -97,6 +97,9 @@ public class RequestSensors
             sensors.values().forEach(sensor -> {
                 double current = latestSyncedValuePerSensor.getOrDefault(sensor, 0d);
                 double update = sensor.getValue() - current;
+                if (update == 0d)
+                    return;
+
                 latestSyncedValuePerSensor.put(sensor, sensor.getValue());
                 sensorsRegistry.get().incrementSensor(sensor.getContext(), sensor.getType(), update);
             });

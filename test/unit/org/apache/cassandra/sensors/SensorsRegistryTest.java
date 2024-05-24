@@ -230,5 +230,8 @@ public class SensorsRegistryTest
         requestSensors.incrementSensor(context1, type1, 1.0);
         requestSensors.syncAllSensors();
         assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(2.0));
+
+        requestSensors.syncAllSensors();
+        assertThat(SensorsRegistry.instance.getOrCreateSensor(context1, type1)).hasValueSatisfying((s) -> assertThat(s.getValue()).isEqualTo(2.0));
     }
 }
