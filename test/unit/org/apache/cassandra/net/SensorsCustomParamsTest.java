@@ -136,7 +136,7 @@ public class SensorsCustomParamsTest
                                 ignored -> SensorsCustomParams.READ_BYTES_TABLE);
     }
 
-    private void testAddSensorToResponse(Type sensorType, Function<Context, String> requestParamFunc, Function<Context, String> tableParamContext)
+    private void testAddSensorToResponse(Type sensorType, Function<Context, String> requestParamSupplier, Function<Context, String> tableParamSupplier)
     {
         RequestSensors sensors = new RequestSensors();
         UUID tableId = UUID.randomUUID();
@@ -171,8 +171,8 @@ public class SensorsCustomParamsTest
         Message<NoPayload> msg = builder.build();
         assertNotNull(msg.header.customParams());
         assertEquals(2, msg.header.customParams().size());
-        String requestParam = requestParamFunc.apply(context);
-        String tableParam = tableParamContext.apply(context);
+        String requestParam = requestParamSupplier.apply(context);
+        String tableParam = tableParamSupplier.apply(context);
         assertTrue(msg.header.customParams().containsKey(requestParam));
         assertTrue(msg.header.customParams().containsKey(tableParam));
         double epsilon = 0.000001;

@@ -42,7 +42,7 @@ public class PrepareVerbHandler implements IVerbHandler<Commit>
         // Initialize the sensor and set ExecutorLocals
         Context context = Context.from(message.payload.update.metadata());
         RequestSensors sensors = new RequestSensors();
-        // Prepare phase incorpporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor
+        // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor
         sensors.registerSensor(context, Type.READ_BYTES);
         sensors.registerSensor(context, Type.WRITE_BYTES);
         ExecutorLocals locals = ExecutorLocals.create(sensors);
