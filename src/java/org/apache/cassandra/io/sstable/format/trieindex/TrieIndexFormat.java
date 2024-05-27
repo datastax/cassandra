@@ -26,6 +26,9 @@ import java.util.UUID;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.SerializationHeader;
@@ -290,7 +293,15 @@ public class TrieIndexFormat implements SSTableFormat
     //
     static class TrieIndexVersion extends Version
     {
+        private static final Logger logger = LoggerFactory.getLogger(TrieIndexVersion.class);
+
         public static final String current_version = CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.getString();
+
+        static
+        {
+            logger.info("Trie index format current version: {}", current_version);
+        }
+
         public static final String earliest_supported_version = "aa";
 
         // aa (DSE 6.0): trie index format
