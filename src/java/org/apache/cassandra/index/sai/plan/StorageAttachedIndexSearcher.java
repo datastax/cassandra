@@ -414,40 +414,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 return null;
             lastKey = key;
 
-            try (UnfilteredRowIterator partition = controller.getPartition(key, executionController))
-            {
-                queryContext.addPartitionsRead(1);
-                queryContext.checkpoint();
-                var staticRow = partition.staticRow();
-                List<Unfiltered> clusters = applyIndexFilter(key, partition, staticRow, filterTree, queryContext);
-                if (clusters == null)
-                    return null;
-                return new PartitionIterator(partition, staticRow, Iterators.filter(clusters.iterator(), u -> !((Row)u).isStatic()));
-            }
-        }
-
-        private static class PartitionIterator extends AbstractUnfilteredRowIterator
-        {
-            private final Iterator<Unfiltered> rows;
-
-            public PartitionIterator(UnfilteredRowIterator partition, Row staticRow, Iterator<Unfiltered> content)
-            {
-                super(partition.metadata(),
-                      partition.partitionKey(),
-                      partition.partitionLevelDeletion(),
-                      partition.columns(),
-                      staticRow,
-                      partition.isReverseOrder(),
-                      partition.stats());
-
-                rows = content;
-            }
-
-            @Override
-            protected Unfiltered computeNext()
-            {
-                return rows.hasNext() ? rows.next() : endOfData();
-            }
+            UnfilteredRowIterator partition = controller.getPartition(key, executionController);
+            queryContext.addPartitionsRead(1);
+            queryContext.checkpoint();
+            return applyIndexFilter(partition, filterTree, queryContext);
         }
 
         @Override
@@ -572,11 +542,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 queryContext.addPartitionsRead(1);
                 queryContext.checkpoint();
                 var staticRow = partition.staticRow();
-                List<Unfiltered> clusters = applyIndexFilter(key, partition, staticRow, filterTree, queryContext);
+                UnfilteredRowIterator clusters = applyIndexFilter(partition, filterTree, queryContext);
                 if (clusters == null)
                     return null;
-                assert clusters.size() == 1 : "Ordering results in just one row";
-                return new PrimaryKeyIterator(key, partition, staticRow, clusters.get(0));
+                return new PrimaryKeyIterator(key, partition, staticRow, clusters.next());
             }
         }
 
@@ -637,7 +606,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return controller.metadata();
         }
 
-        @Override
         public void close()
         {
             FileUtils.closeQuietly(scoredPrimaryKeyIterator);
@@ -645,46 +613,77 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
     }
 
-    private static List<Unfiltered> applyIndexFilter(PrimaryKey key, UnfilteredRowIterator partition, Row staticRow,
-                                                     FilterTree tree, QueryContext queryContext)
+    private static UnfilteredRowIterator applyIndexFilter(UnfilteredRowIterator partition, FilterTree tree, QueryContext queryContext)
     {
-        List<Unfiltered> clusters = new ArrayList<>();
-
-        while (partition.hasNext())
-        {
-            Unfiltered row = partition.next();
-
-            queryContext.addRowsFiltered(1);
-            if (tree.isSatisfiedBy(key.partitionKey(), row, staticRow))
-            {
-                clusters.add(row);
-            }
-        }
-
-        if (clusters.isEmpty())
-        {
-            queryContext.addRowsFiltered(1);
-            if (tree.isSatisfiedBy(key.partitionKey(), staticRow, staticRow))
-            {
-                clusters.add(staticRow);
-            }
-        }
-
-        /*
-         * If {@code clusters} is empty, which means either all clustering row and static row pairs failed,
-         *       or static row and static row pair failed. In both cases, we should not return any partition.
-         * If {@code clusters} is not empty, which means either there are some clustering row and static row pairs match the filters,
-         *       or static row and static row pair matches the filters. In both cases, we should return a partition with static row,
-         *       and remove the static row marker from the {@code clusters} for the latter case.
-         */
-        if (clusters.isEmpty())
+        FilteringPartitionIterator filtered = new FilteringPartitionIterator(partition, tree, queryContext);
+        if (!filtered.hasNext() && !filtered.matchesStaticRow())
         {
             // shadowed by expired TTL or row tombstone or range tombstone
             queryContext.addShadowed(1);
+            filtered.close();
             return null;
         }
+        return filtered;
+    }
 
-        return clusters;
+    /**
+     * Filters the rows in the partition so that only non-static rows that match given filter are returned.
+     */
+    private static class FilteringPartitionIterator extends AbstractUnfilteredRowIterator
+    {
+        private final FilterTree filter;
+        private final QueryContext queryContext;
+        private final UnfilteredRowIterator rows;
+
+        private final DecoratedKey key;
+        private final Row staticRow;
+
+        public FilteringPartitionIterator(UnfilteredRowIterator partition, FilterTree filter, QueryContext queryContext)
+        {
+            super(partition.metadata(),
+                  partition.partitionKey(),
+                  partition.partitionLevelDeletion(),
+                  partition.columns(),
+                  partition.staticRow(),
+                  partition.isReverseOrder(),
+                  partition.stats());
+
+            this.rows = partition;
+            this.filter = filter;
+            this.queryContext = queryContext;
+            this.key = partition.partitionKey();
+            this.staticRow = partition.staticRow();
+        }
+
+        public boolean matchesStaticRow()
+        {
+            queryContext.addRowsFiltered(1);
+            return filter.isSatisfiedBy(key, staticRow, staticRow);
+        }
+
+        @Override
+        protected Unfiltered computeNext()
+        {
+            while (rows.hasNext())
+            {
+                Unfiltered row = rows.next();
+                queryContext.addRowsFiltered(1);
+
+                if (!row.isRow() || ((Row)row).isStatic())
+                    continue;
+
+                if (filter.isSatisfiedBy(key, row, staticRow))
+                    return row;
+            }
+            return endOfData();
+        }
+
+        @Override
+        public void close()
+        {
+            super.close();
+            rows.close();
+        }
     }
 
     /**
