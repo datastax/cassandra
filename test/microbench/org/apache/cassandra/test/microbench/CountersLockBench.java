@@ -1,0 +1,96 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.test.microbench;
+
+import java.security.NoSuchAlgorithmException;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.stream.Collectors;
+
+import com.google.common.util.concurrent.Striped;
+
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Threads;
+import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.infra.Blackhole;
+
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
+@Measurement(iterations = 5, time = 2, timeUnit = TimeUnit.SECONDS)
+@Threads(4)
+@State(Scope.Benchmark)
+public class CountersLockBench
+{
+    private static final Random random = new Random(12345678);
+
+    @Param({ /*"1024", "16384", "65536", */"102400", "512000", "1638400", "6553600" })
+    private int numStripes;
+
+    private Striped<Lock> locks;
+
+    private final int numLocks = 500;
+
+    @Setup
+    public void setup() throws NoSuchAlgorithmException
+    {
+        // locks should be created like CounterMutation::LOCKS
+        locks = Striped.lock(numStripes);
+    }
+
+    @Benchmark
+    public void baseline(Blackhole bh)
+    {
+        List<Integer> keys = random.ints(numLocks).boxed().collect(Collectors.toList());
+        bh.consume(keys);
+    }
+
+    @Benchmark
+    public void benchBatchLock(Blackhole bh)
+    {
+        List<Integer> keys = random.ints(numLocks).boxed().collect(Collectors.toList());
+        Iterable<Lock> sortedLocks = locks.bulkGet(keys);
+
+        try
+        {
+            for (Lock lock : sortedLocks)
+            {
+                lock.lock();
+            }
+        }
+        finally
+        {
+            for (Lock lock : sortedLocks)
+            {
+                lock.unlock();
+            }
+        }
+        bh.consume(locks);
+    }
+}

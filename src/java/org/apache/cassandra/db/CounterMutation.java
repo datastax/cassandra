@@ -56,6 +56,7 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
 import static java.util.concurrent.TimeUnit.*;
+import static org.apache.cassandra.config.CassandraRelevantProperties.NUM_COUNTER_LOCKS;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
@@ -98,7 +99,7 @@ public class CounterMutation implements IMutation
     private static final String LOCK_TIMEOUT_MESSAGE = "Failed to acquire locks for counter mutation on keyspace {} for longer than {} millis, giving up";
     private static final String LOCK_TIMEOUT_TRACE = "Failed to acquire locks for counter mutation for longer than {} millis, giving up";
 
-    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentCounterWriters() * 1024);
+    private static final Striped<Lock> LOCKS = Striped.lock(NUM_COUNTER_LOCKS.getInt());
 
     private final Mutation mutation;
     private final ConsistencyLevel consistency;

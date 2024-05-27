@@ -456,6 +456,7 @@ public enum CassandraRelevantProperties
     CUSTOM_KEYSPACES_FILTER_PROVIDER("cassandra.custom_keyspaces_filter_provider_class"),
 
     LWT_LOCKS_PER_THREAD("cassandra.lwt_locks_per_thread", "1024"),
+    NUM_COUNTER_LOCKS("cassandra.num_counter_locks", "1024"),
 
     CUSTOM_READ_OBSERVER_FACTORY("cassandra.custom_read_observer_factory_class"),
     /**
