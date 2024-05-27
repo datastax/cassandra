@@ -39,16 +39,22 @@ public class ImmutableOneDimPointValues extends MutableOneDimPointValues
 {
     private final TermsIterator termEnum;
     private final byte[] scratch;
+    private final ByteComparable.Version version;
 
-    private ImmutableOneDimPointValues(TermsIterator termEnum, AbstractType<?> termComparator)
+    private ImmutableOneDimPointValues(TermsIterator termEnum,
+                                       AbstractType<?> termComparator,
+                                       ByteComparable.Version version)
     {
         this.termEnum = termEnum;
         this.scratch = new byte[TypeUtil.fixedSizeOf(termComparator)];
+        this.version = version;
     }
 
-    public static ImmutableOneDimPointValues fromTermEnum(TermsIterator termEnum, AbstractType<?> termComparator)
+    public static ImmutableOneDimPointValues fromTermEnum(TermsIterator termEnum,
+                                                          AbstractType<?> termComparator,
+                                                          ByteComparable.Version version)
     {
-        return new ImmutableOneDimPointValues(termEnum, termComparator);
+        return new ImmutableOneDimPointValues(termEnum, termComparator, version);
     }
 
     @Override
@@ -56,7 +62,7 @@ public class ImmutableOneDimPointValues extends MutableOneDimPointValues
     {
         while (termEnum.hasNext())
         {
-            ByteBufferUtil.toBytes(termEnum.next().asComparableBytes(ByteComparable.Version.OSS41), scratch);
+            ByteBufferUtil.toBytes(termEnum.next().asComparableBytes(version), scratch);
             try (final PostingList postings = termEnum.postings())
             {
                 long segmentRowId;

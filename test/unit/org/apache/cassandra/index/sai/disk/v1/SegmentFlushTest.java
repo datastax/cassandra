@@ -217,7 +217,7 @@ public class SegmentFlushTest
         ByteComparable term = iterator.next();
         PostingList postings = iterator.postings();
 
-        assertEquals(0, ByteComparable.compare(term, ByteComparable.fixedLength(expectedTerm), ByteComparable.Version.OSS41));
+        assertEquals(0, ByteComparable.compare(term, ByteComparable.fixedLength(expectedTerm)));
         assertEquals(minSegmentRowId == maxSegmentRowId ? 1 : 2, postings.size());
     }
 

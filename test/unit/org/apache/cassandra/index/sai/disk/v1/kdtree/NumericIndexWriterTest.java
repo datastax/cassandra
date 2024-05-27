@@ -136,7 +136,7 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
         final int maxSegmentRowId = 100;
         final TermsIterator termEnum = buildTermEnum(0, maxSegmentRowId);
         final ImmutableOneDimPointValues pointValues = ImmutableOneDimPointValues
-                                                       .fromTermEnum(termEnum, Int32Type.instance);
+                                                       .fromTermEnum(termEnum, Int32Type.instance, ByteComparable.Version.OSS41);
 
         SegmentMetadata.ComponentMetadataMap indexMetas;
         try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,
@@ -167,7 +167,7 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
                     final ByteComparable actualTerm = ByteComparable.fixedLength(packedValue);
                     final ByteComparable expectedTerm = ByteComparable.of(Math.toIntExact(visited.get()));
                     assertEquals("Point value mismatch after visiting " + visited.get() + " entries.", 0,
-                                 ByteComparable.compare(actualTerm, expectedTerm, ByteComparable.Version.OSS41));
+                                 ByteComparable.compare(actualTerm, expectedTerm));
 
                     visited.addAndGet(1);
                     return true;

@@ -51,6 +51,7 @@ import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 
@@ -118,8 +119,9 @@ public abstract class SegmentBuilder
         protected final byte[] buffer;
         private final BKDTreeRamBuffer kdTreeRamBuffer;
         private final IndexWriterConfig indexWriterConfig;
+        private final ByteComparable.Version version;
 
-        KDTreeSegmentBuilder(long rowIdOffset, AbstractType<?> termComparator, NamedMemoryLimiter limiter, IndexWriterConfig indexWriterConfig)
+        KDTreeSegmentBuilder(long rowIdOffset, AbstractType<?> termComparator, NamedMemoryLimiter limiter, IndexWriterConfig indexWriterConfig, ByteComparable.Version version)
         {
             super(rowIdOffset, termComparator, limiter);
 
@@ -127,6 +129,7 @@ public abstract class SegmentBuilder
             this.kdTreeRamBuffer = new BKDTreeRamBuffer(1, typeSize);
             this.buffer = new byte[typeSize];
             this.indexWriterConfig = indexWriterConfig;
+            this.version = version;
             totalBytesAllocated = kdTreeRamBuffer.ramBytesUsed();
             totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
@@ -138,7 +141,7 @@ public abstract class SegmentBuilder
 
         protected long addInternal(ByteBuffer term, int segmentRowId)
         {
-            TypeUtil.toComparableBytes(term, termComparator, buffer);
+            TypeUtil.toComparableBytes(term, termComparator, buffer, version);
             return kdTreeRamBuffer.addPackedValue(segmentRowId, new BytesRef(buffer));
         }
 

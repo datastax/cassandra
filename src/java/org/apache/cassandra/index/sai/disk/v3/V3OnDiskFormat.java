@@ -35,6 +35,7 @@ import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Different vector components compared to V2OnDiskFormat (supporting DiskANN/jvector instead of HNSW/lucene).
@@ -88,7 +89,7 @@ public class V3OnDiskFormat extends V2OnDiskFormat
                                           SegmentMetadata segmentMetadata) throws IOException
     {
         if (indexContext.isVector())
-            return new V3VectorIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor, indexContext);
+            return new V3VectorIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor(), indexContext);
         return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
     }
 

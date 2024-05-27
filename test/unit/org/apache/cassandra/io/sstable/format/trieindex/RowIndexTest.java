@@ -474,7 +474,7 @@ public class RowIndexTest
         for (int i = 0; i < size; i++)
         {
             assert i == 0 || comparator.compare(list.get(i - 1), list.get(i)) < 0;
-            assert i == 0 || ByteComparable.compare(comparator.asByteComparable(list.get(i - 1)), comparator.asByteComparable(list.get(i)), VERSION) < 0 :
+            assert i == 0 || ByteComparable.compare(comparator.asByteComparable(list.get(i - 1)), comparator.asByteComparable(list.get(i))) < 0 :
             String.format("%s bs %s versus %s bs %s", list.get(i - 1).clustering().clusteringString(comparator.subtypes()), comparator.asByteComparable(list.get(i - 1)), list.get(i).clustering().clusteringString(comparator.subtypes()), comparator.asByteComparable(list.get(i)));
             writer.add(list.get(i), list.get(i), new IndexInfo(i, DeletionTime.LIVE));
         }

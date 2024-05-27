@@ -53,6 +53,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.store.IndexInput;
 
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
@@ -164,7 +165,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     {
         if (indexContext.isLiteral())
             return new InvertedIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor(), indexContext);
-        return new KDTreeIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor, indexContext);
+        return new KDTreeIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor(), indexContext);
     }
 
     @Override
@@ -305,6 +306,34 @@ public class V1OnDiskFormat implements OnDiskFormat
     public ByteOrder byteOrderFor(IndexComponent indexComponent, IndexContext context)
     {
         return ByteOrder.BIG_ENDIAN;
+    }
+
+    @Override
+    public ByteComparable.Version byteComparableVersionFor(IndexComponent component, IndexDescriptor descriptor)
+    {
+        if (component == IndexComponent.KD_TREE)
+            return ByteComparable.Version.OSS41;
+
+        // DSP-24228
+        //
+        // Accidentally, we deployed a version of Converged Cassandra that had a bug to production.
+        // That version, which uses sstables in version CC, incorrectly uses OSS41 bytecomparables to
+        // read and write V1 SAI indexes. Fixing the bytecomparables to the correct LEGACY version for all SAI AA
+        // indexes would cause the "incorrect" indexes written by the unpached version to be misinterpreted.
+        // Hence, we make this special case exception here - for legacy SAI indexes in version AA created for sstables
+        // in version CC we stick to the new encoding to keep consistency with whatever was written to disk.
+        // Using different encoding does not cause any trouble as long as it is consistent
+        // for reading (querying) and writing; the problem only happens if bytecomprables of different versions
+        // are compared to each other.
+        //
+        // Additionally, we introduce a new SAI version AB, which is essentially the same as AA, but for which we
+        // will use the correct LEGACY encoding regardless of the sstable version so that those indexes are
+        // fully compatible with DSE 6.8.
+        String sstableVersion =  descriptor.descriptor.version.getVersion();
+        Version indexVersion = descriptor.getVersion();
+        return sstableVersion.startsWith("c") && indexVersion.equals(Version.AA)
+                ? ByteComparable.Version.OSS41
+                : ByteComparable.Version.LEGACY;
     }
 
     protected boolean isBuildCompletionMarker(IndexComponent indexComponent)

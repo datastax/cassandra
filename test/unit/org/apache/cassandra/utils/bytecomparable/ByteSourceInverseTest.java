@@ -314,7 +314,7 @@ public class ByteSourceInverseTest
             // The best way to test the read bytes seems to be to assert that just directly using them as a
             // ByteSource (using ByteSource.fixedLength(byte[])) they compare as equal to another ByteSource obtained
             // from the same original value.
-            int compare = ByteComparable.compare(v -> originalSourceCopy, v -> ByteSource.fixedLength(bytes), version);
+            int compare = ByteComparable.compare(v -> originalSourceCopy, v -> ByteSource.fixedLength(bytes));
             Assert.assertEquals(0, compare);
         }
     }

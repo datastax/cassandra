@@ -197,7 +197,7 @@ public class TrieMemtableIndex implements MemtableIndex
         for (int i = minSubrange; i <= maxSubrange; i++)
             rangeIterators.add(rangeIndexes[i].iterator());
 
-        return MergeIterator.get(rangeIterators, (o1, o2) -> ByteComparable.compare(o1.left, o2.left, ByteComparable.Version.OSS41),
+        return MergeIterator.get(rangeIterators, (o1, o2) -> ByteComparable.compare(o1.left, o2.left),
                                  new PrimaryKeysMergeReducer(rangeIterators.size()));
     }
 

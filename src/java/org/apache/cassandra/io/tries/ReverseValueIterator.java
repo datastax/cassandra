@@ -49,7 +49,12 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         initializeNoRightBound(root, NOT_AT_LIMIT, LeftBoundTreatment.GREATER);
     }
 
-    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, ByteComparable.Version version)
+    protected ReverseValueIterator(Rebufferer source,
+                                   long root,
+                                   ByteComparable start,
+                                   ByteComparable end,
+                                   LeftBoundTreatment admitPrefix,
+                                   ByteComparable.Version version)
     {
         this(source, root, start, end, admitPrefix, false, version);
     }
@@ -65,7 +70,13 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
      * </ul>
      * This behaviour is shared with the forward counterpart {@link ValueIterator}.
      */
-    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting, ByteComparable.Version version)
+    protected ReverseValueIterator(Rebufferer source,
+                                   long root,
+                                   ByteComparable start,
+                                   ByteComparable end,
+                                   LeftBoundTreatment admitPrefix,
+                                   boolean collecting,
+                                   ByteComparable.Version version)
     {
         super(source, root, start != null ? start.asComparableBytes(version) : null, collecting, version);
 

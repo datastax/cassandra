@@ -18,12 +18,17 @@
 package org.apache.cassandra.io.tries;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collection;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.TailOverridingRebufferer;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.junit.Assert.assertEquals;
 

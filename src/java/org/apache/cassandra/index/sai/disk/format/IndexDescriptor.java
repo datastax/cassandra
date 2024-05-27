@@ -203,6 +203,15 @@ public class IndexDescriptor
     }
 
     /**
+     * Returns the byte-comparable version used to encode keys in the trie-based components of the index.
+     * @see OnDiskFormat#byteComparableVersionFor(IndexComponent, IndexDescriptor)
+     */
+    public ByteComparable.Version byteComparableVersionFor(IndexComponent component)
+    {
+        return getVersion().onDiskFormat().byteComparableVersionFor(component, this);
+    }
+
+    /**
      * Returns true if the given component exists on disk for the given index.
      * If context is null, the component is assumed to be a per-sstable component.
      */
@@ -440,7 +449,8 @@ public class IndexDescriptor
      */
     private ChecksumIndexInput checksumIndexInput(IndexContext context, IndexInput indexInput)
     {
-        return getVersion(context) == Version.AA
+        Version version = getVersion(context);
+        return version == Version.AA
                ? new EndiannessReverserChecksumIndexInput(indexInput)
                : new BufferedChecksumIndexInput(indexInput);
     }

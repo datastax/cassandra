@@ -54,6 +54,7 @@ public class SortedTermsTest extends SaiRandomizedTest
     public void testLexicographicException() throws Exception
     {
         IndexDescriptor indexDescriptor = newIndexDescriptor();
+        ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE);
         try (MetadataWriter metadataWriter = new MetadataWriter(indexDescriptor.openPerSSTableOutput(IndexComponent.GROUP_META)))
         {
             NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
@@ -65,16 +66,17 @@ public class SortedTermsTest extends SaiRandomizedTest
                                                                   metadataWriter,
                                                                   bytesWriter,
                                                                   blockFPWriter,
-                                                                  trieWriter))
+                                                                  trieWriter,
+                                                                  version))
             {
                 ByteBuffer buffer = Int32Type.instance.decompose(99999);
-                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, version);
                 byte[] bytes1 = ByteSourceInverse.readBytes(byteSource);
 
                 writer.add(ByteComparable.fixedLength(bytes1));
 
                 buffer = Int32Type.instance.decompose(444);
-                byteSource = Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+                byteSource = Int32Type.instance.asComparableBytes(buffer, version);
                 byte[] bytes2 = ByteSourceInverse.readBytes(byteSource);
 
                 assertThrows(IllegalArgumentException.class, () -> writer.add(ByteComparable.fixedLength(bytes2)));
@@ -110,7 +112,8 @@ public class SortedTermsTest extends SaiRandomizedTest
                                                                   metadataWriter,
                                                                   bytesWriter,
                                                                   blockFPWriter,
-                                                                  trieWriter))
+                                                                  trieWriter,
+                                                                  indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE)))
             {
                 primaryKeys.forEach(primaryKey -> {
                     try
@@ -247,6 +250,7 @@ public class SortedTermsTest extends SaiRandomizedTest
     public void testAdvance() throws IOException
     {
         IndexDescriptor descriptor = newIndexDescriptor();
+        ByteComparable.Version version = descriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE);
 
         List<byte[]> terms = new ArrayList<>();
         writeTerms(descriptor, terms);
@@ -258,7 +262,7 @@ public class SortedTermsTest extends SaiRandomizedTest
             {
                 ByteComparable term = cursor.term();
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(version));
                 assertArrayEquals(terms.get(x), bytes);
 
                 x++;
@@ -275,6 +279,7 @@ public class SortedTermsTest extends SaiRandomizedTest
     public void testReset() throws Exception
     {
         IndexDescriptor descriptor = newIndexDescriptor();
+        ByteComparable.Version version = descriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE);
 
         List<byte[]> terms = new ArrayList<>();
         writeTerms(descriptor, terms);
@@ -283,11 +288,11 @@ public class SortedTermsTest extends SaiRandomizedTest
         {
             assertTrue(cursor.advance());
             assertTrue(cursor.advance());
-            String term1 = cursor.term().byteComparableAsString(ByteComparable.Version.OSS41);
+            String term1 = cursor.term().byteComparableAsString(version);
             cursor.reset();
             assertTrue(cursor.advance());
             assertTrue(cursor.advance());
-            String term2 = cursor.term().byteComparableAsString(ByteComparable.Version.OSS41);
+            String term2 = cursor.term().byteComparableAsString(version);
             assertEquals(term1, term2);
             assertEquals(1, cursor.pointId());
         });
@@ -297,6 +302,7 @@ public class SortedTermsTest extends SaiRandomizedTest
     public void testSeekToPointId() throws Exception
     {
         IndexDescriptor descriptor = newIndexDescriptor();
+        ByteComparable.Version version = descriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE);
 
         List<byte[]> terms = new ArrayList<>();
         writeTerms(descriptor, terms);
@@ -309,7 +315,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                 cursor.seekToPointId(x);
                 ByteComparable term = cursor.term();
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(version));
                 assertArrayEquals(terms.get(x), bytes);
             }
         });
@@ -322,7 +328,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                 cursor.seekToPointId(x);
                 ByteComparable term = cursor.term();
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(version));
                 assertArrayEquals(terms.get(x), bytes);
             }
         });
@@ -336,7 +342,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                 cursor.seekToPointId(target);
                 ByteComparable term = cursor.term();
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(version));
                 assertArrayEquals(terms.get(target), bytes);
             }
         });
@@ -366,16 +372,18 @@ public class SortedTermsTest extends SaiRandomizedTest
             NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         metadataWriter, true);
+            ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE);
             try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
                                                                   bytesWriter,
                                                                   blockFPWriter,
-                                                                  trieWriter))
+                                                                  trieWriter,
+                                                                  version))
             {
                 for (int x = 0; x < 1000 * 4; x++)
                 {
                     ByteBuffer buffer = Int32Type.instance.decompose(x);
-                    ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+                    ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, version);
                     byte[] bytes = ByteSourceInverse.readBytes(byteSource);
                     terms.add(bytes);
 
@@ -394,11 +402,13 @@ public class SortedTermsTest extends SaiRandomizedTest
             NumericValuesWriter blockFPWriter = new NumericValuesWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         indexDescriptor.openPerSSTableOutput(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS),
                                                                         metadataWriter, true);
+            ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE);
             try (SortedTermsWriter writer = new SortedTermsWriter(indexDescriptor.componentFileName(IndexComponent.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
                                                                   bytesWriter,
                                                                   blockFPWriter,
-                                                                  trieWriter))
+                                                                  trieWriter,
+                                                                  version))
             {
                 for (int x = 0; x < 1000 ; x++)
                 {
@@ -406,25 +416,25 @@ public class SortedTermsTest extends SaiRandomizedTest
                     for (int i = 0; i < numPerPrefix; i++)
                     {
                         String component2 = "v" + i;
-                        termsMinPrefix.add(ByteSource.withTerminator(ByteSource.LT_NEXT_COMPONENT, intByteSource(component1 + (matchesData ? 0 : 1))));
-                        termsMaxPrefix.add(ByteSource.withTerminator(ByteSource.GT_NEXT_COMPONENT, intByteSource(component1 + (matchesData ? 0 : 1))));
-                        writer.add(v -> ByteSource.withTerminator(ByteSource.TERMINATOR, intByteSource(component1), utfByteSource(component2)));
+                        termsMinPrefix.add(ByteSource.withTerminator(ByteSource.LT_NEXT_COMPONENT, intByteSource(component1 + (matchesData ? 0 : 1), version)));
+                        termsMaxPrefix.add(ByteSource.withTerminator(ByteSource.GT_NEXT_COMPONENT, intByteSource(component1 + (matchesData ? 0 : 1), version)));
+                        writer.add(v -> ByteSource.withTerminator(ByteSource.TERMINATOR, intByteSource(component1, version), utfByteSource(component2, version)));
                     }
                 }
             }
         }
     }
 
-    private ByteSource intByteSource(int value)
+    private ByteSource intByteSource(int value, ByteComparable.Version version)
     {
         ByteBuffer buffer = Int32Type.instance.decompose(value);
-        return Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+        return Int32Type.instance.asComparableBytes(buffer, version);
     }
 
-    private ByteSource utfByteSource(String value)
+    private ByteSource utfByteSource(String value, ByteComparable.Version version)
     {
         ByteBuffer buffer = UTF8Type.instance.decompose(value);
-        return UTF8Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+        return UTF8Type.instance.asComparableBytes(buffer, version);
     }
 
     @FunctionalInterface
@@ -442,7 +452,8 @@ public class SortedTermsTest extends SaiRandomizedTest
              FileHandle termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
              FileHandle blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS))
         {
-            SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta);
+            ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE);
+            SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta, version);
             try (SortedTermsReader.Cursor cursor = reader.openCursor())
             {
                 testCode.accept(cursor);
@@ -460,7 +471,8 @@ public class SortedTermsTest extends SaiRandomizedTest
              FileHandle termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
              FileHandle blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS))
         {
-            SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta);
+            ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE);
+            SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta, version);
             testCode.accept(reader);
         }
     }

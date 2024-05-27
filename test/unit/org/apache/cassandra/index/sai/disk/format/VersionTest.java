@@ -61,7 +61,7 @@ public class VersionTest
     public void unsupportedOrInvalidVersionsDoNotParse()
     {
         assertThatThrownBy(() -> Version.parse(null)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> Version.parse("ab")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Version.parse("ac")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Version.parse("a")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Version.parse("abc")).isInstanceOf(IllegalArgumentException.class);
     }

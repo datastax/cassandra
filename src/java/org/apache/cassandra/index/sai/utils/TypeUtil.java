@@ -117,20 +117,20 @@ public class TypeUtil
 
     /**
      * Returns the lesser of two {@code ByteComparable} values, based on the result of {@link
-     * ByteComparable#compare(ByteComparable, ByteComparable, ByteComparable.Version)} comparision.
+     * ByteComparable#compare(ByteComparable, ByteComparable)} comparision.
      */
     public static ByteComparable min(ByteComparable a, ByteComparable b)
     {
-        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS41) > 0) ? a : b;
+        return a == null ?  b : (b == null || ByteComparable.compare(b, a) > 0) ? a : b;
     }
 
     /**
      * Returns the greater of two {@code ByteComparable} values, based on the result of {@link
-     * ByteComparable#compare(ByteComparable, ByteComparable, ByteComparable.Version)} comparision.
+     * ByteComparable#compare(ByteComparable, ByteComparable)} comparision.
      */
     public static ByteComparable max(ByteComparable a, ByteComparable b)
     {
-        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS41) < 0) ? a : b;
+        return a == null ?  b : (b == null || ByteComparable.compare(b, a) < 0) ? a : b;
     }
 
     /**
@@ -221,7 +221,7 @@ public class TypeUtil
      * @param type the type associated with the encoded {@code value} parameter
      * @param bytes this method's output
      */
-    public static void toComparableBytes(ByteBuffer value, AbstractType<?> type, byte[] bytes)
+    public static void toComparableBytes(ByteBuffer value, AbstractType<?> type, byte[] bytes, ByteComparable.Version version)
     {
         if (isInetAddress(type))
             ByteBufferUtil.arrayCopy(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, 16);
@@ -230,7 +230,7 @@ public class TypeUtil
         else if (type instanceof DecimalType)
             ByteBufferUtil.arrayCopy(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, DECIMAL_APPROXIMATION_BYTES);
         else
-            ByteBufferUtil.toBytes(type.asComparableBytes(value, ByteComparable.Version.OSS41), bytes);
+            ByteBufferUtil.toBytes(type.asComparableBytes(value, version), bytes);
     }
 
     /**
@@ -542,7 +542,9 @@ public class TypeUtil
 
     public static ByteBuffer encodeDecimal(ByteBuffer value)
     {
-        ByteSource bs = DecimalType.instance.asComparableBytes(value, ByteComparable.Version.OSS41);
+        // bytecomparable version doesn't matter for decimals, so it is set to null deliberately,
+        // so if it ever changes, this would fail the test
+        ByteSource bs = DecimalType.instance.asComparableBytes(value, null);
         bs = ByteSource.cutOrRightPad(bs, DECIMAL_APPROXIMATION_BYTES, 0);
         return ByteBuffer.wrap(ByteSourceInverse.readBytes(bs, DECIMAL_APPROXIMATION_BYTES));
     }

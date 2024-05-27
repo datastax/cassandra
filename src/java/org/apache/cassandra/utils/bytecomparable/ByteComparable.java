@@ -133,8 +133,13 @@ public interface ByteComparable
      * @return the result of the lexicographic unsigned byte comparison of the byte-comparable representations of the
      *         two arguments
      */
-    static int compare(ByteComparable bytes1, ByteComparable bytes2, Version version)
+    static int compare(ByteComparable bytes1, ByteComparable bytes2)
     {
+        // The particular version of byte comparable encoding used here shouldn't matter
+        // as long as the same version is used on both sides of the comparison.
+        // But we have to choose a version here, so we choose to use the most recent one.
+        // This version does not leak to the caller in any way.
+        ByteComparable.Version version = Version.OSS41;
         ByteSource s1 = bytes1.asComparableBytes(version);
         ByteSource s2 = bytes2.asComparableBytes(version);
 

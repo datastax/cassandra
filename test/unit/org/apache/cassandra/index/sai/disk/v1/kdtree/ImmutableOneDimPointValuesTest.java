@@ -46,7 +46,7 @@ public class ImmutableOneDimPointValuesTest
         final int minTerm = 0, maxTerm = 10;
         final TermsIterator termEnum = buildDescTermEnum(minTerm, maxTerm);
         final ImmutableOneDimPointValues pointValues = ImmutableOneDimPointValues
-                .fromTermEnum(termEnum, Int32Type.instance);
+                .fromTermEnum(termEnum, Int32Type.instance, ByteComparable.Version.OSS41);
 
         pointValues.intersect(assertingVisitor(minTerm));
     }
@@ -57,7 +57,7 @@ public class ImmutableOneDimPointValuesTest
         final int minTerm = 3, maxTerm = 13;
         final TermsIterator termEnum = buildDescTermEnum(minTerm, maxTerm);
         final ImmutableOneDimPointValues pointValues = ImmutableOneDimPointValues
-                .fromTermEnum(termEnum, Int32Type.instance);
+                .fromTermEnum(termEnum, Int32Type.instance, ByteComparable.Version.OSS41);
 
         expectedException.expect(IllegalStateException.class);
         pointValues.swap(0, 1);
@@ -68,7 +68,7 @@ public class ImmutableOneDimPointValuesTest
     {
         final int minTerm = 2, maxTerm = 7;
         final TermsIterator termEnum = buildDescTermEnum(minTerm, maxTerm);
-        final ImmutableOneDimPointValues pointValues = ImmutableOneDimPointValues.fromTermEnum(termEnum, Int32Type.instance);
+        final ImmutableOneDimPointValues pointValues = ImmutableOneDimPointValues.fromTermEnum(termEnum, Int32Type.instance, ByteComparable.Version.OSS41);
 
         MutablePointsReaderUtils.sort(2, Int32Type.instance.valueLengthIfFixed(), pointValues, 0, Math.toIntExact(pointValues.size()));
 
@@ -88,7 +88,7 @@ public class ImmutableOneDimPointValuesTest
                 final ByteComparable actualTerm = ByteComparable.fixedLength(packedValue);
                 final ByteComparable expectedTerm = ByteComparable.of(term);
 
-                assertEquals(0, ByteComparable.compare(actualTerm, expectedTerm, ByteComparable.Version.OSS41));
+                assertEquals(0, ByteComparable.compare(actualTerm, expectedTerm));
                 assertEquals(postingCounter, docID);
 
                 if (postingCounter >= 2)

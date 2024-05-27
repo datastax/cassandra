@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai.disk;
 
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -31,6 +32,7 @@ import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.ListType;
@@ -254,7 +256,37 @@ public class TypeUtilTest extends SaiRandomizedTest
             // simulate: saving into on-disk trie
             ByteComparable t0 = ByteComparable.fixedLength(b0);
             ByteComparable t1 = ByteComparable.fixedLength(b1);
-            assertTrue("#" + i, ByteComparable.compare(t0, t1, ByteComparable.Version.OSS41) <= 0);
+            assertTrue("#" + i, ByteComparable.compare(t0, t1) <= 0);
+        }
+    }
+
+
+    @Test
+    public void testBigDecimalEncoding()
+    {
+        Random rng = new Random(-9078270684023566599L);
+
+        BigDecimal[] data = new BigDecimal[100000];
+        for (int i = 0; i < data.length; i++)
+        {
+            BigDecimal randomNumber = new BigDecimal(new BigInteger(rng.nextInt(1000), rng), rng.nextInt(100) - 50);
+            if (rng.nextBoolean())
+                randomNumber = randomNumber.negate();
+
+            data[i] = randomNumber;
+        }
+
+        Arrays.sort(data, BigDecimal::compareTo);
+
+        for (int i = 1; i < data.length; i++)
+        {
+            BigDecimal i0 = data[i - 1];
+            BigDecimal i1 = data[i];
+            assertTrue("#" + i, i0.compareTo(i1) <= 0);
+
+            ByteBuffer b0 = TypeUtil.encode(DecimalType.instance.decompose(i0), DecimalType.instance);
+            ByteBuffer b1 = TypeUtil.encode(DecimalType.instance.decompose(i1), DecimalType.instance);
+            assertTrue("#" + i, TypeUtil.compare(b0, b1, DecimalType.instance) <= 0);
         }
     }
 
