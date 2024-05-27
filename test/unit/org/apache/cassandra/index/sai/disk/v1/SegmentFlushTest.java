@@ -194,7 +194,8 @@ public class SegmentFlushTest
                                                   termsData,
                                                   postingLists,
                                                   segmentMetadata.componentMetadatas.get(IndexComponent.TERMS_DATA).root,
-                                                  termsFooterPointer))
+                                                  termsFooterPointer,
+                                                  indexDescriptor.byteComparableVersionFor(IndexComponent.TERMS_DATA)))
         {
             TermsIterator iterator = reader.allTerms(0);
             assertEquals(minTerm, iterator.getMinTerm());

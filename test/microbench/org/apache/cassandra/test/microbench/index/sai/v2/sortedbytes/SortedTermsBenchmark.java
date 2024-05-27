@@ -123,7 +123,8 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
                                                               metadataWriter,
                                                               bytesWriter,
                                                               blockFPWriter,
-                                                              trieWriter))
+                                                              trieWriter,
+                                                              ByteComparable.Version.OSS41))
         {
             for (int x = 0; x < NUM_ROWS; x++)
             {
@@ -175,7 +176,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
         termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
         blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS);
 
-        sortedTermsReader = new SortedTermsReader(termsData,blockOffsets, trieFile, sortedTermsMeta, blockOffsetMeta);
+        sortedTermsReader = new SortedTermsReader(termsData, blockOffsets, trieFile, sortedTermsMeta, blockOffsetMeta, ByteComparable.Version.OSS41);
 
         luceneReader = DirectoryReader.open(directory);
         LeafReaderContext context = luceneReader.leaves().get(0);

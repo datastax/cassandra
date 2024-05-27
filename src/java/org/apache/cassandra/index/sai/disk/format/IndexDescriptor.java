@@ -55,6 +55,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.util.IOUtils;
@@ -199,6 +200,15 @@ public class IndexDescriptor
             // this is called by flush while creating new index files, as well as loading files that already exist
             return Version.latest();
         });
+    }
+
+    /**
+     * Returns the byte-comparable version used to encode keys in the trie-based components of the index.
+     * @see OnDiskFormat#byteComparableVersionFor(IndexComponent, IndexDescriptor)
+     */
+    public ByteComparable.Version byteComparableVersionFor(IndexComponent component)
+    {
+        return getVersion().onDiskFormat().byteComparableVersionFor(component, this);
     }
 
     /**
@@ -439,7 +449,8 @@ public class IndexDescriptor
      */
     private ChecksumIndexInput checksumIndexInput(IndexContext context, IndexInput indexInput)
     {
-        return getVersion(context) == Version.AA
+        Version version = getVersion(context);
+        return version == Version.AA || version == Version.AB
                ? new EndiannessReverserChecksumIndexInput(indexInput)
                : new BufferedChecksumIndexInput(indexInput);
     }

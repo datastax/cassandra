@@ -190,7 +190,8 @@ public class LegacyOnDiskFormatTest
                                                   indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext),
                                                   indexDescriptor.createPerIndexFileHandle(IndexComponent.POSTING_LISTS, indexContext),
                                                   root,
-                                                  footerPointer);
+                                                  footerPointer,
+                                                  ByteComparable.Version.LEGACY);
         Expression expression = new Expression(indexContext).add(Operator.EQ, UTF8Type.instance.decompose("10"));
         ByteComparable term = ByteComparable.fixedLength(expression.lower.value.encoded);
 

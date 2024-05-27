@@ -136,7 +136,7 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
         final int maxSegmentRowId = 100;
         final TermsIterator termEnum = buildTermEnum(0, maxSegmentRowId);
         final ImmutableOneDimPointValues pointValues = ImmutableOneDimPointValues
-                                                       .fromTermEnum(termEnum, Int32Type.instance);
+                                                       .fromTermEnum(termEnum, Int32Type.instance, ByteComparable.Version.OSS41);
 
         SegmentMetadata.ComponentMetadataMap indexMetas;
         try (NumericIndexWriter writer = new NumericIndexWriter(indexDescriptor,

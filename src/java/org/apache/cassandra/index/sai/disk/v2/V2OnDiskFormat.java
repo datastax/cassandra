@@ -43,6 +43,7 @@ import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.store.IndexInput;
 
 /**
@@ -110,7 +111,7 @@ public class V2OnDiskFormat extends V1OnDiskFormat
                                           SegmentMetadata segmentMetadata) throws IOException
     {
         if (indexContext.isVector())
-            return new V2VectorIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor, indexContext);
+            return new V2VectorIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor(), indexContext);
         return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
     }
 
@@ -189,5 +190,11 @@ public class V2OnDiskFormat extends V1OnDiskFormat
             default:
                 return ByteOrder.BIG_ENDIAN;
         }
+    }
+
+    @Override
+    public ByteComparable.Version byteComparableVersionFor(IndexComponent component, IndexDescriptor descriptor)
+    {
+        return ByteComparable.Version.OSS41;
     }
 }

@@ -46,7 +46,12 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
         initializeNoLeftBound(root, 256);
     }
 
-    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, ByteComparable.Version version)
+    protected ValueIterator(Rebufferer source,
+                            long root,
+                            ByteComparable start,
+                            ByteComparable end,
+                            LeftBoundTreatment admitPrefix,
+                            ByteComparable.Version version)
     {
         this(source, root, start, end, admitPrefix, false, version);
     }
@@ -63,12 +68,18 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
      * </ul>
      * This behaviour is shared with the reverse counterpart {@link ReverseValueIterator}.
      */
-    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting, ByteComparable.Version version)
+    protected ValueIterator(Rebufferer source,
+                            long root,
+                            ByteComparable start,
+                            ByteComparable end,
+                            LeftBoundTreatment admitPrefix,
+                            boolean collecting,
+                            ByteComparable.Version version)
     {
         super(source, root, end != null ? end.asComparableBytes(version) : null, collecting, version);
 
         if (start != null)
-            initializeWithLeftBound(root, start.asComparableBytes(byteComparableVersion), admitPrefix, limit != null);
+            initializeWithLeftBound(root, start.asComparableBytes(version), admitPrefix, limit != null);
         else
             initializeNoLeftBound(root, limit != null ? limit.next() : 256);
     }

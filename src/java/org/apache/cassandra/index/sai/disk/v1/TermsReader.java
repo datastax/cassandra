@@ -70,17 +70,20 @@ public class TermsReader implements Closeable
     private final FileHandle termDictionaryFile;
     private final FileHandle postingsFile;
     private final long termDictionaryRoot;
+    private final ByteComparable.Version byteComparableVersion;
 
     public TermsReader(IndexContext indexContext,
                        FileHandle termsData,
                        FileHandle postingLists,
                        long root,
-                       long termsFooterPointer) throws IOException
+                       long termsFooterPointer,
+                       ByteComparable.Version byteComparableVersion) throws IOException
     {
         this.indexContext = indexContext;
         termDictionaryFile = termsData;
         postingsFile = postingLists;
         termDictionaryRoot = root;
+        this.byteComparableVersion = byteComparableVersion;
 
         try (final IndexInput indexInput = IndexFileUtils.instance.openInput(termDictionaryFile))
         {
@@ -191,7 +194,7 @@ public class TermsReader implements Closeable
 
         public long lookupTermDictionary(ByteComparable term)
         {
-            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, ByteComparable.Version.OSS41))
+            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, byteComparableVersion))
             {
                 final long offset = reader.exactMatch(term);
 
@@ -239,7 +242,7 @@ public class TermsReader implements Closeable
                                                                                   lower,
                                                                                   upper,
                                                                                   true,
-                                                                                  ByteComparable.Version.OSS41))
+                                                                                  byteComparableVersion))
             {
                 if (!reader.hasNext())
                     return PostingList.EMPTY;
@@ -278,7 +281,7 @@ public class TermsReader implements Closeable
             do
             {
                 Pair<ByteComparable, Long> nextTriePair = reader.next();
-                ByteSource mapEntry = nextTriePair.left.asComparableBytes(ByteComparable.Version.OSS41);
+                ByteSource mapEntry = nextTriePair.left.asComparableBytes(byteComparableVersion);
                 long postingsOffset = nextTriePair.right;
                 byte[] nextBytes = ByteSourceInverse.readBytes(mapEntry);
 
@@ -312,9 +315,9 @@ public class TermsReader implements Closeable
 
         private TermsScanner(long segmentOffset)
         {
-            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, ByteComparable.Version.OSS41);
-            this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(ByteComparable.Version.OSS41)));
-            this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(ByteComparable.Version.OSS41)));
+            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, byteComparableVersion);
+            this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(byteComparableVersion)));
+            this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(byteComparableVersion)));
             this.segmentOffset = segmentOffset;
         }
 

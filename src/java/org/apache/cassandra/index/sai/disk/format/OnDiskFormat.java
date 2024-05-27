@@ -38,6 +38,7 @@ import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * An interface to the on-disk format of an index. This provides format agnostics methods
@@ -212,4 +213,10 @@ public interface OnDiskFormat
      * @return The {@link ByteOrder} for the file associated with the {@link IndexComponent}
      */
     public ByteOrder byteOrderFor(IndexComponent component, IndexContext context);
+
+
+    /**
+     * Return the ByteComparable encoding version used by the index tries.
+     */
+    ByteComparable.Version byteComparableVersionFor(IndexComponent component, IndexDescriptor descriptor);
 }
