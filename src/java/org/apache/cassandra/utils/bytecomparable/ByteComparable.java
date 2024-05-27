@@ -19,9 +19,16 @@
 package org.apache.cassandra.utils.bytecomparable;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * Interface indicating a value can be represented/identified by a comparable {@link ByteSource}.
+ *
+ * All Cassandra types that can be used as part of a primary key have a corresponding byte-comparable translation,
+ * detailed in ByteComparable.md. Byte-comparable representations are used in some memtable as well as primary and
+ * secondary index implementations.
  */
 public interface ByteComparable
 {
@@ -55,6 +62,14 @@ public interface ByteComparable
         for (int b = stream.next(); b != ByteSource.END_OF_STREAM; b = stream.next())
             builder.append(Integer.toHexString((b >> 4) & 0xF)).append(Integer.toHexString(b & 0xF));
         return builder.toString();
+    }
+
+    /**
+     * Returns the full byte-comparable representation of the value as a byte array.
+     */
+    default byte[] asByteComparableArray(Version version)
+    {
+        return ByteSourceInverse.readBytes(asComparableBytes(version));
     }
 
     // Simple factories used for testing
