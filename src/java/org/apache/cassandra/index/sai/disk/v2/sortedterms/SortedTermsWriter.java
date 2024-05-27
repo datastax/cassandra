@@ -79,6 +79,8 @@ public class SortedTermsWriter implements Closeable
     private final NumericValuesWriter offsetsWriter;
     private final String componentName;
     private final MetadataWriter metadataWriter;
+    private final ByteComparable.Version trieByteComparableVersion;
+
 
     private BytesRefBuilder prevTerm = new BytesRefBuilder();
     private BytesRefBuilder tempTerm = new BytesRefBuilder();
@@ -104,17 +106,19 @@ public class SortedTermsWriter implements Closeable
                              @NonNull MetadataWriter metadataWriter,
                              @Nonnull IndexOutput termsData,
                              @Nonnull NumericValuesWriter termsDataBlockOffsets,
-                             @Nonnull IndexOutputWriter trieWriter) throws IOException
+                             @Nonnull IndexOutputWriter trieWriter,
+                             ByteComparable.Version trieByteComparableVersion) throws IOException
     {
         this.componentName = componentName;
         this.metadataWriter = metadataWriter;
         this.trieOutput = trieWriter;
         SAICodecUtils.writeHeader(this.trieOutput);
-        this.trieWriter = new IncrementalDeepTrieWriterPageAware<>(trieSerializer, trieWriter.asSequentialWriter(), ByteComparable.Version.OSS41); // TODO hardcoded encoding version
+        this.trieWriter = new IncrementalDeepTrieWriterPageAware<>(trieSerializer, trieWriter.asSequentialWriter(), trieByteComparableVersion);
         SAICodecUtils.writeHeader(termsData);
         this.termsOutput = termsData;
         this.bytesStartFP = termsData.getFilePointer();
         this.offsetsWriter = termsDataBlockOffsets;
+        this.trieByteComparableVersion = trieByteComparableVersion;
     }
 
     /**
@@ -199,7 +203,7 @@ public class SortedTermsWriter implements Closeable
      */
     private void copyBytes(ByteComparable source, BytesRefBuilder dest)
     {
-        ByteSource byteSource = source.asComparableBytes(ByteComparable.Version.OSS41);
+        ByteSource byteSource = source.asComparableBytes(trieByteComparableVersion);
         int val;
         while ((val = byteSource.next()) != ByteSource.END_OF_STREAM)
             dest.append((byte) val);

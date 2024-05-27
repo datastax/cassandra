@@ -162,7 +162,8 @@ public class MemtableIndexWriter implements PerIndexWriter
                                                                     Integer.MAX_VALUE,
                                                                     indexContext.getIndexWriterConfig()))
             {
-                indexMetas = writer.writeAll(ImmutableOneDimPointValues.fromTermEnum(terms, termComparator));
+                ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.KD_TREE);
+                indexMetas = writer.writeAll(ImmutableOneDimPointValues.fromTermEnum(terms, termComparator, version));
                 numRows = writer.getPointCount();
             }
         }

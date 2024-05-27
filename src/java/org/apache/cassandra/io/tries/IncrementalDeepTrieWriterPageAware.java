@@ -35,13 +35,18 @@ public class IncrementalDeepTrieWriterPageAware<VALUE> extends IncrementalTrieWr
 {
     private final int maxRecursionDepth;
 
-    public IncrementalDeepTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, int maxRecursionDepth, ByteComparable.Version version)
+    public IncrementalDeepTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer,
+                                              DataOutputPlus dest,
+                                              int maxRecursionDepth,
+                                              ByteComparable.Version version)
     {
         super(trieSerializer, dest, version);
         this.maxRecursionDepth = maxRecursionDepth;
     }
 
-    public IncrementalDeepTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, ByteComparable.Version version)
+    public IncrementalDeepTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer,
+                                              DataOutputPlus dest,
+                                              ByteComparable.Version version)
     {
         this(trieSerializer, dest, 64, version);
     }

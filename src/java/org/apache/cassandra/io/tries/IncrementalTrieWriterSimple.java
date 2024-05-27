@@ -45,9 +45,9 @@ public class IncrementalTrieWriterSimple<VALUE>
 {
     private long position = 0;
 
-    public IncrementalTrieWriterSimple(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, ByteComparable.Version version)
+    public IncrementalTrieWriterSimple(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, ByteComparable.Version byteComparableVersion)
     {
-        super(trieSerializer, dest, new Node<>((byte) 0), version);
+        super(trieSerializer, dest, new Node<>((byte) 0), byteComparableVersion);
     }
 
     @Override

@@ -37,6 +37,8 @@ public class Version
 {
     // 6.8 formats
     public static final Version AA = new Version("aa", V1OnDiskFormat.instance, Version::aaFileNameFormat);
+    // version AB is the same as AA, but always uses ByteComparable.Version.LEGACY encoding (see DSP-24228)
+    public static final Version AB = new Version("ab", V1OnDiskFormat.instance, (c, i) -> stargazerFileNameFormat(c, i, "ab"));
     // Stargazer
     public static final Version BA = new Version("ba", V2OnDiskFormat.instance, (c, i) -> stargazerFileNameFormat(c, i, "ba"));
     // Converged Cassandra with JVector
@@ -44,7 +46,7 @@ public class Version
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(CA, BA, AB, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;

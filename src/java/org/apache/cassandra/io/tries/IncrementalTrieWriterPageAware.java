@@ -96,9 +96,9 @@ implements IncrementalTrieWriter<VALUE>
         return c;
     };
 
-    IncrementalTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, ByteComparable.Version version)
+    IncrementalTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, ByteComparable.Version byteComparableVersion)
     {
-        super(trieSerializer, dest, new Node<>((byte) 0), version);
+        super(trieSerializer, dest, new Node<>((byte) 0), byteComparableVersion);
         this.maxBytesPerPage = dest.maxBytesInPage();
     }
 

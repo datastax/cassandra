@@ -33,9 +33,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  */
 public class ReverseTrieTermsDictionaryReader extends ReverseValueIterator<ReverseTrieTermsDictionaryReader> implements Iterator<Pair<ByteComparable, Long>>
 {
-    public ReverseTrieTermsDictionaryReader(Rebufferer rebufferer, long root)
+    public ReverseTrieTermsDictionaryReader(Rebufferer rebufferer, long root, ByteComparable.Version version)
     {
-        super(rebufferer, root, true, ByteComparable.Version.OSS41); // TODO hardcoded encoding version
+        super(rebufferer, root, true, version);
     }
 
     @Override

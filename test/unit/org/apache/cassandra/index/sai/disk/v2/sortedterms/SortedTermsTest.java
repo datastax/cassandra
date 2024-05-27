@@ -65,7 +65,8 @@ public class SortedTermsTest extends SaiRandomizedTest
                                                                   metadataWriter,
                                                                   bytesWriter,
                                                                   blockFPWriter,
-                                                                  trieWriter))
+                                                                  trieWriter,
+                                                                  indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE)))
             {
                 ByteBuffer buffer = Int32Type.instance.decompose(99999);
                 ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
@@ -110,7 +111,8 @@ public class SortedTermsTest extends SaiRandomizedTest
                                                                   metadataWriter,
                                                                   bytesWriter,
                                                                   blockFPWriter,
-                                                                  trieWriter))
+                                                                  trieWriter,
+                                                                  indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE)))
             {
                 primaryKeys.forEach(primaryKey -> {
                     try
@@ -370,7 +372,8 @@ public class SortedTermsTest extends SaiRandomizedTest
                                                                   metadataWriter,
                                                                   bytesWriter,
                                                                   blockFPWriter,
-                                                                  trieWriter))
+                                                                  trieWriter,
+                                                                  indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE)))
             {
                 for (int x = 0; x < 1000 * 4; x++)
                 {
@@ -398,7 +401,8 @@ public class SortedTermsTest extends SaiRandomizedTest
                                                                   metadataWriter,
                                                                   bytesWriter,
                                                                   blockFPWriter,
-                                                                  trieWriter))
+                                                                  trieWriter,
+                                                                  indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE)))
             {
                 for (int x = 0; x < 1000 ; x++)
                 {
@@ -442,7 +446,8 @@ public class SortedTermsTest extends SaiRandomizedTest
              FileHandle termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
              FileHandle blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS))
         {
-            SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta);
+            ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE);
+            SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta, version);
             try (SortedTermsReader.Cursor cursor = reader.openCursor())
             {
                 testCode.accept(cursor);
@@ -460,7 +465,8 @@ public class SortedTermsTest extends SaiRandomizedTest
              FileHandle termsData = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCKS);
              FileHandle blockOffsets = indexDescriptor.createPerSSTableFileHandle(IndexComponent.PRIMARY_KEY_BLOCK_OFFSETS))
         {
-            SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta);
+            ByteComparable.Version version = indexDescriptor.byteComparableVersionFor(IndexComponent.PRIMARY_KEY_TRIE);
+            SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta, version);
             testCode.accept(reader);
         }
     }

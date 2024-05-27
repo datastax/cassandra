@@ -60,11 +60,11 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
     /**
      * Creates a walker. Rebufferer must be aligned and with a buffer size that is at least 4k.
      */
-    public Walker(Rebufferer source, long root, ByteComparable.Version version)
+    public Walker(Rebufferer source, long root, ByteComparable.Version byteComparableVersion)
     {
         this.source = source;
         this.root = root;
-        this.byteComparableVersion = version;
+        this.byteComparableVersion = byteComparableVersion;
         try
         {
             bh = source.rebuffer(root);

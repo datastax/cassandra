@@ -71,7 +71,9 @@ public class InvertedIndexSearcher extends IndexSearcher
         reader = new TermsReader(indexContext,
                                  indexFiles.termsData(),
                                  indexFiles.postingLists(),
-                                 root, footerPointer);
+                                 root,
+                                 footerPointer,
+                                 indexDescriptor.byteComparableVersionFor(IndexComponent.TERMS_DATA));
     }
 
     @Override

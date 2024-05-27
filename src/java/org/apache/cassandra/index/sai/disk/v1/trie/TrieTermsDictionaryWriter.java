@@ -51,8 +51,10 @@ public class TrieTermsDictionaryWriter implements Closeable
         startOffset = termDictionaryOutput.getFilePointer();
 
         SAICodecUtils.writeHeader(termDictionaryOutput);
+        ByteComparable.Version byteComparableVersion = indexDescriptor.byteComparableVersionFor(IndexComponent.TERMS_DATA);
+
         // we pass the output as SequentialWriter, but we keep IndexOutputWriter around to write footer on flush
-        termsDictionaryWriter = new IncrementalDeepTrieWriterPageAware<>(TrieTermsDictionaryReader.trieSerializer, termDictionaryOutput.asSequentialWriter(), ByteComparable.Version.OSS41); // TODO hardcoded encoding version
+        termsDictionaryWriter = new IncrementalDeepTrieWriterPageAware<>(TrieTermsDictionaryReader.trieSerializer, termDictionaryOutput.asSequentialWriter(), byteComparableVersion);
     }
 
     public void add(ByteComparable term, long postingListOffset) throws IOException
