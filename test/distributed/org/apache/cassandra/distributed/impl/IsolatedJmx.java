@@ -46,7 +46,6 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.JAVA_RMI_D
 import static org.apache.cassandra.config.CassandraRelevantProperties.ORG_APACHE_CASSANDRA_DISABLE_MBEAN_REGISTRATION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SUN_RMI_TRANSPORT_TCP_THREADKEEPALIVETIME;
 import static org.apache.cassandra.distributed.api.Feature.JMX;
-import static org.apache.cassandra.utils.ReflectionUtils.clearMapField;
 
 public class IsolatedJmx
 {
@@ -203,7 +202,7 @@ public class IsolatedJmx
         // make sure to remove the reference to them when the instance is shutting down.
         // Additionally, we must make sure to only clear endpoints created by this instance
         // As clearning the entire map can cause issues with starting and stopping nodes mid-test.
-        clearMapField(TCPEndpoint.class, null, "localEndpoints", this::endpointCreateByThisInstance);
+//        clearMapField(TCPEndpoint.class, null, "localEndpoints", this::endpointCreateByThisInstance);
         Uninterruptibles.sleepUninterruptibly(2 * RMI_KEEPALIVE_TIME, TimeUnit.MILLISECONDS); // Double the keep-alive time to give Distributed GC some time to clean up
     }
 
