@@ -349,7 +349,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         private final boolean hasPartitionLevelDeletionsPresenceMarker;
         private final boolean hasKeyRange;
         private final boolean hasUIntDeletionTime;
-        private final boolean hasExplicitlyFrozenTuples;
+        private final boolean hasImplicitlyFrozenTuples;
 
         BtiVersion(BtiFormat format, String version)
         {
@@ -379,7 +379,8 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
             hasZeroCopyMetadata = bOrLater && !cOrLater; // DSE only field
             hasIncrementalNodeSyncMetadata = bOrLater && !cOrLater; // DSE only field
 
-            hasExplicitlyFrozenTuples = version.compareTo("cc") < 0 || version.compareTo("da") >= 0; // we don't know if what DA is going to be eventually, but it is almost certain it will not include explicitly frozen tuples
+            // TODO figure out which versions support that
+            hasImplicitlyFrozenTuples = version.compareTo("cc") < 0; // we don't know if what DA is going to be eventually, but it is almost certain it will not include explicitly frozen tuples
         }
 
         @Override
@@ -528,7 +529,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         @Override
         public boolean hasImplicitlyFrozenTuples()
         {
-            return hasExplicitlyFrozenTuples;
+            return hasImplicitlyFrozenTuples;
         }
     }
 
