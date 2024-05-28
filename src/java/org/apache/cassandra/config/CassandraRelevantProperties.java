@@ -709,6 +709,10 @@ public enum CassandraRelevantProperties
     // i.e. that all replicas except for at most one in the cluster (across all DCs) must accept the write for it to be successful.
     THREE_MEANS_ALL_BUT_ONE("dse.consistency_level.three_means_all_but_one", "false"),
     TOLERATE_SSTABLE_SIZE("cassandra.tolerate_sstable_size"),
+    /**
+     * Allows to set custom current trie index format. This node will produce sstables in this format.
+     */
+    TRIE_INDEX_FORMAT_VERSION("cassandra.trie_index_format_version", "da"),
     TRIGGERS_DIR("cassandra.triggers_dir"),
     TRUNCATE_BALLOT_METADATA("cassandra.truncate_ballot_metadata"),
     /**
