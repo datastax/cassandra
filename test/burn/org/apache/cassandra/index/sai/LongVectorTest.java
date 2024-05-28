@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -190,7 +189,7 @@ public class LongVectorTest extends SAITester
             }
         }
         normalize(vector);
-        return vector(vector);
+        return vectorOf(vector);
     }
 
     private static class KeySet
