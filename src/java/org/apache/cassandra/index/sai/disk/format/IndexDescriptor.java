@@ -46,6 +46,7 @@ import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.oldlucene.EndiannessReverserChecksumIndexInput;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -137,6 +138,8 @@ public class IndexDescriptor
 
     public static IndexDescriptor createNew(Descriptor descriptor, IPartitioner partitioner, ClusteringComparator clusteringComparator)
     {
+        if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT && !Version.latest().onOrAfter(Version.DB))
+            throw new IllegalStateException("JVector3 format is enabled, but the latest version is older than DB");
         return new IndexDescriptor(Version.latest(), descriptor, partitioner, clusteringComparator);
     }
 

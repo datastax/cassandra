@@ -41,10 +41,12 @@ public class Version
     public static final Version BA = new Version("ba", V2OnDiskFormat.instance, (c, i) -> stargazerFileNameFormat(c, i, "ba"));
     // Converged Cassandra with JVector
     public static final Version CA = new Version("ca", V3OnDiskFormat.instance, (c, i) -> stargazerFileNameFormat(c, i, "ca"));
+    // Converged Cassandra with JVector 3
+    public static final Version DB = new Version("db", V3OnDiskFormat.instance, (c, i) -> stargazerFileNameFormat(c, i, "db"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;
