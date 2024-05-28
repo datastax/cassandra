@@ -55,6 +55,7 @@ import net.openhft.chronicle.hash.serialization.BytesReader;
 import net.openhft.chronicle.hash.serialization.BytesWriter;
 import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
+import org.apache.cassandra.concurrent.ExecutorFactory;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -74,7 +75,6 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.service.StorageService;
 
-import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
 
@@ -279,7 +279,7 @@ public class CompactionGraph implements Closeable, Accountable
 
             // write postings asynchronously while we run cleanup()
             long postingsOffset = postingsOutput.getFilePointer();
-            var es = executorFactory().sequential("CompactionGraph.flush");
+            var es = ExecutorFactory.Global.executorFactory().sequential("SAI-CompactionGraph");
             var postingsFuture = es.submit(() -> {
                 return new VectorPostingsWriter<Integer>(postingsOneToOne, i -> i)
                        .writePostings(postingsOutput.asSequentialWriter(), inlineVectors, postingsMap, deletedOrdinals);

@@ -2688,24 +2688,30 @@ public abstract class CQLTester
         return Arrays.asList(values);
     }
 
-    public Vector<Float> randomVectorBoxed(int dimension)
+    /** @return a normalized vector with the given dimension */
+    public static Vector<Float> randomVectorBoxed(int dimension)
     {
         float[] floats = randomVector(dimension);
-        return vector(floats);
+        return vectorOf(floats);
     }
 
     protected Vector<Float> vector(float[] v)
     {
-        var v2 = new Float[v.length];
-        for (int i = 0; i < v.length; i++)
-            v2[i] = v[i];
-        return new Vector<>(v2);
+        return vectorOf(v);
     }
 
     @SafeVarargs
     public static <T> Vector<T> vector(T... values)
     {
         return new Vector<>(values);
+    }
+
+    public static Vector<Float> vectorOf(float... v)
+    {
+        var v2 = new Float[v.length];
+        for (int i = 0; i < v.length; i++)
+            v2[i] = v[i];
+        return new Vector<>(v2);
     }
 
     public ByteBuffer randomVectorSerialized(int dimension)
