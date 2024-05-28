@@ -60,6 +60,13 @@ public class RAMStringIndexer
         return bytesUsed.get();
     }
 
+    public boolean requiresFlush()
+    {
+        // termsPool can't handle more than Integer.MAX_VALUE bytes. These are allocated in chunks, which means
+        // the last allocated chunk should put estimatedBytesUsed() at Integer.MAX_VALUE + 1.
+        return estimatedBytesUsed() >= Integer.MAX_VALUE;
+    }
+
     public boolean isEmpty()
     {
         return rowCount == 0;

@@ -192,6 +192,12 @@ public abstract class SegmentBuilder
                 return writer.writeAll(ramIndexer.getTermsWithPostings());
             }
         }
+
+        @Override
+        public boolean requiresFlush()
+        {
+            return ramIndexer.requiresFlush();
+        }
     }
 
     public static class VectorOffHeapSegmentBuilder extends SegmentBuilder
