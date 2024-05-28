@@ -738,7 +738,7 @@ public enum CassandraRelevantProperties
     /**
      * Allows to set custom current trie index format. This node will produce sstables in this format.
      */
-    TRIE_INDEX_FORMAT_VERSION("cassandra.trie_index_format_version", "da"),
+    TRIE_INDEX_FORMAT_VERSION("cassandra.trie_index_format_version", "cc"),
     TRIGGERS_DIR("cassandra.triggers_dir"),
     TRUNCATE_BALLOT_METADATA("cassandra.truncate_ballot_metadata"),
     /**
