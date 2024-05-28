@@ -30,6 +30,7 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -292,7 +293,15 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
     static class BtiVersion extends Version
     {
-        public static final String current_version = "da";
+        private static final Logger logger = LoggerFactory.getLogger(BtiVersion.class);
+
+        public static final String current_version = CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.getString();
+
+        static
+        {
+            logger.info("Trie index format current version: {}", current_version);
+        }
+
         public static final String earliest_supported_version = "aa";
 
         // aa (DSE 6.0): trie index format
