@@ -2688,6 +2688,7 @@ public abstract class CQLTester
         return Arrays.asList(values);
     }
 
+    /** @return a normalized vector with the given dimension */
     public static Vector<Float> randomVectorBoxed(int dimension)
     {
         float[] floats = randomVector(dimension);
@@ -2705,7 +2706,7 @@ public abstract class CQLTester
         return new Vector<>(values);
     }
 
-    protected static Vector<Float> vectorOf(float[] v)
+    public static Vector<Float> vectorOf(float... v)
     {
         var v2 = new Float[v.length];
         for (int i = 0; i < v.length; i++)
