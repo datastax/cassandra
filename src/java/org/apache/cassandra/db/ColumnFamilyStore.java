@@ -1891,6 +1891,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return data.getView().getAllMemtables();
     }
 
+    @Override
+    public OpOrder readOrdering()
+    {
+        return readOrdering;
+    }
+
     public Map<UUID, PendingStat> getPendingRepairStats()
     {
         Map<UUID, PendingStat.Builder> builders = new HashMap<>();

@@ -165,6 +165,11 @@ public interface Memtable extends Comparable<Memtable>
         Iterable<Memtable> getIndexMemtables();
 
         ShardBoundaries localRangeSplits(int shardCount);
+
+        /**
+         * Get the op-order primitive that protects data for the duration of reads.
+         */
+        public OpOrder readOrdering();
     }
 
     // Main write and read operations

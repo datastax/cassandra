@@ -37,7 +37,7 @@ import org.openjdk.jmh.annotations.*;
 @Fork(value = 1,jvmArgsAppend = { "-Xmx4G", "-Xms4G", "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"})
 @Threads(1) // no concurrent writes
 @State(Scope.Benchmark)
-public class MemtableTrieReadBench
+public class InMemoryTrieReadBench
 {
     @Param({"ON_HEAP", "OFF_HEAP"})
     BufferType bufferType = BufferType.OFF_HEAP;
@@ -55,7 +55,7 @@ public class MemtableTrieReadBench
     @Setup(Level.Trial)
     public void setup() throws Throwable
     {
-        trie = new InMemoryTrie<>(bufferType);
+        trie = InMemoryTrie.longLived(bufferType, null);
         Random rand = new Random(1);
 
         System.out.format("Putting %,d\n", count);
@@ -175,9 +175,7 @@ public class MemtableTrieReadBench
     public int iterateValuesLimited()
     {
         Iterable<Byte> values = trie.subtrie(ByteComparable.of(0L),
-                                             true,
-                                             ByteComparable.of(Long.MAX_VALUE / 2),         // 1/4 of all
-                                             false)
+                                             ByteComparable.of(Long.MAX_VALUE / 2))         // 1/4 of all
                                     .values();
         int sum = 0;
         for (byte b : values)

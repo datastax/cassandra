@@ -35,7 +35,7 @@ import org.openjdk.jmh.infra.Blackhole;
 @Fork(value = 1,jvmArgsAppend = { "-Xmx4G", "-Xms4G", "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"})
 @Threads(1) // no concurrent writes
 @State(Scope.Benchmark)
-public class MemtableTrieWriteBench
+public class InMemoryTrieWriteBench
 {
     @Param({"ON_HEAP", "OFF_HEAP"})
     BufferType bufferType = BufferType.OFF_HEAP;
@@ -55,7 +55,7 @@ public class MemtableTrieWriteBench
     @Benchmark
     public void putSequential(Blackhole bh) throws InMemoryTrie.SpaceExhaustedException
     {
-        InMemoryTrie<Byte> trie = new InMemoryTrie(bufferType);
+        InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
         ByteBuffer buf = ByteBuffer.allocate(keyLength);
 
         for (long current = 0; current < count; ++current)
@@ -76,7 +76,7 @@ public class MemtableTrieWriteBench
     @Benchmark
     public void putRandom(Blackhole bh) throws InMemoryTrie.SpaceExhaustedException
     {
-        InMemoryTrie<Byte> trie = new InMemoryTrie(bufferType);
+        InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
         Random rand = new Random(1);
         byte[] buf = new byte[keyLength];
 
@@ -97,7 +97,7 @@ public class MemtableTrieWriteBench
     @Benchmark
     public void applySequential(Blackhole bh) throws InMemoryTrie.SpaceExhaustedException
     {
-        InMemoryTrie<Byte> trie = new InMemoryTrie(bufferType);
+        InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
         ByteBuffer buf = ByteBuffer.allocate(keyLength);
 
         for (long current = 0; current < count; ++current)
@@ -118,7 +118,7 @@ public class MemtableTrieWriteBench
     @Benchmark
     public void applyRandom(Blackhole bh) throws InMemoryTrie.SpaceExhaustedException
     {
-        InMemoryTrie<Byte> trie = new InMemoryTrie(bufferType);
+        InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
         Random rand = new Random(1);
         byte[] buf = new byte[keyLength];
 

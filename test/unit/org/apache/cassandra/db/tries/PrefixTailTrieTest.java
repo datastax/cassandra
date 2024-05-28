@@ -239,7 +239,7 @@ public class PrefixTailTrieTest
     {
         InMemoryTrie<Object>[] tries = new InMemoryTrie[splits];
         for (int i = 0; i < splits; ++i)
-            tries[i] = new InMemoryTrie<>(BufferType.ON_HEAP);
+            tries[i] = InMemoryTrie.shortLived();
         for (int i = 0; i < COUNT_HEAD; ++i)
         {
             ByteComparable[] src = generateKeys(rand, COUNT_TAIL);
@@ -247,7 +247,7 @@ public class PrefixTailTrieTest
             for (int k = 0; k < splits; ++k)
             {
                 NavigableMap<ByteComparable, ByteBuffer> content = new TreeMap<>(BYTE_COMPARABLE_COMPARATOR);
-                InMemoryTrie<Object> tail = new InMemoryTrie(BufferType.ON_HEAP);
+                InMemoryTrie<Object> tail = InMemoryTrie.shortLived();
                 addNthToInMemoryTrie(src, content, tail, true, splits, k);
 
                 Tail t = new Tail(prefixes[i].asByteComparableArray(VERSION), content);
@@ -268,14 +268,14 @@ public class PrefixTailTrieTest
     {
         InMemoryTrie<Object>[] tries = new InMemoryTrie[splits];
         for (int i = 0; i < splits; ++i)
-            tries[i] = new InMemoryTrie<>(BufferType.ON_HEAP);
+            tries[i] = InMemoryTrie.shortLived();
         int trieIndex = 0;
         for (int i = 0; i < COUNT_HEAD; ++i)
         {
             ByteComparable[] src = generateKeys(rand, COUNT_TAIL);
 
             NavigableMap<ByteComparable, ByteBuffer> content = new TreeMap<>(BYTE_COMPARABLE_COMPARATOR);
-            InMemoryTrie<Object> tail = new InMemoryTrie(BufferType.ON_HEAP);
+            InMemoryTrie<Object> tail = InMemoryTrie.shortLived();
             addToInMemoryTrie(src, content, tail, true);
 
             Tail t = new Tail(prefixes[i].asByteComparableArray(VERSION), content);
@@ -296,13 +296,13 @@ public class PrefixTailTrieTest
     public void testTailMerge() throws Exception
     {
         ByteComparable prefix = generateKey(rand);
-        InMemoryTrie<Object> trie = new InMemoryTrie(BufferType.ON_HEAP);
+        InMemoryTrie<Object> trie = InMemoryTrie.shortLived();
         NavigableMap<ByteComparable, ByteBuffer> content = new TreeMap<>(BYTE_COMPARABLE_COMPARATOR);
 
         for (int i = 0; i < COUNT_HEAD; ++i)
         {
             ByteComparable[] src = generateKeys(rand, COUNT_TAIL);
-            InMemoryTrie<Object> tail = new InMemoryTrie(BufferType.ON_HEAP);
+            InMemoryTrie<Object> tail = InMemoryTrie.shortLived();
             addToInMemoryTrie(src, content, tail, true);
 //                        System.out.println(tail.dump(CONTENT_TO_STRING));
             tail.putRecursive(ByteComparable.EMPTY, 1, THROWING_UPSERT);

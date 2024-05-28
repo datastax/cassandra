@@ -117,6 +117,11 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             {
                 return null; // not implemented
             }
+
+            public OpOrder readOrdering()
+            {
+                return null;
+            }
         });
     }
 

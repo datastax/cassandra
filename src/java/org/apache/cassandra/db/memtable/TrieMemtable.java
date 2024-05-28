@@ -533,7 +533,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         @VisibleForTesting
         MemtableShard(TableMetadataRef metadata, MemtableAllocator allocator, TrieMemtableMetricsView metrics)
         {
-            this.data = new InMemoryTrie<>(BUFFER_TYPE);
+            this.data = InMemoryTrie.longLived(null);
             this.columnsCollector = new AbstractMemtable.ColumnsCollector(metadata.get().regularAndStaticColumns());
             this.statsCollector = new AbstractMemtable.StatsCollector();
             this.allocator = allocator;
@@ -817,11 +817,11 @@ public class TrieMemtable extends AbstractAllocatorMemtable
     }
 
     @VisibleForTesting
-    public long unusedReservedMemory()
+    public long unusedReservedOnHeapMemory()
     {
         long size = 0;
         for (MemtableShard shard : shards)
-            size += shard.data.unusedReservedMemory();
+            size += shard.data.unusedReservedOnHeapMemory();
         return size;
     }
 

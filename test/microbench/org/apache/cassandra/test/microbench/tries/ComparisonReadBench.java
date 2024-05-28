@@ -71,8 +71,14 @@ public class ComparisonReadBench
     // partitions).
     static MemoryMeter meter = new MemoryMeter().withGuessing(Guess.FALLBACK_UNSAFE);
 
-    @Param({"ON_HEAP"})
-    BufferType bufferType = BufferType.OFF_HEAP;
+    public enum TrieAllocation {
+        SHORT_LIVED,
+        LONG_LIVED_ON_HEAP,
+        LONG_LIVED_OFF_HEAP
+    }
+
+    @Param({"SHORT_LIVED"})
+    TrieAllocation allocation = TrieAllocation.SHORT_LIVED;
 
     @Param({"1000", "100000", "10000000"})
     int count = 1000;
@@ -308,7 +314,20 @@ public class ComparisonReadBench
         TrieAccess(Type<T> type)
         {
             this.type = type;
-            trie = new InMemoryTrie<>(bufferType);
+            switch (allocation)
+            {
+                case SHORT_LIVED:
+                    trie = InMemoryTrie.shortLived();
+                    break;
+                case LONG_LIVED_ON_HEAP:
+                    trie = InMemoryTrie.longLived(BufferType.ON_HEAP, null);
+                    break;
+                case LONG_LIVED_OFF_HEAP:
+                    trie = InMemoryTrie.longLived(BufferType.OFF_HEAP, null);
+                    break;
+                default:
+                    throw new AssertionError();
+            };
         }
 
         public void put(long v, byte b)

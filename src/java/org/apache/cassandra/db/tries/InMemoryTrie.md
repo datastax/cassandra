@@ -804,3 +804,93 @@ When descending at `tree` we set `existingPreContentNode = ~1`, `existingPostCon
 Ascending back to add the child `~3`, we add a child to `NONE` and get `updatedPostContentNode = 0x0BB`. To then apply
 the existing content, we create the embedded prefix node `updatedPreContentNode = 0x0BF` with `contentIndex = 1` and
 pass that on to the recursion.
+
+### Memory management and cell reuse
+
+As mentioned in the beginning, in order to avoid long garbage collection pauses due to large long-lasting content in
+memtable tries such as the ones used to store database memtables, `InMemoryTrie` uses its own memory management, and
+can be used with on- or off-heap memory.
+
+The most important uses for the trie are long-lived ones, but there are also cases where we want to compose small
+short-lived tries, for example to store the result of a query, or to prepare a partition update before it is merged
+with the memtable. The two usecases are served most efficiently by using different allocation and reuse methods, which
+is why `InMemoryTrie`s offer two factory methods to create two different kinds of tries:
+
+- `InMemoryTrie.shortLived()` creates a trie that is expected to remain relatively small, to be used only for a short
+  period (e.g. the duration of a write or read request), and typically to be accessed by one thread only. These tries
+  reside on heap, because allocation and release of smaller buffers is done more efficiently using garbage collection, and
+  do not make any attempt to reclaim cells that become unused due to copying or type change. In tries that are accessed
+  by one thread only, mutations can safely be made without any atomicity or consistency concerns thus without any forced
+  copying, which means that the overhead of not reclaiming cells should be inconsequential.
+  `PartitionUpdate`s are an example of short-lived tries, where mutations are prepared before being sent to the commit log
+  and merged into a memtable.
+
+- `InMemoryTrie.longLived(OpOrder)` creates a trie which is expected to grow large, to remain in place for a long time,
+  and to be read by a multitude of threads concurrently with a single mutator. This kind of trie will usually be off-heap,
+  and will reclaim any cells that become unreferenced due to copying or type change. Because recycling cells requires the
+  trie/mutator to know if a reader can still be looking at cells that have become unreachable, long lived tries rely on an
+  `OpOrder` which readers must take a group from before reading the trie, and release when done.
+  `MemtableShard` (and in general database memtables) use long-lived tries, with the table's `readOrdering` (which all
+  reads already use) as the `OpOrder` signal when unreachable cells can be reused.
+
+The on/off-heap distinction is handled by the `BufferType` used in constructing the trie, while the recycling strategy
+is handled by the one of the two `MemtableAllocationStrategies`. `NoReuseStrategy`, used by the short-lived option is
+trivial, simply bump-allocating cells and objects from linear byte buffer and object array. `OpOrderReuseStrategy`
+handles the long-lived case and will be detailed below.
+
+The descriptions in this section talk about cells, but we apply exactly the same mechanisms for handling slots in the
+java object content array (with separate queues).
+
+#### Cell recycling in long-lived tries
+
+During the application of a mutation, the `InMemoryTrie` code knows which cells are being copied to another location and
+tells the allocation strategy that the cells are going to be freed (using a `recycleBlock` or implied in `copyBlock`).
+This does not mean that the old cell is already free, because:
+- (1) it is probably still reachable (if the process has not backtracked enough to attach the new cell to some
+  parent) by concurrent readers;
+- (2) the procedure may fail before the attachment point and the old cell may remain reachable even for this thread;
+- (3) it may still be needed by the mutator (e.g. a chain cell is freed when we recognize that the last node in the
+  chain needs to be moved, but the other nodes in the cell are still in the parent path for the mutation process); or
+- (4) concurrent readers may hold a pointer to the old cell, or a parent or child chain that leads to it.
+
+Thus, we can only recycle a cell when all four conditions are no longer possible. Once an attachment has been made, (1)
+and (2) are no longer possible (since attachment writes are volatile, all threads that visit that point at any time
+after the write _must_ see the new paths). (3) becomes impossible when the mutation completes. To make things simple,
+we use the completion of a mutation (signalled to the allocation strategy via a `completeMutation` call) as the point
+in time when all attachments are in place. To make sure (4) is no longer happening, the allocation strategy relies on
+the given `OpOrder` &mdash; when a barrier, issued at any point _after_ the `completeMutation` call, expires, no cells
+identified by the mutation as recyclable can be referenced in any current readers, because they must have followed the
+newly set paths and thus cannot have reached those cells.
+
+The allocation strategy implements this by maintaining several lists:
+- just-released cells, added in response to `recycleCell` calls and awaiting `completeMutation`
+- cells awaiting barrier, moved from the top list after `completeMutation`, for which a barrier has been issued,
+  awaiting the barrier to expire
+- reusable cells, moved from the list above after their barrier has expired
+
+For efficiency the allocation strategy does not work with individual cells, but rather in blocks of 1024. Newly
+allocated cells are taken from a `free` block. When a mutation releases cells, they are put in a `justReleased` block,
+and if the block is filled, another one is created and linked to form a queue. At mutation completion we do nothing if
+no block is yet completed; if one is, we issue a barrier and give it to the block (and any other completed blocks in
+the `justReleased` queue), with which we move it/them to the tail of an `awaitingBarrier` queue. The head of this queue
+is the oldest block of recycled cells and has the highest probability of having passed its barrier &mdash; if any block
+in the queue has an expired barrier, all previous ones also will (because of the logic of expiring barriers in
+`OpOrder`). Hence, when we need to allocate a new cell and the free block is empty, we check if that head block's barrier
+has expired, and if it has, we make that the new `free` block. If the barrier hasn't expired, there is no block of cells
+that is ready for recycling, thus we must refill the `free` block with new cells.
+
+Technically, the "reusable cells" list and "cells awaiting barrier" are in the same linked queue, which is effectively
+split in two parts by the property of having an expired barrier. Also, to simplify handling, the `free` block stands at
+the head of that queue &mdash; it plays the part of a sentinel block for the `awaitingBarrier` queue as we
+always have a block at `free`, thus `awaitingBarrierTail` can move to it when the queue becomes empty.
+
+![diagram](InMemoryTrie.md.recycling.svg)
+
+If an exception is thrown during a mutation, the `InMemoryTrie` code catches that exception and signals `abortMutation`
+to the strategy, which tells it that the cells the current call marked as recyclable will probably remain reachable
+and should be discarded; because the strategy works with blocks, it will actually discard everything in the
+`justReleased` block and queue. This may result in some cell waste &mdash; unreachable cells that cannot be recycled
+&mdash; if cells were allocated and/or an attachment was made before the exception is thrown. We don't expect this to
+happen often, but any users of tries that expect them to live indefinitely (unlike memtables which are flushed
+regularly; an example would be the chunk cache map when/if we switch it to `InMemoryTrie`) must ensure that exceptions
+cannot happen during mutation, otherwise waste can slowly accumulate to bring the node down.

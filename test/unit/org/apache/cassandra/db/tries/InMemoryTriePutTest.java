@@ -25,7 +25,6 @@ import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
 
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.junit.Assert.fail;
@@ -41,7 +40,7 @@ public class InMemoryTriePutTest extends InMemoryTrieTestBase
     @Test
     public void testLongKey_StackOverflow() throws InMemoryTrie.SpaceExhaustedException
     {
-        InMemoryTrie<String> trie = new InMemoryTrie<>(BufferType.ON_HEAP);
+        InMemoryTrie<String> trie = strategy.create();
         Random rand = new Random(1);
         byte[] key = new byte[40960];
         rand.nextBytes(key);
@@ -67,7 +66,7 @@ public class InMemoryTriePutTest extends InMemoryTrieTestBase
     @Test
     public void testOver1GSize() throws InMemoryTrie.SpaceExhaustedException
     {
-        InMemoryTrie<String> trie = new InMemoryTrie<>(BufferType.ON_HEAP);
+        InMemoryTrie<String> trie = strategy.create();
         trie.advanceAllocatedPos(0x20000000);
         String t1 = "test1";
         String t2 = "testing2";

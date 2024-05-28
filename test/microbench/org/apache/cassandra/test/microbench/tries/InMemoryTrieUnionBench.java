@@ -38,7 +38,7 @@ import org.openjdk.jmh.annotations.*;
 @Fork(value = 1,jvmArgsAppend = { "-Xmx4G", "-Xms4G", "-Djmh.executor=CUSTOM", "-Djmh.executor.class=org.apache.cassandra.test.microbench.FastThreadExecutor"})
 @Threads(1) // no concurrent writes
 @State(Scope.Benchmark)
-public class MemtableTrieUnionBench
+public class InMemoryTrieUnionBench
 {
     @Param({"ON_HEAP", "OFF_HEAP"})
     BufferType bufferType = BufferType.OFF_HEAP;
@@ -66,7 +66,7 @@ public class MemtableTrieUnionBench
         {
             long sz = 65536 / sources;
             for (int i = 0; i < sources; ++i)
-                tries.add(new InMemoryTrie<>(bufferType));
+                tries.add(InMemoryTrie.longLived(bufferType, null));
 
             for (long current = 0; current < count; ++current)
             {
@@ -81,7 +81,7 @@ public class MemtableTrieUnionBench
             long current = 0;
             for (int i = 0; i < sources; ++i)
             {
-                InMemoryTrie<Byte> trie = new InMemoryTrie(bufferType);
+                InMemoryTrie<Byte> trie = InMemoryTrie.longLived(bufferType, null);
                 int currMax = this.count * (i + 1) / sources;
 
                 for (; current < currMax; ++current)
@@ -134,9 +134,7 @@ public class MemtableTrieUnionBench
     public int iterateValuesLimited()
     {
         Iterable<Byte> values = trie.subtrie(ByteComparable.of(0L),
-                                             true,
-                                             ByteComparable.of(Long.MAX_VALUE / 2),         // 1/4 of all
-                                             false)
+                                             ByteComparable.of(Long.MAX_VALUE / 2))         // 1/4 of all
                                     .values();
         int sum = 0;
         for (byte b : values)
