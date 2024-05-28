@@ -134,7 +134,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
             tables.forEach(tm -> {
                 Context context = Context.from(tm);
                 requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
-                requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.serializedSize(MessagingService.current_version) / tables.size());
+                requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
             });
 
             message.payload.applyFuture(WriteOptions.DEFAULT).thenAccept(o -> respond(message, respondToAddress)).exceptionally(wto -> {

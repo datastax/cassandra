@@ -1481,7 +1481,7 @@ public class Message<T>
     private int payloadSizeSG10 = -1;
     private int payloadSizeDSE68 = -1;
 
-    protected int payloadSize(int version)
+    public int payloadSize(int version)
     {
         switch (version)
         {

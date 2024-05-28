@@ -72,7 +72,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         // Initialize internode bytes with the inbound message size:
         tables.forEach(tm -> {
             requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
-            requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.serializedSize(MessagingService.current_version) / tables.size());
+            requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
         });
 
         long timeout = message.expiresAtNanos() - message.createdAtNanos();
