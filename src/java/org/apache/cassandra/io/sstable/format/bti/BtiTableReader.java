@@ -235,7 +235,7 @@ public class BtiTableReader extends SSTableReaderWithFilter
             return null;
         }
 
-        if (!isPresentInFilter(dk))
+        if (!inBloomFilter(dk))
         {
             notifySkipped(SkippingReason.BLOOM_FILTER, listener, EQ, updateStats);
             return null;
@@ -262,6 +262,8 @@ public class BtiTableReader extends SSTableReaderWithFilter
                 fh = dfile;
                 seekPosition = ~indexPos;
             }
+
+            listener.onSSTablePartitionIndexAccessed(this);
 
             try (FileDataInput in = fh.createReader(seekPosition))
             {

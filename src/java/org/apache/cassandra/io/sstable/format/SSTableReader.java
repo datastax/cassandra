@@ -29,6 +29,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -103,6 +104,7 @@ import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -158,7 +160,7 @@ import static org.apache.cassandra.utils.concurrent.SharedCloseable.sharedCopyOr
  */
 public abstract class SSTableReader extends SSTable implements UnfilteredSource, SelfRefCounted<SSTableReader>, CompactionSSTable
 {
-    private static final Logger logger = LoggerFactory.getLogger(SSTableReader.class);
+    protected static final Logger logger = LoggerFactory.getLogger(SSTableReader.class);
 
     private static final boolean TRACK_ACTIVITY = CassandraRelevantProperties.DISABLE_SSTABLE_ACTIVITY_TRACKING.getBoolean();
 
@@ -250,6 +252,19 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
     protected final FileHandle dfile;
 
+    // Unlike readMeter, which is global and tracks access to data files, this meter
+    // is incremented as soon as the partition index is accessed with SinglePartitionReadCommand EQ. This includes
+    // the case where the sstable does not contain the partition the query was looking for.
+    // we use a restorable meter to gain access to the moving averages, we don't
+    // really restore it from disk
+    protected final Optional<RestorableMeter> partitionIndexReadMeter = BloomFilter.lazyLoading()
+                                                                      ? Optional.of(BloomFilter.lazyLoadingWindow() > 0
+                                                                                    // when window > 0, use rate at given window
+                                                                                    ? RestorableMeter.builder().withWindow(BloomFilter.lazyLoadingWindow()).build()
+                                                                                    // when window <= 0, it only cares about absolute count
+                                                                                    : RestorableMeter.builder().build())
+                                                                      : Optional.empty();
+
     // technically isCompacted is not necessary since it should never be unreferenced unless it is also compacted,
     // but it seems like a good extra layer of protection against reference counting bugs to not delete data based on that alone
     public final AtomicBoolean isSuspect = new AtomicBoolean(false);
@@ -259,7 +274,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
     public final SerializationHeader header;
 
-    private final InstanceTidier tidy;
+    protected final InstanceTidier tidy;
     private final Ref<SSTableReader> selfRef;
 
     private RestorableMeter readMeter;
@@ -666,6 +681,13 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     public RestorableMeter getReadMeter()
     {
         return readMeter;
+    }
+
+    @VisibleForTesting
+    @Nullable
+    public RestorableMeter getPartitionIndexReadMeter()
+    {
+        return partitionIndexReadMeter.orElse(null);
     }
 
     /**
@@ -1376,6 +1398,14 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
             readMeter.mark();
     }
 
+    /**
+     * Increment the total read count and read rate for accessing partition index.
+     */
+    public void incrementIndexReadCount()
+    {
+        partitionIndexReadMeter.ifPresent(RestorableMeter::mark);
+    }
+
     public EncodingStats stats()
     {
         // We could return sstable.header.stats(), but this may not be as accurate than the actual sstable stats (see
@@ -1453,7 +1483,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         private final Descriptor descriptor;
         private final WeakReference<Owner> owner;
 
-        private List<? extends AutoCloseable> closeables;
+        private List<AutoCloseable> closeables;
         private Runnable runOnClose;
 
         private boolean isReplaced = false;
@@ -1481,6 +1511,12 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         {
             this.descriptor = descriptor;
             this.owner = new WeakReference<>(owner);
+        }
+
+        public void addCloseable(AutoCloseable closeable)
+        {
+            if (closeable != null)
+                closeables.add(closeable); // Last added is first to be closed.
         }
 
         @Override
@@ -1623,7 +1659,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
             if (!DatabaseDescriptor.supportsSSTableReadMeter())
             {
-                readMeter = new RestorableMeter();
+                readMeter = RestorableMeter.createWithDefaultRates();
                 readMeterSyncFuture = NULL;
                 return;
             }
