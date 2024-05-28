@@ -294,7 +294,7 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
         if (searchOp == Operator.EQ)
         {
             assert key instanceof DecoratedKey; // EQ only make sense if the key is a valid row key
-            if (!isPresentInFilter((IFilter.FilterKey) key))
+            if (!inBloomFilter((DecoratedKey)key))
             {
                 notifySkipped(SkippingReason.BLOOM_FILTER, listener, operator, updateStats);
                 return null;
@@ -325,6 +325,8 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
         // next index position because the searched key can be greater the last key of the index interval checked if it
         // is lesser than the first key of next interval (and in that case we must return the position of the first key
         // of the next interval).
+        listener.onSSTablePartitionIndexAccessed(this);
+
         int i = 0;
         File path = null;
         try (FileDataInput in = ifile.createReader(sampledPosition))

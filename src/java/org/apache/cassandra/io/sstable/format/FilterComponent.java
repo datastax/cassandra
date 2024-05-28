@@ -31,7 +31,9 @@ import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.BloomFilterSerializer;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
@@ -122,6 +124,11 @@ public class FilterComponent
                 logger.trace("Bloom filter for {} will not be loaded because fpChance has changed from {} to {} and the filter should be recreated", descriptor, currentFPChance, desiredFPChance);
 
             return null;
+        }
+        else if (BloomFilter.lazyLoading() && !SchemaConstants.isLocalSystemKeyspace(metadata.keyspace))
+        {
+            logger.debug("postponing bloom filter deserialization for {}", descriptor.fileFor(Components.FILTER));
+            return FilterFactory.AlwaysPresentForLazyLoading;
         }
 
         try

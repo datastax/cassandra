@@ -1278,12 +1278,12 @@ public final class SystemKeyspace
         UntypedResultSet results = readSSTableActivity(keyspace, table, id);
 
         if (results.isEmpty())
-            return new RestorableMeter();
+            return RestorableMeter.createWithDefaultRates();
 
         UntypedResultSet.Row row = results.one();
         double m15rate = row.getDouble("rate_15m");
         double m120rate = row.getDouble("rate_120m");
-        return new RestorableMeter(m15rate, m120rate);
+        return RestorableMeter.builder().withM15Rate(m15rate).withM120Rate(m120rate).build();
     }
 
     @VisibleForTesting
