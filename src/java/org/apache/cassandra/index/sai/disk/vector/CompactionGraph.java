@@ -32,12 +32,13 @@ import java.util.concurrent.ForkJoinPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.disk.SimpleReader;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.disk.Feature;
 import io.github.jbellis.jvector.graph.disk.FeatureId;
 import io.github.jbellis.jvector.graph.disk.FusedADC;
-import io.github.jbellis.jvector.graph.disk.InlineVectorValues;
 import io.github.jbellis.jvector.graph.disk.InlineVectors;
+import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
 import io.github.jbellis.jvector.pq.PQVectors;
@@ -86,7 +87,6 @@ public class CompactionGraph implements Closeable, Accountable
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
     private final ChronicleMap<VectorFloat<?>, CompactionVectorPostings> postingsMap;
-    private final InlineVectorValues inlineVectors;
     private final PQVectors pqVectors;
     private final ArrayList<ByteSequence<?>> pqVectorsList;
     private final IndexDescriptor descriptor;
@@ -138,7 +138,10 @@ public class CompactionGraph implements Closeable, Accountable
                                          .entries(postingsEntriesAllocated)
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
-        builder = new GraphIndexBuilder(null,
+        // VSTODO add LVQ
+        pqVectorsList = new ArrayList<>(postingsEntriesAllocated);
+        pqVectors = new PQVectors(compressor, pqVectorsList);
+        builder = new GraphIndexBuilder(BuildScoreProvider.pqBuildScoreProvider(similarityFunction, pqVectors),
                                         dimension,
                                         indexConfig.getAnnMaxDegree(),
                                         indexConfig.getConstructionBeamWidth(),
@@ -164,18 +167,12 @@ public class CompactionGraph implements Closeable, Accountable
         writer = writerBuilder.build();
         writer.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
         SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()));
-        inlineVectors = new InlineVectorValues(dimension, writer);
-        pqVectorsList = new ArrayList<>(postingsEntriesAllocated);
-        pqVectors = new PQVectors(compressor, pqVectorsList);
-        // VSTODO add LVQ
-        builder.setBuildScoreProvider(BuildScoreProvider.pqBuildScoreProvider(similarityFunction, inlineVectors, pqVectors));
     }
 
     @Override
     public void close() throws IOException
     {
         // this gets called in finally{} blocks, so use closeQuietly to avoid generating additional exceptions
-        FileUtils.closeQuietly(inlineVectors);
         FileUtils.closeQuietly(writer);
         FileUtils.closeQuietly(postingsMap);
         Files.delete(postingsFile.toJavaIOFile().toPath());
@@ -276,12 +273,17 @@ public class CompactionGraph implements Closeable, Accountable
             pqVectors.write(pqOutput.asSequentialWriter(), JVECTOR_2_VERSION); // VSTODO old version until we add APQ
             long pqLength = pqOutput.getFilePointer() - pqOffset;
 
-            // write postings asynchronously while we run cleanup()
+            // write postings asynchronously while we run cleanup().  this requires the index header to be present
+            writer.writeHeader();
             long postingsOffset = postingsOutput.getFilePointer();
             var es = Executors.newSingleThreadExecutor();
+            var index = OnDiskGraphIndex.load(new SimpleReader.Supplier(writer.getPath()), termsOffset);
             var postingsFuture = es.submit(() -> {
-                return new VectorPostingsWriter<Integer>(postingsOneToOne, i -> i)
-                       .writePostings(postingsOutput.asSequentialWriter(), inlineVectors, postingsMap, deletedOrdinals);
+                try (var view = index.getView())
+                {
+                    return new VectorPostingsWriter<Integer>(postingsOneToOne, i -> i)
+                           .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, deletedOrdinals);
+                }
             });
 
             // complete internal graph clean up
@@ -291,8 +293,9 @@ public class CompactionGraph implements Closeable, Accountable
             long postingsEnd = postingsFuture.get();
             long postingsLength = postingsEnd - postingsOffset;
             es.shutdown();
+            index.close();
 
-            // write the graph
+            // write the graph edge lists and optionally fused adc features
             var start = System.nanoTime();
             if (writer.getFeatureSet().contains(FeatureId.FUSED_ADC))
             {
