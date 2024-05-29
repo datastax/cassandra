@@ -112,8 +112,6 @@ public class VectorCompressionTest extends VectorTester
     private void testOne(int rows, VectorSourceModel model, int originalDimension, VectorCompression expectedCompression) throws IOException
     {
         createTable("CREATE TABLE %s " + String.format("(pk int, v vector<float, %d>, PRIMARY KEY(pk))", originalDimension));
-        createIndex("CREATE CUSTOM INDEX ON %s(v) " + String.format("USING 'StorageAttachedIndex' WITH OPTIONS = {'source_model': '%s'}", model));
-        waitForTableIndexesQueryable();
 
         for (int i = 0; i < rows; i++)
             execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, randomVectorBoxed(originalDimension));
@@ -122,6 +120,10 @@ public class VectorCompressionTest extends VectorTester
         // end up with a single sstable (otherwise PQ might conclude there aren't enough vectors to train on)
         compact();
         waitForCompactionsFinished();
+
+        // create index after compaction so we don't have to wait for it to (potentially) build twice
+        createIndex("CREATE CUSTOM INDEX ON %s(v) " + String.format("USING 'StorageAttachedIndex' WITH OPTIONS = {'source_model': '%s'}", model));
+        waitForTableIndexesQueryable();
 
         // get a View of the sstables that contain indexed data
         var sim = getCurrentColumnFamilyStore().indexManager;
