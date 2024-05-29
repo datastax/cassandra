@@ -432,7 +432,7 @@ public class VectorTypeTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'source_model' : 'ada002' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         var sim = getCurrentColumnFamilyStore().indexManager;
         var index = (StorageAttachedIndex) sim.listIndexes().iterator().next();
@@ -445,7 +445,7 @@ public class VectorTypeTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'optimize_for' : 'recall' }");
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
         // as long as CREATE doesn't error out, we're good
     }
 
