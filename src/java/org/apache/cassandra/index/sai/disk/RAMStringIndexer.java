@@ -65,8 +65,11 @@ public class RAMStringIndexer
 
     public boolean requiresFlush()
     {
-        // termsPool can't handle more than Integer.MAX_VALUE bytes. These are allocated in chunks, which means
-        // the last allocated chunk should put estimatedBytesUsed() at Integer.MAX_VALUE + 1.
+        // ByteBlockPool can't handle more than Integer.MAX_VALUE bytes. These are allocated in fixed-size chunks,
+        // and additions are guaranteed to be smaller than the chunks. This means that the last chunk allocation will
+        // be triggered by an addition, and the rest of the space in the final chunk will be wasted, as the bytesUsed
+        // counters track block allocation, not the size of additions. This means that we can't pass this check and then
+        // fail to add a term.
         return termsBytesUsed.get() >= Integer.MAX_VALUE || slicesBytesUsed.get() >= Integer.MAX_VALUE;
     }
 
