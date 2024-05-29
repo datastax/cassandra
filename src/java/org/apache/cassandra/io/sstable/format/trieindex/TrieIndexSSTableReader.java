@@ -1037,7 +1037,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                      FileHandle.Builder rowIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX))
                 {
                     rowIdxFH = rowIdxFHBuilder.complete();
-                    partitionIndex = PartitionIndex.load(partitionIdxFHBuilder, metadata.get().partitioner, bloomFilter == FilterFactory.AlwaysPresent, statsMetadata.zeroCopyMetadata);
+                    partitionIndex = PartitionIndex.load(partitionIdxFHBuilder, metadata.get().partitioner, bloomFilter == FilterFactory.AlwaysPresent, statsMetadata.zeroCopyMetadata, descriptor.version.getByteComparableVersion());
                     sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                                   components,
                                                                   metadata,

@@ -40,19 +40,25 @@ import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
+import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.LEGACY;
+import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS41;
+
 @RunWith(Parameterized.class)
 abstract public class AbstractTrieTestBase
 {
     @Parameterized.Parameter(0)
-    public TestClass writerClass;
+    public static TestClass writerClass;
+
+    @Parameterized.Parameter(1)
+    public static ByteComparable.Version version;
 
     enum TestClass
     {
-        SIMPLE(IncrementalTrieWriterSimple::new),
-        PAGE_AWARE(IncrementalTrieWriterPageAware::new),
-        PAGE_AWARE_DEEP_ON_STACK((serializer, dest) -> new IncrementalDeepTrieWriterPageAware<>(serializer, dest, 256)),
-        PAGE_AWARE_DEEP_ON_HEAP((serializer, dest) -> new IncrementalDeepTrieWriterPageAware<>(serializer, dest, 0)),
-        PAGE_AWARE_DEEP_MIXED((serializer, dest) -> new IncrementalDeepTrieWriterPageAware<>(serializer, dest, 2));
+        SIMPLE((trieSerializer, dest) -> new IncrementalTrieWriterSimple(trieSerializer, dest, version)),
+        PAGE_AWARE((trieSerializer, dest) -> new IncrementalTrieWriterPageAware(trieSerializer, dest, version)),
+        PAGE_AWARE_DEEP_ON_STACK((serializer, dest) -> new IncrementalDeepTrieWriterPageAware<>(serializer, dest, 256, version)),
+        PAGE_AWARE_DEEP_ON_HEAP((serializer, dest) -> new IncrementalDeepTrieWriterPageAware<>(serializer, dest, 0, version)),
+        PAGE_AWARE_DEEP_MIXED((serializer, dest) -> new IncrementalDeepTrieWriterPageAware<>(serializer, dest, 2, version));
 
         final BiFunction<TrieSerializer<Integer, DataOutputPlus>, DataOutputPlus, IncrementalTrieWriter<Integer>> constructor;
         TestClass(BiFunction<TrieSerializer<Integer, DataOutputPlus>, DataOutputPlus, IncrementalTrieWriter<Integer>> constructor)
@@ -61,14 +67,19 @@ abstract public class AbstractTrieTestBase
         }
     }
 
-    @Parameterized.Parameters(name = "{index}: trie writer class={0}")
+    @Parameterized.Parameters(name = "{index}: trie writer class={0}, encoding={1}")
     public static Collection<Object[]> data()
     {
-        return Arrays.asList(new Object[]{ TestClass.SIMPLE },
-                             new Object[]{ TestClass.PAGE_AWARE },
-                             new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_STACK },
-                             new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_HEAP },
-                             new Object[]{ TestClass.PAGE_AWARE_DEEP_MIXED });
+        return Arrays.asList(new Object[]{ TestClass.SIMPLE, LEGACY },
+                             new Object[]{ TestClass.PAGE_AWARE, LEGACY },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_STACK, LEGACY },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_HEAP, LEGACY },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_MIXED, LEGACY },
+                             new Object[]{ TestClass.SIMPLE, OSS41 },
+                             new Object[]{ TestClass.PAGE_AWARE, OSS41 },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_STACK, OSS41 },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_ON_HEAP, OSS41 },
+                             new Object[]{ TestClass.PAGE_AWARE_DEEP_MIXED, OSS41 });
     }
 
     protected final static Logger logger = LoggerFactory.getLogger(TrieBuilderTest.class);
@@ -132,7 +143,7 @@ abstract public class AbstractTrieTestBase
         if (source == null)
             return null;
         StringBuilder sb = new StringBuilder();
-        ByteComparable.Version version = ByteComparable.Version.OSS41;
+        ByteComparable.Version version = OSS41;
         ByteSource.Peekable stream = source.asPeekableBytes(version);
         for (int b = stream.next(); b != ByteSource.END_OF_STREAM; b = stream.next())
             sb.append((char) b);

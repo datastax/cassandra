@@ -153,7 +153,7 @@ public class SortedTermsReader
             this.termsDataFp = this.termsData.getFilePointer();
             this.blockOffsets = new LongArray.DeferredLongArray(blockOffsetsFactory::open);
             this.currentTerm = new BytesRef(Math.max(meta.maxTermLength, 0));  // maxTermLength can be negative if meta.count == 0
-            this.reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(), meta.trieFP);
+            this.reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(), meta.trieFP, ByteComparable.Version.OSS41); // TODO hardcoded encoding version
         }
 
         /**

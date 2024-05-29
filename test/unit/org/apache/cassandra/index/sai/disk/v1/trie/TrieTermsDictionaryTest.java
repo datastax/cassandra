@@ -47,6 +47,8 @@ import static org.apache.cassandra.utils.bytecomparable.ByteComparable.compare;
 
 public class TrieTermsDictionaryTest extends SaiRandomizedTest
 {
+    public final static ByteComparable.Version VERSION = OSS41; // TODO hardcoded encoding version
+
     private IndexDescriptor indexDescriptor;
     private String index;
     private IndexContext indexContext;
@@ -79,7 +81,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         }
 
         try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
-             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             assertEquals(NOT_FOUND, reader.exactMatch(asByteComparable.apply("a")));
             assertEquals(0, reader.exactMatch(asByteComparable.apply("ab")));
@@ -163,7 +165,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         }
 
         try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
-             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             assertEquals(0, reader.ceiling(asByteComparable.apply("a")));
             assertEquals(2, reader.ceiling(asByteComparable.apply("abc")));
@@ -243,7 +245,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
     private void readAndAssertCeiling(long root, long expected, ByteComparable key)
     {
         try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
-             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), root))
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), root, VERSION))
         {
             assertEquals(expected, reader.ceiling(key));
         }
@@ -272,7 +274,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         }
 
         try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
-             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             assertEquals(NOT_FOUND, reader.floor(asByteComparable.apply("a")));
             assertEquals(7, reader.floor(asByteComparable.apply("z")));
@@ -310,7 +312,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         }
 
         try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
-             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             // Validate token only searches
             assertEquals(NOT_FOUND, reader.floor(primaryKey(asByteComparable, "a", ByteSource.GT_NEXT_COMPONENT)));
@@ -361,7 +363,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         }
 
         try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
-             TrieTermsDictionaryReader iterator = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp);
+             TrieTermsDictionaryReader iterator = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION);
              ReverseTrieTermsDictionaryReader reverseIterator = new ReverseTrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
         {
             verifyOrder(iterator, byteComparables, true);
@@ -406,7 +408,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         }
 
         try (FileHandle input = indexDescriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, indexContext);
-             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp))
+             TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(input.instantiateRebufferer(), fp, VERSION))
         {
             final ByteComparable expectedMaxTerm = byteComparables.get(byteComparables.size() - 1);
             final ByteComparable actualMaxTerm = reader.getMaxTerm();

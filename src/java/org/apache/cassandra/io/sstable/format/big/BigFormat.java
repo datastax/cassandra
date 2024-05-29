@@ -41,6 +41,7 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.io.sstable.format.SSTableReaderBuilder.defaultIndexHandleBuilder;
 
@@ -368,6 +369,12 @@ public class BigFormat implements SSTableFormat
         public boolean hasImplicitlyFrozenTuples()
         {
             return false;
+        }
+
+        @Override
+        public ByteComparable.Version getByteComparableVersion()
+        {
+            return ByteComparable.Version.OSS41;
         }
     }
 }

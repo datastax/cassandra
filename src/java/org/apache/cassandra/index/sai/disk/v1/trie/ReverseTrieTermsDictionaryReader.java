@@ -35,7 +35,7 @@ public class ReverseTrieTermsDictionaryReader extends ReverseValueIterator<Rever
 {
     public ReverseTrieTermsDictionaryReader(Rebufferer rebufferer, long root)
     {
-        super(rebufferer, root, true);
+        super(rebufferer, root, true, ByteComparable.Version.OSS41); // TODO hardcoded encoding version
     }
 
     @Override

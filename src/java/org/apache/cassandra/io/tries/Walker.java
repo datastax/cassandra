@@ -55,15 +55,16 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
     protected long lesserBranch;
 
     // Version of the byte comparable conversion to use -- trie-based indices use the 6.0 conversion
-    public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS41;
+    public final ByteComparable.Version byteComparableVersion;
 
     /**
      * Creates a walker. Rebufferer must be aligned and with a buffer size that is at least 4k.
      */
-    public Walker(Rebufferer source, long root)
+    public Walker(Rebufferer source, long root, ByteComparable.Version version)
     {
         this.source = source;
         this.root = root;
+        this.byteComparableVersion = version;
         try
         {
             bh = source.rebuffer(root);
@@ -192,7 +193,7 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
      */
     public int follow(ByteComparable key)
     {
-        ByteSource stream = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
+        ByteSource stream = key.asComparableBytes(byteComparableVersion);
         go(root);
         while (true)
         {
@@ -217,7 +218,7 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
     {
         greaterBranch = NONE;
 
-        ByteSource stream = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
+        ByteSource stream = key.asComparableBytes(byteComparableVersion);
         go(root);
         while (true)
         {
@@ -243,7 +244,7 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
     {
         lesserBranch = NONE;
 
-        ByteSource stream = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
+        ByteSource stream = key.asComparableBytes(byteComparableVersion);
         go(root);
         while (true)
         {
@@ -272,7 +273,7 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
     {
         RESULT payload = null;
 
-        ByteSource stream = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
+        ByteSource stream = key.asComparableBytes(byteComparableVersion);
         go(root);
         while (true)
         {
@@ -310,7 +311,7 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
         greaterBranch = NONE;
         lesserBranch = NONE;
 
-        ByteSource stream = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
+        ByteSource stream = key.asComparableBytes(byteComparableVersion);
         go(root);
         while (true)
         {

@@ -32,14 +32,14 @@ class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterat
 {
     private long currentNode = -1;
 
-    public RowIndexReverseIterator(FileHandle file, long root, ByteComparable start, ByteComparable end)
+    public RowIndexReverseIterator(FileHandle file, long root, ByteComparable start, ByteComparable end, ByteComparable.Version version)
     {
-        super(file.instantiateRebufferer(), root, start, end, ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES);
+        super(file.instantiateRebufferer(), root, start, end, ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES, version);
     }
 
-    public RowIndexReverseIterator(FileHandle file, TrieIndexEntry entry, ByteComparable end)
+    public RowIndexReverseIterator(FileHandle file, TrieIndexEntry entry, ByteComparable end, ByteComparable.Version version)
     {
-        this(file, entry.indexTrieRoot, ByteComparable.EMPTY, end);
+        this(file, entry.indexTrieRoot, ByteComparable.EMPTY, end, version);
     }
 
     /**
