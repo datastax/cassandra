@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.IOException;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointValues;
@@ -34,6 +35,8 @@ import org.apache.lucene.util.packed.PackedLongValues;
  */
 public class BKDTreeRamBuffer implements Accountable
 {
+    @VisibleForTesting
+    public static int MAX_BLOCK_BYTE_POOL_SIZE = Integer.MAX_VALUE;
     // This counter should not be used to track any other allocations, as we use it to prevent block pool overflow
     private final Counter blockBytesUsed;
     private final ByteBlockPool bytes;
@@ -73,7 +76,7 @@ public class BKDTreeRamBuffer implements Accountable
         // be triggered by an addition, and the rest of the space in the final chunk will be wasted, as the bytesUsed
         // counters track block allocation, not the size of additions. This means that we can't pass this check and then
         // fail to add a term.
-        return blockBytesUsed.get() >= Integer.MAX_VALUE;
+        return blockBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE;
     }
 
     public int numRows()

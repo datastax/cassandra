@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.disk;
 import java.nio.ByteBuffer;
 import java.util.NoSuchElementException;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -35,6 +37,8 @@ import org.apache.lucene.util.Counter;
  */
 public class RAMStringIndexer
 {
+    @VisibleForTesting
+    public static int MAX_BLOCK_BYTE_POOL_SIZE = Integer.MAX_VALUE;
     private final AbstractType<?> termComparator;
     private final BytesRefHash termsHash;
     private final RAMPostingSlices slices;
@@ -70,7 +74,7 @@ public class RAMStringIndexer
         // be triggered by an addition, and the rest of the space in the final chunk will be wasted, as the bytesUsed
         // counters track block allocation, not the size of additions. This means that we can't pass this check and then
         // fail to add a term.
-        return termsBytesUsed.get() >= Integer.MAX_VALUE || slicesBytesUsed.get() >= Integer.MAX_VALUE;
+        return termsBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE || slicesBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE;
     }
 
     public boolean isEmpty()

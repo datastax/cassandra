@@ -115,18 +115,27 @@ public class RAMStringIndexerTest extends SaiRandomizedTest
     @Test
     public void testRequiresFlush()
     {
-        // primary behavior we're testing is that exceptions aren't thrown due to overflowing backing structures
-        RAMStringIndexer indexer = new RAMStringIndexer(UTF8Type.instance);
-
-        Assert.assertFalse(indexer.requiresFlush());
-        for (int i = 0; i < Integer.MAX_VALUE; i++)
+        int maxBlockBytePoolSize = RAMStringIndexer.MAX_BLOCK_BYTE_POOL_SIZE;
+        try
         {
-            if (indexer.requiresFlush())
-                break;
-            indexer.add(new BytesRef(String.format("%5000d", i)), i);
+            RAMStringIndexer.MAX_BLOCK_BYTE_POOL_SIZE = 1024 * 1024 * 100;
+            // primary behavior we're testing is that exceptions aren't thrown due to overflowing backing structures
+            RAMStringIndexer indexer = new RAMStringIndexer(UTF8Type.instance);
+
+            Assert.assertFalse(indexer.requiresFlush());
+            for (int i = 0; i < Integer.MAX_VALUE; i++)
+            {
+                if (indexer.requiresFlush())
+                    break;
+                indexer.add(new BytesRef(String.format("%5000d", i)), i);
+            }
+            // If we don't require a flush before MAX_VALUE, the implementation of RAMStringIndexer has sufficiently
+            // changed to warrant changes to the test.
+            Assert.assertTrue(indexer.requiresFlush());
         }
-        // If we don't require a flush before MAX_VALUE, the implementation of RAMStringIndexer has sufficiently
-        // changed to warrant changes to the test.
-        Assert.assertTrue(indexer.requiresFlush());
+        finally
+        {
+            RAMStringIndexer.MAX_BLOCK_BYTE_POOL_SIZE = maxBlockBytePoolSize;
+        }
     }
 }

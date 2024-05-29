@@ -80,20 +80,29 @@ public class BKDTreeRamBufferTest
     @Test
     public void testRequiresFlush()
     {
-        // primary behavior we're testing is that exceptions aren't thrown due to overflowing backing structures
-        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
-
-        Assert.assertFalse(buffer.requiresFlush());
-        for (int i = 0; i < Integer.MAX_VALUE; i++)
+        int maxByteBlockPoolSize = BKDTreeRamBuffer.MAX_BLOCK_BYTE_POOL_SIZE;
+        try
         {
-            if (buffer.requiresFlush())
-                break;
-            byte[] scratch = new byte[Integer.BYTES];
-            NumericUtils.intToSortableBytes(i, scratch, 0);
-            buffer.addPackedValue(i, new BytesRef(scratch));
+            BKDTreeRamBuffer.MAX_BLOCK_BYTE_POOL_SIZE = 1024 * 1024 * 100;
+            // primary behavior we're testing is that exceptions aren't thrown due to overflowing backing structures
+            final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
+
+            Assert.assertFalse(buffer.requiresFlush());
+            for (int i = 0; i < Integer.MAX_VALUE; i++)
+            {
+                if (buffer.requiresFlush())
+                    break;
+                byte[] scratch = new byte[Integer.BYTES];
+                NumericUtils.intToSortableBytes(i, scratch, 0);
+                buffer.addPackedValue(i, new BytesRef(scratch));
+            }
+            // If we don't require a flush before MAX_VALUE, the implementation of BKDTreeRamBuffer has sufficiently
+            // changed to warrant changes to the test.
+            Assert.assertTrue(buffer.requiresFlush());
         }
-        // If we don't require a flush before MAX_VALUE, the implementation of BKDTreeRamBuffer has sufficiently
-        // changed to warrant changes to the test.
-        Assert.assertTrue(buffer.requiresFlush());
+        finally
+        {
+            BKDTreeRamBuffer.MAX_BLOCK_BYTE_POOL_SIZE = maxByteBlockPoolSize;
+        }
     }
 }
