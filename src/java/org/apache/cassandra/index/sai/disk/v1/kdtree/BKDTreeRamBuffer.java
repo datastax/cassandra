@@ -34,7 +34,8 @@ import org.apache.lucene.util.packed.PackedLongValues;
  */
 public class BKDTreeRamBuffer implements Accountable
 {
-    private final Counter bytesUsed;
+    // This counter should not be used to track any other allocations, as we use it to prevent block pool overflow
+    private final Counter blockBytesUsed;
     private final ByteBlockPool bytes;
     private final int pointDimensionCount, pointNumBytes;
     private final int packedBytesLength;
@@ -47,23 +48,27 @@ public class BKDTreeRamBuffer implements Accountable
 
     public BKDTreeRamBuffer(int pointDimensionCount, int pointNumBytes)
     {
-        this.bytesUsed = Counter.newCounter();
+        this.blockBytesUsed = Counter.newCounter();
         this.pointDimensionCount = pointDimensionCount;
         this.pointNumBytes = pointNumBytes;
 
-        this.bytes = new ByteBlockPool(new ByteBlockPool.DirectTrackingAllocator(bytesUsed));
+        this.bytes = new ByteBlockPool(new ByteBlockPool.DirectTrackingAllocator(blockBytesUsed));
 
         packedValue = new byte[pointDimensionCount * pointNumBytes];
         packedBytesLength = pointDimensionCount * pointNumBytes;
 
         docIDsBuilder = PackedLongValues.deltaPackedBuilder(PackedInts.COMPACT);
-        bytesUsed.addAndGet(docIDsBuilder.ramBytesUsed());
     }
 
     @Override
     public long ramBytesUsed()
     {
-        return bytesUsed.get();
+        return docIDsBuilder.ramBytesUsed() + blockBytesUsed.get();
+    }
+
+    public boolean requiresFlush()
+    {
+        return blockBytesUsed.get() >= Integer.MAX_VALUE;
     }
 
     public int numRows()
@@ -80,7 +85,7 @@ public class BKDTreeRamBuffer implements Accountable
             throw new IllegalArgumentException("The value has length=" + value.length + " but should be " + pointDimensionCount * pointNumBytes);
         }
 
-        long startingBytesUsed = bytesUsed.get();
+        long startingBlockBytesUsed = blockBytesUsed.get();
         long startingDocIDsBytesUsed = docIDsBuilder.ramBytesUsed();
 
         docIDsBuilder.add(segmentRowId);
@@ -95,9 +100,9 @@ public class BKDTreeRamBuffer implements Accountable
         numPoints++;
 
         long docIDsAllocatedBytes = docIDsBuilder.ramBytesUsed() - startingDocIDsBytesUsed;
-        long endingBytesAllocated = bytesUsed.addAndGet(docIDsAllocatedBytes);
+        long blockAllocatedBytes = blockBytesUsed.get() - startingBlockBytesUsed;
         
-        return endingBytesAllocated - startingBytesUsed;
+        return docIDsAllocatedBytes + blockAllocatedBytes;
     }
 
     public MutableOneDimPointValues asPointValues()

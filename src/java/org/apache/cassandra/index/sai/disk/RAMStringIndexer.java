@@ -38,7 +38,9 @@ public class RAMStringIndexer
     private final AbstractType<?> termComparator;
     private final BytesRefHash termsHash;
     private final RAMPostingSlices slices;
-    private final Counter bytesUsed;
+    // counters need to be separate so that we can trigger flushes if either ByteBlockPool hits maximum size
+    private final Counter termsBytesUsed;
+    private final Counter slicesBytesUsed;
     
     private int rowCount = 0;
     private int[] lastSegmentRowID = new int[RAMPostingSlices.DEFAULT_TERM_DICT_SIZE];
@@ -46,25 +48,26 @@ public class RAMStringIndexer
     public RAMStringIndexer(AbstractType<?> termComparator)
     {
         this.termComparator = termComparator;
-        bytesUsed = Counter.newCounter();
+        termsBytesUsed = Counter.newCounter();
+        slicesBytesUsed = Counter.newCounter();
 
-        ByteBlockPool termsPool = new ByteBlockPool(new ByteBlockPool.DirectTrackingAllocator(bytesUsed));
+        ByteBlockPool termsPool = new ByteBlockPool(new ByteBlockPool.DirectTrackingAllocator(termsBytesUsed));
 
         termsHash = new BytesRefHash(termsPool);
 
-        slices = new RAMPostingSlices(bytesUsed);
+        slices = new RAMPostingSlices(slicesBytesUsed);
     }
 
     public long estimatedBytesUsed()
     {
-        return bytesUsed.get();
+        return termsBytesUsed.get() + slicesBytesUsed.get();
     }
 
     public boolean requiresFlush()
     {
         // termsPool can't handle more than Integer.MAX_VALUE bytes. These are allocated in chunks, which means
         // the last allocated chunk should put estimatedBytesUsed() at Integer.MAX_VALUE + 1.
-        return estimatedBytesUsed() >= Integer.MAX_VALUE;
+        return termsBytesUsed.get() >= Integer.MAX_VALUE || slicesBytesUsed.get() >= Integer.MAX_VALUE;
     }
 
     public boolean isEmpty()
