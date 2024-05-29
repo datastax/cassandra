@@ -26,8 +26,6 @@ import org.junit.Test;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.cql.VectorTester;
 import org.apache.cassandra.index.sai.disk.v3.V3VectorIndexSearcher;
-import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
-import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.BINARY_QUANTIZATION;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.NONE;
@@ -114,7 +112,7 @@ public class VectorCompressionTest extends VectorTester
     {
         createTable("CREATE TABLE %s " + String.format("(pk int, v vector<float, %d>, PRIMARY KEY(pk))", originalDimension));
         createIndex("CREATE CUSTOM INDEX ON %s(v) " + String.format("USING 'StorageAttachedIndex' WITH OPTIONS = {'source_model': '%s'}", model));
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         for (int i = 0; i < rows; i++)
             execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, randomVector(originalDimension));
