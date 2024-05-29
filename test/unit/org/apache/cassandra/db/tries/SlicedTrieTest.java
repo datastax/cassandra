@@ -82,7 +82,7 @@ public class SlicedTrieTest
     "\000\000\777",
     "\777\777"
     });
-    public static final Comparator<ByteComparable> BYTE_COMPARABLE_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, Trie.BYTE_COMPARABLE_VERSION);
+    public static final Comparator<ByteComparable> BYTE_COMPARABLE_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, Trie.byteComparableVersion);
     private static final int COUNT = 15000;
     Random rand = new Random();
 
@@ -95,7 +95,7 @@ public class SlicedTrieTest
     public void testIntersectRange(int count)
     {
         ByteComparable[] src1 = generateKeys(rand, count);
-        NavigableMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>((bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, Trie.BYTE_COMPARABLE_VERSION));
+        NavigableMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>((bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, Trie.byteComparableVersion));
 
         MemtableTrie<ByteBuffer> trie1 = makeMemtableTrie(src1, content1, true);
 
@@ -106,7 +106,7 @@ public class SlicedTrieTest
         {
             ByteComparable l = rand.nextBoolean() ? MemtableTrieTestBase.generateKey(rand) : src1[rand.nextInt(src1.length)];
             ByteComparable r = rand.nextBoolean() ? MemtableTrieTestBase.generateKey(rand) : src1[rand.nextInt(src1.length)];
-            int cmp = ByteComparable.compare(l, r, Trie.BYTE_COMPARABLE_VERSION);
+            int cmp = ByteComparable.compare(l, r, Trie.byteComparableVersion);
             if (cmp > 0)
             {
                 ByteComparable t = l;

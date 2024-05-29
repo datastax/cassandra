@@ -41,7 +41,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  */
 public class RowMapping
 {
-    public static final RowMapping DUMMY = new RowMapping()
+    public static final RowMapping DUMMY = new RowMapping(null)
     {
         @Override
         public Iterator<Pair<ByteComparable, LongArrayList>> merge(MemtableIndex index) { return Collections.emptyIterator(); }
@@ -76,16 +76,20 @@ public class RowMapping
 
     public int count;
 
-    private RowMapping()
-    {}
+    private final ByteComparable.Version byteComparableVersion;
+
+    private RowMapping(ByteComparable.Version version)
+    {
+        this.byteComparableVersion = version;
+    }
 
     /**
      * Create row mapping for FLUSH operation only.
      */
-    public static RowMapping create(OperationType opType)
+    public static RowMapping create(OperationType opType, ByteComparable.Version version)
     {
         if (opType == OperationType.FLUSH)
-            return new RowMapping();
+            return new RowMapping(version);
         return DUMMY;
     }
 
@@ -151,7 +155,7 @@ public class RowMapping
         assert !complete : "Cannot modify built RowMapping.";
 
         ByteComparable byteComparable = v -> key.asComparableBytes(v);
-        rowMapping.apply(Trie.singleton(byteComparable, sstableRowId), (existing, neww) -> neww);
+        rowMapping.apply(Trie.singleton(byteComparable, sstableRowId, byteComparableVersion), (existing, neww) -> neww);
 
         maxSegmentRowId = Math.max(maxSegmentRowId, sstableRowId);
 

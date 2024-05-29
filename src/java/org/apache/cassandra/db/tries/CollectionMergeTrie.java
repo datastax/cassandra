@@ -23,6 +23,8 @@ import java.util.List;
 
 import com.google.common.collect.Iterables;
 
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+
 /**
  * A merged view of multiple tries.
  *
@@ -41,8 +43,10 @@ class CollectionMergeTrie<T> extends Trie<T>
     private final CollectionMergeResolver<T> resolver;  // only called on more than one input
     protected final Collection<? extends Trie<T>> inputs;
 
-    CollectionMergeTrie(Collection<? extends Trie<T>> inputs, CollectionMergeResolver<T> resolver)
+    CollectionMergeTrie(Collection<? extends Trie<T>> inputs, CollectionMergeResolver<T> resolver, ByteComparable.Version version)
     {
+        super(version);
+        assert inputs.stream().allMatch(t -> t.byteComparableVersion == version);
         this.resolver = resolver;
         this.inputs = inputs;
     }
@@ -351,9 +355,9 @@ class CollectionMergeTrie<T> extends Trie<T>
      */
     static class Distinct<T> extends CollectionMergeTrie<T>
     {
-        Distinct(Collection<? extends Trie<T>> inputs)
+        Distinct(Collection<? extends Trie<T>> inputs, ByteComparable.Version version)
         {
-            super(inputs, throwingResolver());
+            super(inputs, throwingResolver(), version);
         }
 
         @Override

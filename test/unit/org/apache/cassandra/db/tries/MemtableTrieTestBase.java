@@ -53,7 +53,7 @@ public abstract class MemtableTrieTestBase
 
     Random rand = new Random();
 
-    static final ByteComparable.Version VERSION = MemtableTrie.BYTE_COMPARABLE_VERSION;
+    static final ByteComparable.Version VERSION = MemtableTrie.byteComparableVersion;
 
     public static final Comparator<ByteComparable> FORWARD_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, VERSION);
     public static final Comparator<ByteComparable> REVERSE_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(invert(bytes1), invert(bytes2), VERSION);
@@ -505,7 +505,7 @@ public abstract class MemtableTrieTestBase
         trie.forEachEntry(direction, (key, value) -> {
             Assert.assertTrue("Map exhausted first, key " + asString(key), it.hasNext());
             Map.Entry<ByteComparable, ByteBuffer> entry = it.next();
-            assertEquals(0, ByteComparable.compare(entry.getKey(), key, Trie.BYTE_COMPARABLE_VERSION));
+            assertEquals(0, ByteComparable.compare(entry.getKey(), key, Trie.byteComparableVersion));
             assertEquals(entry.getValue(), value);
         });
         Assert.assertFalse("Trie exhausted first", it.hasNext());

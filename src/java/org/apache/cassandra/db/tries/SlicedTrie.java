@@ -54,6 +54,7 @@ public class SlicedTrie<T> extends Trie<T>
 
     public SlicedTrie(Trie<T> source, ByteComparable left, boolean includeLeft, ByteComparable right, boolean includeRight)
     {
+        super(source.byteComparableVersion);
         this.source = source;
         this.left = left;
         this.right = right;
@@ -81,11 +82,11 @@ public class SlicedTrie<T> extends Trie<T>
         };
     }
 
-    static ByteSource openAndMaybeAdd0(ByteComparable key, boolean shouldAdd0)
+    ByteSource openAndMaybeAdd0(ByteComparable key, boolean shouldAdd0)
     {
         if (key == null)
             return null;
-        ByteSource src = key.asComparableBytes(Trie.BYTE_COMPARABLE_VERSION);
+        ByteSource src = key.asComparableBytes(byteComparableVersion);
         if (shouldAdd0)
             return add0(src);
         else
@@ -117,7 +118,7 @@ public class SlicedTrie<T> extends Trie<T>
             if (rightNext == ByteSource.END_OF_STREAM)
             {
                 assert leftSource == null : "Invalid range " + sliceString();
-                return Trie.<T>empty().cursor(direction);
+                return Trie.<T>empty(byteComparableVersion).cursor(direction);
             }
         }
 
@@ -133,8 +134,8 @@ public class SlicedTrie<T> extends Trie<T>
     {
         return String.format("%s%s;%s%s",
                              includeLeft ? "[" : "(",
-                             left.byteComparableAsString(Trie.BYTE_COMPARABLE_VERSION),
-                             right.byteComparableAsString(Trie.BYTE_COMPARABLE_VERSION),
+                             left.byteComparableAsString(byteComparableVersion),
+                             right.byteComparableAsString(byteComparableVersion),
                              includeRight ? "]" : ")");
     }
 

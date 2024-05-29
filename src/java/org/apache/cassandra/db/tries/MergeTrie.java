@@ -38,6 +38,8 @@ class MergeTrie<T> extends Trie<T>
 
     MergeTrie(MergeResolver<T> resolver, Trie<T> t1, Trie<T> t2)
     {
+        super(t1.byteComparableVersion);
+        assert t1.byteComparableVersion == t2.byteComparableVersion;
         this.resolver = resolver;
         this.t1 = t1;
         this.t2 = t2;

@@ -28,8 +28,9 @@ class SingletonTrie<T> extends Trie<T>
     private final ByteComparable key;
     private final T value;
 
-    SingletonTrie(ByteComparable key, T value)
+    SingletonTrie(ByteComparable key, T value, ByteComparable.Version version)
     {
+        super(version);
         this.key = key;
         this.value = value;
     }
@@ -41,7 +42,7 @@ class SingletonTrie<T> extends Trie<T>
 
     class Cursor implements Trie.Cursor<T>
     {
-        ByteSource src = key.asComparableBytes(BYTE_COMPARABLE_VERSION);
+        ByteSource src = key.asComparableBytes(byteComparableVersion);
         int currentDepth = 0;
         int currentTransition = -1;
         int nextTransition = src.next();

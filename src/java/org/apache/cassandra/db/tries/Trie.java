@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.util.Collection;
+import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.function.BiConsumer;
@@ -28,6 +29,8 @@ import com.google.common.collect.ImmutableList;
 
 import org.agrona.concurrent.UnsafeBuffer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+
+import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.LEGACY;
 
 /**
  * Base class for tries.
@@ -58,6 +61,11 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  */
 public abstract class Trie<T>
 {
+    protected Trie(ByteComparable.Version version)
+    {
+        this.byteComparableVersion = version;
+    }
+
     /**
      * A trie cursor.
      *
@@ -275,7 +283,7 @@ public abstract class Trie<T>
     }
 
     // Version of the byte comparable conversion to use for all operations
-    static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS41; // TODO hardcoded encoding version
+    public final ByteComparable.Version byteComparableVersion;
 
     /**
      * Adapter interface providing the methods a {@link Walker} to a {@link Consumer}, so that the latter can be used
@@ -382,9 +390,9 @@ public abstract class Trie<T>
     /**
      * Returns a singleton trie mapping the given byte path to content.
      */
-    public static <T> Trie<T> singleton(ByteComparable b, T v)
+    public static <T> Trie<T> singleton(ByteComparable b, T v, ByteComparable.Version version)
     {
-        return new SingletonTrie<>(b, v);
+        return new SingletonTrie<>(b, v, version);
     }
 
     /**
@@ -536,23 +544,27 @@ public abstract class Trie<T>
      * If there is content for a given key in more than one sources, the resolver will be called to obtain the
      * combination. (The resolver will not be called if there's content from only one source.)
      */
-    public static <T> Trie<T> merge(Collection<? extends Trie<T>> sources, CollectionMergeResolver<T> resolver)
+    public static <T> Trie<T> merge(Collection<? extends Trie<T>> sources, CollectionMergeResolver<T> resolver, ByteComparable.Version version)
     {
         switch (sources.size())
         {
         case 0:
-            return empty();
+            return empty(version);
         case 1:
-            return sources.iterator().next();
+            Trie<T> t = sources.iterator().next();
+            assert t.byteComparableVersion == version;
+            return t;
         case 2:
         {
             Iterator<? extends Trie<T>> it = sources.iterator();
             Trie<T> t1 = it.next();
             Trie<T> t2 = it.next();
+            assert t1.byteComparableVersion == version;
+            assert t2.byteComparableVersion == version;
             return t1.mergeWith(t2, resolver);
         }
         default:
-            return new CollectionMergeTrie<>(sources, resolver);
+            return new CollectionMergeTrie<>(sources, resolver, version);
         }
     }
 
@@ -562,28 +574,37 @@ public abstract class Trie<T>
      *
      * If there is content for a given key in more than one sources, the merge will throw an assertion error.
      */
-    public static <T> Trie<T> mergeDistinct(Collection<? extends Trie<T>> sources)
+    public static <T> Trie<T> mergeDistinct(Collection<? extends Trie<T>> sources, ByteComparable.Version version)
     {
         switch (sources.size())
         {
         case 0:
-            return empty();
+            return empty(version);
         case 1:
-            return sources.iterator().next();
+            Trie<T> t = sources.iterator().next();
+            assert t.byteComparableVersion == version;
+            return t;
         case 2:
         {
             Iterator<? extends Trie<T>> it = sources.iterator();
             Trie<T> t1 = it.next();
             Trie<T> t2 = it.next();
+            assert t1.byteComparableVersion == version;
+            assert t2.byteComparableVersion == version;
             return new MergeTrie.Distinct<>(t1, t2);
         }
         default:
-            return new CollectionMergeTrie.Distinct<>(sources);
+            return new CollectionMergeTrie.Distinct<>(sources, version);
         }
     }
 
-    private static final Trie<Object> EMPTY = new Trie<Object>()
+    private static class EmptyTrie extends Trie<Object>
     {
+        protected EmptyTrie(ByteComparable.Version version)
+        {
+            super(version);
+        }
+
         protected Cursor<Object> cursor(Direction direction)
         {
             return new Cursor<Object>()
@@ -618,9 +639,16 @@ public abstract class Trie<T>
         }
     };
 
+    private static final EnumMap<ByteComparable.Version, Trie<Object>> EMPTY = new EnumMap<>(ByteComparable.Version.class) {
+        {
+            for (ByteComparable.Version version : ByteComparable.Version.values())
+                put(version, new EmptyTrie(version));
+        }
+    };
+
     @SuppressWarnings("unchecked")
-    public static <T> Trie<T> empty()
+    public static <T> Trie<T> empty(ByteComparable.Version version)
     {
-        return (Trie<T>) EMPTY;
+        return (Trie<T>) EMPTY.get(version);
     }
 }

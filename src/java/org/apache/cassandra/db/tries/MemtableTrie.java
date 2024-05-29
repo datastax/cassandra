@@ -871,7 +871,7 @@ public class MemtableTrie<T> extends MemtableReadTrie<T>
                                  R value,
                                  UpsertTransformer<T, ? super R> transformer) throws SpaceExhaustedException
     {
-        apply(Trie.singleton(key, value), transformer);
+        apply(Trie.singleton(key, value, byteComparableVersion), transformer);
     }
 
     /**
@@ -902,7 +902,7 @@ public class MemtableTrie<T> extends MemtableReadTrie<T>
      */
     public <R> void putRecursive(ByteComparable key, R value, final UpsertTransformer<T, R> transformer) throws SpaceExhaustedException
     {
-        int newRoot = putRecursive(root, key.asComparableBytes(BYTE_COMPARABLE_VERSION), value, transformer);
+        int newRoot = putRecursive(root, key.asComparableBytes(byteComparableVersion), value, transformer);
         if (newRoot != root)
             root = newRoot;
     }

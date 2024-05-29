@@ -118,7 +118,7 @@ public class TrieMemoryIndex extends MemoryIndex
                     }
                     else
                     {
-                        data.apply(Trie.singleton(encodedTerm, primaryKey), primaryKeysReducer);
+                        data.apply(Trie.singleton(encodedTerm, primaryKey, data.byteComparableVersion), primaryKeysReducer);
                     }
                 }
                 catch (MemtableTrie.SpaceExhaustedException e)

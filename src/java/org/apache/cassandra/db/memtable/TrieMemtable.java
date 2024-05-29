@@ -188,7 +188,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         List<Trie<BTreePartitionData>> tries = new ArrayList<>(shards.length);
         for (MemtableShard shard : shards)
             tries.add(shard.data);
-        return Trie.mergeDistinct(tries);
+        return Trie.mergeDistinct(tries, MemtableTrie.BYTE_COMPARABLE_VERSION);
     }
 
     protected Factory factory()

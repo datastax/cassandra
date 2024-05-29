@@ -219,8 +219,11 @@ public class MemtableReadTrie<T> extends Trie<T>
     final UnsafeBuffer[] buffers;
     final AtomicReferenceArray<T>[] contentArrays;
 
+    public final static ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS41;
+
     MemtableReadTrie(UnsafeBuffer[] buffers, AtomicReferenceArray<T>[] contentArrays, int root)
     {
+        super(BYTE_COMPARABLE_VERSION);
         this.buffers = buffers;
         this.contentArrays = contentArrays;
         this.root = root;
@@ -885,7 +888,7 @@ public class MemtableReadTrie<T> extends Trie<T>
     public T get(ByteComparable path)
     {
         int n = root;
-        ByteSource source = path.asComparableBytes(BYTE_COMPARABLE_VERSION);
+        ByteSource source = path.asComparableBytes(byteComparableVersion);
         while (!isNull(n))
         {
             int c = source.next();
