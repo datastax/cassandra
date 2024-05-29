@@ -303,17 +303,6 @@ public class LuceneAnalyzerTest extends SAITester
     }
 
     @Test
-    public void testStopFilterNoFormat() throws Throwable
-    {
-        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
-
-        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
-                                            "\t{\"tokenizer\":{\"name\" : \"whitespace\"},\n" +
-                                            "\t \"filters\":[{\"name\":\"stop\", \"args\": {\"words\": \"the,test\"}}]}'}");
-        verifyStopWordsLoadedCorrectly();
-    }
-
-    @Test
     public void testStopFilterWordSet() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
@@ -373,6 +362,119 @@ public class LuceneAnalyzerTest extends SAITester
         waitForIndexQueryable();
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 0, "");
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "some text to analyze");
+        flush();
+        assertRows(execute("SELECT * FROM %s WHERE v : ''"));
+    }
+
+    @Test
+    public void testStopFilterNoFormat() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                   "\t{\"tokenizer\":{\"name\" : \"whitespace\"},\n" +
+                   "\t \"filters\":[{\"name\":\"stop\", \"args\": {\"words\": \"the,test\"}}]}'}");
+        verifyStopWordsLoadedCorrectly();
+    }
+
+    @Test
+    public void testStandardAnalyzerWithFullConfigWithJsonData() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': '{" +
+                    "    \"tokenizer\" : {\"name\" : \"standard\"}," +
+                    "    \"filters\" : [ {\"name\" : \"lowercase\"}] \n" +
+                    "  }','data_parser':'data'}");
+        standardAnalyzerTestWithJsonData();
+    }
+
+    @Test
+    public void testStandardAnalyzerWithBuiltInNameWithJsonData() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(val) " +
+                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'index_analyzer': 'standard','data_parser':'data'}");
+        standardAnalyzerTestWithJsonData();
+    }
+
+    private void standardAnalyzerTestWithJsonData() throws Throwable {
+        waitForIndexQueryable();
+        execute("INSERT INTO %s (id, val) VALUES ('1','{\"data\":\"The quick brown fox jumps over the lazy DOG.\"}')");
+
+        flush();
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' OR val : 'missing'").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'missing1' OR val : 'missing2'").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'dog' AND val : 'missing'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' AND val : 'lazy'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' AND val : 'quick' AND val : 'fox'").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' AND val : 'quick' OR val : 'missing'").size());
+
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' AND (val : 'quick' OR val : 'missing')").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'missing' AND (val : 'quick' OR val : 'dog')").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'dog' OR (val : 'quick' AND val : 'missing')").size());
+        assertEquals(1, execute("SELECT * FROM %s WHERE val : 'missing' OR (val : 'quick' AND val : 'dog')").size());
+        assertEquals(0, execute("SELECT * FROM %s WHERE val : 'missing' OR (val : 'quick' AND val : 'missing')").size());
+
+        // EQ operator is not supported for analyzed columns unless ALLOW FILTERING is used
+        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE val = 'dog'")).isInstanceOf(InvalidRequestException.class);
+        assertEquals(1, execute("SELECT * FROM %s WHERE val = '{\"data\":\"The quick brown fox jumps over the lazy DOG.\"}' ALLOW FILTERING").size());
+        // EQ is a raw equality check, so a token like 'dog' should not return any results
+        assertEquals(0, execute("SELECT * FROM %s WHERE val = 'dog' ALLOW FILTERING").size());
+    }
+
+    @Test
+    public void testStopFilterNoFormatWithJsonData() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                   "\t{\"tokenizer\":{\"name\" : \"whitespace\"},\n" +
+                   "\t \"filters\":[{\"name\":\"stop\", \"args\": {\"words\": \"the,test\"}}]}','data_parser':'data'}");
+        verifyStopWordsLoadedCorrectlyWithJsonData();
+    }
+
+    @Test
+    public void testStopFilterWordSetWithJsonData() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+
+        executeNet("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'\n" +
+                   "\t{\"tokenizer\":{\"name\" : \"whitespace\"},\n" +
+                   "\t \"filters\":[{\"name\":\"stop\", \"args\": {\"words\": \"the, test\", \"format\": \"wordset\"}}]}','data_parser':'data'}");
+        verifyStopWordsLoadedCorrectlyWithJsonData();
+    }
+
+    private void verifyStopWordsLoadedCorrectlyWithJsonData() throws Throwable
+    {
+        waitForIndexQueryable();
+
+        execute("INSERT INTO %s (id, val) VALUES ('1', '{\"data\":\"the big test\"}')");
+
+        flush();
+
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the'"));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the test'"));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'test'"));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'the big'"), row("1"));
+        assertRows(execute("SELECT id FROM %s WHERE val : 'big'"), row("1"));
+        // the extra words shouldn't change the outcome because tokenizer is whitespace and tokens are matched then unioned
+        assertRows(execute("SELECT id FROM %s WHERE val : 'test some other words'"));
+    }
+
+    @Test
+    public void testEmptyQueryStringWithJsonData() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer':'standard'}");
+        waitForIndexQueryable();
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 0, "{}");
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "{\"data\":\"some text to analyze\"}");
         flush();
         assertRows(execute("SELECT * FROM %s WHERE v : ''"));
     }

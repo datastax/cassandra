@@ -209,7 +209,8 @@ public class StorageAttachedIndex implements Index
                                                                      IndexWriterConfig.SOURCE_MODEL,
                                                                      IndexWriterConfig.OPTIMIZE_FOR,
                                                                      LuceneAnalyzer.INDEX_ANALYZER,
-                                                                     LuceneAnalyzer.QUERY_ANALYZER);
+                                                                     LuceneAnalyzer.QUERY_ANALYZER,
+                                                                     LuceneAnalyzer.DATA_PARSER);
 
     // this does not include vectors because each Vector declaration is a separate type instance
     public static final Set<CQL3Type> SUPPORTED_TYPES = ImmutableSet.of(CQL3Type.Native.ASCII, CQL3Type.Native.BIGINT, CQL3Type.Native.DATE,

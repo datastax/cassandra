@@ -135,7 +135,7 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
 
                 public AbstractAnalyzer create()
                 {
-                    return new LuceneAnalyzer(type, analyzer, options);
+                    return new LuceneAnalyzer(type, analyzer, options, JSONAnalyzerParser.dataParser(options.get(LuceneAnalyzer.DATA_PARSER)));
                 }
             };
         }

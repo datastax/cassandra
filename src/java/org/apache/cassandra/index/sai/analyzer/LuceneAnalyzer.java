@@ -43,6 +43,7 @@ public class LuceneAnalyzer extends AbstractAnalyzer
 {
     public static final String INDEX_ANALYZER = "index_analyzer";
     public static final String QUERY_ANALYZER = "query_analyzer";
+    public static final String DATA_PARSER = "data_parser";
     private AbstractType<?> type;
     private boolean hasNext = false;
 
@@ -52,12 +53,14 @@ public class LuceneAnalyzer extends AbstractAnalyzer
     private TermToBytesRefAttribute termAttr;
     private final BytesRefBuilder bytesBuilder = new BytesRefBuilder();
     private final Map<String, String> options;
+    private final DataParser parser;
 
-    public LuceneAnalyzer(AbstractType<?> type, Analyzer analyzer, Map<String, String> options)
+    public LuceneAnalyzer(AbstractType<?> type, Analyzer analyzer, Map<String, String> options, DataParser parser)
     {
         this.type = type;
         this.analyzer = analyzer;
         this.options = options;
+        this.parser = parser;
     }
 
     @Override
@@ -130,6 +133,8 @@ public class LuceneAnalyzer extends AbstractAnalyzer
     {
         try
         {
+            //Parse data if needed
+            input = parser.parse(input);
             // the following uses a byte[] and char[] buffer to reduce object creation
             BytesRefUtil.copyBufferToBytesRef(input, bytesBuilder);
 

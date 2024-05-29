@@ -19,7 +19,10 @@
 package org.apache.cassandra.index.sai.analyzer;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
@@ -149,6 +152,16 @@ public class JSONAnalyzerParser
         }
         return builder.build();
     }
+
+    public static DataParser dataParser(String fields)
+    {
+        if(fields == null){
+            return DefaultParser.INSTANCE;
+        }
+        return new JsonFieldsParser(fields);
+    }
+
+
 
     private static Analyzer matchBuiltInAnalzyer(String maybeAnalyzer) {
         for (BuiltInAnalyzers analyzer : BuiltInAnalyzers.values()) {

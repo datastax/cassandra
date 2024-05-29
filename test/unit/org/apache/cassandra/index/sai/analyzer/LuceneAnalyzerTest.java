@@ -53,7 +53,7 @@ public class LuceneAnalyzerTest
                       "}\n";
         String testString = "pánové";
         String[] expected = new String[]{ "pán" };
-        List<String> list = tokenize(testString, json);
+        List<String> list = tokenize(testString, json, null);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
@@ -64,7 +64,7 @@ public class LuceneAnalyzerTest
                       "\"tokenizer\":{\"name\":\"simplepattern\", \"args\":{\"pattern\":\"[0123456789]{3}\"}}}";
         String testString = "fd-786-335-514-x";
         String[] expected = new String[]{ "786", "335", "514"  };
-        List<String> list = tokenize(testString, json);
+        List<String> list = tokenize(testString, json, null);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
@@ -77,7 +77,7 @@ public class LuceneAnalyzerTest
                       "}";
         String testString = "DoG";
         String[] expected = new String[]{ "do", "dog", "og" };
-        List<String> list = tokenize(testString, json);
+        List<String> list = tokenize(testString, json, null);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
@@ -92,7 +92,7 @@ public class LuceneAnalyzerTest
         String testString = "DoGs";
         // Default minGramSize is 3
         String[] expected = new String[]{ "dog", "dogs", "ogs" };
-        List<String> list = tokenize(testString, json);
+        List<String> list = tokenize(testString, json, null);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
@@ -105,7 +105,7 @@ public class LuceneAnalyzerTest
                       "}";
         String testString = "dogs withering in the windy";
         String[] expected = new String[]{ "dog", "wither", "in", "the", "windi" };
-        List<String> list = tokenize(testString, json);
+        List<String> list = tokenize(testString, json, null);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
@@ -118,7 +118,7 @@ public class LuceneAnalyzerTest
                       "}";
         String testString = "apples orcharding";
         String[] expected = new String[]{ "appl", "orchard"};
-        List<String> list = tokenize(testString, json);
+        List<String> list = tokenize(testString, json, null);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
@@ -133,7 +133,7 @@ public class LuceneAnalyzerTest
         // Put result in the middle to make sure that one,stopword and test are broken up and applied individually
         String testString = "one,stopword result test";
         String[] expected = new String[]{ "result" };
-        List<String> list = tokenize(testString, json);
+        List<String> list = tokenize(testString, json, null);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
@@ -148,7 +148,7 @@ public class LuceneAnalyzerTest
         // 'one stopword' is a single stopword, so it gets filtered out (note that the tokenizer is keyword, so
         // it doesn't get broken up into multiple tokens)
         String testString = "one stopword";
-        List<String> list = tokenize(testString, json);
+        List<String> list = tokenize(testString, json, null);
         assertArrayEquals(new String[]{}, list.toArray(new String[0]));
     }
 
@@ -159,7 +159,7 @@ public class LuceneAnalyzerTest
         String json = "{\"tokenizer\":{\"name\" : \"keyword\"}," +
                       "\"filters\":[{\"name\":\"synonym\", \"args\": " +
                       "{\"words\": \"as => like\"}}]}";
-        tokenize("irrelevant test string", json);
+        tokenize("irrelevant test string", json, null);
     }
 
     @Test
@@ -172,7 +172,7 @@ public class LuceneAnalyzerTest
                       "{\"synonyms\": \"as => like\", \"analyzer\":\"" + WhitespaceAnalyzer.class.getName() + "\"}}]}";
         String testString = "as";
         String[] expected = new String[]{ "like" };
-        List<String> list = tokenize(testString, json);
+        List<String> list = tokenize(testString, json, null);
         assertArrayEquals(expected, list.toArray(new String[0]));
     }
 
@@ -184,13 +184,67 @@ public class LuceneAnalyzerTest
         String json = "{\"tokenizer\":{\"name\" : \"keyword\"}," +
                       "\"filters\":[{\"name\":\"synonym\", \"args\": " +
                       "{\"synonyms\": \"as => like\", \"analyzer\":\"not-a-class\"}}]}";
-        tokenize("irrelevant text", json);
+        tokenize("irrelevant text", json, null);
     }
 
-    public static List<String> tokenize(String testString, String json) throws Exception
+    //Json data test cases
+    @Test
+    public void testPatternWithJsonData() throws Exception
+    {
+        String json = "{\n" +
+                      "\"tokenizer\":{\"name\":\"simplepattern\", \"args\":{\"pattern\":\"[0123456789]{3}\"}}}";
+        String dataParserFields = "data";
+        String testString = "{\"_id\": \"id1\", \"data\" : \"fd-786-335-514-x\"}";
+        String[] expected = new String[]{ "786", "335", "514"  };
+        List<String> list = tokenize(testString, json, dataParserFields);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    @Test
+    public void testPatternWithNoJsonData() throws Exception
+    {
+        String json = "{\n" +
+                      "\"tokenizer\":{\"name\":\"simplepattern\", \"args\":{\"pattern\":\"[0123456789]{3}\"}}}";
+        String dataParserFields = "data";
+        String testString = "{\"_id\": \"id1\", \"data1\" : \"fd-786-335-514-x\"}";
+        String[] expected = new String[]{};
+        List<String> list = tokenize(testString, json, dataParserFields);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    @Test
+    public void testPorterStem1WithJsonData() throws Exception
+    {
+        String json = "{\n" +
+                      "\"tokenizer\":{\"name\":\"whitespace\"},\n" +
+                      "\"filters\":[{\"name\":\"porterstem\"}]\n" +
+                      "}";
+        String dataParserFields = "data";
+        String testString = "{\"_id\": \"id2\", \"data\" : \"dogs withering in the windy\"}";
+
+        String[] expected = new String[]{ "dog", "wither", "in", "the", "windi" };
+        List<String> list = tokenize(testString, json, dataParserFields);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    @Test
+    public void testNgramWithJsonData() throws Exception
+    {
+        String json = "{\n" +
+                      "\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}},\n" +
+                      "\"filters\":[{\"name\":\"lowercase\"}]\n" +
+                      "}";
+        String testString = "{\"_id\": \"id2\", \"data\" : \"DoG\"}";
+        String dataParserFields = "data";
+        String[] expected = new String[]{ "do", "dog", "og" };
+        List<String> list = tokenize(testString, json, dataParserFields);
+        assertArrayEquals(expected, list.toArray(new String[0]));
+    }
+
+    public static List<String> tokenize(String testString, String json, String dataParserFields) throws Exception
     {
         Analyzer luceneAnalyzer = JSONAnalyzerParser.parse(json);
-        LuceneAnalyzer analyzer = new LuceneAnalyzer(UTF8Type.instance, luceneAnalyzer, new HashMap<String, String>());
+        LuceneAnalyzer analyzer = new LuceneAnalyzer(UTF8Type.instance, luceneAnalyzer, new HashMap<String, String>(), JSONAnalyzerParser.dataParser(dataParserFields));
 
         ByteBuffer toAnalyze = ByteBuffer.wrap(testString.getBytes(Charsets.UTF_8));
         analyzer.reset(toAnalyze);
