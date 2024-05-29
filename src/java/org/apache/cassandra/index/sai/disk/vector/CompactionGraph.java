@@ -32,6 +32,8 @@ import java.util.concurrent.ForkJoinPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.disk.RandomAccessReader;
+import io.github.jbellis.jvector.disk.ReaderSupplier;
 import io.github.jbellis.jvector.disk.SimpleReader;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.disk.Feature;
@@ -71,6 +73,7 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
@@ -277,7 +280,8 @@ public class CompactionGraph implements Closeable, Accountable
             writer.writeHeader();
             long postingsOffset = postingsOutput.getFilePointer();
             var es = Executors.newSingleThreadExecutor();
-            var index = OnDiskGraphIndex.load(new SimpleReader.Supplier(writer.getPath()), termsOffset);
+            var indexHandle = descriptor.createPerIndexFileHandle(IndexComponent.TERMS_DATA, context);
+            var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset);
             var postingsFuture = es.submit(() -> {
                 try (var view = index.getView())
                 {
@@ -289,11 +293,12 @@ public class CompactionGraph implements Closeable, Accountable
             // complete internal graph clean up
             builder.cleanup();
 
-            // wait for postings to finish writing
+            // wait for postings to finish writing and clean up related resources
             long postingsEnd = postingsFuture.get();
             long postingsLength = postingsEnd - postingsOffset;
             es.shutdown();
             index.close();
+            indexHandle.close();
 
             // write the graph edge lists and optionally fused adc features
             var start = System.nanoTime();
