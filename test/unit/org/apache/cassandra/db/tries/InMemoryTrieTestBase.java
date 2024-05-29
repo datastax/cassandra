@@ -46,6 +46,9 @@ public abstract class InMemoryTrieTestBase
     // Do not commit the code with VERBOSE = true.
     private static final boolean VERBOSE = false;
 
+    // Set to true by some tests that need prefix-free keys.
+    static boolean prefixFree = false;
+
     private static final int COUNT = 100000;
     private static final int KEY_CHOICE = 25;
     private static final int MIN_LENGTH = 10;
@@ -692,7 +695,8 @@ public abstract class InMemoryTrieTestBase
             while (p < m)
                 bytes[p++] = (byte) r2.nextInt(256);
         }
-        return ByteComparable.fixedLength(bytes);
+        return prefixFree ? v -> ByteSource.withTerminator(ByteSource.TERMINATOR, ByteSource.of(bytes, v))
+                          : ByteComparable.fixedLength(bytes);
     }
 
     static String asString(ByteComparable bc)

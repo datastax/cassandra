@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
@@ -64,7 +65,11 @@ public class MemtableTrieWriteBench
             trie.putRecursive(ByteComparable.fixedLength(buf), Byte.valueOf((byte) (l >> 56)), resolver);
         }
         if (PRINT_SIZES)
-            System.out.println(trie.valuesCount());
+        {
+            System.out.println(String.format("Size on heap %s off heap %s",
+                                             FBUtilities.prettyPrintMemory(trie.sizeOnHeap()),
+                                             FBUtilities.prettyPrintMemory(trie.sizeOffHeap())));
+        }
         bh.consume(trie);
     }
 
@@ -81,7 +86,11 @@ public class MemtableTrieWriteBench
             trie.putRecursive(ByteComparable.fixedLength(buf), Byte.valueOf(buf[0]), resolver);
         }
         if (PRINT_SIZES)
-            System.out.println(trie.valuesCount());
+        {
+            System.out.println(String.format("Size on heap %s off heap %s",
+                                             FBUtilities.prettyPrintMemory(trie.sizeOnHeap()),
+                                             FBUtilities.prettyPrintMemory(trie.sizeOffHeap())));
+        }
         bh.consume(trie);
     }
 
@@ -98,7 +107,11 @@ public class MemtableTrieWriteBench
             trie.putSingleton(ByteComparable.fixedLength(buf), Byte.valueOf((byte) (l >> 56)), resolver);
         }
         if (PRINT_SIZES)
-            System.out.println(trie.valuesCount());
+        {
+            System.out.println(String.format("Size on heap %s off heap %s",
+                                             FBUtilities.prettyPrintMemory(trie.sizeOnHeap()),
+                                             FBUtilities.prettyPrintMemory(trie.sizeOffHeap())));
+        }
         bh.consume(trie);
     }
 
@@ -115,7 +128,11 @@ public class MemtableTrieWriteBench
             trie.putSingleton(ByteComparable.fixedLength(buf), Byte.valueOf(buf[0]), resolver);
         }
         if (PRINT_SIZES)
-            System.out.println(trie.valuesCount());
+        {
+            System.out.println(String.format("Size on heap %s off heap %s",
+                                             FBUtilities.prettyPrintMemory(trie.sizeOnHeap()),
+                                             FBUtilities.prettyPrintMemory(trie.sizeOffHeap())));
+        }
         bh.consume(trie);
     }
 }

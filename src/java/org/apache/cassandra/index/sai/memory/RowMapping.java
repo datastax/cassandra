@@ -151,7 +151,7 @@ public class RowMapping
         assert !complete : "Cannot modify built RowMapping.";
 
         ByteComparable byteComparable = v -> key.asComparableBytes(v);
-        rowMapping.apply(Trie.singleton(byteComparable, sstableRowId), (existing, neww) -> neww);
+        rowMapping.putSingleton(byteComparable, sstableRowId, (existing, neww) -> neww);
 
         maxSegmentRowId = Math.max(maxSegmentRowId, sstableRowId);
 

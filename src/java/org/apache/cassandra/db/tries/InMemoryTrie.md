@@ -26,6 +26,8 @@ The main features of its implementation are:
 - using nodes of several different types for efficiency
 - support for content on any node, including intermediate (prefix)
 - support for writes from a single mutator thread concurrent with multiple readers
+- various consistency and atomicity guarantees for readers
+- memory management, off-heap or on-heap
 - maximum trie size of 2GB
 
 
@@ -289,7 +291,7 @@ bytes, thus this splitting can add ~15% overhead. However, real data often has a
 use of to avoid creating some of the blocks, e.g. if the trie encodes US-ASCII or UTF-encoded strings where some
 character ranges are not allowed at all, and others are prevalent. Another benefit is that to change a transition while
 preserving the previous state of the node for concurrent readers we have to only copy three blocks and not the entire
-range of children (applications of this will be given later).
+range of children (applications of this will be given in the [Mutation](#mutation) section).
 
 As an example, suppose we need to add a `0x51` `Q` transition to `0x455` to the 6-children sparse node from the previous
 section. This will generate the following structure:
@@ -540,7 +542,8 @@ Note that if we perform multiple mutations in sequence, and a reader happens to 
 order), such reader may see only the mutation that is ahead of it _in iteration order_, which is not necessarily the
 mutation that happened first. For the example above, if we also inserted `trespass`, a reader thread that was paused
 at `0x018` in a forward traversal and wakes up after both insertions have completed will see `trespass`, but _will not_
-see `traverse` even though it was inserted earlier.
+see `traverse` even though it was inserted earlier. This inconsistency is often undesirable; we will describe a
+method of avoiding it in one of the next paragraphs.
 
 ### In-place modifications
 
@@ -701,6 +704,10 @@ iteration processes a child, we apply the update to the node, which may happen i
 the original `existingNode`, it was pointing to an unreachable copied node which will remain unreachable as we will only
 attach the newer version.
 
+For reasons to be described below, copying of existing reachable nodes may be enforced. The test `updatedNode
+ == existingNode` can be used to tell if the node is indeed reachable; if we have copied it already there is no need to
+ copy it again to update for a new child (note: we may still need to copy reachable mid or end cells in `Split` nodes).
+
 After all modifications coming as the result of application of child branches have been applied, we have an
 `updatedNode` that reflects all. As we ascend we apply that new value to the parent's `updatedNode`.
 
@@ -722,6 +729,52 @@ manages to attach `truck`;
 - a reading thread that iterated to `tree` (while `traverse` was not yet attached) and paused, will see `truck` if the
 mutating thread applies the update during the pause.
 
+### Atomicity
+
+Atomicity of writes is usually a desirable property. Atomicity means that readers can see either none of the contents
+of a mutation, or all of them, i.e. that they can never see some part of an update and miss another.
+
+We can achieve this by making sure that the application of a mutation has only one attachment point. This is always the
+case for single-path updates (`putRecursive` or `apply` where no mutation node has more than one child). We can achieve
+the same for branching updates if we "force-copy" all memtable trie nodes at or below the topmost branching node of
+the mutation trie.
+
+This ensures that any partially applied changes are only done in unreachable copy nodes, while concurrent readers
+continue working on the originals. Once the branch is fully prepared, we attach it using one in-place write which makes
+the whole of it visible.
+
+The example above with atomic writes will be done as
+
+![graph](InMemoryTrie.md.a2.svg)
+
+### Consistency
+
+The same idea can also be used to enforce sequential consistency, defined here as the property that all readers that see
+an update must also be able to see all updates that happened before it (alternatively, if a reader does not see an
+update, it will not see any update that was applied after it in the order of execution of the mutating thread).
+
+Inconsistencies happen because, while a reader is traversing through it, a branch can change at random places, some of
+which may be before or after the reader's position in iteration order. We can avoid this problem if we ensure that the
+snapshot the reader is operating on does not change.
+
+To do this, we must force-copy any node we update, until the modification proceeds to the root pointer, which we then
+update to the new value (i.e. we force the attachment point for the mutation to be the root pointer). Any reader who has
+already read the root pointer will not see any updates that apply after that point in time. Any reader who reads the new
+pointer will see everything that the mutation thread did until it wrote that pointer, i.e. the last mutation and all
+mutations that precede it.
+
+![graph](InMemoryTrie.md.a3.svg)
+
+At the end of the processing of this example, the root pointer is written volatile to the new value `0x13A`. Although we
+maintain a full snapshot of the trie, we did not need to copy all nodes, only the ones that were touched by the update
+(i.e. the extra space is proportional to the update size, not to the size of the recipient trie).
+
+Consistency can also be applied below a point selected by the user (e.g. below user-identifiable metadata). In this case
+the snapshot is preserved only for nodes at or below the identified point, i.e. force-copying applies at that level
+and below, and the attachment point of any update is above the identified point &mdash; readers who see the new link
+must also see anything that the mutation thread did below that point, including any mutation that preceded the last and
+all modified content in the protected branch.
+
 ### Handling prefix nodes
 
 The descriptions above were given without prefix nodes. Handling prefixes is just a little complication over the update
@@ -732,7 +785,7 @@ To do this we expand the state tracked to:
   nodes like a prefix with no child) and is the base for all child updates (i.e. it takes the role of
   `existingNode` in the descriptions above),
 - `updatedPostContentNode` which is the node as changed/copied after children modifications are applied,
-- `contentIndex` which is the index in the content array for the result of merging existing and newly introduced 
+- `contentIndex` which is the index in the content array for the result of merging existing and newly introduced
   content, (Note: The mutation content is only readable when the cursor enters the node, and we can only attach it when
   we ascend from it.)
 - `transition` remains as before.
