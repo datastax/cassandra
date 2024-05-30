@@ -23,7 +23,6 @@ package org.apache.cassandra.sensors;
  */
 public enum Type
 {
-    CLIENT_BYTES,
     INTERNODE_BYTES,
 
     READ_BYTES,
