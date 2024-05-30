@@ -64,6 +64,16 @@ public final class SensorsCustomParams
      * To support batch writes, table name is encoded in the following format: INDEX_WRITE_BYTES_TABLE."table"
      */
     public static final String INDEX_WRITE_BYTES_TABLE_TEMPLATE = "INDEX_WRITE_BYTES_TABLE.%s";
+    /**
+     * The per-request internode message bytes received and sent by the writer for a given keyspace and table.
+     * To support batch writes, table name is encoded in the following format: INTERNODE_MSG_BYTES_REQUEST."table"
+     */
+    public static final String INTERNODE_MSG_BYTES_REQUEST_TEMPLATE = "INTERNODE_MSG_BYTES_REQUEST.%s";
+    /**
+     * The total internode message bytes received by the writer or coordinator for a given keyspace and table.
+     * To support batch writes, table name is encoded in the following format: INTERNODE_MSG_BYTES_TABLE."table"
+     */
+    public static final String INTERNODE_MSG_BYTES_TABLE_TEMPLATE = "INTERNODE_MSG_BYTES_TABLE.%s";
 
     private SensorsCustomParams()
     {
@@ -106,5 +116,15 @@ public final class SensorsCustomParams
     public static String encodeTableInIndexWriteBytesTableParam(String tableName)
     {
         return String.format(INDEX_WRITE_BYTES_TABLE_TEMPLATE, tableName);
+    }
+
+    public static String encodeTableInInternodeBytesRequestParam(String tableName)
+    {
+        return String.format(INTERNODE_MSG_BYTES_REQUEST_TEMPLATE, tableName);
+    }
+
+    public static String encodeTableInInternodeBytesTableParam(String tableName)
+    {
+        return String.format(INTERNODE_MSG_BYTES_TABLE_TEMPLATE, tableName);
     }
 }
