@@ -497,6 +497,8 @@ public class Message<T>
 
         private boolean hasId;
 
+        private Message cachedMessage;
+
         private Builder()
         {
         }
@@ -604,7 +606,31 @@ public class Message<T>
             if (payload == null)
                 throw new IllegalArgumentException();
 
-            return new Message<>(new Header(hasId ? id : nextId(), verb, from, createdAtNanos, expiresAtNanos, flags, params), payload);
+            return doBuild(hasId ? id : nextId());
+        }
+
+        public int currentPayloadSize(int version)
+        {
+            // use dummy id just for the sake of computing the serialized size
+            Message<T> tmp = doBuild(0);
+            cachedMessage = tmp;
+            return tmp.payloadSize(version);
+        }
+
+        private Message<T> doBuild(long id)
+        {
+            if (verb == null)
+                throw new IllegalArgumentException();
+            if (from == null)
+                throw new IllegalArgumentException();
+            if (payload == null)
+                throw new IllegalArgumentException();
+
+            Message<T> tmp = new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, params), payload);
+            if (cachedMessage != null)
+                tmp.maybeCachePayloadSize(cachedMessage);
+
+            return tmp;
         }
     }
 
@@ -1455,7 +1481,7 @@ public class Message<T>
     private int payloadSizeSG10 = -1;
     private int payloadSizeDSE68 = -1;
 
-    private int payloadSize(int version)
+    public int payloadSize(int version)
     {
         switch (version)
         {
@@ -1485,6 +1511,25 @@ public class Message<T>
                 return payloadSizeDSE68;
             default:
                 throw new IllegalStateException();
+        }
+    }
+
+    protected void maybeCachePayloadSize(Message other)
+    {
+        if (payload == other.payload)
+        {
+            if (other.payloadSize30 > 0)
+                payloadSize30 = other.payloadSize30;
+            if (other.payloadSize3014 > 0)
+                payloadSize3014 = other.payloadSize3014;
+            if (other.payloadSize40 > 0)
+                payloadSize40 = other.payloadSize40;
+            if (other.payloadSize41 > 0)
+                payloadSize41 = other.payloadSize41;
+            if (other.payloadSizeSG10 > 0)
+                payloadSizeSG10 = other.payloadSizeSG10;
+            if (other.payloadSizeDSE68 > 0)
+                payloadSizeDSE68 = other.payloadSizeDSE68;
         }
     }
 
