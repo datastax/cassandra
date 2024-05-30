@@ -32,6 +32,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableSet;
@@ -98,6 +99,13 @@ public class ReplicaPlans
     private static final Range<Token> FULL_TOKEN_RANGE = new Range<>(DatabaseDescriptor.getPartitioner().getMinimumToken(), DatabaseDescriptor.getPartitioner().getMinimumToken());
 
     private static final int REQUIRED_BATCHLOG_REPLICA_COUNT = Math.min(2, CassandraRelevantProperties.REQUIRED_BATCHLOG_REPLICA_COUNT.getInt());
+
+    static
+    {
+        int batchlogReplicaCount = CassandraRelevantProperties.REQUIRED_BATCHLOG_REPLICA_COUNT.getInt();
+        Preconditions.checkArgument(1 <= batchlogReplicaCount && batchlogReplicaCount <= 2, "%s only accepts values of 1 or 2.",  CassandraRelevantProperties.REQUIRED_BATCHLOG_REPLICA_COUNT.getKey());
+        logger.warn("System property {} was set to {} but is capped at 2.", CassandraRelevantProperties.REQUIRED_BATCHLOG_REPLICA_COUNT.getKey(), batchlogReplicaCount);
+    }
 
     public static boolean isSufficientLiveReplicasForRead(AbstractReplicationStrategy replicationStrategy, ConsistencyLevel consistencyLevel, Endpoints<?> liveReplicas)
     {

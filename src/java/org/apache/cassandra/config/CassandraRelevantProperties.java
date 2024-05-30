@@ -465,7 +465,7 @@ public enum CassandraRelevantProperties
     TRIE_INDEX_FORMAT_VERSION("cassandra.trie_index_format_version", "cc"),
 
     /**
-     * Number of replicas required to store batchlog for atomicity, at most 2
+     * Number of replicas required to store batchlog for atomicity, only accepts values of 1 or 2.
      */
     REQUIRED_BATCHLOG_REPLICA_COUNT("cassandra.batchlog.required_replica_count", "2");
 
