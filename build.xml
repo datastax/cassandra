@@ -274,6 +274,7 @@
     <pathconvert property="_jvm8_test_arg_items_concat" refid="_jvm8_test_arg_items" pathsep=" "/>
     <resources id="_jvm11_test_arg_items">
         <!--<string>-XX:-CMSClassUnloadingEnabled</string>-->
+        <string>-Djava.security.manager=allow</string>
         <string>-Dio.netty.tryReflectionSetAccessible=true</string>
     </resources>
     <pathconvert property="_jvm11_test_arg_items_concat" refid="_jvm11_test_arg_items" pathsep=" "/>
