@@ -54,7 +54,7 @@ public class RebuildWithImmutableComponentsTest extends AbstractRebuildAndImmuta
             // assertions, but good sanity check (and somewhat test the `activeComponents` method too).
             assertTrue(SSTable.readTOC(sstable.descriptor).containsAll(indexGroup.activeComponents(sstable)));
 
-            IndexDescriptor descriptor = IndexDescriptor.create(sstable);
+            IndexDescriptor descriptor = IndexDescriptor.load(sstable, Set.of(context));
             assertEquals(1, descriptor.perSSTableComponents().generation());
             assertEquals(1, descriptor.perIndexComponents(context).generation());
 

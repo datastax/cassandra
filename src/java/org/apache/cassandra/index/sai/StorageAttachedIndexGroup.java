@@ -107,7 +107,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     }
 
     @Override
-    public Set<Index> getIndexes()
+    public Set<StorageAttachedIndex> getIndexes()
     {
         return ImmutableSet.copyOf(indices);
     }
@@ -136,14 +136,14 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             // make sure this does not clear the `contexts` collection below (since it exists to be used after the clear).
             Collection<SSTableContext> contexts = new ArrayList<>(contextManager.allContexts());
             contexts.forEach(context -> {
-                var components = context.indexDescriptor.perSSTableComponents();
+                var components = context.usedPerSSTableComponents();
                 context.sstable.unregisterComponents(components.allAsCustomComponents(), baseCfs.getTracker());
             });
 
             contextManager.clear();
 
             contexts.forEach(context -> {
-                context.indexDescriptor.perSSTableComponents().forWrite().forceDeleteAllComponents();
+                context.usedPerSSTableComponents().forWrite().forceDeleteAllComponents();
             });
         }
     }
@@ -239,10 +239,10 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     @Override
     public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount)
     {
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, tableMetadata);
+        IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);
         try
         {
-            return new StorageAttachedIndexWriter(indexDescriptor, indices, tracker, keyCount);
+            return new StorageAttachedIndexWriter(indexDescriptor, tableMetadata, indices, tracker, keyCount);
         }
         catch (Throwable t)
         {
@@ -262,50 +262,15 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     }
 
     @Override
-    public Set<Component> componentsForNewBuid(Descriptor descriptor, TableMetadata metadata)
+    public Set<Component> componentsForNewSSTable()
     {
-        return componentsForNewBuid(descriptor, metadata, indices);
-    }
-
-    static Set<Component> componentsForNewBuid(Descriptor descriptor, TableMetadata metadata, Collection<StorageAttachedIndex> indices)
-    {
-        // The components created depends, amongst other things, on the generation that needs to be used for the new
-        // build (which depends on the version, but that's always the latest for new builds). That generation is always
-        // 0 for new sstables, but may not be for rebuilds. To handle that, we rely on the same logic used when we do
-        // write the new components (`IndexDescriptor.newPerSSTableGroupWriter`/`IndexDescriptor.newPerIndexGroupWriter`),
-        // even if we don't write anything at that point.
-        // Do note that we create an `IndexDescriptor` from scratch, rather than getting the one from the context
-        // manager, because in some cases, the underlying sstable will simply not exist yet (and when that's the case,
-        // we don't want to populate the context just yet). It will exist if this is called as part of a rebuild or is
-        // the build of a new index on an existing sstable, but this is also called for sstables that we're about to
-        // flush or about to create as result of compaction. Of course, we could get it from the context in the case of
-        // existing stables, and create it otherwise, but it doesn't feel worth bothering here.
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(descriptor, metadata);
-        Set<Component> components = indexDescriptor
-                                    .newPerSSTableComponentsForWrite()
-                                    .addAllComponentsForVersion()
-                                    .all()
-                                    .stream()
-                                    .map(IndexComponent::asCustomComponent)
-                                    .collect(Collectors.toSet());
-
-        for (StorageAttachedIndex index : indices)
-        {
-            indexDescriptor.newPerIndexComponentsForWrite(index.getIndexContext())
-                           .addAllComponentsForVersion()
-                           .all()
-                           .stream()
-                           .map(IndexComponent::asCustomComponent)
-                           .forEach(components::add);
-        }
-
-        return components;
+        return IndexDescriptor.componentsForNewlyFlushedSSTable(indices);
     }
 
     @Override
     public Set<Component> activeComponents(SSTableReader sstable)
     {
-        IndexDescriptor indexDescriptor = contextManager.getOrCreateIndexDescriptor(sstable);
+        IndexDescriptor indexDescriptor = descriptorFor(sstable);
         Set<Component> components = indexDescriptor
                                     .perSSTableComponents()
                                     .all()
@@ -379,8 +344,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     public synchronized Set<StorageAttachedIndex> onSSTableChanged(Collection<SSTableReader> removed, Iterable<SSTableReader> added,
                                                             Set<StorageAttachedIndex> indexes, boolean validate)
     {
-        Optional<Set<SSTableContext>> optValid = contextManager.update(removed, added, validate);
-
+        Optional<Set<SSTableContext>> optValid = contextManager.update(removed, added, validate, indices);
         if (optValid.isEmpty())
         {
             // This means at least one sstable had invalid per-sstable components, so mark all indexes non-queryable.
@@ -486,7 +450,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
      */
     public IndexDescriptor descriptorFor(SSTableReader sstable)
     {
-        return contextManager.getOrCreateIndexDescriptor(sstable);
+        return contextManager.getOrLoadIndexDescriptor(sstable, indices);
     }
 
     /**

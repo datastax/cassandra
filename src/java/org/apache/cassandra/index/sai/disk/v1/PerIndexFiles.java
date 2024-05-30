@@ -36,13 +36,13 @@ public class PerIndexFiles implements Closeable
     private static final Logger logger = org.slf4j.LoggerFactory.getLogger(PerIndexFiles.class);
 
     private final Map<IndexComponentType, FileHandle> files = new EnumMap<>(IndexComponentType.class);
-    private final IndexComponents.ForRead componentsGroup;
+    private final IndexComponents.ForRead perIndexComponents;
 
-    public PerIndexFiles(IndexComponents.ForRead componentsGroup)
+    public PerIndexFiles(IndexComponents.ForRead perIndexComponents)
     {
-        this.componentsGroup = componentsGroup;
+        this.perIndexComponents = perIndexComponents;
 
-        var toOpen = new HashSet<>(componentsGroup.expectedComponentsForVersion());
+        var toOpen = new HashSet<>(perIndexComponents.expectedComponentsForVersion());
         toOpen.remove(IndexComponentType.META);
         toOpen.remove(IndexComponentType.COLUMN_COMPLETION_MARKER);
 
@@ -51,7 +51,7 @@ public class PerIndexFiles implements Closeable
         {
             try
             {
-                files.put(component, componentsGroup.get(component).createFileHandle());
+                files.put(component, perIndexComponents.get(component).createFileHandle());
                 componentsPresent.add(component);
             }
             catch (UncheckedIOException e)
@@ -60,12 +60,12 @@ public class PerIndexFiles implements Closeable
             }
         }
 
-        logger.info("Components present for {} are {}", componentsGroup.indexDescriptor(), componentsPresent);
+        logger.info("Components present for {} are {}", perIndexComponents.indexDescriptor(), componentsPresent);
     }
 
-    public IndexComponents.ForRead perIndexComponents()
+    public IndexComponents.ForRead usedPerIndexComponents()
     {
-        return componentsGroup;
+        return perIndexComponents;
     }
 
     /** It is the caller's responsibility to close the returned file handle. */
@@ -108,9 +108,9 @@ public class PerIndexFiles implements Closeable
     {
         FileHandle file = files.get(indexComponentType);
         if (file == null)
-            throw new IllegalArgumentException(String.format(componentsGroup.logMessage("Component %s not found for SSTable %s"),
+            throw new IllegalArgumentException(String.format(perIndexComponents.logMessage("Component %s not found for SSTable %s"),
                                                              indexComponentType,
-                                                             componentsGroup.descriptor()));
+                                                             perIndexComponents.descriptor()));
 
         return file;
     }

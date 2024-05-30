@@ -202,7 +202,7 @@ public class NodeStartupTest extends SAITester
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, v1 int)");
         indexName = createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
-        indexContext = createIndexContext(indexName, Int32Type.instance);
+        indexContext = getIndexContext(indexName);
         Injections.inject(ObjectArrays.concat(barriers, counters, Injection.class));
         Stream.of(barriers).forEach(Injections.Barrier::reset);
         Stream.of(barriers).forEach(Injections.Barrier::disable);
@@ -343,13 +343,13 @@ public class NodeStartupTest extends SAITester
     private boolean isGroupIndexComplete() throws Exception
     {
         ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(currentTable());
-        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexDescriptor.create(sstable).perSSTableComponents().isComplete());
+        return cfs.getLiveSSTables().stream().allMatch(sstable -> loadDescriptor(sstable, cfs).perSSTableComponents().isComplete());
     }
 
     private boolean isColumnIndexComplete() throws Exception
     {
         ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(currentTable());
-        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexDescriptor.create(sstable).isPerIndexBuildComplete(indexContext));
+        return cfs.getLiveSSTables().stream().allMatch(sstable -> IndexDescriptor.isIndexBuildCompleteOnDisk(sstable, indexContext));
     }
 
     private void setState(IndexStateOnRestart state)
@@ -359,8 +359,8 @@ public class NodeStartupTest extends SAITester
             case VALID:
                 break;
             case ALL_EMPTY:
-                Version.latest().onDiskFormat().perSSTableComponents().forEach(this::remove);
-                Version.latest().onDiskFormat().perIndexComponents(indexContext).forEach(c -> remove(c, indexContext));
+                Version.latest().onDiskFormat().perSSTableComponentTypes().forEach(this::remove);
+                Version.latest().onDiskFormat().perIndexComponentTypes(indexContext).forEach(c -> remove(c, indexContext));
                 break;
             case PER_SSTABLE_INCOMPLETE:
                 remove(IndexComponentType.GROUP_COMPLETION_MARKER);

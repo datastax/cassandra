@@ -68,10 +68,10 @@ public class InvertedIndexSearcher extends IndexSearcher
         String footerPointerString = map.get(SAICodecUtils.FOOTER_POINTER);
         long footerPointer = footerPointerString == null ? -1 : Long.parseLong(footerPointerString);
 
-        var perIndexComponents = perIndexFiles.perIndexComponents();
+        var perIndexComponents = perIndexFiles.usedPerIndexComponents();
         reader = new TermsReader(indexContext,
                                  indexFiles.termsData(),
-                                 perIndexComponents.version().byteComparableVersionFor(IndexComponentType.TERMS_DATA, perIndexComponents.descriptor().version),
+                                 perIndexComponents.byteComparableVersionFor(IndexComponentType.TERMS_DATA),
                                  indexFiles.postingLists(),
                                  root, footerPointer);
     }

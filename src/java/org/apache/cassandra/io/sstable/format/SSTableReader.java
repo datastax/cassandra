@@ -1002,7 +1002,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     private SSTableReader cloneAndReplace(DecoratedKey newFirst, OpenReason reason, IndexSummary newSummary)
     {
         SSTableReader replacement = internalOpen(descriptor,
-                                                 components,
+                                                 components(),
                                                  metadata,
                                                  ifile != null ? ifile.sharedCopy() : null,
                                                  dfile.sharedCopy(),
@@ -1030,7 +1030,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     public SSTableReader cloneAndReplace(IFilter newBloomFilter)
     {
         SSTableReader replacement = internalOpen(descriptor,
-                                                 components,
+                                                 components(),
                                                  metadata,
                                                  ifile.sharedCopy(),
                                                  dfile.sharedCopy(),
@@ -1867,7 +1867,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public void createLinks(String snapshotDirectoryPath, RateLimiter rateLimiter)
     {
-        createLinks(descriptor, components, snapshotDirectoryPath, rateLimiter);
+        createLinks(descriptor, components(), snapshotDirectoryPath, rateLimiter);
     }
 
     public static void createLinks(Descriptor descriptor, Set<Component> components, String snapshotDirectoryPath)

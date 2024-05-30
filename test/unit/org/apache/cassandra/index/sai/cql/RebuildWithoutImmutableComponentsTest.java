@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Set;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -38,7 +40,7 @@ public class RebuildWithoutImmutableComponentsTest extends AbstractRebuildAndImm
     {
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            IndexDescriptor descriptor = IndexDescriptor.create(sstable);
+            IndexDescriptor descriptor = IndexDescriptor.load(sstable, Set.of(context));
             assertEquals(0, descriptor.perSSTableComponents().generation());
             assertEquals(0, descriptor.perIndexComponents(context).generation());
         }

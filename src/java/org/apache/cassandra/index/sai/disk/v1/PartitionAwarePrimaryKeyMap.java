@@ -60,6 +60,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @ThreadSafe
     public static class PartitionAwarePrimaryKeyMapFactory implements Factory
     {
+        private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final LongArray.Factory offsetReaderFactory;
         private final MetadataSource metadata;
@@ -75,6 +76,7 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         {
             try
             {
+                this.perSSTableComponents = perSSTableComponents;
                 this.metadata = MetadataSource.loadMetadata(perSSTableComponents);
 
                 IndexComponent.ForRead offsetsComponent = perSSTableComponents.get(IndexComponentType.OFFSETS_VALUES);

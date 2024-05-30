@@ -78,27 +78,29 @@ public interface OnDiskFormat
      * @param comparator
      * @return the primary key factory
      */
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator);
+    public PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator);
 
     /**
      * Returns a {@link PrimaryKeyMap.Factory} for the SSTable
      *
-     * @param indexDescriptor The {@link IndexDescriptor} for the SSTable
-     * @param sstable The {@link SSTableReader} associated with the {@link IndexDescriptor}
+     * @param perSSTableComponents The concrete sstable components to use for the factory
+     * @param primaryKeyFactory The {@link PrimaryKey.Factory} corresponding to the provided {@code perSSTableComponents}.
+     * @param sstable The {@link SSTableReader} associated with the per-sstable components
      * @return a {@link PrimaryKeyMap.Factory} for the SSTable
      * @throws IOException
      */
-    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable) throws IOException;
+    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable) throws IOException;
 
     /**
      * Create a new {@link SearchableIndex} for an on-disk index. This is held by the {@SSTableIndex}
      * and shared between queries.
      *
      * @param sstableContext The {@link SSTableContext} holding the per-SSTable information for the index
-     * @param indexContext The {@link IndexContext} holding the per-index information for the index
-     * @return
+     * @param perIndexComponents The group of per-index sstable components to use/read for the returned index (which
+     *                           also link to the underlying {@link IndexContext} for the index).
+     * @return the created {@link SearchableIndex}.
      */
-    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexContext indexContext);
+    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents);
 
     IndexSearcher newIndexSearcher(SSTableContext sstableContext,
                                    IndexContext indexContext,
@@ -145,22 +147,22 @@ public interface OnDiskFormat
 
     /**
      * Returns the set of {@link IndexComponentType} for the per-SSTable part of an index.
-     * This is a complete set of components that could exist on-disk. It does not imply that the
+     * This is a complete set of componentstypes that could exist on-disk. It does not imply that the
      * components currently exist on-disk.
      *
      * @return The set of {@link IndexComponentType} for the per-SSTable index
      */
-    public Set<IndexComponentType> perSSTableComponents();
+    public Set<IndexComponentType> perSSTableComponentTypes();
 
     /**
      * Returns the set of {@link IndexComponentType} for the per-index part of an index.
-     * This is a complete set of components that could exist on-disk. It does not imply that the
+     * This is a complete set of component types that could exist on-disk. It does not imply that the
      * components currently exist on-disk.
      *
      * @param indexContext The {@link IndexContext} for the index
      * @return The set of {@link IndexComponentType} for the per-index index
      */
-    public Set<IndexComponentType> perIndexComponents(IndexContext indexContext);
+    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext);
 
     /**
      * Return the number of open per-SSTable files that can be open during a query.

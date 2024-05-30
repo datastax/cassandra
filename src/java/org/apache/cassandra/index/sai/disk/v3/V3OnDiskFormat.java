@@ -93,12 +93,12 @@ public class V3OnDiskFormat extends V2OnDiskFormat
     }
 
     @Override
-    public Set<IndexComponentType> perIndexComponents(IndexContext indexContext)
+    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
     {
         // VSTODO add checksums and actual validation
         if (indexContext.isVector())
             return VECTOR_COMPONENTS_V3;
-        return super.perIndexComponents(indexContext);
+        return super.perIndexComponentTypes(indexContext);
     }
 
     @VisibleForTesting

@@ -43,7 +43,10 @@ import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
@@ -142,6 +145,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             return false;
         }
 
+        SSTableContext existingPerSSTableContext = group.sstableContextManager().getContext(sstable);
         IndexDescriptor indexDescriptor = group.descriptorFor(sstable);
         Set<Component> replacedComponents = new HashSet<>();
 
@@ -154,16 +158,10 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             // build the per-index components
             boolean perIndexComponentsOnly = perSSTableFileLock == null;
             for (StorageAttachedIndex index : indexes)
-            {
-                var components = indexDescriptor.perIndexComponents(index.getIndexContext());
-                if (components.version().useImmutableComponentFiles())
-                    replacedComponents.addAll(components.allAsCustomComponents());
-                else
-                    components.forWrite().forceDeleteAllComponents();
-            }
+                prepareForRebuild(indexDescriptor.perIndexComponents(index.getIndexContext()), replacedComponents);
 
             long keyCount = SSTableReader.getApproximateKeyCount(Set.of(sstable));
-            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, indexes, txn, keyCount, perIndexComponentsOnly);
+            indexWriter = new StorageAttachedIndexWriter(indexDescriptor, metadata, indexes, txn, keyCount, perIndexComponentsOnly);
 
             long previousKeyPosition = 0;
             indexWriter.begin();
@@ -294,15 +292,23 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             CountDownLatch latch = new CountDownLatch(1);
             if (inProgress.putIfAbsent(sstable, latch) == null)
             {
-                var components = indexDescriptor.perSSTableComponents();
-                if (components.version().useImmutableComponentFiles())
-                    replacedComponents.addAll(components.allAsCustomComponents());
-                else
-                    components.forWrite().forceDeleteAllComponents();
+                prepareForRebuild(indexDescriptor.perSSTableComponents(), replacedComponents);
                 return latch;
             }
         }
         return null;
+    }
+
+    private static void prepareForRebuild(IndexComponents.ForRead components, Set<Component> replacedComponents)
+    {
+        // The current components will be replaced by "other" components if either 1) we either use immutable components,
+        // or 2) the old components are from an old version. In the later cases, even if immutable components is not in
+        // use, then newly written components will have a different version and thus be different files.
+        if (components.version().useImmutableComponentFiles() || !components.version().equals(Version.latest()))
+            replacedComponents.addAll(components.allAsCustomComponents());
+
+        if (!components.version().useImmutableComponentFiles())
+            components.forWrite().forceDeleteAllComponents();
     }
 
     private void completeSSTable(SSTableFlushObserver indexWriter,

@@ -85,9 +85,9 @@ public class TermsReaderTest extends SaiRandomizedTest
 
         long termsFooterPointer = Long.parseLong(indexMetas.get(IndexComponentType.TERMS_DATA).attributes.get(SAICodecUtils.FOOTER_POINTER));
 
-        try (TermsReader reader = new TermsReader(indexDescriptor,
-                                                  indexContext,
+        try (TermsReader reader = new TermsReader(indexContext,
                                                   termsData,
+                                                  components.byteComparableVersionFor(IndexComponentType.TERMS_DATA),
                                                   postingLists,
                                                   indexMetas.get(IndexComponentType.TERMS_DATA).root,
                                                   termsFooterPointer))
@@ -123,9 +123,9 @@ public class TermsReaderTest extends SaiRandomizedTest
 
         long termsFooterPointer = Long.parseLong(indexMetas.get(IndexComponentType.TERMS_DATA).attributes.get(SAICodecUtils.FOOTER_POINTER));
 
-        try (TermsReader reader = new TermsReader(indexDescriptor,
-                                                  indexContext,
+        try (TermsReader reader = new TermsReader(indexContext,
                                                   termsData,
+                                                  components.byteComparableVersionFor(IndexComponentType.TERMS_DATA),
                                                   postingLists,
                                                   indexMetas.get(IndexComponentType.TERMS_DATA).root,
                                                   termsFooterPointer))

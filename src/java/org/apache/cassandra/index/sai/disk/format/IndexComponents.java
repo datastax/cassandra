@@ -31,6 +31,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Represents a related group of concrete SAI components files which are either all the per-sstable components of a
@@ -164,8 +165,18 @@ public interface IndexComponents
     default Set<IndexComponentType> expectedComponentsForVersion()
     {
         return isPerIndexGroup()
-               ? version().onDiskFormat().perIndexComponents(context())
-               : version().onDiskFormat().perSSTableComponents();
+               ? version().onDiskFormat().perIndexComponentTypes(context())
+               : version().onDiskFormat().perSSTableComponentTypes();
+    }
+
+    default boolean hasSameVersionAndGenerationThan(IndexComponents other)
+    {
+        return version().equals(other.version()) && generation() == other.generation();
+    }
+
+    default ByteComparable.Version byteComparableVersionFor(IndexComponentType component)
+    {
+        return version().byteComparableVersionFor(component, descriptor().version);
     }
 
     /**

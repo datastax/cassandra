@@ -94,6 +94,7 @@ import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.NonTokenizingOptions;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
+import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
@@ -140,7 +141,7 @@ public class StorageAttachedIndex implements Index
                                 if (!isFullRebuild)
                                 {
                                     ss = sstablesToRebuild.stream()
-                                                          .filter(s -> !group.descriptorFor(s).isPerIndexBuildComplete(indexContext))
+                                                          .filter(s -> !IndexDescriptor.isIndexBuildCompleteOnDisk(s, indexContext))
                                                           .collect(Collectors.toList());
                                 }
 
@@ -519,7 +520,7 @@ public class StorageAttachedIndex implements Index
             // in case of dropping table, SSTable indexes should already been removed by SSTableListChangedNotification.
             for (SSTableIndex sstableIndex : indexContext.getView().getIndexes())
             {
-                var components = sstableIndex.getSSTableContext().indexDescriptor.perIndexComponents(getIndexContext());
+                var components = sstableIndex.usedPerIndexComponents();
                 sstableIndex.getSSTable().unregisterComponents(components.allAsCustomComponents(), baseCfs.getTracker());
             }
 
@@ -738,8 +739,9 @@ public class StorageAttachedIndex implements Index
             //   1. The current view does not contain the SSTable
             //   2. The SSTable is not marked compacted
             //   3. The column index does not have a completion marker
-            if (!view.containsSSTable(sstable) && !sstable.isMarkedCompacted() &&
-                !group.descriptorFor(sstable).isPerIndexBuildComplete(indexContext))
+            if (!view.containsSSTable(sstable)
+                && !sstable.isMarkedCompacted()
+                && !IndexDescriptor.isIndexBuildCompleteOnDisk(sstable, indexContext))
             {
                 nonIndexed.add(sstable);
             }

@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
@@ -89,15 +90,15 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator)
+    public PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator)
     {
         return new RowAwarePrimaryKeyFactory(comparator);
     }
 
     @Override
-    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable) throws IOException
+    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
     {
-        return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(indexDescriptor, sstable);
+        return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
     }
 
     @Override
@@ -118,15 +119,15 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public Set<IndexComponentType> perIndexComponents(IndexContext indexContext)
+    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
     {
         if (indexContext.isVector())
             return VECTOR_COMPONENTS_V2;
-        return super.perIndexComponents(indexContext);
+        return super.perIndexComponentTypes(indexContext);
     }
 
     @Override
-    public Set<IndexComponentType> perSSTableComponents()
+    public Set<IndexComponentType> perSSTableComponentTypes()
     {
         return PER_SSTABLE_COMPONENTS;
     }

@@ -74,19 +74,18 @@ public class V1SearchableIndex implements SearchableIndex
     private final long numRows;
     private PerIndexFiles indexFiles;
 
-    public V1SearchableIndex(SSTableContext sstableContext, IndexContext indexContext)
+    public V1SearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
     {
-        this.indexContext = indexContext;
+        this.indexContext = perIndexComponents.context();
         try
         {
-            IndexComponents.ForRead perIndexComponents = sstableContext.indexDescriptor.perIndexComponents(indexContext);
             this.indexFiles = new PerIndexFiles(perIndexComponents);
 
             ImmutableList.Builder<Segment> segmentsBuilder = ImmutableList.builder();
 
             final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
 
-            metadatas = SegmentMetadata.load(source, sstableContext.indexDescriptor.primaryKeyFactory);
+            metadatas = SegmentMetadata.load(source, sstableContext.primaryKeyFactory());
 
             for (SegmentMetadata metadata : metadatas)
             {

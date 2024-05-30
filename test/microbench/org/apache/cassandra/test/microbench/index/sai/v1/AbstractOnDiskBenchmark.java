@@ -125,7 +125,7 @@ public abstract class AbstractOnDiskBenchmark
                                     metadata.keyspace,
                                     metadata.name,
                                     Util.newUUIDGen().get());
-        indexDescriptor = IndexDescriptor.create(descriptor, metadata);
+        indexDescriptor = IndexDescriptor.empty(descriptor);
         index = "test";
         indexContext = SAITester.createIndexContext(index, IntegerType.instance);
 

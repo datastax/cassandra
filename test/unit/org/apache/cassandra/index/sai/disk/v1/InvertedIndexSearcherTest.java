@@ -173,7 +173,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         {
             SSTableContext sstableContext = mock(SSTableContext.class);
             when(sstableContext.primaryKeyMapFactory()).thenReturn(KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY);
-            when(sstableContext.indexDescriptor()).thenReturn(indexDescriptor);
+            when(sstableContext.usedPerSSTableComponents()).thenReturn(indexDescriptor.perSSTableComponents());
             final IndexSearcher searcher = Version.latest().onDiskFormat().newIndexSearcher(sstableContext,
                                                                                           SAITester.createIndexContext(index, UTF8Type.instance),
                                                                                           indexFiles,

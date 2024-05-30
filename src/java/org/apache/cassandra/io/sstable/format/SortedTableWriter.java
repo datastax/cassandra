@@ -349,7 +349,7 @@ public abstract class SortedTableWriter extends SSTableWriter
             writeMetadata(descriptor, finalizeMetadata(), writerOption());
 
             // save the table of components
-            SSTable.appendTOC(descriptor, components);
+            SSTable.appendTOC(descriptor, components());
         }
 
         private void openResult()

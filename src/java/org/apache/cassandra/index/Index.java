@@ -49,6 +49,7 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CollatedViewIndexBuilder;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -740,7 +741,7 @@ public interface Index
          *
          * @return the indexes that are members of this group
          */
-        Set<Index> getIndexes();
+        Set<? extends Index> getIndexes();
 
         /**
          * Adds the specified {@link Index} as a member of this group.
@@ -834,19 +835,13 @@ public interface Index
         default void unload() { }
 
         /**
-         * Return the set of sstable-attached components created by a new build of the indexes in this group on the
-         * provided sstable
+         * Returns the set of sstable-attached components that this group will create for a newly flushed sstable.
          *
-         * @param descriptor a sstable descriptor. Please note that the corresponding sstable may or may not exist on disk
-         *                   when this is called. It will exist if this is called as part of index rebuilds, but will not
-         *                   for an initial build (by flush or compaction). In the later cases, the descriptor is that of
-         *                   the sstable we are about to write, but no files for that descriptor may exist on disk.
-         * @param metadata metadata of the table {@code descriptor} is a sstable of.
-         * @return the set of sstable-attached components created by a new build of the indexes in this group for the
-         * provided sstable. Here, "new" is meant in the sense that if the index already exists for the sstable, meaning
-         * that there is existing components, then this method will return the components corresponding to a rebuild.
+         * Note that the result of this method is only valid for newly flushed/written sstables as the components
+         * returned will assume a version of {@link Version#latest()} and a generation of 0. SSTables for which some
+         * index have been rebuild may have index components that do not match what this method return in particular.
          */
-        Set<Component> componentsForNewBuid(Descriptor descriptor, TableMetadata metadata);
+        Set<Component> componentsForNewSSTable();
 
         /**
          * Return the set of sstable-attached components belonging to the group that are currently "active" for the

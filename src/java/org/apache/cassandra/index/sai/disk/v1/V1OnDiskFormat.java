@@ -35,6 +35,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.EmptyIndex;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
@@ -141,21 +142,23 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public PrimaryKey.Factory primaryKeyFactory(ClusteringComparator comparator)
+    public PrimaryKey.Factory newPrimaryKeyFactory(ClusteringComparator comparator)
     {
         return new PartitionAwarePrimaryKeyFactory();
     }
 
     @Override
-    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable) throws IOException
+    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable) throws IOException
     {
-        return new PartitionAwarePrimaryKeyMap.PartitionAwarePrimaryKeyMapFactory(indexDescriptor.perSSTableComponents(), sstable, indexDescriptor.primaryKeyFactory);
+        return new PartitionAwarePrimaryKeyMap.PartitionAwarePrimaryKeyMapFactory(perSSTableComponents, sstable, primaryKeyFactory);
     }
 
     @Override
-    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexContext indexContext)
+    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
     {
-        return new V1SearchableIndex(sstableContext, indexContext);
+        return perIndexComponents.isEmpty()
+               ? new EmptyIndex()
+               : new V1SearchableIndex(sstableContext, perIndexComponents);
     }
 
     @Override
@@ -165,7 +168,7 @@ public class V1OnDiskFormat implements OnDiskFormat
                                           SegmentMetadata segmentMetadata) throws IOException
     {
         if (indexContext.isLiteral())
-            return new InvertedIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, sstableContext.indexDescriptor(), indexContext);
+            return new InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
         return new KDTreeIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext);
     }
 
@@ -182,7 +185,8 @@ public class V1OnDiskFormat implements OnDiskFormat
                                             RowMapping rowMapping,
                                             long keyCount)
     {
-        IndexComponents.ForWrite perIndexComponents = indexDescriptor.newPerIndexComponentsForWrite(index.getIndexContext());
+        IndexContext context = index.getIndexContext();
+        IndexComponents.ForWrite perIndexComponents = indexDescriptor.newPerIndexComponentsForWrite(context);
         // If we're not flushing or we haven't yet started the initialization build, flush from SSTable contents.
         if (tracker.opType() != OperationType.FLUSH || !index.canFlushFromMemtableIndex())
         {
@@ -193,8 +197,9 @@ public class V1OnDiskFormat implements OnDiskFormat
             return new SSTableIndexWriter(perIndexComponents, limiter, index.isIndexValid(), keyCount);
         }
 
-        return new MemtableIndexWriter(index.getIndexContext().getPendingMemtableIndex(tracker),
+        return new MemtableIndexWriter(context.getPendingMemtableIndex(tracker),
                                        perIndexComponents,
+                                       context.keyFactory(),
                                        rowMapping);
     }
 
@@ -248,13 +253,13 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public Set<IndexComponentType> perSSTableComponents()
+    public Set<IndexComponentType> perSSTableComponentTypes()
     {
         return PER_SSTABLE_COMPONENTS;
     }
 
     @Override
-    public Set<IndexComponentType> perIndexComponents(IndexContext indexContext)
+    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
     {
         if (TypeUtil.isLiteral(indexContext.getValidator()))
             return LITERAL_COMPONENTS;

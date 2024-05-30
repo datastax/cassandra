@@ -191,7 +191,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(dataFile.getLastFlushOffset());
             invalidateCacheAtBoundary(dfile);
             SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
-                                                               components, metadata,
+                                                               components(), metadata,
                                                                ifile, dfile, partitionIndex, iwriter.bf.sharedCopy(),
                                                                maxDataAge, stats, SSTableReader.OpenReason.EARLY, header);
 
@@ -231,7 +231,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
         invalidateCacheAtBoundary(dfile);
         SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
-                                                            components,
+                                                            components(),
                                                             this.metadata,
                                                             rowIndexFile,
                                                             dfile,
@@ -361,7 +361,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
          */
         void flushBf()
         {
-            if (components.contains(Component.FILTER))
+            if (components().contains(Component.FILTER))
             {
                 File path = descriptor.fileFor(Component.FILTER);
                 try (SeekableByteChannel fos = Files.newByteChannel(path.toPath(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);

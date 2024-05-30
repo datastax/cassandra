@@ -360,7 +360,7 @@ public class ColumnFamilyStoreTest
         {
             Descriptor existing = liveSSTable.descriptor;
             Descriptor desc = new Descriptor(Directories.getBackupsDirectory(existing), KEYSPACE2, CF_STANDARD1, liveSSTable.descriptor.id, liveSSTable.descriptor.formatType);
-            for (Component c : liveSSTable.components)
+            for (Component c : liveSSTable.components())
                 assertTrue("Cannot find backed-up file:" + desc.fileFor(c), desc.fileFor(c).exists());
         }
     }

@@ -738,7 +738,7 @@ public class SSTableReaderTest
 
         // re-open the same sstable as it would be during bulk loading
         Set<Component> components = Sets.newHashSet(sstable.descriptor.getFormat().requiredComponents());
-        if (sstable.components.contains(Component.COMPRESSION_INFO))
+        if (sstable.components().contains(Component.COMPRESSION_INFO))
             components.add(Component.COMPRESSION_INFO);
         SSTableReader bulkLoaded = sstable.descriptor.getFormat().getReaderFactory().openForBatch(sstable.descriptor, components, store.metadata);
         sections = bulkLoaded.getPositionsForRanges(ranges);
@@ -896,7 +896,7 @@ public class SSTableReaderTest
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD);
         SSTableReader sstable = getNewSSTable(cfs);
         Descriptor notLiveDesc = new Descriptor(new File("/tmp"), "", "", SSTableIdFactory.instance.defaultBuilder().generator(Stream.empty()).get());
-        notLiveDesc.getFormat().getReaderFactory().moveAndOpenSSTable(cfs, sstable.descriptor, notLiveDesc, sstable.components, false);
+        notLiveDesc.getFormat().getReaderFactory().moveAndOpenSSTable(cfs, sstable.descriptor, notLiveDesc, sstable.components(), false);
     }
 
     @Test(expected = RuntimeException.class)
@@ -906,7 +906,7 @@ public class SSTableReaderTest
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD);
         SSTableReader sstable = getNewSSTable(cfs);
         Descriptor notLiveDesc = new Descriptor(new File("/tmp"), "", "", SSTableIdFactory.instance.defaultBuilder().generator(Stream.empty()).get());
-        sstable.descriptor.getFormat().getReaderFactory().moveAndOpenSSTable(cfs, notLiveDesc, sstable.descriptor, sstable.components, false);
+        sstable.descriptor.getFormat().getReaderFactory().moveAndOpenSSTable(cfs, notLiveDesc, sstable.descriptor, sstable.components(), false);
     }
 
     @Test
@@ -922,15 +922,15 @@ public class SSTableReaderTest
         SSTableId id = SSTableIdFactory.instance.defaultBuilder().generator(Stream.empty()).get();
         Descriptor notLiveDesc = new Descriptor(tmpdir, sstable.descriptor.ksname, sstable.descriptor.cfname, id);
         // make sure the new directory is empty and that the old files exist:
-        for (Component c : sstable.components)
+        for (Component c : sstable.components())
         {
             File f = notLiveDesc.fileFor(c);
             assertFalse(f.exists());
             assertTrue(sstable.descriptor.fileFor(c).exists());
         }
-        notLiveDesc.getFormat().getReaderFactory().moveAndOpenSSTable(cfs, sstable.descriptor, notLiveDesc, sstable.components, false);
+        notLiveDesc.getFormat().getReaderFactory().moveAndOpenSSTable(cfs, sstable.descriptor, notLiveDesc, sstable.components(), false);
         // make sure the files were moved:
-        for (Component c : sstable.components)
+        for (Component c : sstable.components())
         {
             File f = notLiveDesc.fileFor(c);
             assertTrue(f.exists());

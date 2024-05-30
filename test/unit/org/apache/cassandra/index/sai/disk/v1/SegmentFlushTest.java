@@ -112,9 +112,7 @@ public class SegmentFlushTest
     private void testFlushBetweenRowIds(long sstableRowId1, long sstableRowId2, int segments) throws Exception
     {
         Path tmpDir = Files.createTempDirectory("SegmentFlushTest");
-        IndexDescriptor indexDescriptor = IndexDescriptor.create(new Descriptor(new File(tmpDir.toFile()), "ks", "cf", new SequenceBasedSSTableId(1)),
-                                                                    Murmur3Partitioner.instance,
-                                                                    SAITester.EMPTY_COMPARATOR);
+        IndexDescriptor indexDescriptor = IndexDescriptor.empty(new Descriptor(new File(tmpDir.toFile()), "ks", "cf", new SequenceBasedSSTableId(1)));
 
         ColumnMetadata column = ColumnMetadata.regularColumn("sai", "internal", "column", UTF8Type.instance);
         IndexMetadata config = IndexMetadata.fromSchemaMetadata("index_name", IndexMetadata.Kind.CUSTOM, null);
@@ -150,7 +148,7 @@ public class SegmentFlushTest
         MetadataSource source = MetadataSource.loadMetadata(components);
 
         // verify segment count
-        List<SegmentMetadata> segmentMetadatas = SegmentMetadata.load(source, indexDescriptor.primaryKeyFactory);
+        List<SegmentMetadata> segmentMetadatas = SegmentMetadata.load(source, indexContext.keyFactory());
         assertEquals(segments, segmentMetadatas.size());
 
         // verify segment metadata
@@ -194,7 +192,7 @@ public class SegmentFlushTest
 
         try (TermsReader reader = new TermsReader(components.context(),
                                                   termsData,
-                                                  components.version().byteComparableVersionFor(IndexComponentType.TERMS_DATA, components.descriptor().version),
+                                                  components.byteComparableVersionFor(IndexComponentType.TERMS_DATA),
                                                   postingLists,
                                                   segmentMetadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).root,
                                                   termsFooterPointer))

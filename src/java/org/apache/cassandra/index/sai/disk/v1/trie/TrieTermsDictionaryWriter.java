@@ -50,7 +50,8 @@ public class TrieTermsDictionaryWriter implements Closeable
 
         SAICodecUtils.writeHeader(termDictionaryOutput);
         // we pass the output as SequentialWriter, but we keep IndexOutputWriter around to write footer on flush
-        termsDictionaryWriter = IncrementalTrieWriter.open(TrieTermsDictionaryReader.trieSerializer, termDictionaryOutput.asSequentialWriter(), indexDescriptor.getEncodingVersion(IndexComponent.TERMS_DATA));
+        var encodingVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
+        termsDictionaryWriter = IncrementalTrieWriter.open(TrieTermsDictionaryReader.trieSerializer, termDictionaryOutput.asSequentialWriter(), encodingVersion);
     }
 
     public void add(ByteComparable term, long postingListOffset) throws IOException

@@ -23,9 +23,9 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.apache.cassandra.cache.InstrumentingCache;
@@ -706,9 +706,9 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public Set<Component> getComponents()
+    public ImmutableSet<Component> components()
     {
-        return delegate.getComponents();
+        return delegate.components();
     }
 
     @Override

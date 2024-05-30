@@ -167,7 +167,7 @@ public class IndexContext
         this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
                                               : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
 
-        this.primaryKeyFactory = Version.latest().onDiskFormat().primaryKeyFactory(clusteringComparator);
+        this.primaryKeyFactory = Version.latest().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
 
         if (config != null)
         {
@@ -800,7 +800,9 @@ public class IndexContext
             if (context.sstable.isMarkedCompacted())
                 return;
 
-            if (!context.indexDescriptor.isPerIndexBuildComplete(this))
+            var perSSTableComponents = context.usedPerSSTableComponents();
+            var perIndexComponents = perSSTableComponents.indexDescriptor().perIndexComponents(this);
+            if (!perSSTableComponents.isComplete() || !perIndexComponents.isComplete())
             {
                 logger.debug(logMessage("An on-disk index build for SSTable {} has not completed."), context.descriptor());
                 return;
@@ -810,7 +812,7 @@ public class IndexContext
             {
                 if (validate)
                 {
-                    if (!context.indexDescriptor.perIndexComponents(this).validateComponents(context.sstable, owner.getTracker(), false))
+                    if (!perIndexComponents.validateComponents(context.sstable, owner.getTracker(), false))
                     {
                         // Note that a precise warning is already logged by the validation if there is an issue.
                         invalid.add(context);
@@ -818,7 +820,7 @@ public class IndexContext
                     }
                 }
 
-                SSTableIndex index = new SSTableIndex(context, this);
+                SSTableIndex index = new SSTableIndex(context, perIndexComponents);
                 logger.debug(logMessage("Successfully created index for SSTable {}."), context.descriptor());
 
                 // Try to add new index to the set, if set already has such index, we'll simply release and move on.

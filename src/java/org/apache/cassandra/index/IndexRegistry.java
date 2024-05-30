@@ -245,7 +245,7 @@ public interface IndexRegistry
             }
 
             @Override
-            public Set<Component> componentsForNewBuid(Descriptor descriptor, TableMetadata metadata)
+            public Set<Component> componentsForNewSSTable()
             {
                 return null;
             }

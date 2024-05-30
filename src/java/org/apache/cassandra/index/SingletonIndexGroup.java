@@ -120,16 +120,16 @@ public class SingletonIndexGroup implements Index.Group
     }
 
     @Override
-    public Set<Component> componentsForNewBuid(Descriptor descriptor, TableMetadata metadata)
+    public Set<Component> componentsForNewSSTable()
     {
         // This class is only used for indexes that don't use per-sstable components, aka not-SAI (note that SASI uses
         // some "file" per sstable, but it is not a `Component` in practice). We could add an equivalent
-        // `componentsForNewBuild` method in `Index`, so that we can call `delegate.componentsForNewBuild` here, but
+        // `componentsForNewSSTable` method in `Index`, so that we can call `delegate.componentsForNewBuild` here, but
         // this would kind of weird for SAI because of the per-sstable components: should they be returned by such
         // method on `Index` or not? Tldr, for SAI, it's cleaner to deal with components created at the group level,
         // which is what `StorageAttachedIndexGroup.componentsForNewBuild` does, and it's simpler to always use
         // `StorageAttachedIndexGroup` for SAI, which is the case. So at that point, adding an
-        // `Index.componentsForNewBuild` method would just be dead code, so let's avoid it.
+        // `Index.componentsForNewSSTable` method would just be dead code, so let's avoid it.
         return Collections.emptySet();
     }
 

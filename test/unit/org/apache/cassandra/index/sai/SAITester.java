@@ -138,7 +138,7 @@ public class SAITester extends CQLTester
 
     public static final ClusteringComparator EMPTY_COMPARATOR = new ClusteringComparator();
 
-    public static final PrimaryKey.Factory TEST_FACTORY = Version.latest().onDiskFormat().primaryKeyFactory(EMPTY_COMPARATOR);
+    public static final PrimaryKey.Factory TEST_FACTORY = Version.latest().onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
 
 
     static
@@ -254,6 +254,18 @@ public class SAITester extends CQLTester
                                 MockSchema.newCFS("test_ks"));
     }
 
+    public IndexContext getIndexContext(String indexName)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
+        return StorageAttachedIndexGroup.getIndexGroup(cfs)
+                                 .getIndexes()
+                                 .stream()
+                                 .map(StorageAttachedIndex::getIndexContext)
+                                 .filter(ctx -> ctx.getIndexName().equals(indexName))
+                                 .findFirst()
+                                 .orElseThrow();
+    }
+
     public static Vector<Float> vector(float... v)
     {
         var v2 = new Float[v.length];
@@ -281,13 +293,19 @@ public class SAITester extends CQLTester
         }
     }
 
+    protected static IndexDescriptor loadDescriptor(SSTableReader sstable, ColumnFamilyStore cfs)
+    {
+        return IndexDescriptor.load(sstable,
+                                    StorageAttachedIndexGroup.getIndexGroup(cfs).getIndexes().stream().map(StorageAttachedIndex::getIndexContext).collect(Collectors.toSet()));
+    }
+
     protected void corruptIndexComponent(IndexComponentType indexComponentType, CorruptionType corruptionType) throws Exception
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            File file = IndexDescriptor.create(sstable).perSSTableComponents().get(indexComponentType).file();
+            File file = loadDescriptor(sstable, cfs).perSSTableComponents().get(indexComponentType).file();
             corruptionType.corrupt(file);
         }
     }
@@ -298,7 +316,7 @@ public class SAITester extends CQLTester
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            File file = IndexDescriptor.create(sstable).perIndexComponents(indexContext).get(indexComponentType).file();
+            File file = loadDescriptor(sstable, cfs).perIndexComponents(indexContext).get(indexComponentType).file();
             corruptionType.corrupt(file);
         }
     }
@@ -347,7 +365,7 @@ public class SAITester extends CQLTester
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            IndexDescriptor indexDescriptor = IndexDescriptor.create(sstable);
+            IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
             if (indexDescriptor.isIndexEmpty(context))
                 continue;
             if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true)
@@ -355,6 +373,39 @@ public class SAITester extends CQLTester
                 return false;
         }
         return true;
+    }
+
+    protected void verifySAIVersionInUse(Version expectedVersion, IndexContext... contexts)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
+        StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
+
+        for (SSTableReader sstable : cfs.getLiveSSTables())
+        {
+            IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
+
+            assertEquals(indexDescriptor.perSSTableComponents().version(), expectedVersion);
+            SSTableContext ssTableContext = group.sstableContextManager().getContext(sstable);
+            // This is to make sure the context uses the actual files we think
+            assertEquals(ssTableContext.usedPerSSTableComponents().version(), expectedVersion);
+
+            for (IndexContext indexContext : contexts)
+            {
+                assertEquals(indexDescriptor.perIndexComponents(indexContext).version(), expectedVersion);
+
+                for (SSTableIndex sstableIndex : indexContext.getView())
+                {
+                    if (sstableIndex.isEmpty())
+                        continue;
+
+                    // Make sure the index does use the context it should (for which we already checked the version),
+                    // but note that `SSTableIndex` uses a "sharedCopy()" of the context, so we check equality of the
+                    // pk map factory (which should be same between original and a copy).
+                    assertEquals(sstableIndex.usedPerIndexComponents(), expectedVersion);
+
+                }
+            }
+        }
     }
 
     protected static void assertFailureReason(ReadFailureException e, RequestFailureReason reason)
@@ -521,7 +572,7 @@ public class SAITester extends CQLTester
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
             // We create a descriptor from scratch, to ensure this discover from disk directly.
-            IndexDescriptor descriptor = IndexDescriptor.create(sstable);
+            IndexDescriptor descriptor = loadDescriptor(sstable, cfs);
 
             // Note that validation makes sure that all expected components exists, on top of validating those.
             descriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true);
@@ -558,7 +609,7 @@ public class SAITester extends CQLTester
     {
         Set<File> indexFiles = indexFiles();
 
-        for (IndexComponentType indexComponentType : Version.latest().onDiskFormat().perSSTableComponents())
+        for (IndexComponentType indexComponentType : Version.latest().onDiskFormat().perSSTableComponentTypes())
         {
             Set<File> tableFiles = componentFiles(indexFiles, new Component(Component.Type.CUSTOM, Version.latest().fileNameFormatter().format(indexComponentType, null, 0)));
             assertEquals(tableFiles.toString(), perSSTableFiles, tableFiles.size());
@@ -566,7 +617,7 @@ public class SAITester extends CQLTester
 
         if (literalIndexContext != null)
         {
-            for (IndexComponentType indexComponentType : Version.latest().onDiskFormat().perIndexComponents(literalIndexContext))
+            for (IndexComponentType indexComponentType : Version.latest().onDiskFormat().perIndexComponentTypes(literalIndexContext))
             {
                 Set<File> stringIndexFiles = componentFiles(indexFiles,
                                                             new Component(Component.Type.CUSTOM,
@@ -582,7 +633,7 @@ public class SAITester extends CQLTester
 
         if (numericIndexContext != null)
         {
-            for (IndexComponentType indexComponentType : Version.latest().onDiskFormat().perIndexComponents(numericIndexContext))
+            for (IndexComponentType indexComponentType : Version.latest().onDiskFormat().perIndexComponentTypes(numericIndexContext))
             {
                 Set<File> numericIndexFiles = componentFiles(indexFiles,
                                                              new Component(Component.Type.CUSTOM,
@@ -680,6 +731,15 @@ public class SAITester extends CQLTester
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
         StorageAttachedIndexGroup.getIndexGroup(cfs).unsafeReload();
+    }
+
+    // `reloadSSTalbleIndex` calls `unsafeReload`, which clear all contexts, and then recreate from scratch. This method
+    // simply signal updates to every sstable without previously clearing anything.
+    protected void reloadSSTableIndexInPlace()
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
+        StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
+        group.onSSTableChanged(Collections.emptySet(), cfs.getLiveSSTables(), group.getIndexes(), true);
     }
 
     protected void runInitializationTask() throws Exception
@@ -788,7 +848,7 @@ public class SAITester extends CQLTester
         ColumnFamilyStore cfs = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(KEYSPACE)).getColumnFamilyStore(table);
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
-            Set<Component> components = sstable.components;
+            Set<Component> components = sstable.components();
             StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
             Set<Component> ndiComponents = group == null ? Collections.emptySet() : group.activeComponents(sstable);
 

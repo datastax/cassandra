@@ -66,7 +66,7 @@ public class DropTableTest extends SAITester
         SSTableReader sstable = Iterables.getOnlyElement(cfs.getLiveSSTables());
 
         ArrayList<String> files = new ArrayList<>();
-        for (Component component : sstable.components)
+        for (Component component : sstable.components())
         {
             File file = sstable.descriptor.fileFor(component);
             if (file.exists())

@@ -56,6 +56,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexBuilder;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -913,16 +914,16 @@ public class NativeIndexDDLTest extends SAITester
                                              CorruptionType corruptionType,
                                              boolean rebuild) throws Throwable
     {
-        IndexContext numericIndexContext = createIndexContext(numericIndexName, Int32Type.instance);
-        IndexContext stringIndexContext = createIndexContext(stringIndexName, UTF8Type.instance);
+        IndexContext numericIndexContext = getIndexContext(numericIndexName);
+        IndexContext stringIndexContext = getIndexContext(stringIndexName);
 
-        for (IndexComponentType component : Version.latest().onDiskFormat().perSSTableComponents())
+        for (IndexComponentType component : Version.latest().onDiskFormat().perSSTableComponentTypes())
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, null, corruptionType, true, true, rebuild);
 
-        for (IndexComponentType component : Version.latest().onDiskFormat().perIndexComponents(numericIndexContext))
+        for (IndexComponentType component : Version.latest().onDiskFormat().perIndexComponentTypes(numericIndexContext))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, numericIndexContext, corruptionType, false, true, rebuild);
 
-        for (IndexComponentType component : Version.latest().onDiskFormat().perIndexComponents(stringIndexContext))
+        for (IndexComponentType component : Version.latest().onDiskFormat().perIndexComponentTypes(stringIndexContext))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, stringIndexContext, corruptionType, true, false, rebuild);
     }
 
@@ -1020,6 +1021,55 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals(rowCount, rows.all().size());
         rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
         assertEquals(rowCount, rows.all().size());
+    }
+
+
+    @Test
+    public void verifyCanRebuildAndReloadInPlaceToNewerVersion() throws Throwable
+    {
+        Version current = Version.latest();
+        try
+        {
+            SAIUtil.setLatestVersion(Version.AA);
+
+            // prepare schema and data
+            createTable(CREATE_TABLE_TEMPLATE);
+            String numericIndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+            String stringIndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+            IndexContext numericIndexContext = createIndexContext(numericIndexName, Int32Type.instance);
+            IndexContext stringIndexContext = createIndexContext(stringIndexName, UTF8Type.instance);
+
+            int rowCount = 2;
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
+            execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
+            flush();
+
+            // Sanity check first
+            ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+            assertEquals(rowCount, rows.all().size());
+            rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
+            assertEquals(rowCount, rows.all().size());
+
+            verifySAIVersionInUse(Version.AA, numericIndexContext, stringIndexContext);
+
+            SAIUtil.setLatestVersion(current);
+
+            rebuildIndexes(numericIndexName, stringIndexName);
+            reloadSSTableIndexInPlace();
+
+            // This should still work
+            rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+            assertEquals(rowCount, rows.all().size());
+            rows = executeNet("SELECT id1 FROM %s WHERE v2='0'");
+            assertEquals(rowCount, rows.all().size());
+
+            verifySAIVersionInUse(current, numericIndexContext, stringIndexContext);
+        }
+        finally
+        {
+            // If we haven't failed, we should already have done this, but if we did fail ...
+            SAIUtil.setLatestVersion(current);
+        }
     }
 
     @Test
@@ -1270,7 +1320,7 @@ public class NativeIndexDDLTest extends SAITester
 
         Injections.inject(delayIndexBuilderCompletion);
 
-        IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
+        IndexContext numericIndexContext = getIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")));
 
         waitForAssert(() -> assertTrue(getCompactionTasks() > 0), 1000, TimeUnit.MILLISECONDS);
 

@@ -35,6 +35,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.disk.EmptyIndex;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
@@ -62,23 +63,33 @@ public class SSTableIndex
     private final IndexContext indexContext;
     private final SSTableReader sstable;
     private final SearchableIndex searchableIndex;
+    private final IndexComponents.ForRead perIndexComponents;
 
     private final AtomicInteger references = new AtomicInteger(1);
     private final AtomicBoolean indexWasDropped = new AtomicBoolean(false);
 
-    public SSTableIndex(SSTableContext sstableContext, IndexContext indexContext)
+    public SSTableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
     {
-        assert indexContext.getValidator() != null;
-        this.searchableIndex = sstableContext.indexDescriptor.newSearchableIndex(sstableContext, indexContext);
+        assert perIndexComponents.context().getValidator() != null;
+        this.perIndexComponents = perIndexComponents;
+        this.searchableIndex = perIndexComponents.version().onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
 
         this.sstableContext = sstableContext.sharedCopy(); // this line must not be before any code that may throw
-        this.indexContext = indexContext;
+        this.indexContext = perIndexComponents.context();
         this.sstable = sstableContext.sstable;
     }
 
     public IndexContext getIndexContext()
     {
         return indexContext;
+    }
+
+    /**
+     * Returns the concrete on-disk perIndex components used by this index instance.
+     */
+    public IndexComponents.ForRead usedPerIndexComponents()
+    {
+        return perIndexComponents;
     }
 
     public SSTableContext getSSTableContext()
@@ -109,7 +120,7 @@ public class SSTableIndex
      */
     public long sizeOfPerColumnComponents()
     {
-        return sstableContext.indexDescriptor.perIndexComponents(indexContext).liveSizeOnDiskInBytes();
+        return perIndexComponents.liveSizeOnDiskInBytes();
     }
 
     /**
@@ -117,7 +128,7 @@ public class SSTableIndex
      */
     public long sizeOfPerSSTableComponents()
     {
-        return sstableContext.indexDescriptor.perSSTableComponents().liveSizeOnDiskInBytes();
+        return sstableContext.usedPerSSTableComponents().liveSizeOnDiskInBytes();
     }
 
     /**
@@ -197,7 +208,7 @@ public class SSTableIndex
 
     public Version getVersion()
     {
-        return sstableContext.indexDescriptor.getVersion(indexContext);
+        return perIndexComponents.version();
     }
 
     public IndexFeatureSet indexFeatureSet()
@@ -249,7 +260,7 @@ public class SSTableIndex
              * components are not in use.
              */
             if (indexWasDropped.get())
-                sstableContext.indexDescriptor.perIndexComponents(indexContext).forWrite().forceDeleteAllComponents();
+                perIndexComponents.forWrite().forceDeleteAllComponents();
         }
     }
 

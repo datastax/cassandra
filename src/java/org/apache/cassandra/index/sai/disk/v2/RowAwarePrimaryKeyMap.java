@@ -34,7 +34,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.BlockPackedReader;
@@ -72,6 +71,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     @ThreadSafe
     public static class RowAwarePrimaryKeyMapFactory implements Factory
     {
+        private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final SortedTermsReader sortedTermsReader;
         private FileHandle token = null;
@@ -83,11 +83,11 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         private final PrimaryKey.Factory primaryKeyFactory;
         private final SSTableId<?> sstableId;
 
-        public RowAwarePrimaryKeyMapFactory(IndexDescriptor indexDescriptor, SSTableReader sstable)
+        public RowAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
         {
             try
             {
-                IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
+                this.perSSTableComponents = perSSTableComponents;
                 MetadataSource metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.TOKEN_VALUES)));
                 SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS)));
@@ -100,8 +100,8 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                 this.termsTrie = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
                 this.sortedTermsReader = new SortedTermsReader(termsData, termsDataBlockOffsets, termsTrie, sortedTermsMeta, blockOffsetsMeta);
                 this.partitioner = sstable.metadata().partitioner;
-                this.primaryKeyFactory = indexDescriptor.primaryKeyFactory;
-                this.clusteringComparator = indexDescriptor.clusteringComparator;
+                this.primaryKeyFactory = primaryKeyFactory;
+                this.clusteringComparator = sstable.metadata().comparator;
                 this.sstableId = sstable.getId();
             }
             catch (Throwable t)

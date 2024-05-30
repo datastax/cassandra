@@ -57,16 +57,19 @@ public class MemtableIndexWriter implements PerIndexWriter
 
     private final IndexComponents.ForWrite perIndexComponents;
     private final MemtableIndex memtableIndex;
+    private final PrimaryKey.Factory pkFactory;
     private final RowMapping rowMapping;
 
     public MemtableIndexWriter(MemtableIndex memtableIndex,
                                IndexComponents.ForWrite perIndexComponents,
+                               PrimaryKey.Factory pkFactory,
                                RowMapping rowMapping)
     {
         assert rowMapping != null && rowMapping != RowMapping.DUMMY : "Row mapping must exist during FLUSH.";
 
         this.perIndexComponents = perIndexComponents;
         this.memtableIndex = memtableIndex;
+        this.pkFactory = pkFactory;
         this.rowMapping = rowMapping;
     }
 
@@ -135,11 +138,6 @@ public class MemtableIndexWriter implements PerIndexWriter
         }
     }
 
-    private PrimaryKey.Factory pkFactory()
-    {
-        return perIndexComponents.indexDescriptor().primaryKeyFactory;
-    }
-
     private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, long maxSegmentRowId) throws IOException
     {
         long numRows;
@@ -180,8 +178,8 @@ public class MemtableIndexWriter implements PerIndexWriter
                                                        numRows,
                                                        terms.getMinSSTableRowId(),
                                                        terms.getMaxSSTableRowId(),
-                                                       pkFactory().createPartitionKeyOnly(minKey),
-                                                       pkFactory().createPartitionKeyOnly(maxKey),
+                                                       pkFactory.createPartitionKeyOnly(minKey),
+                                                       pkFactory.createPartitionKeyOnly(maxKey),
                                                        terms.getMinTerm(),
                                                        terms.getMaxTerm(),
                                                        indexMetas);
@@ -214,8 +212,8 @@ public class MemtableIndexWriter implements PerIndexWriter
                                                        rowMapping.size(),
                                                        0,
                                                        rowMapping.maxSegmentRowId,
-                                                       pkFactory().createPartitionKeyOnly(minKey),
-                                                       pkFactory().createPartitionKeyOnly(maxKey),
+                                                       pkFactory.createPartitionKeyOnly(minKey),
+                                                       pkFactory.createPartitionKeyOnly(maxKey),
                                                        ByteBufferUtil.bytes(0), // VSTODO by pass min max terms for vectors
                                                        ByteBufferUtil.bytes(0), // VSTODO by pass min max terms for vectors
                                                        metadataMap);
