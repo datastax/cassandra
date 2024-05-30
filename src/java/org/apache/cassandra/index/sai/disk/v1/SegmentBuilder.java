@@ -155,6 +155,12 @@ public abstract class SegmentBuilder
                 return writer.writeAll(kdTreeRamBuffer.asPointValues());
             }
         }
+
+        @Override
+        public boolean requiresFlush()
+        {
+            return kdTreeRamBuffer.requiresFlush();
+        }
     }
 
     public static class RAMStringSegmentBuilder extends SegmentBuilder
@@ -191,6 +197,12 @@ public abstract class SegmentBuilder
             {
                 return writer.writeAll(ramIndexer.getTermsWithPostings());
             }
+        }
+
+        @Override
+        public boolean requiresFlush()
+        {
+            return ramIndexer.requiresFlush();
         }
     }
 
