@@ -41,7 +41,9 @@ import io.github.jbellis.jvector.pq.ProductQuantization;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.ExplicitThreadLocal;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
+import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
@@ -66,6 +68,7 @@ import static java.lang.Math.min;
 public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraDiskAnn.class.getName());
+    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     public static final int PQ_MAGIC = 0xB011A61C; // PQ_MAGIC, with a lot of liberties taken
 
@@ -80,6 +83,7 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
     private final ProductQuantization pq;
     private final VectorCompression compression;
     final boolean pqUnitVectors;
+    final VectorFloat<?> datasetMean;
 
     private final ExplicitThreadLocal<GraphSearcher> searchers;
 
@@ -106,10 +110,12 @@ public class CassandraDiskAnn extends JVectorLuceneOnDiskGraph
                 version = PQVersion.values()[reader.readInt()];
                 assert PQVersion.V1.compareTo(version) >= 0 : String.format("Old PQ version %s written with PQ_MAGIC!?", version);
                 pqUnitVectors = reader.readBoolean();
+                datasetMean = vts.readFloatVector(reader, rawGraph.getDimension());
             }
             else
             {
                 pqUnitVectors = true;
+                datasetMean = null;
                 reader.seek(pqSegmentOffset);
             }
 

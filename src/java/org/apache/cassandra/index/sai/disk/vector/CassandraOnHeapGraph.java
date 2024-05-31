@@ -21,14 +21,12 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -122,6 +120,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     private final IndexContext context;
     private final InvalidVectorBehavior invalidVectorBehavior;
     private volatile boolean hasDeletions;
+    private final KahanSum vectorSum;
 
     // we don't need to explicitly close these since only on-heap resources are involved
     private final ThreadLocal<GraphSearcher> searchers;
@@ -139,6 +138,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         vectorValues = new ConcurrentVectorValues(dimension);
         similarityFunction = indexConfig.getSimilarityFunction();
         sourceModel = indexConfig.getSourceModel();
+        vectorSum = new KahanSum(dimension);
         // We need to be able to inexpensively distinguish different vectors, with a slower path
         // that identifies vectors that are equal but not the same reference.  A comparison-
         // based Map (which only needs to look at vector elements until a difference is found)
@@ -242,6 +242,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 bytesUsed += vectorValues.add(ordinal, vector);
                 bytesUsed += postings.ramBytesUsed();
                 postingsByOrdinal.put(ordinal, postings);
+                vectorSum.add(vector);
                 bytesUsed += builder.addGraphNode(ordinal, vector);
                 return bytesUsed;
             }
@@ -440,7 +441,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 if (matcher.apply(cv))
                 {
                     // We can exit now because we won't find a better candidate
-                    var candidate = new PqInfo(searcher.getPQ(), searcher.containsUnitVectors());
+                    var candidate = new PqInfo(searcher.getPQ(), searcher.containsUnitVectors(), searcher.getDatasetMean());
                     if (segment.metadata.numRows >= ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
                         return candidate;
 
@@ -518,7 +519,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
 
         var actualType = compressor == null ? CompressionType.NONE : preferredCompression.type;
-        writePqHeader(writer, containsUnitVectors, actualType);
+        writePqHeader(writer, containsUnitVectors, vectorSum.getMean(), actualType);
         if (actualType == CompressionType.NONE)
             return writer.position();
 
@@ -532,7 +533,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return writer.position();
     }
 
-    static void writePqHeader(DataOutput writer, boolean unitVectors, CompressionType type)
+    static void writePqHeader(DataOutput writer, boolean unitVectors, VectorFloat<?> mean, CompressionType type)
     throws IOException
     {
         if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT)
@@ -541,6 +542,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             writer.writeInt(CassandraDiskAnn.PQ_MAGIC);
             writer.writeInt(PQVersion.V1.ordinal());
             writer.writeBoolean(unitVectors);
+            vts.writeFloatVector(writer, mean);
         }
 
         // write the compression type
@@ -608,19 +610,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
     {
         IGNORE,
         FAIL
-    }
-
-    public static class PqInfo
-    {
-        public final ProductQuantization pq;
-        /** an empty Optional indicates that the index was written with an older version that did not record this information */
-        public final Optional<Boolean> unitVectors;
-
-        public PqInfo(ProductQuantization pq, Optional<Boolean> unitVectors)
-        {
-            this.pq = pq;
-            this.unitVectors = unitVectors;
-        }
     }
 
     /** ensures that the graph is connected -- normally not necessary but it can help tests reason about the state */

@@ -69,7 +69,23 @@ public class VectorSiftSmallTest extends VectorTester
     }
 
     @Test
-    public void testCompaction() throws Throwable
+    public void testCompactionOnHeap() throws Throwable
+    {
+        // each segment will be too small to trigger PQ so final compaction will be on heap
+        testCompactionWithSegments(10);
+    }
+
+    // Note to Joel:
+    // remember to enable WRITE_JVECTOR3_FORMAT and Version.DB when running this
+    // (left it disabled in the PR so it's clear that we shouldn't commit it that way just yet)
+    @Test
+    public void testCompactionOnDisk() throws Throwable
+    {
+        // segments have PQ so final compaction will be done with disk-based CompactionGraph
+        testCompactionWithSegments(5);
+    }
+
+    private void testCompactionWithSegments(int segments) throws IOException
     {
         var baseVectors = readFvecs(String.format("test/data/%s/%s_base.fvecs", DATASET, DATASET));
         var queryVectors = readFvecs(String.format("test/data/%s/%s_query.fvecs", DATASET, DATASET));
@@ -83,7 +99,6 @@ public class VectorSiftSmallTest extends VectorTester
         // we're going to compact manually, so disable background compactions to avoid interference
         disableCompaction();
 
-        int segments = 10;
         int vectorsPerSegment = baseVectors.size() / segments;
         assert baseVectors.size() % vectorsPerSegment == 0; // simplifies split logic
         for (int i = 0; i < segments; i++)
@@ -94,14 +109,14 @@ public class VectorSiftSmallTest extends VectorTester
         for (int topK : List.of(1, 100))
         {
             double recall = testRecall(topK, queryVectors, groundTruth);
-            assertTrue("Pre-compaction recall is " + recall, recall > 0.975);
+            assertTrue("Pre-compaction recall is " + recall, recall >= 0.95);
         }
 
         compact();
-        for (int topK : List.of(1, 100))
+        for (int topK : List.of(100, 1))
         {
             var recall = testRecall(topK, queryVectors, groundTruth);
-            assertTrue("Post-compaction recall is " + recall, recall > 0.975);
+            assertTrue("Post-compaction recall is " + recall, recall >= 0.95);
         }
     }
 

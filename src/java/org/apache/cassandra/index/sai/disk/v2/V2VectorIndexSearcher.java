@@ -633,4 +633,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     {
         return Optional.empty();
     }
+
+    public VectorFloat<?> getDatasetMean()
+    {
+        return null;
+    }
 }

@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v3;
 import java.io.IOException;
 import java.util.Optional;
 
+import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -45,5 +46,11 @@ public class V3VectorIndexSearcher extends V2VectorIndexSearcher
     public Optional<Boolean> containsUnitVectors()
     {
         return Optional.of(((CassandraDiskAnn) graph).pqUnitVectors);
+    }
+
+    @Override
+    public VectorFloat<?> getDatasetMean()
+    {
+        return ((CassandraDiskAnn) graph).datasetMean;
     }
 }

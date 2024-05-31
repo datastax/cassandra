@@ -24,7 +24,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.function.IntUnaryOperator;
 
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
@@ -52,10 +51,26 @@ public class VectorPostingsWriter<T>
         writeDeletedOrdinals(writer, deletedOrdinals);
         // VSTODO if we're willing to write non-sequentially then we can save a lot of getVector and postingsMap.get calls,
         // which are expensive when both are on-disk
-        writeNodeOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
-        writeRowIdToNodeOrdinalMapping(writer, vectorValues, postingsMap);
+        writeNodeOrdinalToRowIdMapping(writer, vectorValues.size(), i -> postingsMap.get(vectorValues.getVector(i)));
+        writeRowIdToNodeOrdinalMapping(writer, vectorValues.size(), i -> postingsMap.get(vectorValues.getVector(i)));
 
         return writer.position();
+    }
+
+    public long writePostings(SequentialWriter writer,
+                              Map<Integer, ? extends VectorPostings<T>> ordinalToPostings,
+                              Set<Integer> deletedOrdinals) throws IOException
+    {
+        writeDeletedOrdinals(writer, deletedOrdinals);
+        writeNodeOrdinalToRowIdMapping(writer, ordinalToPostings.size(), ordinalToPostings::get);
+        writeRowIdToNodeOrdinalMapping(writer, ordinalToPostings.size(), ordinalToPostings::get);
+        return writer.position();
+    }
+
+    @FunctionalInterface
+    private interface OrdinalToRows<U>
+    {
+        VectorPostings<U> get(int ordinal);
     }
 
     private void writeDeletedOrdinals(SequentialWriter writer, Set<Integer> deletedOrdinals) throws IOException
@@ -73,33 +88,31 @@ public class VectorPostingsWriter<T>
         }
     }
 
-    public void writeNodeOrdinalToRowIdMapping(SequentialWriter writer,
-                                               RandomAccessVectorValues vectorValues,
-                                               Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
+    private void writeNodeOrdinalToRowIdMapping(SequentialWriter writer, int size, OrdinalToRows<T> ordinalToRows) throws IOException
     {
         long ordToRowOffset = writer.getOnDiskFilePointer();
 
         // total number of vectors
-        writer.writeInt(vectorValues.size());
+        writer.writeInt(size);
 
         // Write the offsets of the postings for each ordinal
-        var offsetsStartAt = ordToRowOffset + 4L + 8L * vectorValues.size();
+        var offsetsStartAt = ordToRowOffset + 4L + 8L * size;
         var nextOffset = offsetsStartAt;
-        for (var i = 0; i < vectorValues.size(); i++) {
+        for (var i = 0; i < size; i++) {
             // (ordinal is implied; don't need to write it)
             writer.writeLong(nextOffset);
 
             var originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
 
-            var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
+            var rowIds = ordinalToRows.get(originalOrdinal).getRowIds();
             nextOffset += 4 + (rowIds.size() * 4L); // 4 bytes for size and 4 bytes for each integer in the list
         }
         assert writer.position() == offsetsStartAt : "writer.position()=" + writer.position() + " offsetsStartAt=" + offsetsStartAt;
 
         // Write postings lists
-        for (var i = 0; i < vectorValues.size(); i++) {
+        for (var i = 0; i < size; i++) {
             var originalOrdinal = reverseOrdinalsMapper.applyAsInt(i);
-            var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
+            var rowIds = ordinalToRows.get(originalOrdinal).getRowIds();
 
             writer.writeInt(rowIds.size());
             for (int r = 0; r < rowIds.size(); r++)
@@ -108,20 +121,14 @@ public class VectorPostingsWriter<T>
         assert writer.position() == nextOffset;
     }
 
-    public void writeRowIdToNodeOrdinalMapping(SequentialWriter writer,
-                                               RandomAccessVectorValues vectorValues,
-                                               Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
+    private void writeRowIdToNodeOrdinalMapping(SequentialWriter writer, int size, OrdinalToRows<T> ordinalToRows) throws IOException
     {
         List<Pair<Integer, Integer>> pairs = new ArrayList<>();
 
         // Collect all (rowId, vectorOrdinal) pairs
-        for (var i = 0; i < vectorValues.size(); i++) {
-            // if it's an on-disk Map then this is an expensive assert, only do it when in memory
-            if (postingsMap instanceof ConcurrentSkipListMap)
-                assert postingsMap.get(vectorValues.getVector(i)).getOrdinal() == i;
-
+        for (var i = 0; i < size; i++) {
             int ord = reverseOrdinalsMapper.applyAsInt(i);
-            var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
+            var rowIds = ordinalToRows.get(ord).getRowIds();
             for (int r = 0; r < rowIds.size(); r++)
                 pairs.add(Pair.create(rowIds.getInt(r), i));
         }

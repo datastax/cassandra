@@ -33,7 +33,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.pq.ProductQuantization;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
@@ -47,6 +46,7 @@ import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
+import org.apache.cassandra.index.sai.disk.vector.PqInfo;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -210,12 +210,12 @@ public abstract class SegmentBuilder
     {
         private final CompactionGraph graphIndex;
 
-        public VectorOffHeapSegmentBuilder(IndexDescriptor descriptor, IndexContext context, long rowIdOffset, long keyCount, NamedMemoryLimiter limiter, ProductQuantization pq, boolean unitVectors)
+        public VectorOffHeapSegmentBuilder(IndexDescriptor descriptor, IndexContext context, long rowIdOffset, long keyCount, NamedMemoryLimiter limiter, PqInfo pqi)
         {
             super(rowIdOffset, context.getValidator(), limiter);
             try
             {
-                graphIndex = new CompactionGraph(descriptor, context, pq, unitVectors, keyCount);
+                graphIndex = new CompactionGraph(descriptor, context, pqi, keyCount);
             }
             catch (IOException e)
             {
