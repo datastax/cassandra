@@ -202,10 +202,6 @@ import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.MATERIAL
 import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.TABLE;
 import static org.apache.cassandra.cql3.SchemaElement.SchemaElementType.TYPE;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
-import static com.datastax.driver.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT_MILLIS;
-import static com.datastax.driver.core.SocketOptions.DEFAULT_READ_TIMEOUT_MILLIS;
-import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
-import static org.apache.cassandra.index.sai.SAITester.vector;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -2683,11 +2679,19 @@ public abstract class CQLTester
         return new Vector<>(values);
     }
 
+    public static Vector<Float> vectorOf(float... v)
+    {
+        var v2 = new Float[v.length];
+        for (int i = 0; i < v.length; i++)
+            v2[i] = v[i];
+        return new Vector<>(v2);
+    }
+
     /** @return a normalized vector with the given dimension */
     public static Vector<Float> randomVectorBoxed(int dimension)
     {
         var floats = randomVector(dimension);
-        return vector(floats);
+        return vectorOf(floats);
     }
 
     public static ByteBuffer randomVectorSerialized(int dimension)
