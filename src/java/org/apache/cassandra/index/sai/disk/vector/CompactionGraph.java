@@ -315,7 +315,10 @@ public class CompactionGraph implements Closeable, Accountable
                 try (var view = index.getView())
                 {
                     return new VectorPostingsWriter<Integer>(postingsOneToOne, i -> i)
-                           .writePostings(postingsOutput.asSequentialWriter(), ordinalToPostings, deletedOrdinals);
+                           .writePostings(postingsOutput.asSequentialWriter(),
+                                          ordinalToPostings.size(),
+                                          ordinalToPostings::get,
+                                          deletedOrdinals);
                 }
             });
 

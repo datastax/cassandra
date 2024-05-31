@@ -22,12 +22,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.function.IntUnaryOperator;
 
-import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
-import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.utils.Pair;
 
@@ -44,31 +41,18 @@ public class VectorPostingsWriter<T>
     }
 
     public long writePostings(SequentialWriter writer,
-                              RandomAccessVectorValues vectorValues,
-                              Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap,
+                              int ordinalCount,
+                              OrdinalToRows<T> ordinalToPostings,
                               Set<Integer> deletedOrdinals) throws IOException
     {
         writeDeletedOrdinals(writer, deletedOrdinals);
-        // VSTODO if we're willing to write non-sequentially then we can save a lot of getVector and postingsMap.get calls,
-        // which are expensive when both are on-disk
-        writeNodeOrdinalToRowIdMapping(writer, vectorValues.size(), i -> postingsMap.get(vectorValues.getVector(i)));
-        writeRowIdToNodeOrdinalMapping(writer, vectorValues.size(), i -> postingsMap.get(vectorValues.getVector(i)));
-
-        return writer.position();
-    }
-
-    public long writePostings(SequentialWriter writer,
-                              Map<Integer, ? extends VectorPostings<T>> ordinalToPostings,
-                              Set<Integer> deletedOrdinals) throws IOException
-    {
-        writeDeletedOrdinals(writer, deletedOrdinals);
-        writeNodeOrdinalToRowIdMapping(writer, ordinalToPostings.size(), ordinalToPostings::get);
-        writeRowIdToNodeOrdinalMapping(writer, ordinalToPostings.size(), ordinalToPostings::get);
+        writeNodeOrdinalToRowIdMapping(writer, ordinalCount, ordinalToPostings);
+        writeRowIdToNodeOrdinalMapping(writer, ordinalCount, ordinalToPostings);
         return writer.position();
     }
 
     @FunctionalInterface
-    private interface OrdinalToRows<U>
+    public interface OrdinalToRows<U>
     {
         VectorPostings<U> get(int ordinal);
     }

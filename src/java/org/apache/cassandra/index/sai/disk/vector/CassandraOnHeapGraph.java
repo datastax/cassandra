@@ -383,7 +383,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
             long postingsOffset = postingsOutput.getFilePointer();
             long postingsPosition = new VectorPostingsWriter<T>(canFastFindRows, reverseOrdinalMapper)
                                             .writePostings(postingsOutput.asSequentialWriter(),
-                                                           vectorValues, postingsMap, deletedOrdinals);
+                                                           postingsByOrdinal.size(),
+                                                           postingsByOrdinal::get,
+                                                           deletedOrdinals);
             long postingsLength = postingsPosition - postingsOffset;
 
             // complete (internal clean up) and write the graph
