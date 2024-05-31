@@ -279,10 +279,16 @@ public class InMemoryReadTrie<T> extends Trie<T>
         return getChunk(pos).getIntVolatile(inChunkPointer(pos));
     }
 
-    T getContent(int index)
+    /**
+     * Get the content for the given content pointer.
+     *
+     * @param id content pointer, encoded as ~index where index is the position in the content array.
+     * @return the current content value.
+     */
+    T getContent(int id)
     {
-        int leadBit = getChunkIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
-        int ofs = inChunkPointer(index, leadBit, CONTENTS_START_SIZE);
+        int leadBit = getChunkIdx(~id, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
+        int ofs = inChunkPointer(~id, leadBit, CONTENTS_START_SIZE);
         AtomicReferenceArray<T> array = contentArrays[leadBit];
         return array.get(ofs);
     }
@@ -467,13 +473,13 @@ public class InMemoryReadTrie<T> extends Trie<T>
     T getNodeContent(int node)
     {
         if (isLeaf(node))
-            return getContent(~node);
+            return getContent(node);
 
         if (offset(node) != PREFIX_OFFSET)
             return null;
 
         int index = getIntVolatile(node + PREFIX_CONTENT_OFFSET);
-        return (index >= 0)
+        return (isLeaf(index))
                ? getContent(index)
                : null;
     }
@@ -1169,5 +1175,74 @@ public class InMemoryReadTrie<T> extends Trie<T>
             }
         }
         return process(new TrieDumper<>(Function.identity()), new TypedNodesCursor());
+    }
+
+    /**
+     * For use in debugging, dump info about the given node.
+     */
+    @SuppressWarnings("unused")
+    String dumpNode(int node)
+    {
+        if (isNull(node))
+            return "NONE";
+        else if (isLeaf(node))
+            return "~" + (~node);
+        else
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.append(node + " ");
+            switch (offset(node))
+            {
+                case SPARSE_OFFSET:
+                {
+                    builder.append("Sparse: ");
+                    for (int i = 0; i < SPARSE_CHILD_COUNT; ++i)
+                    {
+                        int child = getIntVolatile(node + SPARSE_CHILDREN_OFFSET + i * 4);
+                        if (child != NONE)
+                            builder.append(String.format("%02x", getUnsignedByte(node + SPARSE_BYTES_OFFSET + i)))
+                                   .append(" -> ")
+                                   .append(child)
+                                   .append('\n');
+                    }
+                    break;
+                }
+                case SPLIT_OFFSET:
+                {
+                    builder.append("Split: ");
+                    for (int i = 0; i < SPLIT_START_LEVEL_LIMIT; ++i)
+                    {
+                        int child = getIntVolatile(node - (SPLIT_START_LEVEL_LIMIT - 1 - i) * 4);
+                        if (child != NONE)
+                            builder.append(Integer.toBinaryString(i))
+                                   .append(" -> ")
+                                   .append(child)
+                                   .append('\n');
+                    }
+                    break;
+                }
+                case PREFIX_OFFSET:
+                {
+                    builder.append("Prefix: ");
+                    int flags = getUnsignedByte(node + PREFIX_FLAGS_OFFSET);
+                    final int content = getIntVolatile(node + PREFIX_CONTENT_OFFSET);
+                    builder.append(content < 0 ? "~" + (~content) : "" + content);
+                    int child = followContentTransition(node);
+                    builder.append(" -> ")
+                           .append(child);
+                    break;
+                }
+                default:
+                {
+                    builder.append("Chain: ");
+                    for (int i = 0; i < chainBlockLength(node); ++i)
+                        builder.append(String.format("%02x", getUnsignedByte(node + i)));
+                    builder.append(" -> ")
+                           .append(getIntVolatile(node + chainBlockLength(node)));
+                    break;
+                }
+            }
+            return builder.toString();
+        }
     }
 }
