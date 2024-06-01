@@ -210,22 +210,46 @@
     <resources id="_jvm11_arg_items">
         <!-- BELOW IS A HACK TO RUN TESTS with newer JDKs. We need to decide whether we add CASSANDRA-18179 and get
         rid of CASSANDRA_USE_JDK11 and use-jdk11 before 5.0-->
+        <string>-XX:+UnlockDiagnosticVMOptions</string>
         <string>-Djdk.attach.allowAttachSelf=true</string>
         <string>-XX:+UseG1GC</string>
         <string>-XX:+ParallelRefProcEnabled</string>
-        <string>-XX:MaxTenuringThreshold=1</string>
-        <string>-XX:G1HeapRegionSize=16m</string>
+        <!-- Below two are used in Cassandra, not in CNDB-->
+        <!--<string>-XX:MaxTenuringThreshold=1</string>
+        <string>-XX:G1HeapRegionSize=16m</string>-->
+        <string>-XX:G1RSetUpdatingPauseTimePercent=5</string>
+        <string>-XX:MaxGCPauseMillis=100</string>
+
+        <!-- Copy-paste for now these options from cndb/docker-entrypoint.sh; we will verify later whether we
+         want all of them for tests-->
+        <string>-XX:-RestrictContended</string>
+        <string>-XX:+UseThreadPriorities</string>
+        <string>-XX:+DebugNonSafepoints</string>
+        <string>-XX:+UseStringDeduplication</string>
+        <string>-XX:StringTableSize=1000003</string>
+        <string>-XX:+PerfDisableSharedMem</string>
+        <string>-XX:+AlwaysPreTouch</string>
+        <string>-XX:+UseTLAB</string>
+        <string>-XX:+ResizeTLAB</string>
+        <string>-XX:+UseNUMA</string>
+
 
         <string>--add-exports java.base/jdk.internal.misc=ALL-UNNAMED</string>
+        <string>--add-exports java.base/jdk.internal.ref=ALL-UNNAMED</string>
+        <string>--add-exports java.base/jdk.internal.perf=ALL-UNNAMED</string>
+        <string>--add-exports java.base/sun.nio.ch=ALL-UNNAMED</string>
         <string>--add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED</string>
         <string>--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED</string>
         <string>--add-exports java.rmi/sun.rmi.server=ALL-UNNAMED</string>
-        <string>--add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED</string>
-        <string>--add-exports java.sql/java.sql=ALL-UNNAMED</string>
-        <string>--add-exports java.base/java.lang.ref=ALL-UNNAMED</string>
-        <string>--add-exports jdk.unsupported/sun.misc=ALL-UNNAMED</string>
-        <string>--add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</string>
-        <string>--add-exports jdk.attach/sun.tools.attach=ALL-UNNAMED</string>
+        <!-- below was added in Cassandra only; check for what and whether we need it here-->
+        <!-- add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED -->
+        <string>--add-exports jdk.naming.dns/com.sun.jndi.dns=java.naming</string>
+        <!-- Below were added only in Cassandra; check for what and whether we need them here-->
+        <!--add-exports java.sql/java.sql=ALL-UNNAMED
+            add-exports java.base/java.lang.ref=ALL-UNNAMED
+            add-exports jdk.unsupported/sun.misc=ALL-UNNAMED
+            add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED
+            add-exports jdk.attach/sun.tools.attach=ALL-UNNAMED-->
 
         <string>--add-opens java.base/java.lang.module=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.loader=ALL-UNNAMED</string>
@@ -233,17 +257,28 @@
         <string>--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
-        <string>--add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED</string>
+        <!-- below was added in Cassandra only; check for what and whether we need it here
+            add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED-->
         <string>--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED</string>
+        <string>--add-opens jdk.management.jfr/jdk.management.jfr=ALL-UNNAMED</string>
+        <string>--add-opens jdk.naming.dns/com.sun.jndi.dns=ALL-UNNAMED</string>
         <string>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.nio.file.spi=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.io=ALL-UNNAMED</string>
-        <string>--add-opens java.base/java.lang.reflect=ALL-UNNAMED</string>
-        <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
+        <!-- below were added in Cassandra; check for what and whether we need them here
+            add-opens java.base/java.lang.reflect=ALL-UNNAMED
+            add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED-->
         <string>--add-opens java.base/java.lang=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.net=ALL-UNNAMED</string>
+        <string>--add-opens=java.base/java.lang.reflect=ALL-UNNAMED</string>
+        <string>--add-opens=jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
+        <string>--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</string>
+        <string>--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED</string>
 
-        <string>--add-opens java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED</string>
+        <!-- below was added in Cassandra only; check for what and whether we need it here
+            add-opens java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED-->
     </resources>
     <pathconvert property="_jvm_args_concat" refid="_jvm11_arg_items" pathsep=" "/>
     <condition property="java11-jvmargs" value="${_jvm_args_concat}" else="">
