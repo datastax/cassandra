@@ -45,7 +45,7 @@
         The use of both CASSANDRA_USE_JDK11 and use-jdk11 is deprecated.
     -->
     <property name="java.default" value="11" />
-    <property name="java.supported" value="11,17" />
+    <property name="java.supported" value="11,17,22" />
 
     <!-- directory details -->
     <property name="basedir" value="."/>
@@ -316,6 +316,47 @@
         <equals arg1="${ant.java.version}" arg2="17"/>
     </condition>
 
+    <resources id="_jvm22_arg_items">
+        <string>-Djdk.attach.allowAttachSelf=true</string>
+        <string>-XX:+UseG1GC</string>
+        <string>-XX:+ParallelRefProcEnabled</string>
+        <string>-XX:MaxTenuringThreshold=1</string>
+        <string>-XX:G1HeapRegionSize=16m</string>
+
+        <string>--add-exports java.base/jdk.internal.misc=ALL-UNNAMED</string>
+        <string>--add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED</string>
+        <string>--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED</string>
+        <string>--add-exports java.rmi/sun.rmi.server=ALL-UNNAMED</string>
+        <string>--add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED</string>
+        <string>--add-exports java.sql/java.sql=ALL-UNNAMED</string>
+        <string>--add-exports java.base/java.lang.ref=ALL-UNNAMED</string>
+        <string>--add-exports jdk.unsupported/sun.misc=ALL-UNNAMED</string>
+        <string>--add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</string>
+        <string>--add-exports jdk.attach/sun.tools.attach=ALL-UNNAMED</string>
+
+        <string>--add-opens java.base/java.lang.module=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.loader=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.ref=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED</string>
+        <string>--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.io=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.reflect=ALL-UNNAMED</string>
+        <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
+
+        <string>--add-opens java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED</string>
+    </resources>
+    <pathconvert property="_jvm22_args_concat" refid="_jvm22_arg_items" pathsep=" "/>
+    <condition property="java-jvmargs" value="${_jvm22_args_concat}">
+        <equals arg1="${ant.java.version}" arg2="22"/>
+    </condition>
+
     <!--
       JVM arguments for tests.
 
@@ -337,11 +378,19 @@
         <string>-Dio.netty.tryReflectionSetAccessible=true</string>
     </resources>
     <pathconvert property="_jvm17_test_arg_items_concat" refid="_jvm17_test_arg_items" pathsep=" "/>
+    <resources id="_jvm22_test_arg_items">
+        <string>-Djava.security.manager=allow</string>
+        <string>-Dio.netty.tryReflectionSetAccessible=true</string>
+    </resources>
+    <pathconvert property="_jvm22_test_arg_items_concat" refid="_jvm22_test_arg_items" pathsep=" "/>
     <condition property="_std-test-jvmargs" value="${_jvm11_test_arg_items_concat}">
             <equals arg1="${ant.java.version}" arg2="11"/>
     </condition>
     <condition property="_std-test-jvmargs" value="${_jvm17_test_arg_items_concat}">
         <equals arg1="${ant.java.version}" arg2="17"/>
+    </condition>
+    <condition property="_std-test-jvmargs" value="${_jvm22_test_arg_items_concat}">
+        <equals arg1="${ant.java.version}" arg2="22"/>
     </condition>
 
     <!-- needed to compile org.apache.cassandra.utils.JMXServerUtils -->
