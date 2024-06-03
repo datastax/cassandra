@@ -20,6 +20,8 @@ package org.apache.cassandra.io.sstable.format;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+
 
 /**
  * A set of feature flags associated with a SSTable format
@@ -159,4 +161,5 @@ public abstract class Version
     // TODO TBD
     public abstract boolean hasMaxColumnValueLengths();
 
+    public abstract ByteComparable.Version getByteComparableVersion();
 }

@@ -47,7 +47,6 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.format.bti.RowIndexReader.IndexInfo;
-import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -65,9 +64,9 @@ import static org.junit.Assert.assertTrue;
 public class RowIndexTest
 {
     private final static Logger logger = LoggerFactory.getLogger(RowIndexTest.class);
-    private final Version version = new BtiFormat(null).getLatestVersion();
+    private static final Version latestVersion = new BtiFormat(null).getLatestVersion();
+    private static final Version legacyVersion = new BtiFormat(null).getVersion("aa");
 
-    static final ByteComparable.Version VERSION = Walker.BYTE_COMPARABLE_VERSION;
 
     static final Random RANDOM;
 
@@ -87,12 +86,17 @@ public class RowIndexTest
     @Parameterized.Parameters()
     public static Collection<Object[]> generateData()
     {
-        return Arrays.asList(new Object[]{ Config.DiskAccessMode.standard },
-                             new Object[]{ Config.DiskAccessMode.mmap });
+        return Arrays.asList(new Object[]{ Config.DiskAccessMode.standard, latestVersion },
+                                         new Object[]{ Config.DiskAccessMode.mmap, latestVersion },
+                                         new Object[]{ Config.DiskAccessMode.standard, legacyVersion },
+                                         new Object[]{ Config.DiskAccessMode.mmap, legacyVersion });
     }
 
     @Parameterized.Parameter(value = 0)
     public static Config.DiskAccessMode accessMode = Config.DiskAccessMode.standard;
+
+    @Parameterized.Parameter(value = 1)
+    public static Version VERSION;
 
     @Test
     public void testSingletons() throws IOException
@@ -184,7 +188,7 @@ public class RowIndexTest
         dos.writeUTF("JUNK");
         dos.writeUTF("JUNK");
 
-        writer = new RowIndexWriter(comparator, dos, version);
+        writer = new RowIndexWriter(comparator, dos, VERSION);
     }
 
     public void complete() throws IOException
@@ -207,7 +211,7 @@ public class RowIndexTest
             assertEquals("JUNK", rdr.readUTF());
             assertEquals("JUNK", rdr.readUTF());
         }
-        return new RowIndexReader(fh, root, version);
+        return new RowIndexReader(fh, root, VERSION);
     }
 
     @Test
@@ -327,7 +331,7 @@ public class RowIndexTest
                 exactRight = b;
             }
 
-            try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, comparator.asByteComparable(left), comparator.asByteComparable(right), random.right.version))
+            try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, comparator.asByteComparable(left), comparator.asByteComparable(right), VERSION))
             {
                 IndexInfo indexInfo = iter.nextIndexInfo();
                 if (indexInfo == null)
@@ -376,10 +380,10 @@ public class RowIndexTest
                 logger.info(keys.stream()
                                 .filter(x -> comparator.compare(ll, x) <= 0 && comparator.compare(x, rr) <= 0)
                                 .map(clustering -> comparator.asByteComparable(clustering))
-                                .map(bc -> bc.byteComparableAsString(VERSION))
+                                .map(bc -> bc.byteComparableAsString(VERSION.getByteComparableVersion()))
                                 .collect(Collectors.joining(", ")));
                 logger.info("Left {}{} Right {}{}", comparator.asByteComparable(left), exactLeft ? "#" : "", comparator.asByteComparable(right), exactRight ? "#" : "");
-                try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, comparator.asByteComparable(left), comparator.asByteComparable(right), version))
+                try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, comparator.asByteComparable(left), comparator.asByteComparable(right), VERSION))
                 {
                     IndexInfo ii;
                     while ((ii = iter2.nextIndexInfo()) != null)
@@ -405,7 +409,7 @@ public class RowIndexTest
             ClusteringPrefix<?> right = exactRight ? keys.get(RANDOM.nextInt(keys.size())) : generateRandomKey();
 
             int idx = 0;
-            try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, ByteComparable.EMPTY, comparator.asByteComparable(right), random.right.version))
+            try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, ByteComparable.EMPTY, comparator.asByteComparable(right), VERSION))
             {
                 IndexInfo indexInfo = iter.nextIndexInfo();
                 if (indexInfo == null)
@@ -445,10 +449,10 @@ public class RowIndexTest
                 logger.info(keys.stream()
                                 .filter(x -> comparator.compare(x, rr) <= 0)
                                 .map(comparator::asByteComparable)
-                                .map(bc -> bc.byteComparableAsString(VERSION))
+                                .map(bc -> bc.byteComparableAsString(VERSION.getByteComparableVersion()))
                                 .collect(Collectors.joining(", ")));
                 logger.info("Right {}{}", comparator.asByteComparable(right), exactRight ? "#" : "");
-                try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, ByteComparable.EMPTY, comparator.asByteComparable(right), version))
+                try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, ByteComparable.EMPTY, comparator.asByteComparable(right), VERSION))
                 {
                     IndexInfo ii;
                     while ((ii = iter2.nextIndexInfo()) != null)
@@ -468,7 +472,7 @@ public class RowIndexTest
         for (int i = 0; i < size; i++)
         {
             assert i == 0 || comparator.compare(list.get(i - 1), list.get(i)) < 0;
-            assert i == 0 || ByteComparable.compare(comparator.asByteComparable(list.get(i - 1)), comparator.asByteComparable(list.get(i)), VERSION) < 0 :
+            assert i == 0 || ByteComparable.compare(comparator.asByteComparable(list.get(i - 1)), comparator.asByteComparable(list.get(i)), VERSION.getByteComparableVersion()) < 0 :
             String.format("%s bs %s versus %s bs %s", list.get(i - 1).clustering().clusteringString(comparator.subtypes()), comparator.asByteComparable(list.get(i - 1)), list.get(i).clustering().clusteringString(comparator.subtypes()), comparator.asByteComparable(list.get(i)));
             writer.add(list.get(i), list.get(i), new IndexInfo(i, DeletionTime.LIVE));
         }
