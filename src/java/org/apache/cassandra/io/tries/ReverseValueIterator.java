@@ -28,7 +28,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * <p>
  * The main utility of this class is the {@link #nextPayloadedNode()} method, which lists all nodes that contain a
  * payload within the requested bounds. The treatment of the bounds is non-standard (see
- * {@link #ReverseValueIterator(Rebufferer, long, ByteComparable, ByteComparable, LeftBoundTreatment)}), necessary to
+ * {@link #ReverseValueIterator(Rebufferer, long, ByteComparable, ByteComparable, LeftBoundTreatment, ByteComparable.Version)}), necessary to
  * properly walk tries of prefixes and separators.
  */
 @NotThreadSafe
@@ -38,20 +38,20 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
     private LeftBoundTreatment reportingPrefixes;
     private boolean popOnAdvance = true;
 
-    protected ReverseValueIterator(Rebufferer source, long root)
+    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable.Version version)
     {
-        this(source, root, false);
+        this(source, root, false, version);
     }
 
-    protected ReverseValueIterator(Rebufferer source, long root, boolean collecting)
+    protected ReverseValueIterator(Rebufferer source, long root, boolean collecting, ByteComparable.Version version)
     {
-        super(source, root, null, collecting);
+        super(source, root, null, collecting, version);
         initializeNoRightBound(root, NOT_AT_LIMIT, LeftBoundTreatment.GREATER);
     }
 
-    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix)
+    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, ByteComparable.Version version)
     {
-        this(source, root, start, end, admitPrefix, false);
+        this(source, root, start, end, admitPrefix, false, version);
     }
 
     /**
@@ -65,12 +65,12 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
      * </ul>
      * This behaviour is shared with the forward counterpart {@link ValueIterator}.
      */
-    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting)
+    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting, ByteComparable.Version version)
     {
-        super(source, root, start != null ? start.asComparableBytes(BYTE_COMPARABLE_VERSION) : null, collecting);
+        super(source, root, start != null ? start.asComparableBytes(version) : null, collecting, version);
 
         if (end != null)
-            initializeWithRightBound(root, end.asComparableBytes(BYTE_COMPARABLE_VERSION), admitPrefix, limit != null);
+            initializeWithRightBound(root, end.asComparableBytes(version), admitPrefix, limit != null);
         else
             initializeNoRightBound(root, limit != null ? limit.next() : NOT_AT_LIMIT, admitPrefix);
     }

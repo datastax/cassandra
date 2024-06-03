@@ -62,6 +62,7 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.io.sstable.format.SSTableFormat.Components.DATA;
 
@@ -550,6 +551,12 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
         public boolean hasMaxColumnValueLengths()
         {
             return false;
+        }
+
+        @Override
+        public ByteComparable.Version getByteComparableVersion()
+        {
+            return ByteComparable.Version.OSS50;
         }
     }
 

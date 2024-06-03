@@ -22,7 +22,6 @@ import java.util.function.Consumer;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.tries.IncrementalTrieWriter;
-import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -39,6 +38,7 @@ public class PartitionIndexBuilder implements AutoCloseable
     private final SequentialWriter writer;
     private final IncrementalTrieWriter<PartitionIndex.Payload> trieWriter;
     private final FileHandle.Builder fhBuilder;
+    private final ByteComparable.Version version;
 
     // the last synced data file position
     private long dataSyncPosition;
@@ -61,10 +61,11 @@ public class PartitionIndexBuilder implements AutoCloseable
     private DecoratedKey lastWrittenKey;
     private PartitionIndex.Payload lastPayload;
 
-    public PartitionIndexBuilder(SequentialWriter writer, FileHandle.Builder fhBuilder)
+    public PartitionIndexBuilder(SequentialWriter writer, FileHandle.Builder fhBuilder, ByteComparable.Version version)
     {
+        this.version = version;
         this.writer = writer;
-        this.trieWriter = IncrementalTrieWriter.open(PartitionIndex.TRIE_SERIALIZER, writer);
+        this.trieWriter = IncrementalTrieWriter.open(PartitionIndex.TRIE_SERIALIZER, writer, version);
         this.fhBuilder = fhBuilder;
     }
 
@@ -111,7 +112,7 @@ public class PartitionIndexBuilder implements AutoCloseable
 
         try (FileHandle fh = fhBuilder.withLengthOverride(writer.getLastFlushOffset()).complete())
         {
-            PartitionIndex pi = new PartitionIndexEarly(fh, partialIndexTail.root(), partialIndexTail.count(), firstKey, partialIndexLastKey, partialIndexTail.cutoff(), partialIndexTail.tail());
+            PartitionIndex pi = new PartitionIndexEarly(fh, partialIndexTail.root(), partialIndexTail.count(), firstKey, partialIndexLastKey, partialIndexTail.cutoff(), partialIndexTail.tail(), version);
             partialIndexConsumer.accept(pi);
             partialIndexConsumer = null;
         }
@@ -137,7 +138,7 @@ public class PartitionIndexBuilder implements AutoCloseable
         }
         else
         {
-            int diffPoint = ByteComparable.diffPoint(lastKey, decoratedKey, Walker.BYTE_COMPARABLE_VERSION);
+            int diffPoint = ByteComparable.diffPoint(lastKey, decoratedKey, version);
             ByteComparable prevPrefix = ByteComparable.cut(lastKey, Math.max(diffPoint, lastDiffPoint));
             trieWriter.add(prevPrefix, lastPayload);
             lastWrittenKey = lastKey;

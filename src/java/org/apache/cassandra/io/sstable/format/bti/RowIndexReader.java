@@ -65,7 +65,7 @@ public class RowIndexReader extends Walker<RowIndexReader>
 
     public RowIndexReader(FileHandle file, long root, Version version)
     {
-        super(file.instantiateRebufferer(null), root);
+        super(file.instantiateRebufferer(null), root, version.getByteComparableVersion());
         this.version = version;
     }
 

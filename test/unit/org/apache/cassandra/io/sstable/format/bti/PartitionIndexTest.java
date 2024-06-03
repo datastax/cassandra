@@ -54,7 +54,6 @@ import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.io.tries.TrieNode;
-import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -68,6 +67,8 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.LEGACY;
+import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS50;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
@@ -81,8 +82,6 @@ public class PartitionIndexTest
     private final static long SEED = System.nanoTime();
     private final static Random random = new Random(SEED);
 
-    static final ByteComparable.Version VERSION = Walker.BYTE_COMPARABLE_VERSION;
-
     static
     {
         DatabaseDescriptor.daemonInitialization();
@@ -95,12 +94,17 @@ public class PartitionIndexTest
     @Parameterized.Parameters()
     public static Collection<Object[]> generateData()
     {
-        return Arrays.asList(new Object[]{ Config.DiskAccessMode.standard },
-                             new Object[]{ Config.DiskAccessMode.mmap });
+        return Arrays.asList(new Object[]{ Config.DiskAccessMode.standard, OSS50 },
+                             new Object[]{ Config.DiskAccessMode.mmap, OSS50 },
+                             new Object[]{ Config.DiskAccessMode.standard, LEGACY },
+                             new Object[]{ Config.DiskAccessMode.mmap, LEGACY });
     }
 
     @Parameterized.Parameter(value = 0)
     public static Config.DiskAccessMode accessMode = Config.DiskAccessMode.standard;
+
+    @Parameterized.Parameter(value = 1)
+    public static ByteComparable.Version version;
 
     @BeforeClass
     public static void beforeClass()
@@ -296,7 +300,7 @@ public class PartitionIndexTest
 
         FileHandle.Builder fhBuilder = makeHandle(file);
         try (SequentialWriter writer = makeWriter(file);
-             PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder)
+             PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder, version)
         )
         {
             DecoratedKey key = p.decorateKey(ByteBufferUtil.EMPTY_BYTE_BUFFER);
@@ -401,13 +405,13 @@ public class PartitionIndexTest
                 catch (AssertionError e)
                 {
                     StringBuilder buf = new StringBuilder();
-                    buf.append(String.format("Left %s%s Right %s%s%n", left.byteComparableAsString(VERSION), exactLeft ? "#" : "", right.byteComparableAsString(VERSION), exactRight ? "#" : ""));
+                    buf.append(String.format("Left %s%s Right %s%s%n", left.byteComparableAsString(version), exactLeft ? "#" : "", right.byteComparableAsString(version), exactRight ? "#" : ""));
                     try (PartitionIndex.IndexPosIterator iter2 = new PartitionIndex.IndexPosIterator(summary, left, right))
                     {
                         long pos;
                         while ((pos = iter2.nextIndexPos()) != PartitionIndex.NOT_FOUND)
-                            buf.append(keys.get((int) pos).byteComparableAsString(VERSION)).append("\n");
-                        buf.append(String.format("Left %s%s Right %s%s%n", left.byteComparableAsString(VERSION), exactLeft ? "#" : "", right.byteComparableAsString(VERSION), exactRight ? "#" : ""));
+                            buf.append(keys.get((int) pos).byteComparableAsString(version)).append("\n");
+                        buf.append(String.format("Left %s%s Right %s%s%n", left.byteComparableAsString(version), exactLeft ? "#" : "", right.byteComparableAsString(version), exactRight ? "#" : ""));
                     }
                     logger.error(buf.toString(), e);
                     throw e;
@@ -426,7 +430,7 @@ public class PartitionIndexTest
             int parts = 15;
             FileHandle.Builder fhBuilder = makeHandle(file);
             try (SequentialWriter writer = makeWriter(file);
-                 PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder)
+                 PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder, version)
             )
             {
                 writer.setPostFlushListener(builder::markPartitionIndexSynced);
@@ -500,7 +504,7 @@ public class PartitionIndexTest
                 FileHandle.Builder fhBuilder = new FileHandle.Builder(file)
                                                .bufferSize(PageAware.PAGE_SIZE)
                                                .withChunkCache(ChunkCache.instance);
-                try (PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder))
+                try (PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder, version))
                 {
                     int i = 0;
                     for (i = 0; i < 3; ++i)
@@ -523,7 +527,7 @@ public class PartitionIndexTest
                         builder.addEntry(list.get(i), i);
                     builder.complete();
 
-                    try (PartitionIndex index = PartitionIndex.load(fhBuilder, partitioner, true))
+                    try (PartitionIndex index = PartitionIndex.load(fhBuilder, partitioner, true, version))
                     {
                         checkIteration(list.size(), index);
                     }
@@ -625,7 +629,7 @@ public class PartitionIndexTest
         public PartitionIndexJumping(FileHandle fh, long trieRoot, long keyCount, DecoratedKey first, DecoratedKey last,
                                      long... cutoffsAndOffsets)
         {
-            super(fh, trieRoot, keyCount, first, last);
+            super(fh, trieRoot, keyCount, first, last, PartitionIndexTest.version);
             this.cutoffsAndOffsets = cutoffsAndOffsets;
         }
 
@@ -666,7 +670,7 @@ public class PartitionIndexTest
             List<DecoratedKey> list = Lists.newArrayList();
             FileHandle.Builder fhBuilder = makeHandle(file);
             try (SequentialWriter writer = makeJumpingWriter(file, cutoffsAndOffsets);
-                 PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder)
+                 PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder, version)
             )
             {
                 writer.setPostFlushListener(builder::markPartitionIndexSynced);
@@ -705,7 +709,7 @@ public class PartitionIndexTest
         ArrayList<DecoratedKey> list = Lists.newArrayList();
         FileHandle.Builder fhBuilder = makeHandle(file);
         try (SequentialWriter writer = new SequentialWriter(file, SequentialWriterOption.DEFAULT);
-             PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder)
+             PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder, version)
         )
         {
             writer.setPostFlushListener(builder::markPartitionIndexSynced);
@@ -721,7 +725,7 @@ public class PartitionIndexTest
             long root = builder.complete();
 
             try (FileHandle fh = fhBuilder.complete();
-                 PartitionIndex index = new PartitionIndex(fh, root, 1000, null, null))
+                 PartitionIndex index = new PartitionIndex(fh, root, 1000, null, null, version))
             {
                 File dump = FileUtils.createTempFile("testDumpTrieToFile", "dumpedTrie");
                 index.dumpTrie(dump.toString());
@@ -738,7 +742,7 @@ public class PartitionIndexTest
 
         public Analyzer(PartitionIndex index)
         {
-            super(index);
+            super(index, index.version);
         }
 
         public void run()
@@ -794,7 +798,7 @@ public class PartitionIndexTest
         List<DecoratedKey> list = Lists.newArrayList();
         FileHandle.Builder fhBuilder = makeHandle(file);
         try (SequentialWriter writer = makeWriter(file);
-             PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder)
+             PartitionIndexBuilder builder = new PartitionIndexBuilder(writer, fhBuilder, version)
         )
         {
             for (int i = 0; i < size; i++)
@@ -883,6 +887,6 @@ public class PartitionIndexTest
 
     protected PartitionIndex loadPartitionIndex(FileHandle.Builder fhBuilder, SequentialWriter writer) throws IOException
     {
-        return PartitionIndex.load(fhBuilder, partitioner, false);
+        return PartitionIndex.load(fhBuilder, partitioner, false, version);
     }
 }
