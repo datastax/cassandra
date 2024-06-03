@@ -28,6 +28,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Incremental builders of on-disk tries which packs trie stages into disk cache pages.
@@ -103,9 +104,9 @@ implements IncrementalTrieWriter<VALUE>
         return c;
     };
 
-    IncrementalTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest)
+    IncrementalTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, ByteComparable.Version version)
     {
-        super(trieSerializer, dest, new Node<>((byte) 0));
+        super(trieSerializer, dest, new Node<>((byte) 0), version);
         this.maxBytesPerPage = dest.maxBytesInPage();
     }
 

@@ -37,7 +37,7 @@ class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterat
 
     public RowIndexReverseIterator(FileHandle file, long root, ByteComparable start, ByteComparable end, Version version)
     {
-        super(file.instantiateRebufferer(null), root, start, end, ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES);
+        super(file.instantiateRebufferer(null), root, start, end, ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES, version.getByteComparableVersion());
         this.version = version;
     }
 

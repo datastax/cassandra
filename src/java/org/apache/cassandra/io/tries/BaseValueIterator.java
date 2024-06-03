@@ -33,9 +33,9 @@ public abstract class BaseValueIterator<CONCRETE extends BaseValueIterator<CONCR
     protected IterationPosition stack;
     protected long next;
 
-    public BaseValueIterator(Rebufferer source, long root, ByteSource limit, boolean collecting)
+    public BaseValueIterator(Rebufferer source, long root, ByteSource limit, boolean collecting, ByteComparable.Version version)
     {
-        super(source, root);
+        super(source, root, version);
         this.limit = limit;
         collector = collecting ? new TransitionBytesCollector() : null;
     }
