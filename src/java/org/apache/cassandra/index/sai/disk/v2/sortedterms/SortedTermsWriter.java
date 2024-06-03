@@ -110,7 +110,7 @@ public class SortedTermsWriter implements Closeable
         this.metadataWriter = metadataWriter;
         this.trieOutput = trieWriter;
         SAICodecUtils.writeHeader(this.trieOutput);
-        this.trieWriter = IncrementalTrieWriter.open(trieSerializer, trieWriter.asSequentialWriter(), ByteComparable.Version.OSS41); // TODO hardcoded encoding version
+        this.trieWriter = IncrementalTrieWriter.open(trieSerializer, trieWriter.asSequentialWriter(), ByteComparable.Version.OSS41);
         SAICodecUtils.writeHeader(termsData);
         this.termsOutput = termsData;
         this.bytesStartFP = termsData.getFilePointer();

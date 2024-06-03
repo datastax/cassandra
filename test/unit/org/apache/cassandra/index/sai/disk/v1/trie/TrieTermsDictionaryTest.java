@@ -47,7 +47,7 @@ import static org.apache.cassandra.utils.bytecomparable.ByteComparable.compare;
 
 public class TrieTermsDictionaryTest extends SaiRandomizedTest
 {
-    public final static ByteComparable.Version VERSION = OSS41; // TODO hardcoded encoding version
+    public final static ByteComparable.Version VERSION = OSS41;
 
     private IndexDescriptor indexDescriptor;
     private String index;
