@@ -28,7 +28,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
-import org.apache.cassandra.io.tries.IncrementalDeepTrieWriterPageAware;
 import org.apache.cassandra.io.tries.IncrementalTrieWriter;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -52,7 +51,7 @@ public class TrieTermsDictionaryWriter implements Closeable
 
         SAICodecUtils.writeHeader(termDictionaryOutput);
         // we pass the output as SequentialWriter, but we keep IndexOutputWriter around to write footer on flush
-        termsDictionaryWriter = new IncrementalDeepTrieWriterPageAware<>(TrieTermsDictionaryReader.trieSerializer, termDictionaryOutput.asSequentialWriter(), ByteComparable.Version.OSS41); // TODO hardcoded encoding version
+        termsDictionaryWriter = IncrementalTrieWriter.open(TrieTermsDictionaryReader.trieSerializer, termDictionaryOutput.asSequentialWriter(), ByteComparable.Version.OSS41); // TODO hardcoded encoding version
     }
 
     public void add(ByteComparable term, long postingListOffset) throws IOException

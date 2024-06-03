@@ -181,7 +181,8 @@ public class PartitionIndex implements Closeable
     public static PartitionIndex load(FileHandle.Builder fhBuilder,
                                       IPartitioner partitioner,
                                       boolean preload,
-                                      ZeroCopyMetadata zeroCopyMetadata, ByteComparable.Version version) throws IOException
+                                      ZeroCopyMetadata zeroCopyMetadata,
+                                      ByteComparable.Version version) throws IOException
     {
         try (FileHandle fh = fhBuilder.complete())
         {
@@ -189,7 +190,11 @@ public class PartitionIndex implements Closeable
         }
     }
 
-    public static PartitionIndex load(FileHandle fh, IPartitioner partitioner, boolean preload, ZeroCopyMetadata zeroCopyMetadata, ByteComparable.Version version) throws IOException
+    public static PartitionIndex load(FileHandle fh,
+                                      IPartitioner partitioner,
+                                      boolean preload,
+                                      ZeroCopyMetadata zeroCopyMetadata,
+                                      ByteComparable.Version version) throws IOException
     {
         try (FileDataInput rdr = fh.createReader(fh.dataLength() - FOOTER_LENGTH))
         {

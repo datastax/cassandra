@@ -31,17 +31,17 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  * very long keys. This implementation can switch processing from stack to heap at a certain depth (provided
  * as a constructor param).
  */
-public class IncrementalDeepTrieWriterPageAware<VALUE> extends IncrementalTrieWriterPageAware<VALUE>
+class IncrementalDeepTrieWriterPageAware<VALUE> extends IncrementalTrieWriterPageAware<VALUE>
 {
     private final int maxRecursionDepth;
 
-    public IncrementalDeepTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, int maxRecursionDepth, ByteComparable.Version version)
+    IncrementalDeepTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, int maxRecursionDepth, ByteComparable.Version version)
     {
         super(trieSerializer, dest, version);
         this.maxRecursionDepth = maxRecursionDepth;
     }
 
-    public IncrementalDeepTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, ByteComparable.Version version)
+    IncrementalDeepTrieWriterPageAware(TrieSerializer<VALUE, ? super DataOutputPlus> trieSerializer, DataOutputPlus dest, ByteComparable.Version version)
     {
         this(trieSerializer, dest, 64, version);
     }
