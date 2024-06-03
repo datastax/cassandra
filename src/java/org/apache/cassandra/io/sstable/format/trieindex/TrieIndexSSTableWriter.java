@@ -313,7 +313,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             rowIndexFHBuilder = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
             partitionIndexFile = new SequentialWriter(descriptor.fileFor(Component.PARTITION_INDEX), WRITER_OPTION);
             partitionIndexFHBuilder = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
-            partitionIndex = new PartitionIndexBuilder(partitionIndexFile, partitionIndexFHBuilder);
+            partitionIndex = new PartitionIndexBuilder(partitionIndexFile, partitionIndexFHBuilder, descriptor.version.getByteComparableVersion());
             bf = FilterFactory.getFilter(keyCount, table.params.bloomFilterFpChance);
             // register listeners to be alerted when the data files are flushed
             partitionIndexFile.setPostFlushListener(() -> partitionIndex.markPartitionIndexSynced(partitionIndexFile.getLastFlushOffset()));
@@ -426,7 +426,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             complete();
             try
             {
-                return PartitionIndex.load(partitionIndexFHBuilder, getPartitioner(), false);
+                return PartitionIndex.load(partitionIndexFHBuilder, getPartitioner(), false, descriptor.version.getByteComparableVersion());
             }
             catch (IOException e)
             {

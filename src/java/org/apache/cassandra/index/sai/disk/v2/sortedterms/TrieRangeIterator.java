@@ -76,14 +76,15 @@ class TrieRangeIterator extends Walker<TrieRangeIterator>
                              ByteComparable start,
                              ByteComparable end,
                              boolean admitPrefix,
-                             boolean inclEnd)
+                             boolean inclEnd,
+                             ByteComparable.Version encodingVersion)
     {
-        super(source, root);
-        limit = end != null ? end.asComparableBytes(BYTE_COMPARABLE_VERSION) : null;
+        super(source, root, encodingVersion);
+        limit = end != null ? end.asComparableBytes(this.encodingVersion) : null;
         this.inclEnd = inclEnd;
 
         if (start != null)
-            initializeWithLeftBound(root, start.asComparableBytes(BYTE_COMPARABLE_VERSION), admitPrefix, limit != null);
+            initializeWithLeftBound(root, start.asComparableBytes(this.encodingVersion), admitPrefix, limit != null);
         else
             initializeNoLeftBound(root, limit != null ? limit.next() : 256);
     }

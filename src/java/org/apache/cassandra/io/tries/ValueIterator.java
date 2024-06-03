@@ -53,20 +53,20 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Wal
         }
     }
 
-    protected ValueIterator(Rebufferer source, long root)
+    protected ValueIterator(Rebufferer source, long root, ByteComparable.Version encodingVersion)
     {
-        super(source, root);
+        super(source, root, encodingVersion);
         limit = null;
         initializeNoLeftBound(root, 256);
     }
 
-    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, boolean admitPrefix)
+    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, boolean admitPrefix, ByteComparable.Version encodingVersion)
     {
-        super(source, root);
-        limit = end != null ? end.asComparableBytes(BYTE_COMPARABLE_VERSION) : null;
+        super(source, root, encodingVersion);
+        limit = end != null ? end.asComparableBytes(this.encodingVersion) : null;
 
         if (start != null)
-            initializeWithLeftBound(root, start.asComparableBytes(BYTE_COMPARABLE_VERSION), admitPrefix, limit != null);
+            initializeWithLeftBound(root, start.asComparableBytes(this.encodingVersion), admitPrefix, limit != null);
         else
             initializeNoLeftBound(root, limit != null ? limit.next() : 256);
     }

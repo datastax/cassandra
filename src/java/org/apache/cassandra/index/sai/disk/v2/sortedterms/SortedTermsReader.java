@@ -120,7 +120,8 @@ public class SortedTermsReader
                                                               term,
                                                               null,
                                                               true,
-                                                              true))
+                                                              true,
+                                                              ByteComparable.Version.OSS41))
         {
             final Iterator<Pair<ByteSource, Long>> iterator = reader.iterator();
             return iterator.hasNext() ? iterator.next().right : Long.MAX_VALUE;
