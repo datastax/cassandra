@@ -19,6 +19,8 @@ package org.apache.cassandra.io.sstable.format;
 
 import java.util.regex.Pattern;
 
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+
 
 /**
  * A set of feature flags associated with a SSTable format
@@ -105,6 +107,8 @@ public abstract class Version
 
     abstract public boolean isCompatible();
     abstract public boolean isCompatibleForStreaming();
+
+    abstract public ByteComparable.Version getByteComparableVersion();
 
     @Override
     public String toString()

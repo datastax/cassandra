@@ -24,7 +24,6 @@ import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.tries.IncrementalTrieWriter;
-import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -41,11 +40,13 @@ class RowIndexWriter implements AutoCloseable
     private final IncrementalTrieWriter<IndexInfo> trie;
     private ByteComparable prevMax = null;
     private ByteComparable prevSep = null;
+    private final ByteComparable.Version encodingVersion;
 
-    RowIndexWriter(ClusteringComparator comparator, DataOutputPlus out)
+    RowIndexWriter(ClusteringComparator comparator, DataOutputPlus out, ByteComparable.Version encodingVersion)
     {
         this.comparator = comparator;
-        this.trie = IncrementalTrieWriter.open(RowIndexReader.trieSerializer, out);
+        this.encodingVersion = encodingVersion;
+        this.trie = IncrementalTrieWriter.open(RowIndexReader.trieSerializer, out, encodingVersion);
     }
 
     void reset()
@@ -77,8 +78,8 @@ class RowIndexWriter implements AutoCloseable
         // Add a separator after the last section, so that greater inputs can be quickly rejected.
         // To maximize its efficiency we add it with the length of the last added separator.
         int i = 0;
-        ByteSource max = prevMax.asComparableBytes(Walker.BYTE_COMPARABLE_VERSION);
-        ByteSource sep = prevSep.asComparableBytes(Walker.BYTE_COMPARABLE_VERSION);
+        ByteSource max = prevMax.asComparableBytes(encodingVersion);
+        ByteSource sep = prevSep.asComparableBytes(encodingVersion);
         int c;
         while ((c = max.next()) == sep.next() && c != ByteSource.END_OF_STREAM)
             ++i;

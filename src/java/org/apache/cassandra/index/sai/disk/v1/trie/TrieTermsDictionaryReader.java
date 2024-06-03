@@ -45,9 +45,9 @@ public class TrieTermsDictionaryReader extends Walker<TrieTermsDictionaryReader>
 {
     public static final long NOT_FOUND = -1;
 
-    public TrieTermsDictionaryReader(Rebufferer rebufferer, long root)
+    public TrieTermsDictionaryReader(Rebufferer rebufferer, long root, ByteComparable.Version encodingVersion)
     {
-        super(rebufferer, root);
+        super(rebufferer, root, encodingVersion);
     }
 
     public static final TrieSerializer<Long, DataOutputPlus> trieSerializer = new TrieSerializer<Long, DataOutputPlus>()

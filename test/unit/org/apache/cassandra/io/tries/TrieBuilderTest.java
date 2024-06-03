@@ -24,6 +24,7 @@ import org.junit.Test;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.TailOverridingRebufferer;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.junit.Assert.assertEquals;
 
@@ -33,7 +34,7 @@ public class TrieBuilderTest extends AbstractTrieTestBase
     public void testPartialBuild_Apollo1148() throws IOException
     {
         DataOutputBuffer buf = new DataOutputBufferPaged();
-        IncrementalTrieWriter<Integer> builder = IncrementalTrieWriter.open(serializer, buf);
+        IncrementalTrieWriter<Integer> builder = IncrementalTrieWriter.open(serializer, buf, ByteComparable.Version.OSS41);
         long count = 0;
 
         count += addUntilBytesWritten(buf, builder, "a", 1);            // Make a node whose children are written

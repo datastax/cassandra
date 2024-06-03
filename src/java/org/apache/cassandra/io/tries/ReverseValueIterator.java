@@ -48,19 +48,19 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         }
     }
 
-    protected ReverseValueIterator(Rebufferer source, long root)
+    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable.Version encodingVersion)
     {
-        super(source, root);
+        super(source, root, encodingVersion);
         stack = new IterationPosition(root, -1, 256, null);
         limit = null;
         next = advanceNode();
     }
 
-    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, boolean admitPrefix)
+    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, boolean admitPrefix, ByteComparable.Version encodingVersion)
     {
-        super(source, root);
-        limit = start.asComparableBytes(BYTE_COMPARABLE_VERSION);
-        ByteSource endStream = end.asComparableBytes(BYTE_COMPARABLE_VERSION);
+        super(source, root, encodingVersion);
+        limit = start.asComparableBytes(this.encodingVersion);
+        ByteSource endStream = end.asComparableBytes(this.encodingVersion);
         IterationPosition prev = null;
         boolean atLimit = true;
         int childIndex;

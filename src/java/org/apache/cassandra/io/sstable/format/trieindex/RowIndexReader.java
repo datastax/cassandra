@@ -59,14 +59,14 @@ class RowIndexReader extends Walker<RowIndexReader>
         }
     }
 
-    public RowIndexReader(FileHandle file, long root)
+    public RowIndexReader(FileHandle file, long root, ByteComparable.Version encodingVersion)
     {
-        super(file.instantiateRebufferer(), root);
+        super(file.instantiateRebufferer(), root, encodingVersion);
     }
 
-    public RowIndexReader(FileHandle file, TrieIndexEntry entry)
+    public RowIndexReader(FileHandle file, TrieIndexEntry entry, ByteComparable.Version encodingVersion)
     {
-        this(file, entry.indexTrieRoot);
+        this(file, entry.indexTrieRoot, encodingVersion);
     }
 
     /**

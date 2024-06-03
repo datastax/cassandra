@@ -114,12 +114,12 @@ abstract public class AbstractTrieTestBase
     {
         public InternalIterator(Rebufferer source, long root)
         {
-            super(source, root);
+            super(source, root, ByteComparable.Version.OSS41);
         }
 
         public InternalIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, boolean admitPrefix)
         {
-            super(source, root, start, end, admitPrefix);
+            super(source, root, start, end, admitPrefix, ByteComparable.Version.OSS41);
         }
     }
 

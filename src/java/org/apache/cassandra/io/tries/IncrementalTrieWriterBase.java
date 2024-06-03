@@ -37,11 +37,13 @@ implements IncrementalTrieWriter<VALUE>
     protected final Deque<NODE> stack = new ArrayDeque<>();
     protected final TrieSerializer<VALUE, ? super DEST> serializer;
     protected final DEST dest;
+    protected final ByteComparable.Version encodingVersion;
     protected ByteComparable prev = null;
     long count = 0;
 
-    protected IncrementalTrieWriterBase(TrieSerializer<VALUE, ? super DEST> serializer, DEST dest, NODE root)
+    protected IncrementalTrieWriterBase(TrieSerializer<VALUE, ? super DEST> serializer, DEST dest, NODE root, ByteComparable.Version encodingVersion)
     {
+        this.encodingVersion = encodingVersion;
         this.serializer = serializer;
         this.dest = dest;
         this.stack.addLast(root);
@@ -69,20 +71,20 @@ implements IncrementalTrieWriter<VALUE>
     {
         ++count;
         int stackpos = 0;
-        ByteSource sn = next.asComparableBytes(Walker.BYTE_COMPARABLE_VERSION);
+        ByteSource sn = next.asComparableBytes(encodingVersion);
         int n = sn.next();
 
         if (prev != null)
         {
-            ByteSource sp = prev.asComparableBytes(Walker.BYTE_COMPARABLE_VERSION);
+            ByteSource sp = prev.asComparableBytes(encodingVersion);
             int p = sp.next();
             while ( n == p )
             {
                 assert n != ByteSource.END_OF_STREAM : String.format("Incremental trie requires unique sorted keys, got equal %s(%s) after %s(%s).",
                                                                      next,
-                                                                     next.byteComparableAsString(Walker.BYTE_COMPARABLE_VERSION),
+                                                                     next.byteComparableAsString(encodingVersion),
                                                                      prev,
-                                                                     prev.byteComparableAsString(Walker.BYTE_COMPARABLE_VERSION));
+                                                                     prev.byteComparableAsString(encodingVersion));
 
                 ++stackpos;
                 n = sn.next();
@@ -90,9 +92,9 @@ implements IncrementalTrieWriter<VALUE>
             }
             assert p < n : String.format("Incremental trie requires sorted keys, got %s(%s) after %s(%s).",
                                          next,
-                                         next.byteComparableAsString(Walker.BYTE_COMPARABLE_VERSION),
+                                         next.byteComparableAsString(encodingVersion),
                                          prev,
-                                         prev.byteComparableAsString(Walker.BYTE_COMPARABLE_VERSION));
+                                         prev.byteComparableAsString(encodingVersion));
         }
         prev = next;
 

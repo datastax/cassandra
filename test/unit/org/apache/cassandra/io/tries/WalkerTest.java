@@ -252,15 +252,15 @@ public class WalkerTest extends AbstractTrieTestBase
     {
         if (writerClass == IncrementalTrieWriterSimple.class)
         {
-            return new IncrementalTrieWriterSimple<>(serializer, out);
+            return new IncrementalTrieWriterSimple<>(serializer, out, ByteComparable.Version.OSS41);
         }
         else if (writerClass == IncrementalTrieWriterPageAware.class)
         {
-            return new IncrementalTrieWriterPageAware<>(serializer, out);
+            return new IncrementalTrieWriterPageAware<>(serializer, out, ByteComparable.Version.OSS41);
         }
         else if (writerClass == IncrementalDeepTrieWriterPageAware.class)
         {
-            return new IncrementalDeepTrieWriterPageAware<>(serializer, out, 4);
+            return new IncrementalDeepTrieWriterPageAware<>(serializer, out, 4, ByteComparable.Version.OSS41);
         }
         else
         {

@@ -22,6 +22,7 @@ import java.io.IOException;
 
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Incremental builder of on-disk tries. Takes sorted input.
@@ -41,9 +42,9 @@ public class IncrementalTrieWriterSimple<VALUE>
 {
     private long position = 0;
 
-    public IncrementalTrieWriterSimple(TrieSerializer<VALUE, ? super DataOutput> trieSerializer, DataOutputPlus dest)
+    public IncrementalTrieWriterSimple(TrieSerializer<VALUE, ? super DataOutput> trieSerializer, DataOutputPlus dest, ByteComparable.Version encodingVersion)
     {
-        super(trieSerializer, dest, new Node<>((byte) 0));
+        super(trieSerializer, dest, new Node<>((byte) 0), encodingVersion);
     }
 
     @Override
