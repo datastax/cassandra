@@ -80,7 +80,7 @@ public class WalkerTest extends AbstractTrieTestBase
 
         Rebufferer source = new ByteBufRebufferer(buf.asNewBuffer());
 
-        Walker<?> it = new Walker<>(source, rootPos);
+        Walker<?> it = new Walker<>(source, rootPos, version);
 
         DataOutputBuffer dumpBuf = new DataOutputBuffer();
         Version sstableVersion = new BtiFormat(null).getLatestVersion();
@@ -236,20 +236,20 @@ public class WalkerTest extends AbstractTrieTestBase
     private void checkIterates(ByteBuffer buffer, long rootPos, String from, String to, ValueIterator.LeftBoundTreatment admitPrefix, int... expected)
     {
         Rebufferer source = new ByteBufRebufferer(buffer);
-        ValueIterator<?> it = new ValueIterator<>(source, rootPos, source(from), source(to), admitPrefix);
+        ValueIterator<?> it = new ValueIterator<>(source, rootPos, source(from), source(to), admitPrefix, version);
         checkReturns(from + "-->" + to, it::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), expected);
 
         if (admitPrefix != ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES && from != null)
         {
-            it = new ValueIterator<>(source, rootPos, null, source(to), admitPrefix, true);
+            it = new ValueIterator<>(source, rootPos, null, source(to), admitPrefix, true, version);
             it.skipTo(source(from), admitPrefix);
             checkReturns(from + "-->" + to, it::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), expected);
 
-            it = new ValueIterator<>(source, rootPos, source(from), source(to), admitPrefix, true);
+            it = new ValueIterator<>(source, rootPos, source(from), source(to), admitPrefix, true, version);
             it.skipTo(source(from), admitPrefix);
             checkReturns(from + "-->" + to, it::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), expected);
 
-            it = new ValueIterator<>(source, rootPos, null, source(to), admitPrefix, true);
+            it = new ValueIterator<>(source, rootPos, null, source(to), admitPrefix, true, version);
             it.skipTo(source(from), admitPrefix);
             it.skipTo(source(from), admitPrefix);
             checkReturns(from + "-->" + to, it::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), expected);
@@ -258,18 +258,18 @@ public class WalkerTest extends AbstractTrieTestBase
         if (to != null)
         {
             // `to` is always inclusive, if we have a match for it check skipping to it works
-            Walker<?> w = new Walker<>(source, rootPos);
+            Walker<?> w = new Walker<>(source, rootPos, version);
             if (w.follow(source(to)) == ByteSource.END_OF_STREAM && w.payloadFlags() != 0
                 && (admitPrefix != ValueIterator.LeftBoundTreatment.GREATER || !to.equals(from))) // skipping with ADMIT_EXACT may accept match after left bound is GREATER. Needs fix/error msg?
             {
-                it = new ValueIterator<>(source, rootPos, source(from), source(to), admitPrefix, true);
+                it = new ValueIterator<>(source, rootPos, source(from), source(to), admitPrefix, true, version);
                 it.skipTo(source(to), ValueIterator.LeftBoundTreatment.ADMIT_EXACT);
                 int[] exp = expected.length > 0 ? new int[] {expected[expected.length - 1]} : new int[0];
                 checkReturns(from + "-->" + to + " skip " + to, it::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), exp);
             }
         }
 
-        ReverseValueIterator<?> rit = new ReverseValueIterator<>(source, rootPos, source(from), source(to), admitPrefix, true);
+        ReverseValueIterator<?> rit = new ReverseValueIterator<>(source, rootPos, source(from), source(to), admitPrefix, true, version);
         reverse(expected);
         checkReturns(from + "<--" + to, rit::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), rit::collectedKey, expected);
         reverse(expected);  // return array in its original form if reused
@@ -280,10 +280,10 @@ public class WalkerTest extends AbstractTrieTestBase
     private void checkIterates(ByteBuffer buffer, long rootPos, int... expected)
     {
         Rebufferer source = new ByteBufRebufferer(buffer);
-        ValueIterator<?> it = new ValueIterator<>(source, rootPos, true);
+        ValueIterator<?> it = new ValueIterator<>(source, rootPos, true, version);
         checkReturns("Forward", it::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), it::collectedKey, expected);
 
-        ReverseValueIterator<?> rit = new ReverseValueIterator<>(source, rootPos, true);
+        ReverseValueIterator<?> rit = new ReverseValueIterator<>(source, rootPos, true, version);
         reverse(expected);
         checkReturns("Reverse", rit::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), rit::collectedKey, expected);
         reverse(expected);  // return array in its original form if reused
@@ -495,7 +495,7 @@ public class WalkerTest extends AbstractTrieTestBase
     private void checkSkipsTo(ByteBuffer buffer, long rootPos, ValueIterator.LeftBoundTreatment admitPrefix, String from, String to, String[] skips, int[] expected)
     {
         Rebufferer source = new ByteBufRebufferer(buffer);
-        ValueIterator<?> it = new ValueIterator<>(source, rootPos, source(from), source(to), admitPrefix, true);
+        ValueIterator<?> it = new ValueIterator<>(source, rootPos, source(from), source(to), admitPrefix, true, version);
         int i = 0;
         IntArrayList list = new IntArrayList();
         while (true)
@@ -525,12 +525,14 @@ public class WalkerTest extends AbstractTrieTestBase
                                                        rootPos,
                                                        source("151"),
                                                        source("515"),
-                                                       ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES);
+                                                       ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES,
+                                                       version);
              ValueIterator<?> tailIt = new ValueIterator<>(new TailOverridingRebufferer(new ByteBufRebufferer(buf.asNewBuffer()), ptail.cutoff(), ptail.tail()),
                                                            ptail.root(),
                                                            source("151"),
                                                            source("515"),
-                                                           ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES))
+                                                           ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES,
+                                                           version))
         {
             while (true)
             {
@@ -565,7 +567,7 @@ public class WalkerTest extends AbstractTrieTestBase
 
         long rootPos = builder.complete();
         Rebufferer source = new ByteBufRebufferer(buf.asNewBuffer());
-        ValueIterator<?> it = new ValueIterator<>(source, rootPos);
+        ValueIterator<?> it = new ValueIterator<>(source, rootPos, version);
 
         while (true)
         {

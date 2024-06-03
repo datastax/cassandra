@@ -28,21 +28,21 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * <p>
  * The main utility of this class is the {@link #nextPayloadedNode()} method, which lists all nodes that contain a
  * payload within the requested bounds. The treatment of the bounds is non-standard (see
- * {@link #ValueIterator(Rebufferer, long, ByteComparable, ByteComparable, LeftBoundTreatment, boolean)}), necessary to
+ * {@link #ValueIterator(Rebufferer, long, ByteComparable, ByteComparable, LeftBoundTreatment, boolean, ByteComparable.Version)}), necessary to
  * properly walk tries of prefixes and separators.
  */
 @NotThreadSafe
 public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends BaseValueIterator<CONCRETE>
 {
 
-    protected ValueIterator(Rebufferer source, long root)
+    protected ValueIterator(Rebufferer source, long root, ByteComparable.Version version)
     {
-        this(source, root, false);
+        this(source, root, false, version);
     }
 
-    protected ValueIterator(Rebufferer source, long root, boolean collecting)
+    protected ValueIterator(Rebufferer source, long root, boolean collecting, ByteComparable.Version version)
     {
-        super(source, root, null, collecting);
+        super(source, root, null, collecting, version);
 
         try
         {
@@ -55,9 +55,9 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
         }
     }
 
-    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix)
+    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, ByteComparable.Version version)
     {
-        this(source, root, start, end, admitPrefix, false);
+        this(source, root, start, end, admitPrefix, false, version);
     }
 
     /**
@@ -72,14 +72,14 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
      * </ul>
      * This behaviour is shared with the reverse counterpart {@link ReverseValueIterator}.
      */
-    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting)
+    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting, ByteComparable.Version version)
     {
-        super(source, root, end != null ? end.asComparableBytes(BYTE_COMPARABLE_VERSION) : null, collecting);
+        super(source, root, end != null ? end.asComparableBytes(version) : null, collecting, version);
 
         try
         {
             if (start != null)
-                initializeWithLeftBound(root, start.asComparableBytes(BYTE_COMPARABLE_VERSION), admitPrefix, limit != null);
+                initializeWithLeftBound(root, start.asComparableBytes(byteComparableVersion), admitPrefix, limit != null);
             else
                 initializeNoLeftBound(root, limit != null ? limit.next() : 256);
         }
@@ -137,7 +137,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
         assert admitPrefix != LeftBoundTreatment.ADMIT_PREFIXES : "Skipping with ADMIT_PREFIXES is not supported";
         if (stack == null)
             return; // exhausted whole trie
-        ByteSource skipToBytes = skipTo.asComparableBytes(BYTE_COMPARABLE_VERSION);
+        ByteSource skipToBytes = skipTo.asComparableBytes(byteComparableVersion);
         int pos;
         int nextByte = skipToBytes.next();
         final int collectedLength = collector.pos;

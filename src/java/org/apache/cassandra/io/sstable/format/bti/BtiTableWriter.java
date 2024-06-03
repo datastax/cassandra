@@ -175,7 +175,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
             rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b).withMmappedRegionsCache(b.getMmappedRegionsCache());
             partitionIndexWriter = new SequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX), b.getIOOptions().writerOptions);
             partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b).withMmappedRegionsCache(b.getMmappedRegionsCache());
-            partitionIndex = new PartitionIndexBuilder(partitionIndexWriter, partitionIndexFHBuilder);
+            partitionIndex = new PartitionIndexBuilder(partitionIndexWriter, partitionIndexFHBuilder, descriptor.version.getByteComparableVersion());
             // register listeners to be alerted when the data files are flushed
             partitionIndexWriter.setPostFlushListener(partitionIndex::markPartitionIndexSynced);
             rowIndexWriter.setPostFlushListener(partitionIndex::markRowIndexSynced);
@@ -266,7 +266,7 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
             partitionIndexFHBuilder.withLengthOverride(NO_LENGTH_OVERRIDE);
             try
             {
-                return PartitionIndex.load(partitionIndexFHBuilder, metadata.getLocal().partitioner, false);
+                return PartitionIndex.load(partitionIndexFHBuilder, metadata.getLocal().partitioner, false, descriptor.version.getByteComparableVersion());
             }
             catch (IOException e)
             {

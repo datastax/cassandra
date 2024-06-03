@@ -193,7 +193,7 @@ public class TermsReader implements Closeable
 
         public long lookupTermDictionary(ByteComparable term)
         {
-            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null), termDictionaryRoot))
+            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null), termDictionaryRoot, ByteComparable.Version.OSS50))
             {
                 final long offset = reader.exactMatch(term);
 
@@ -240,7 +240,8 @@ public class TermsReader implements Closeable
                                                                                   termDictionaryRoot,
                                                                                   lower,
                                                                                   upper,
-                                                                                  true))
+                                                                                  true,
+                                                                                  ByteComparable.Version.OSS50))
             {
                 if (!reader.hasNext())
                     return PostingList.EMPTY;
@@ -313,7 +314,7 @@ public class TermsReader implements Closeable
 
         private TermsScanner(long segmentOffset)
         {
-            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null), termDictionaryRoot);
+            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null), termDictionaryRoot, ByteComparable.Version.OSS50);
             this.minTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMinTerm().asComparableBytes(ByteComparable.Version.OSS50)));
             this.maxTerm = ByteBuffer.wrap(ByteSourceInverse.readBytes(termsDictionaryReader.getMaxTerm().asComparableBytes(ByteComparable.Version.OSS50)));
             this.segmentOffset = segmentOffset;
