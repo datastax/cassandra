@@ -83,6 +83,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.AbstractTransactionalTest;
 import org.apache.cassandra.utils.concurrent.Transactional;
 import org.mockito.Mockito;
@@ -1548,7 +1549,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
             SSTableReader reader = new BtiTableReader.Builder(descriptor).setComponents(components)
                                                                          .setTableMetadataRef(cfs.metadata)
                                                                          .setDataFile(dFile)
-                                                                         .setPartitionIndex(new PartitionIndex(iFile, 0, 0, MockSchema.readerBounds(generation), MockSchema.readerBounds(generation)))
+                                                                         .setPartitionIndex(new PartitionIndex(iFile, 0, 0, MockSchema.readerBounds(generation), MockSchema.readerBounds(generation), ByteComparable.Version.OSS50))
                                                                          .setRowIndexFile(rFile)
                                                                          .setFilter(FilterFactory.AlwaysPresent)
                                                                          .setMaxDataAge(1L)
