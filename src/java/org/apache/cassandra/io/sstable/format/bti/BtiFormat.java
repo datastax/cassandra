@@ -55,6 +55,7 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Bigtable format with trie indices. See BTIFormat.md for the format documentation.
@@ -263,7 +264,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         @Override
         public Pair<DecoratedKey, DecoratedKey> readKeyRange(Descriptor descriptor, IPartitioner partitioner) throws IOException
         {
-            return PartitionIndex.readFirstAndLastKey(descriptor.fileFor(Components.PARTITION_INDEX), partitioner);
+            return PartitionIndex.readFirstAndLastKey(descriptor.fileFor(Components.PARTITION_INDEX), partitioner, descriptor.version.getByteComparableVersion());
         }
 
         @Override
@@ -343,6 +344,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
 
         private final int correspondingMessagingVersion;
+        private final ByteComparable.Version byteComparableVersion;
         private final boolean hasPartitionLevelDeletionsPresenceMarker;
         private final boolean hasKeyRange;
         private final boolean hasUIntDeletionTime;
@@ -358,6 +360,7 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
             isLatestVersion = version.compareTo(current_version) == 0;
             correspondingMessagingVersion = MessagingService.VERSION_50;
+            byteComparableVersion = version.compareTo("ca") >= 0 ? ByteComparable.Version.OSS50 : ByteComparable.Version.LEGACY;
             hasOldBfFormat = aOrLater && !bOrLater;
             hasImprovedMinMax = bOrLater;
             hasLegacyMinMax = aOrLater && !bOrLater;
@@ -416,6 +419,12 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         public boolean hasIsTransient()
         {
             return hasIsTransient;
+        }
+
+        @Override
+        public ByteComparable.Version getByteComparableVersion()
+        {
+            return byteComparableVersion;
         }
 
         @Override
