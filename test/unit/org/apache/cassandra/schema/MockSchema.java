@@ -68,6 +68,7 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.service.ActiveRepairService.UNREPAIRED_SSTABLE;
 
@@ -255,7 +256,7 @@ public class MockSchema
                 BtiTableReader reader = new BtiTableReader.Builder(descriptor).setComponents(components)
                                                                               .setTableMetadataRef(cfs.metadata)
                                                                               .setDataFile(fileHandle.sharedCopy())
-                                                                              .setPartitionIndex(new PartitionIndex(fileHandle.sharedCopy(), 0, 0, readerBounds(firstToken), readerBounds(lastToken)))
+                                                                              .setPartitionIndex(new PartitionIndex(fileHandle.sharedCopy(), 0, 0, readerBounds(firstToken), readerBounds(lastToken), ByteComparable.Version.OSS50))
                                                                               .setRowIndexFile(fileHandle.sharedCopy())
                                                                               .setFilter(FilterFactory.AlwaysPresent)
                                                                               .setMaxDataAge(1L)
