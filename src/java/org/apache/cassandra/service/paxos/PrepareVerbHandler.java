@@ -19,9 +19,14 @@ package org.apache.cassandra.service.paxos;
  * under the License.
  * 
  */
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Type;
 
 public class PrepareVerbHandler implements IVerbHandler<Commit>
 {
@@ -34,7 +39,18 @@ public class PrepareVerbHandler implements IVerbHandler<Commit>
 
     public void doVerb(Message<Commit> message)
     {
-        Message<PrepareResponse> reply = message.responseWith(doPrepare(message.payload));
-        MessagingService.instance().send(reply, message.from());
+        // Initialize the sensor and set ExecutorLocals
+        Context context = Context.from(message.payload.update.metadata());
+        RequestSensors sensors = new RequestSensors();
+        // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.WRITE_BYTES);
+        ExecutorLocals locals = ExecutorLocals.create(sensors);
+        ExecutorLocals.set(locals);
+
+        Message.Builder<PrepareResponse> reply = message.responseWithBuilder(doPrepare(message.payload));
+        SensorsCustomParams.addWriteSensorToResponse(reply, sensors, context);
+        SensorsCustomParams.addReadSensorToResponse(reply, sensors, context);
+        MessagingService.instance().send(reply.build(), message.from());
     }
 }
