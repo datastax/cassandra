@@ -160,4 +160,11 @@ public class VectorFctsTest extends CQLTester
                                   InvalidRequestException.class,
                                   "SELECT normalize_l2(123) FROM %s");
     }
+
+    @SafeVarargs
+    protected final <T> Vector<T> vector(T... values)
+    {
+        return new Vector<>(values);
+    }
+
 }
