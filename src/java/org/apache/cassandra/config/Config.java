@@ -42,7 +42,7 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.io.compress.BufferType;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.service.StartupChecks.StartupCheckType;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 
@@ -373,7 +373,7 @@ public class Config
 
     public static class SSTableConfig
     {
-        public String selected_format = BigFormat.NAME;
+        public String selected_format = BtiFormat.NAME;
         public Map<String, Map<String, String>> format = new HashMap<>();
     }
 
