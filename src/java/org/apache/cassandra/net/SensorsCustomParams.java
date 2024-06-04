@@ -19,8 +19,14 @@
 package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
+import java.util.Optional;
+import java.util.function.Function;
 
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.SensorsRegistry;
+import org.apache.cassandra.sensors.Type;
 
 /**
  * A utility class that contains the definition of custom params added to the {@link Message} header to propagate {@link Sensor} values from
@@ -126,5 +132,42 @@ public final class SensorsCustomParams
     public static String encodeTableInInternodeBytesTableParam(String tableName)
     {
         return String.format(INTERNODE_MSG_BYTES_TABLE_TEMPLATE, tableName);
+    }
+
+    /**
+     * A utility method to encode writer sensor values in the internode response message.
+     */
+    public static <T> void addWriteSensorToResponse(Message.Builder<T> response, RequestSensors sensors, Context context)
+    {
+        addSensorToResponse(response, sensors, context, Type.WRITE_BYTES,
+                            (sensor) -> SensorsCustomParams.encodeTableInWriteBytesRequestParam(sensor.getContext().getTable()),
+                            (sensor) -> SensorsCustomParams.encodeTableInWriteBytesTableParam(sensor.getContext().getTable()));
+    }
+
+    /**
+     * A utility method to encode read sensor values in the internode response message.
+     */
+    public static <T> void addReadSensorToResponse(Message.Builder<T> response, RequestSensors sensors, Context context)
+    {
+        addSensorToResponse(response, sensors, context, Type.READ_BYTES,
+                            (ignored) -> SensorsCustomParams.READ_BYTES_REQUEST,
+                            (ignored) -> SensorsCustomParams.READ_BYTES_TABLE);
+    }
+
+    private static <T> void addSensorToResponse(Message.Builder<T> response, RequestSensors sensors, Context context, Type type,
+                                                Function<Sensor, String> requestParamSupplier,
+                                                Function<Sensor, String> tableParamSupplier)
+    {
+        Optional<Sensor> requestSensor = sensors.getSensor(context, type);
+        requestSensor.ifPresent(sensor -> {
+            byte[] requestBytes = SensorsCustomParams.sensorValueAsBytes(sensor.getValue());
+            response.withCustomParam(requestParamSupplier.apply(sensor), requestBytes);
+
+            Optional<Sensor> registrySensor = SensorsRegistry.instance.getSensor(sensor.getContext(), type);
+            registrySensor.ifPresent(registry -> {
+                byte[] tableBytes = SensorsCustomParams.sensorValueAsBytes(registry.getValue());
+                response.withCustomParam(tableParamSupplier.apply(registry), tableBytes);
+            });
+        });
     }
 }

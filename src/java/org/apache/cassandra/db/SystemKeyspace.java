@@ -103,6 +103,10 @@ import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.schema.UserFunctions;
 import org.apache.cassandra.schema.Views;
 import org.apache.cassandra.service.paxos.Ballot;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.Commit.Accepted;
 import org.apache.cassandra.service.paxos.Commit.AcceptedWithTTL;
@@ -238,6 +242,7 @@ public final class SystemKeyspace
                 .compaction(CompactionParams.lcs(emptyMap()))
                 .indexes(PaxosUncommittedIndex.indexes())
                 .build();
+    private static final Context PaxosContext = Context.from(Paxos);
 
     private static final TableMetadata BuiltIndexes =
         parse(BUILT_INDEXES,
@@ -1105,8 +1110,15 @@ public final class SystemKeyspace
      */
     public static PaxosState.Snapshot loadPaxosState(DecoratedKey partitionKey, TableMetadata metadata, long nowInSec)
     {
+        // Track bytes read from the Paxos system table for the commit that initiated Paxos
+        registerPaxosSensor(Type.READ_BYTES);
+
         String cql = "SELECT * FROM system." + PAXOS + " WHERE row_key = ? AND cf_id = ?";
         List<Row> results = QueryProcessor.executeInternalRawWithNow(nowInSec, cql, partitionKey.getKey(), metadata.id.asUUID()).get(partitionKey);
+
+        // transfer bytes read off of Paxos system table to the user table for the commit that initiated Paxos
+        transferPaxosSensorBytes(metadata, Type.READ_BYTES);
+
         if (results == null || results.isEmpty())
         {
             Committed noneCommitted = Committed.none(partitionKey, metadata);
@@ -1186,21 +1198,21 @@ public final class SystemKeyspace
         if (paxosStatePurging() == legacy)
         {
             String cql = "UPDATE system." + PAXOS + " USING TIMESTAMP ? AND TTL ? SET in_progress_read_ballot = ? WHERE row_key = ? AND cf_id = ?";
-            executeInternal(cql,
+            trackPaxosBytes(metadata, () -> executeInternal(cql,
                             ballot.unixMicros(),
                             legacyPaxosTtlSec(metadata),
                             ballot,
                             key.getKey(),
-                            metadata.id.asUUID());
+                            metadata.id.asUUID()));
         }
         else
         {
             String cql = "UPDATE system." + PAXOS + " USING TIMESTAMP ? SET in_progress_read_ballot = ? WHERE row_key = ? AND cf_id = ?";
-            executeInternal(cql,
+            trackPaxosBytes(metadata, () -> executeInternal(cql,
                             ballot.unixMicros(),
                             ballot,
                             key.getKey(),
-                            metadata.id.asUUID());
+                            metadata.id.asUUID()));
         }
     }
 
@@ -1212,7 +1224,7 @@ public final class SystemKeyspace
             int ttlInSec = legacyPaxosTtlSec(proposal.update.metadata());
             long nowInSec = localDeletionTime - ttlInSec;
             String cql = "UPDATE system." + PAXOS + " USING TIMESTAMP ? AND TTL ? SET proposal_ballot = ?, proposal = ?, proposal_version = ? WHERE row_key = ? AND cf_id = ?";
-            executeInternalWithNowInSec(cql,
+            trackPaxosBytes(proposal, () -> executeInternalWithNowInSec(cql,
                                         nowInSec,
                                         proposal.ballot.unixMicros(),
                                         ttlInSec,
@@ -1220,18 +1232,18 @@ public final class SystemKeyspace
                                         PartitionUpdate.toBytes(proposal.update, MessagingService.current_version),
                                         MessagingService.current_version,
                                         proposal.update.partitionKey().getKey(),
-                                        proposal.update.metadata().id.asUUID());
+                                        proposal.update.metadata().id.asUUID()));
         }
         else
         {
             String cql = "UPDATE system." + PAXOS + " USING TIMESTAMP ? SET proposal_ballot = ?, proposal = ?, proposal_version = ? WHERE row_key = ? AND cf_id = ?";
-            executeInternal(cql,
+            trackPaxosBytes(proposal, () -> executeInternal(cql,
                             proposal.ballot.unixMicros(),
                             proposal.ballot,
                             PartitionUpdate.toBytes(proposal.update, MessagingService.current_version),
                             MessagingService.current_version,
                             proposal.update.partitionKey().getKey(),
-                            proposal.update.metadata().id.asUUID());
+                            proposal.update.metadata().id.asUUID()));
         }
     }
 
@@ -1245,7 +1257,7 @@ public final class SystemKeyspace
             int ttlInSec = legacyPaxosTtlSec(commit.update.metadata());
             long nowInSec = localDeletionTime - ttlInSec;
             String cql = "UPDATE system." + PAXOS + " USING TIMESTAMP ? AND TTL ? SET proposal_ballot = null, proposal = null, proposal_version = null, most_recent_commit_at = ?, most_recent_commit = ?, most_recent_commit_version = ? WHERE row_key = ? AND cf_id = ?";
-            executeInternalWithNowInSec(cql,
+            trackPaxosBytes(commit, () -> executeInternalWithNowInSec(cql,
                             nowInSec,
                             commit.ballot.unixMicros(),
                             ttlInSec,
@@ -1253,18 +1265,18 @@ public final class SystemKeyspace
                             PartitionUpdate.toBytes(commit.update, MessagingService.current_version),
                             MessagingService.current_version,
                             commit.update.partitionKey().getKey(),
-                            commit.update.metadata().id.asUUID());
+                            commit.update.metadata().id.asUUID()));
         }
         else
         {
             String cql = "UPDATE system." + PAXOS + " USING TIMESTAMP ? SET proposal_ballot = null, proposal = null, proposal_version = null, most_recent_commit_at = ?, most_recent_commit = ?, most_recent_commit_version = ? WHERE row_key = ? AND cf_id = ?";
-            executeInternal(cql,
+            trackPaxosBytes(commit, () -> executeInternal(cql,
                             commit.ballot.unixMicros(),
                             commit.ballot,
                             PartitionUpdate.toBytes(commit.update, MessagingService.current_version),
                             MessagingService.current_version,
                             commit.update.partitionKey().getKey(),
-                            commit.update.metadata().id.asUUID());
+                            commit.update.metadata().id.asUUID()));
         }
     }
 
@@ -1296,6 +1308,52 @@ public final class SystemKeyspace
         List<ByteBuffer> points = row.getList("points", BytesType.instance);
 
         return PaxosRepairHistory.fromTupleBufferList(points);
+    }
+
+    /**
+     * Decorates a paxos comit consumer with methods to track bytes written to the Paxos system table under the context of the user table that initiated Paxos.
+     */
+    private static void trackPaxosBytes(TableMetadata metadata, Runnable paxosCommitConsumer)
+    {
+        // Track bytes written to the Paxos system table for the commit that initiated Paxos
+        registerPaxosSensor(Type.WRITE_BYTES);
+        paxosCommitConsumer.run();
+        // transfer bytes written to the Paxos system table to the user table for the commit that initiated Paxos
+        transferPaxosSensorBytes(metadata, Type.WRITE_BYTES);
+    }
+
+    /**
+     * Decorates a paxos comit consumer with methods to track bytes written to the Paxos system table under the context of the user table that initiated Paxos.
+     */
+    private static void trackPaxosBytes(Commit commit, Runnable paxosCommitConsumer)
+    {
+        // Track bytes written to the Paxos system table for the commit that initiated Paxos
+        registerPaxosSensor(Type.WRITE_BYTES);
+        paxosCommitConsumer.run();
+        // transfer bytes written to the Paxos system table to the user table for the commit that initiated Paxos
+        transferPaxosSensorBytes(commit.update.metadata(), Type.WRITE_BYTES);
+    }
+
+    private static void registerPaxosSensor(Type type)
+    {
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+        {
+            sensors.registerSensor(PaxosContext, type);
+        }
+    }
+
+    /**
+     * Populates sensor values of a given {@link Type} associated with the user commit that initiated Paxos.
+     */
+    private static void transferPaxosSensorBytes(TableMetadata targetSensorMetadata, Type type)
+    {
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+            sensors.getSensor(PaxosContext, type).ifPresent(paxosSensor -> {
+                sensors.incrementSensor(Context.from(targetSensorMetadata), type, paxosSensor.getValue());
+                sensors.syncAllSensors();
+            });
     }
 
     /**
