@@ -189,7 +189,7 @@ public class LongVectorTest extends SAITester
             }
         }
         normalize(vector);
-        return vectorOf(vector);
+        return vector(vector);
     }
 
     private static class KeySet
