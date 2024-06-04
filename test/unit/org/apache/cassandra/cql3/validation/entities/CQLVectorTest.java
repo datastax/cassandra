@@ -472,4 +472,9 @@ public class CQLVectorTest extends CQLTester
                                   InvalidRequestException.class,
                                   format("CREATE TABLE %s.t (k int PRIMARY KEY, v frozen<vector>)", KEYSPACE));
     }
-}
+
+    @SafeVarargs
+    protected final <T> Vector<T> vector(T... values)
+    {
+        return new Vector<>(values);
+    }}
