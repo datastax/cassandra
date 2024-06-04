@@ -282,41 +282,28 @@
         <string>--add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED</string>
         <string>--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED</string>
         <string>--add-exports java.rmi/sun.rmi.server=ALL-UNNAMED</string>
-        <!-- below was added in Cassandra only; check for what and whether we need it here-->
-        <!-- add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED -->
         <string>--add-exports jdk.naming.dns/com.sun.jndi.dns=java.naming</string>
-        <!-- Below were added only in Cassandra; check for what and whether we need them here-->
-        <!--add-exports java.sql/java.sql=ALL-UNNAMED
-            add-exports java.base/java.lang.ref=ALL-UNNAMED
-            add-exports jdk.unsupported/sun.misc=ALL-UNNAMED
-            add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED
-            add-exports jdk.attach/sun.tools.attach=ALL-UNNAMED-->
-
-        <string>--add-opens java.base/java.lang.module=ALL-UNNAMED</string>
-        <string>--add-opens java.base/jdk.internal.loader=ALL-UNNAMED</string>
-        <string>--add-opens java.base/jdk.internal.ref=ALL-UNNAMED</string>
-        <string>--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED</string>
-        <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
-        <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
-        <!-- below was added in Cassandra only; check for what and whether we need it here
-            add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED-->
-        <string>--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED</string>
-        <string>--add-opens jdk.management.jfr/jdk.management.jfr=ALL-UNNAMED</string>
-        <string>--add-opens jdk.naming.dns/com.sun.jndi.dns=ALL-UNNAMED</string>
-        <string>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</string>
-        <string>--add-opens java.base/java.nio.file.spi=ALL-UNNAMED</string>
-        <string>--add-opens java.base/java.io=ALL-UNNAMED</string>
-        <!-- below were added in Cassandra; check for what and whether we need them here
-            add-opens java.base/java.lang.reflect=ALL-UNNAMED
-            add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED-->
-        <string>--add-opens java.base/java.lang=ALL-UNNAMED</string>
-        <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
-        <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
-        <string>--add-opens java.base/java.net=ALL-UNNAMED</string>
-        <string>--add-opens java.base/java.lang.reflect=ALL-UNNAMED</string>
-        <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
         <string>--add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</string>
         <string>--add-exports jdk.unsupported/sun.misc=ALL-UNNAMED</string>
+
+        <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.loader=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.ref=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
+        <string>--add-opens jdk.management.jfr/jdk.management.jfr=ALL-UNNAMED</string>
+        <string>--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED</string>
+        <string>--add-opens jdk.naming.dns/com.sun.jndi.dns=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.module=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.net=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.io=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.nio.file.spi=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.reflect=ALL-UNNAMED</string>
+        <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
 
         <!-- below was added in Cassandra only; check for what and whether we need it here
             add-opens java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED-->
